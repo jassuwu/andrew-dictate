@@ -111,12 +111,14 @@ final class AppSettings: ObservableObject {
         "AndrewDictate.agentCommandTemplate"
     private static let terminalBundleIDKey = "AndrewDictate.terminalBundleID"
 
-    static let defaultAgentCommandTemplate = "codex exec {prompt}"
     static let defaultTerminalBundleID = "com.apple.Terminal"
 
     private let userDefaults: UserDefaults
 
-    init(userDefaults: UserDefaults = .standard) {
+    init(
+        userDefaults: UserDefaults = .standard,
+        detectedAgents: [DetectedAgentCLI]? = nil
+    ) {
         self.userDefaults = userDefaults
         onboardingCompleted = userDefaults.bool(
             forKey: Self.onboardingCompletedKey
@@ -142,16 +144,35 @@ final class AppSettings: ObservableObject {
             .string(forKey: Self.engineVersionKey)
             .flatMap(EngineVersion.init(rawValue:)) ?? .v2
 
-        let storedAgentTemplate = userDefaults.string(
-            forKey: Self.agentCommandTemplateKey
-        )
-        agentCommandTemplate = storedAgentTemplate.flatMap {
-            $0.isEmpty || AgentCommandTemplate.isValid($0) ? $0 : nil
-        } ?? Self.defaultAgentCommandTemplate
+        let initialAgentCommandTemplate: String
+        let shouldPersistInitialAgentCommandTemplate: Bool
+        if userDefaults.object(forKey: Self.agentCommandTemplateKey) != nil {
+            let storedAgentTemplate = userDefaults.string(
+                forKey: Self.agentCommandTemplateKey
+            )
+            initialAgentCommandTemplate = storedAgentTemplate.flatMap {
+                $0.isEmpty || AgentCommandTemplate.isValid($0) ? $0 : nil
+            } ?? ""
+            shouldPersistInitialAgentCommandTemplate =
+                storedAgentTemplate != initialAgentCommandTemplate
+        } else {
+            initialAgentCommandTemplate = Self.initialAgentCommandTemplate(
+                detectedAgents: detectedAgents ?? AgentCLIDetector.detect()
+            )
+            shouldPersistInitialAgentCommandTemplate = true
+        }
+        agentCommandTemplate = initialAgentCommandTemplate
 
         terminalBundleID = userDefaults.string(
             forKey: Self.terminalBundleIDKey
         ) ?? Self.defaultTerminalBundleID
+
+        if shouldPersistInitialAgentCommandTemplate {
+            userDefaults.set(
+                initialAgentCommandTemplate,
+                forKey: Self.agentCommandTemplateKey
+            )
+        }
 
         if let correctedCommandHotkey {
             userDefaults.setHotkeyBinding(
@@ -159,6 +180,16 @@ final class AppSettings: ObservableObject {
                 for: .command
             )
         }
+    }
+
+    private static func initialAgentCommandTemplate(
+        detectedAgents: [DetectedAgentCLI]
+    ) -> String {
+        for cli in AgentCLI.allCases
+        where detectedAgents.contains(where: { $0.cli == cli }) {
+            return cli.commandTemplate
+        }
+        return ""
     }
 
     func hotkeyBinding(for mode: DictationMode) -> HotkeyBinding {

@@ -45,10 +45,19 @@ final class CommandRouterTests: XCTestCase {
         )
     }
 
-    func testGoToSchemeDoesNotRequireADot() {
+    func testGoToNonHTTPSchemeDelegatesForGating() {
         XCTAssertEqual(
             router.route("go to custom:destination"),
-            .goTo(urlString: "custom:destination")
+            .delegate(prompt: "go to custom:destination")
+        )
+    }
+
+    func testGoToShortcutsURLDelegatesForGating() {
+        let transcript =
+            "go to shortcuts://run-shortcut?name=Delete%20Everything"
+        XCTAssertEqual(
+            router.route(transcript),
+            .delegate(prompt: transcript)
         )
     }
 
@@ -131,6 +140,7 @@ final class CommandRouterTests: XCTestCase {
                 )
             )
             XCTAssertEqual(command.url.absoluteString, testCase.expectedURL)
+            XCTAssertTrue(command.url.isHTTPOrHTTPS)
             XCTAssertEqual(
                 command.label,
                 "\(testCase.site): swift actors"

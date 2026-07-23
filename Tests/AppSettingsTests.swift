@@ -6,7 +6,10 @@ final class AppSettingsTests: XCTestCase {
         let (userDefaults, suiteName) = makeUserDefaults()
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
 
-        let settings = AppSettings(userDefaults: userDefaults)
+        let settings = AppSettings(
+            userDefaults: userDefaults,
+            detectedAgents: [detectedAgent(.codex)]
+        )
 
         XCTAssertFalse(settings.onboardingCompleted)
         XCTAssertFalse(settings.preRollEnabled)
@@ -24,7 +27,10 @@ final class AppSettingsTests: XCTestCase {
         let (userDefaults, suiteName) = makeUserDefaults()
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
 
-        let settings = AppSettings(userDefaults: userDefaults)
+        let settings = AppSettings(
+            userDefaults: userDefaults,
+            detectedAgents: [detectedAgent(.codex)]
+        )
         settings.onboardingCompleted = true
         settings.preRollEnabled = true
         settings.setHotkeyBinding(.leftCommand, for: .dictation)
@@ -54,7 +60,10 @@ final class AppSettingsTests: XCTestCase {
         let (userDefaults, suiteName) = makeUserDefaults()
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
 
-        let settings = AppSettings(userDefaults: userDefaults)
+        let settings = AppSettings(
+            userDefaults: userDefaults,
+            detectedAgents: [detectedAgent(.codex)]
+        )
 
         XCTAssertFalse(
             settings.setHotkeyBinding(.command, for: .dictation)
@@ -72,11 +81,68 @@ final class AppSettingsTests: XCTestCase {
         let (userDefaults, suiteName) = makeUserDefaults()
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
 
-        let settings = AppSettings(userDefaults: userDefaults)
+        let settings = AppSettings(
+            userDefaults: userDefaults,
+            detectedAgents: [detectedAgent(.codex)]
+        )
         settings.agentCommandTemplate = ""
 
-        let reloaded = AppSettings(userDefaults: userDefaults)
+        let reloaded = AppSettings(
+            userDefaults: userDefaults,
+            detectedAgents: [detectedAgent(.codex)]
+        )
         XCTAssertEqual(reloaded.agentCommandTemplate, "")
+    }
+
+    func testNoDetectedAgentDefaultsToNoneOnlyOnFirstRun() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppSettings(
+            userDefaults: userDefaults,
+            detectedAgents: []
+        )
+        XCTAssertEqual(settings.agentCommandTemplate, "")
+
+        let reloaded = AppSettings(
+            userDefaults: userDefaults,
+            detectedAgents: [detectedAgent(.codex)]
+        )
+        XCTAssertEqual(reloaded.agentCommandTemplate, "")
+    }
+
+    func testCodexRemainsRecommendedAmongDetectedAgents() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppSettings(
+            userDefaults: userDefaults,
+            detectedAgents: [
+                detectedAgent(.claude),
+                detectedAgent(.codex),
+            ]
+        )
+
+        XCTAssertEqual(
+            settings.agentCommandTemplate,
+            AgentCLI.codex.commandTemplate
+        )
+    }
+
+    func testInvalidStoredTemplateMigratesToNone() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        userDefaults.set(
+            #"codex exec "{prompt}""#,
+            forKey: "AndrewDictate.agentCommandTemplate"
+        )
+
+        let settings = AppSettings(
+            userDefaults: userDefaults,
+            detectedAgents: [detectedAgent(.codex)]
+        )
+
+        XCTAssertEqual(settings.agentCommandTemplate, "")
     }
 
     private func makeUserDefaults() -> (UserDefaults, String) {
@@ -84,5 +150,12 @@ final class AppSettingsTests: XCTestCase {
         let userDefaults = UserDefaults(suiteName: suiteName)!
         userDefaults.removePersistentDomain(forName: suiteName)
         return (userDefaults, suiteName)
+    }
+
+    private func detectedAgent(_ cli: AgentCLI) -> DetectedAgentCLI {
+        DetectedAgentCLI(
+            cli: cli,
+            executableURL: URL(fileURLWithPath: "/usr/local/bin/\(cli.rawValue)")
+        )
     }
 }

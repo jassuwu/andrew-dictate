@@ -15,26 +15,26 @@ extension AgentCommandTemplate {
         _ template: String,
         prompt: String
     ) throws -> String {
-        guard isValid(template) else {
+        let parsed: Parsed
+        do {
+            parsed = try parse(template)
+        } catch {
             throw AgentDelegationError.templateMissingPrompt
         }
 
-        return template.replacingOccurrences(
-            of: promptPlaceholder,
-            with: shellEscapeSingleQuoted(prompt)
-        )
+        let arguments = parsed.arguments(replacingPromptWith: prompt)
+        return "exec " + arguments
+            .map(shellEscapeSingleQuoted)
+            .joined(separator: " ")
     }
 
     static func commandPreview(
         template: String,
         prompt: String
     ) -> String {
-        let commandName = template
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .split(whereSeparator: \.isWhitespace)
-            .first
-            .map(String.init)?
-            .trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
+        let commandName = (try? parse(template))?
+            .arguments
+            .first?
             .split(separator: "/")
             .last
             .map(String.init)
@@ -45,7 +45,7 @@ extension AgentCommandTemplate {
 
 @MainActor
 final class AgentDelegator {
-    private static let scriptLifetime: TimeInterval = 24 * 60 * 60
+    private static let scriptLifetime: TimeInterval = 60 * 60
 
     private let settings: AppSettings
     private let fileManager: FileManager
@@ -55,23 +55,26 @@ final class AgentDelegator {
     init(
         settings: AppSettings,
         fileManager: FileManager = .default,
-        workspace: NSWorkspace = .shared
+        workspace: NSWorkspace = .shared,
+        runDirectory: URL? = nil
     ) {
         self.settings = settings
         self.fileManager = fileManager
         self.workspace = workspace
-        runDirectory = fileManager.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first?
-            .appendingPathComponent("Andrew Dictate", isDirectory: true)
-            .appendingPathComponent("run", isDirectory: true)
+        self.runDirectory = runDirectory
+            ?? fileManager.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first?
+                .appendingPathComponent("Andrew Dictate", isDirectory: true)
+                .appendingPathComponent("run", isDirectory: true)
             ?? fileManager.homeDirectoryForCurrentUser
                 .appendingPathComponent(
                     "Library/Application Support/Andrew Dictate/run",
                     isDirectory: true
                 )
 
+        prepareRunDirectoryForCleanup()
         cleanupExpiredScripts()
     }
 
@@ -91,20 +94,19 @@ final class AgentDelegator {
         } else if !workspace.open(scriptURL) {
             throw AgentDelegationError.unableToOpenScript
         }
+
+        cleanupExpiredScripts()
     }
 
     private func writeScript(commandLine: String) throws -> URL {
-        try fileManager.createDirectory(
-            at: runDirectory,
-            withIntermediateDirectories: true
-        )
+        try prepareRunDirectory()
 
         let timestamp = Int(Date().timeIntervalSince1970 * 1_000)
         let scriptURL = runDirectory.appendingPathComponent(
             "agent-\(timestamp).command",
             isDirectory: false
         )
-        let script = "#!/bin/zsh\n\(commandLine)\n"
+        let script = Self.scriptContents(commandLine: commandLine)
 
         try Data(script.utf8).write(to: scriptURL, options: .atomic)
         try fileManager.setAttributes(
@@ -112,6 +114,32 @@ final class AgentDelegator {
             ofItemAtPath: scriptURL.path
         )
         return scriptURL
+    }
+
+    static func scriptContents(commandLine: String) -> String {
+        "#!/bin/zsh\nrm -- \"$0\"\n\(commandLine)\n"
+    }
+
+    private func prepareRunDirectory() throws {
+        try fileManager.createDirectory(
+            at: runDirectory,
+            withIntermediateDirectories: true
+        )
+        try fileManager.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: runDirectory.path
+        )
+    }
+
+    private func prepareRunDirectoryForCleanup() {
+        do {
+            try prepareRunDirectory()
+        } catch {
+            print(
+                "agent run directory preparation failed: "
+                    + error.localizedDescription
+            )
+        }
     }
 
     private func terminalApplicationURL() -> URL? {

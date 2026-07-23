@@ -1,5 +1,14 @@
 import Foundation
 
+extension URL {
+    var isHTTPOrHTTPS: Bool {
+        guard let scheme = scheme?.lowercased() else {
+            return false
+        }
+        return scheme == "http" || scheme == "https"
+    }
+}
+
 enum RoutedCommand: Equatable {
     case openApp(query: String)
     case switchToApp(query: String)
@@ -57,8 +66,16 @@ struct CommandRouter {
         }
 
         if let destination = remainder(after: ["go", "to"], in: transcript) {
+            if let scheme = urlScheme(in: destination) {
+                guard scheme.caseInsensitiveCompare("http") == .orderedSame
+                        || scheme.caseInsensitiveCompare("https")
+                            == .orderedSame else {
+                    return .delegate(prompt: transcript)
+                }
+                return .goTo(urlString: destination)
+            }
             if looksLikeURL(destination) {
-                return .goTo(urlString: normalizedURLString(destination))
+                return .goTo(urlString: "https://\(destination)")
             }
             return .switchToApp(query: destination)
         }
@@ -217,26 +234,25 @@ struct CommandRouter {
     }
 
     private func looksLikeURL(_ value: String) -> Bool {
-        value.contains(".") || hasScheme(value)
+        value.contains(".")
     }
 
-    private func normalizedURLString(_ value: String) -> String {
-        hasScheme(value) ? value : "https://\(value)"
-    }
-
-    private func hasScheme(_ value: String) -> Bool {
+    private func urlScheme(in value: String) -> String? {
         guard let colonIndex = value.firstIndex(of: ":"),
               colonIndex > value.startIndex else {
-            return false
+            return nil
         }
 
         let scheme = value[..<colonIndex]
         guard let first = scheme.first, first.isLetter else {
-            return false
+            return nil
         }
 
-        return scheme.dropFirst().allSatisfy {
+        guard scheme.dropFirst().allSatisfy({
             $0.isLetter || $0.isNumber || $0 == "+" || $0 == "-" || $0 == "."
+        }) else {
+            return nil
         }
+        return String(scheme)
     }
 }

@@ -533,7 +533,7 @@ struct OnboardingView: View {
                 }
 
                 if customTemplateIsInvalid {
-                    Text("template must contain {prompt}")
+                    Text("{prompt} must be a standalone word")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

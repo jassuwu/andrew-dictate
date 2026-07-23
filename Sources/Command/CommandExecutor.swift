@@ -41,11 +41,7 @@ final class CommandExecutor {
             _ = await paster.paste(text)
             await flash("→ type \(text)")
         case let .template(url, label):
-            if workspace.open(url) {
-                await flash("→ \(label)")
-            } else {
-                await flash("couldn't open \(label)")
-            }
+            await openTemplate(url, label: label)
         case let .delegate(prompt):
             await onDelegate?(prompt)
         }
@@ -122,12 +118,21 @@ final class CommandExecutor {
         feedback: String
     ) async {
         guard let url = URL(string: urlString),
+              url.isHTTPOrHTTPS,
               workspace.open(url) else {
             await flash("couldn't open \(urlString)")
             return
         }
 
         await flash(feedback)
+    }
+
+    private func openTemplate(_ url: URL, label: String) async {
+        guard url.isHTTPOrHTTPS, workspace.open(url) else {
+            await flash("couldn't open \(label)")
+            return
+        }
+        await flash("→ \(label)")
     }
 
     private func resolveApplication(_ query: String) -> InstalledApp? {

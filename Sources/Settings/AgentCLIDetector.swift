@@ -24,8 +24,171 @@ enum AgentCLI: String, CaseIterable, Identifiable, Sendable {
 enum AgentCommandTemplate {
     static let promptPlaceholder = "{prompt}"
 
+    struct Parsed: Equatable, Sendable {
+        let arguments: [String]
+        let promptArgumentIndex: Int
+
+        func arguments(replacingPromptWith prompt: String) -> [String] {
+            var result = arguments
+            result[promptArgumentIndex] = prompt
+            return result
+        }
+    }
+
+    enum ValidationError: Error, Equatable {
+        case promptMustBeStandaloneWord
+        case invalidShellQuoting
+    }
+
     static func isValid(_ template: String) -> Bool {
-        template.contains(promptPlaceholder)
+        (try? parse(template)) != nil
+    }
+
+    static func parse(_ template: String) throws -> Parsed {
+        let placeholderCount = template
+            .components(separatedBy: promptPlaceholder)
+            .count - 1
+        guard placeholderCount == 1 else {
+            throw ValidationError.promptMustBeStandaloneWord
+        }
+
+        let tokens = try lexicalTokens(template)
+        let promptIndices = tokens.indices.filter {
+            tokens[$0].value == promptPlaceholder
+                && !tokens[$0].usedQuotingOrEscaping
+        }
+        guard promptIndices.count == 1,
+              let promptArgumentIndex = promptIndices.first,
+              promptArgumentIndex > 0 else {
+            throw ValidationError.promptMustBeStandaloneWord
+        }
+
+        return Parsed(
+            arguments: tokens.map(\.value),
+            promptArgumentIndex: promptArgumentIndex
+        )
+    }
+
+    static func tokenize(_ template: String) throws -> [String] {
+        try lexicalTokens(template).map(\.value)
+    }
+
+    private struct LexicalToken {
+        var value: String
+        var usedQuotingOrEscaping: Bool
+    }
+
+    private enum Quote {
+        case single
+        case double
+    }
+
+    private static func lexicalTokens(
+        _ template: String
+    ) throws -> [LexicalToken] {
+        var tokens: [LexicalToken] = []
+        var value = ""
+        var tokenStarted = false
+        var usedQuotingOrEscaping = false
+        var quote: Quote?
+        var index = template.startIndex
+
+        func appendToken() {
+            tokens.append(
+                LexicalToken(
+                    value: value,
+                    usedQuotingOrEscaping: usedQuotingOrEscaping
+                )
+            )
+            value = ""
+            tokenStarted = false
+            usedQuotingOrEscaping = false
+        }
+
+        while index < template.endIndex {
+            let character = template[index]
+
+            if quote == .single {
+                if character == "'" {
+                    quote = nil
+                } else {
+                    value.append(character)
+                }
+                template.formIndex(after: &index)
+                continue
+            }
+
+            if character == "\\" {
+                let nextIndex = template.index(after: index)
+                guard nextIndex < template.endIndex else {
+                    throw ValidationError.invalidShellQuoting
+                }
+
+                let escapedCharacter = template[nextIndex]
+                tokenStarted = true
+                usedQuotingOrEscaping = true
+
+                if quote == .double,
+                   escapedCharacter != "$",
+                   escapedCharacter != "`",
+                   escapedCharacter != "\"",
+                   escapedCharacter != "\\",
+                   !escapedCharacter.isNewline {
+                    value.append("\\")
+                }
+                if !escapedCharacter.isNewline {
+                    value.append(escapedCharacter)
+                }
+                index = template.index(after: nextIndex)
+                continue
+            }
+
+            if quote == .double {
+                if character == "\"" {
+                    quote = nil
+                } else {
+                    value.append(character)
+                }
+                template.formIndex(after: &index)
+                continue
+            }
+
+            if character.isWhitespace {
+                if tokenStarted {
+                    appendToken()
+                }
+                template.formIndex(after: &index)
+                continue
+            }
+
+            if character == "'" {
+                tokenStarted = true
+                usedQuotingOrEscaping = true
+                quote = .single
+                template.formIndex(after: &index)
+                continue
+            }
+
+            if character == "\"" {
+                tokenStarted = true
+                usedQuotingOrEscaping = true
+                quote = .double
+                template.formIndex(after: &index)
+                continue
+            }
+
+            tokenStarted = true
+            value.append(character)
+            template.formIndex(after: &index)
+        }
+
+        guard quote == nil else {
+            throw ValidationError.invalidShellQuoting
+        }
+        if tokenStarted {
+            appendToken()
+        }
+        return tokens
     }
 }
 
