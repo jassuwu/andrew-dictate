@@ -46,6 +46,7 @@ targets:
       - Sources/Audio/RingSplicer.swift
       - Sources/Settings/AppSettings.swift
       - Sources/Settings/AgentCLIDetector.swift
+      - Sources/Onboarding/OnboardingState.swift
       - Sources/Hotkey/HotkeyBinding.swift
       - Sources/Hotkey/TapLockDetector.swift
     settings:

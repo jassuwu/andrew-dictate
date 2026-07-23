@@ -1,5 +1,4 @@
 import AppKit
-@preconcurrency import ApplicationServices
 
 @MainActor
 final class HotkeyMonitor {
@@ -9,6 +8,7 @@ final class HotkeyMonitor {
     var onLockBegin: ((DictationMode) -> Void)?
     var onLockEnd: ((DictationMode) -> Void)?
     var onLockCancel: ((DictationMode) -> Void)?
+    var onKeyDetected: ((DictationMode) -> Void)?
 
     private var monitors: [Any] = []
     private let settings: AppSettings
@@ -23,7 +23,6 @@ final class HotkeyMonitor {
                 ($0, settings.hotkeyBinding(for: $0))
             }
         )
-        requestAccessibilityPermission()
         installMonitors()
     }
 
@@ -45,13 +44,6 @@ final class HotkeyMonitor {
         }
         bindings[mode] = binding
         return true
-    }
-
-    private func requestAccessibilityPermission() {
-        let options = [
-            kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
-        ] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
     }
 
     private func installMonitors() {
@@ -112,6 +104,7 @@ final class HotkeyMonitor {
             )
         } else if event.modifierFlags.contains(modifierFlag) {
             pressedKeyCodes.insert(keyCode)
+            onKeyDetected?(mode)
             perform(
                 detector.modifierPressed(
                     mode,

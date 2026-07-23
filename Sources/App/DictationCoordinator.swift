@@ -1,5 +1,21 @@
 import Combine
 
+enum EnginePreparationState: Equatable, Sendable {
+    case downloading(progress: Double)
+    case warmingUp
+    case ready
+    case failed
+
+    var isReady: Bool {
+        self == .ready
+    }
+}
+
+struct HotkeyDetection: Equatable, Sendable {
+    let mode: DictationMode
+    let sequence: Int
+}
+
 @MainActor
 final class DictationCoordinator: ObservableObject {
     enum State: String, Equatable, Sendable {
@@ -26,6 +42,9 @@ final class DictationCoordinator: ObservableObject {
     }
 
     @Published private(set) var state: State = .prewarming
+    @Published private(set) var enginePreparationState:
+        EnginePreparationState = .downloading(progress: 0)
+    @Published private(set) var hotkeyDetection: HotkeyDetection?
 
     let dictionaryStore: DictionaryStore
     let settings: AppSettings
@@ -45,9 +64,13 @@ final class DictationCoordinator: ObservableObject {
     private var settingsCancellables: Set<AnyCancellable> = []
     private var isApplyingPreRollSetting = false
     private var settingsWindowController: SettingsWindowController?
+    private var onboardingWindowController: OnboardingWindowController?
+    private var isOnboardingPresented: Bool
+    private var hotkeyDetectionSequence = 0
 
     init(settings: AppSettings = .shared) {
         self.settings = settings
+        isOnboardingPresented = !settings.onboardingCompleted
         dictionaryStore = DictionaryStore()
         transcriptionEngine = ParakeetEngine(
             version: settings.engineVersion
@@ -91,6 +114,16 @@ final class DictationCoordinator: ObservableObject {
         hotkeyMonitor.onLockCancel = { [weak self] mode in
             self?.cancelRecording(mode)
         }
+        hotkeyMonitor.onKeyDetected = { [weak self] mode in
+            guard let self else {
+                return
+            }
+            self.hotkeyDetectionSequence += 1
+            self.hotkeyDetection = HotkeyDetection(
+                mode: mode,
+                sequence: self.hotkeyDetectionSequence
+            )
+        }
 
         settings.$preRollEnabled
             .dropFirst()
@@ -109,6 +142,13 @@ final class DictationCoordinator: ObservableObject {
             .store(in: &settingsCancellables)
 
         startPrewarming(transcriptionEngine)
+
+        if isOnboardingPresented {
+            Task { @MainActor [weak self] in
+                await Task.yield()
+                self?.presentOnboardingIfNeeded()
+            }
+        }
     }
 
     @discardableResult
@@ -127,6 +167,56 @@ final class DictationCoordinator: ObservableObject {
             controller = SettingsWindowController(coordinator: self)
             settingsWindowController = controller
         }
+        controller.present()
+    }
+
+    func presentOnboardingIfNeeded() {
+        guard !settings.onboardingCompleted else {
+            isOnboardingPresented = false
+            return
+        }
+        presentOnboarding()
+    }
+
+    func runOnboardingAgain() {
+        settings.onboardingCompleted = false
+        presentOnboarding()
+    }
+
+    func finishOnboarding() {
+        settings.onboardingCompleted = true
+        onboardingWindowController?.close()
+    }
+
+    func onboardingWindowDidClose(
+        _ controller: OnboardingWindowController
+    ) {
+        guard onboardingWindowController === controller else {
+            return
+        }
+        onboardingWindowController = nil
+        isOnboardingPresented = false
+        synchronizeHUD()
+    }
+
+    func retryEnginePrewarm() {
+        guard enginePreparationState == .failed else {
+            return
+        }
+        startPrewarming(transcriptionEngine)
+    }
+
+    private func presentOnboarding() {
+        isOnboardingPresented = true
+        hudPanel.dismiss()
+
+        if let onboardingWindowController {
+            onboardingWindowController.present()
+            return
+        }
+
+        let controller = OnboardingWindowController(coordinator: self)
+        onboardingWindowController = controller
         controller.present()
     }
 
@@ -181,17 +271,27 @@ final class DictationCoordinator: ObservableObject {
     private func startPrewarming(_ engine: ParakeetEngine) {
         engineGeneration += 1
         let generation = engineGeneration
+        isPrewarmed = false
+        enginePreparationState = .downloading(progress: 0)
         transition(to: .prewarming)
 
         enginePrewarmTask = Task { [weak self] in
             do {
-                try await engine.prewarm()
+                try await engine.prewarm { [weak self] update in
+                    Task { @MainActor [weak self] in
+                        self?.applyPreparationUpdate(
+                            update,
+                            generation: generation
+                        )
+                    }
+                }
                 try Task.checkCancellation()
                 guard let self,
                       generation == self.engineGeneration else {
                     return
                 }
                 self.isPrewarmed = true
+                self.enginePreparationState = .ready
                 self.enginePrewarmTask = nil
                 self.transition(to: .idle)
             } catch is CancellationError {
@@ -202,12 +302,41 @@ final class DictationCoordinator: ObservableObject {
                     return
                 }
                 self.enginePrewarmTask = nil
+                self.enginePreparationState = .failed
                 print(
                     "transcription engine prewarm failed: "
                         + error.localizedDescription
                 )
                 self.transition(to: .idle)
             }
+        }
+    }
+
+    private func applyPreparationUpdate(
+        _ update: TranscriptionPreparationUpdate,
+        generation: Int
+    ) {
+        guard generation == engineGeneration,
+              enginePrewarmTask != nil,
+              !isPrewarmed else {
+            return
+        }
+
+        switch update {
+        case let .downloading(progress):
+            let boundedProgress = min(max(progress, 0), 1)
+            if case let .downloading(currentProgress) =
+                enginePreparationState {
+                enginePreparationState = .downloading(
+                    progress: max(currentProgress, boundedProgress)
+                )
+            } else {
+                enginePreparationState = .downloading(
+                    progress: boundedProgress
+                )
+            }
+        case .warmingUp:
+            enginePreparationState = .warmingUp
         }
     }
 
@@ -362,7 +491,11 @@ final class DictationCoordinator: ObservableObject {
         state = newState
         hudViewModel.update(state: newState)
 
-        if newState == .idle {
+        synchronizeHUD()
+    }
+
+    private func synchronizeHUD() {
+        if isOnboardingPresented || state == .idle {
             hudPanel.dismiss()
         } else {
             hudPanel.present()

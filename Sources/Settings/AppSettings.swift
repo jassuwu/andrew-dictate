@@ -23,6 +23,18 @@ enum EngineVersion: String, CaseIterable, Identifiable, Sendable {
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
 
+    @Published var onboardingCompleted: Bool {
+        didSet {
+            guard onboardingCompleted != oldValue else {
+                return
+            }
+            userDefaults.set(
+                onboardingCompleted,
+                forKey: Self.onboardingCompletedKey
+            )
+        }
+    }
+
     @Published var preRollEnabled: Bool {
         didSet {
             guard preRollEnabled != oldValue else {
@@ -90,6 +102,8 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    private static let onboardingCompletedKey =
+        "AndrewDictate.onboardingCompleted"
     private static let preRollKey = "AndrewDictate.preRollEnabled"
     private static let engineVersionKey = "AndrewDictate.engineVersion"
     private static let agentCommandTemplateKey =
@@ -103,6 +117,9 @@ final class AppSettings: ObservableObject {
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
+        onboardingCompleted = userDefaults.bool(
+            forKey: Self.onboardingCompletedKey
+        )
         preRollEnabled = userDefaults.bool(forKey: Self.preRollKey)
 
         let loadedDictationHotkey = userDefaults.hotkeyBinding(for: .dictation)

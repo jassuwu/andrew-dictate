@@ -20,6 +20,12 @@ struct AndrewDictateApp: App {
                 coordinator.openSettings()
             }
 
+            #if DEBUG
+            Button("run onboarding again") {
+                coordinator.runOnboardingAgain()
+            }
+            #endif
+
             Button("quit Andrew Dictate") {
                 NSApp.terminate(nil)
             }

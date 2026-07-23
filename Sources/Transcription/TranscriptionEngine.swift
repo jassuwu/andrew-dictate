@@ -1,7 +1,14 @@
 import FluidAudio
 
+enum TranscriptionPreparationUpdate: Sendable {
+    case downloading(progress: Double)
+    case warmingUp
+}
+
 protocol TranscriptionEngine {
-    func prewarm() async throws
+    func prewarm(
+        progressHandler: (@Sendable (TranscriptionPreparationUpdate) -> Void)?
+    ) async throws
     func transcribe(_ samples: [Float]) async throws -> String
 }
 
@@ -20,12 +27,14 @@ actor ParakeetEngine: TranscriptionEngine {
         self.version = version
     }
 
-    func prewarm() async throws {
-        _ = try await preparedManager()
+    func prewarm(
+        progressHandler: (@Sendable (TranscriptionPreparationUpdate) -> Void)?
+    ) async throws {
+        _ = try await preparedManager(progressHandler: progressHandler)
     }
 
     func transcribe(_ samples: [Float]) async throws -> String {
-        let manager = try await preparedManager()
+        let manager = try await preparedManager(progressHandler: nil)
         let decoderLayerCount = await manager.decoderLayerCount
         var decoderState = TdtDecoderState.make(decoderLayers: decoderLayerCount)
 
@@ -39,7 +48,11 @@ actor ParakeetEngine: TranscriptionEngine {
         return result.text
     }
 
-    private func preparedManager() async throws -> AsrManager {
+    private func preparedManager(
+        progressHandler: (
+            @Sendable (TranscriptionPreparationUpdate) -> Void
+        )?
+    ) async throws -> AsrManager {
         if let manager {
             return manager
         }
@@ -52,7 +65,10 @@ actor ParakeetEngine: TranscriptionEngine {
             let newPreparation = Preparation(
                 identifier: nextPreparationIdentifier,
                 task: Task {
-                    try await Self.makePrewarmedManager(version: version)
+                    try await Self.makePrewarmedManager(
+                        version: version,
+                        progressHandler: progressHandler
+                    )
                 }
             )
             preparation = newPreparation
@@ -78,15 +94,26 @@ actor ParakeetEngine: TranscriptionEngine {
     }
 
     private static func makePrewarmedManager(
-        version: EngineVersion
+        version: EngineVersion,
+        progressHandler: (
+            @Sendable (TranscriptionPreparationUpdate) -> Void
+        )?
     ) async throws -> AsrManager {
         let asrVersion = version.asrModelVersion
         print("prewarming transcription engine")
         print("downloading \(version.displayName) models if needed")
         let modelDirectory = try await AsrModels.download(
-            version: asrVersion
+            version: asrVersion,
+            progressHandler: { progress in
+                progressHandler?(
+                    .downloading(
+                        progress: progress.fractionCompleted
+                    )
+                )
+            }
         )
 
+        progressHandler?(.warmingUp)
         print("loading \(version.displayName) models")
         let models = try await AsrModels.load(
             from: modelDirectory,
