@@ -1,6 +1,24 @@
 import Combine
 import Foundation
 
+enum EngineVersion: String, CaseIterable, Identifiable, Sendable {
+    case v2
+    case v3
+
+    var id: Self {
+        self
+    }
+
+    var displayName: String {
+        switch self {
+        case .v2:
+            "parakeet v2 (english)"
+        case .v3:
+            "parakeet v3 (multilingual)"
+        }
+    }
+}
+
 @MainActor
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
@@ -14,7 +32,7 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    @Published var dictationHotkey: HotkeyBinding {
+    @Published private(set) var dictationHotkey: HotkeyBinding {
         didSet {
             guard dictationHotkey != oldValue else {
                 return
@@ -23,7 +41,7 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    @Published var commandHotkey: HotkeyBinding {
+    @Published private(set) var commandHotkey: HotkeyBinding {
         didSet {
             guard commandHotkey != oldValue else {
                 return
@@ -32,14 +50,97 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var engineVersion: EngineVersion {
+        didSet {
+            guard engineVersion != oldValue else {
+                return
+            }
+            userDefaults.set(
+                engineVersion.rawValue,
+                forKey: Self.engineVersionKey
+            )
+        }
+    }
+
+    @Published var agentCommandTemplate: String {
+        didSet {
+            guard agentCommandTemplate != oldValue else {
+                return
+            }
+            guard AgentCommandTemplate.isValid(agentCommandTemplate) else {
+                agentCommandTemplate = oldValue
+                return
+            }
+            userDefaults.set(
+                agentCommandTemplate,
+                forKey: Self.agentCommandTemplateKey
+            )
+        }
+    }
+
+    @Published var terminalBundleID: String {
+        didSet {
+            guard terminalBundleID != oldValue else {
+                return
+            }
+            userDefaults.set(
+                terminalBundleID,
+                forKey: Self.terminalBundleIDKey
+            )
+        }
+    }
+
     private static let preRollKey = "AndrewDictate.preRollEnabled"
+    private static let engineVersionKey = "AndrewDictate.engineVersion"
+    private static let agentCommandTemplateKey =
+        "AndrewDictate.agentCommandTemplate"
+    private static let terminalBundleIDKey = "AndrewDictate.terminalBundleID"
+
+    static let defaultAgentCommandTemplate = "codex exec {prompt}"
+    static let defaultTerminalBundleID = "com.apple.Terminal"
+
     private let userDefaults: UserDefaults
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
         preRollEnabled = userDefaults.bool(forKey: Self.preRollKey)
-        dictationHotkey = userDefaults.hotkeyBinding(for: .dictation)
-        commandHotkey = userDefaults.hotkeyBinding(for: .command)
+
+        let loadedDictationHotkey = userDefaults.hotkeyBinding(for: .dictation)
+        let loadedCommandHotkey = userDefaults.hotkeyBinding(for: .command)
+        let correctedCommandHotkey: HotkeyBinding?
+        dictationHotkey = loadedDictationHotkey
+        if loadedCommandHotkey == loadedDictationHotkey {
+            let replacement = HotkeyBinding.supported.first {
+                $0 != loadedDictationHotkey
+            } ?? .command
+            commandHotkey = replacement
+            correctedCommandHotkey = replacement
+        } else {
+            commandHotkey = loadedCommandHotkey
+            correctedCommandHotkey = nil
+        }
+
+        engineVersion = userDefaults
+            .string(forKey: Self.engineVersionKey)
+            .flatMap(EngineVersion.init(rawValue:)) ?? .v2
+
+        let storedAgentTemplate = userDefaults.string(
+            forKey: Self.agentCommandTemplateKey
+        )
+        agentCommandTemplate = storedAgentTemplate.flatMap {
+            AgentCommandTemplate.isValid($0) ? $0 : nil
+        } ?? Self.defaultAgentCommandTemplate
+
+        terminalBundleID = userDefaults.string(
+            forKey: Self.terminalBundleIDKey
+        ) ?? Self.defaultTerminalBundleID
+
+        if let correctedCommandHotkey {
+            userDefaults.setHotkeyBinding(
+                correctedCommandHotkey,
+                for: .command
+            )
+        }
     }
 
     func hotkeyBinding(for mode: DictationMode) -> HotkeyBinding {
@@ -51,15 +152,23 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @discardableResult
     func setHotkeyBinding(
         _ binding: HotkeyBinding,
         for mode: DictationMode
-    ) {
+    ) -> Bool {
+        guard HotkeyBinding.supported.contains(binding),
+              binding != hotkeyBinding(for: mode.other) else {
+            return false
+        }
+
         switch mode {
         case .dictation:
             dictationHotkey = binding
         case .command:
             commandHotkey = binding
         }
+
+        return true
     }
 }

@@ -14,6 +14,11 @@ actor ParakeetEngine: TranscriptionEngine {
     private var manager: AsrManager?
     private var preparation: Preparation?
     private var nextPreparationIdentifier = 0
+    private let version: EngineVersion
+
+    init(version: EngineVersion) {
+        self.version = version
+    }
 
     func prewarm() async throws {
         _ = try await preparedManager()
@@ -47,7 +52,7 @@ actor ParakeetEngine: TranscriptionEngine {
             let newPreparation = Preparation(
                 identifier: nextPreparationIdentifier,
                 task: Task {
-                    try await Self.makePrewarmedManager()
+                    try await Self.makePrewarmedManager(version: version)
                 }
             )
             preparation = newPreparation
@@ -72,15 +77,20 @@ actor ParakeetEngine: TranscriptionEngine {
         }
     }
 
-    private static func makePrewarmedManager() async throws -> AsrManager {
+    private static func makePrewarmedManager(
+        version: EngineVersion
+    ) async throws -> AsrManager {
+        let asrVersion = version.asrModelVersion
         print("prewarming transcription engine")
-        print("downloading parakeet v2 models if needed")
-        let modelDirectory = try await AsrModels.download(version: .v2)
+        print("downloading \(version.displayName) models if needed")
+        let modelDirectory = try await AsrModels.download(
+            version: asrVersion
+        )
 
-        print("loading parakeet v2 models")
+        print("loading \(version.displayName) models")
         let models = try await AsrModels.load(
             from: modelDirectory,
-            version: .v2
+            version: asrVersion
         )
         let manager = AsrManager(config: .default, models: models)
 
@@ -95,5 +105,16 @@ actor ParakeetEngine: TranscriptionEngine {
         print("transcription engine ready")
 
         return manager
+    }
+}
+
+private extension EngineVersion {
+    var asrModelVersion: AsrModelVersion {
+        switch self {
+        case .v2:
+            .v2
+        case .v3:
+            .v3
+        }
     }
 }

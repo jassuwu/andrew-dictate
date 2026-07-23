@@ -16,22 +16,14 @@ struct AndrewDictateApp: App {
 
             Divider()
 
-            PreRollMenuToggle(settings: coordinator.settings)
-
-            Divider()
+            Button("settings…") {
+                coordinator.openSettings()
+            }
 
             Button("quit Andrew Dictate") {
                 NSApp.terminate(nil)
             }
             .keyboardShortcut("q")
         }
-    }
-}
-
-private struct PreRollMenuToggle: View {
-    @ObservedObject var settings: AppSettings
-
-    var body: some View {
-        Toggle("pre-roll", isOn: $settings.preRollEnabled)
     }
 }

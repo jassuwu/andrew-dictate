@@ -27,9 +27,16 @@ final class HotkeyMonitor {
         installMonitors()
     }
 
-    func rebind(_ mode: DictationMode, to binding: HotkeyBinding) {
+    @discardableResult
+    func rebind(
+        _ mode: DictationMode,
+        to binding: HotkeyBinding
+    ) -> Bool {
         guard bindings[mode] != binding else {
-            return
+            return true
+        }
+        guard settings.setHotkeyBinding(binding, for: mode) else {
+            return false
         }
 
         perform(detector.cancelForRebind(mode))
@@ -37,7 +44,7 @@ final class HotkeyMonitor {
             pressedKeyCodes.remove(oldKeyCode)
         }
         bindings[mode] = binding
-        settings.setHotkeyBinding(binding, for: mode)
+        return true
     }
 
     private func requestAccessibilityPermission() {

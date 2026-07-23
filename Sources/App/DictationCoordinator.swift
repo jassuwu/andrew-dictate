@@ -31,7 +31,7 @@ final class DictationCoordinator: ObservableObject {
     let settings: AppSettings
 
     private let hotkeyMonitor: HotkeyMonitor
-    private let transcriptionEngine: ParakeetEngine
+    private var transcriptionEngine: ParakeetEngine
     private let paster: Paster
     private let audioRecorder: AudioRecorder?
     private let hudViewModel: HUDViewModel
@@ -40,13 +40,18 @@ final class DictationCoordinator: ObservableObject {
     private var activeMode: DictationMode?
     private var pipelineTask: Task<Void, Never>?
     private var pipelineGeneration = 0
+    private var enginePrewarmTask: Task<Void, Never>?
+    private var engineGeneration = 0
     private var settingsCancellables: Set<AnyCancellable> = []
     private var isApplyingPreRollSetting = false
+    private var settingsWindowController: SettingsWindowController?
 
     init(settings: AppSettings = .shared) {
         self.settings = settings
         dictionaryStore = DictionaryStore()
-        transcriptionEngine = ParakeetEngine()
+        transcriptionEngine = ParakeetEngine(
+            version: settings.engineVersion
+        )
         paster = Paster()
 
         let recorder: AudioRecorder?
@@ -95,9 +100,34 @@ final class DictationCoordinator: ObservableObject {
             }
             .store(in: &settingsCancellables)
 
-        Task { [weak self] in
-            await self?.prewarm()
+        settings.$engineVersion
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] version in
+                self?.replaceEngine(with: version)
+            }
+            .store(in: &settingsCancellables)
+
+        startPrewarming(transcriptionEngine)
+    }
+
+    @discardableResult
+    func rebindHotkey(
+        _ mode: DictationMode,
+        to binding: HotkeyBinding
+    ) -> Bool {
+        hotkeyMonitor.rebind(mode, to: binding)
+    }
+
+    func openSettings() {
+        let controller: SettingsWindowController
+        if let settingsWindowController {
+            controller = settingsWindowController
+        } else {
+            controller = SettingsWindowController(coordinator: self)
+            settingsWindowController = controller
         }
+        controller.present()
     }
 
     private func applyPreRoll(_ enabled: Bool) {
@@ -133,16 +163,51 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
-    private func prewarm() async {
-        defer {
-            transition(to: .idle)
+    private func replaceEngine(with version: EngineVersion) {
+        invalidatePipeline()
+        if state == .recording {
+            audioRecorder?.cancel()
+            activeMode = nil
         }
 
-        do {
-            try await transcriptionEngine.prewarm()
-            isPrewarmed = true
-        } catch {
-            print("transcription engine prewarm failed: \(error.localizedDescription)")
+        enginePrewarmTask?.cancel()
+        isPrewarmed = false
+
+        let replacement = ParakeetEngine(version: version)
+        transcriptionEngine = replacement
+        startPrewarming(replacement)
+    }
+
+    private func startPrewarming(_ engine: ParakeetEngine) {
+        engineGeneration += 1
+        let generation = engineGeneration
+        transition(to: .prewarming)
+
+        enginePrewarmTask = Task { [weak self] in
+            do {
+                try await engine.prewarm()
+                try Task.checkCancellation()
+                guard let self,
+                      generation == self.engineGeneration else {
+                    return
+                }
+                self.isPrewarmed = true
+                self.enginePrewarmTask = nil
+                self.transition(to: .idle)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard let self,
+                      generation == self.engineGeneration else {
+                    return
+                }
+                self.enginePrewarmTask = nil
+                print(
+                    "transcription engine prewarm failed: "
+                        + error.localizedDescription
+                )
+                self.transition(to: .idle)
+            }
         }
     }
 

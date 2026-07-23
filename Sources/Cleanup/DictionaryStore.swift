@@ -1,7 +1,7 @@
 import Combine
 import Foundation
 
-struct DictionaryEntry: Codable, Identifiable, Sendable {
+struct DictionaryEntry: Codable, Equatable, Identifiable, Sendable {
     let id: UUID
     var wrong: String
     var right: String
@@ -45,6 +45,20 @@ final class DictionaryStore: ObservableObject {
         update(DictionaryEntry(id: id, wrong: wrong, right: right))
     }
 
+    func updateWrong(id: UUID, wrong: String) {
+        guard let entry = entries.first(where: { $0.id == id }) else {
+            return
+        }
+        update(id: id, wrong: wrong, right: entry.right)
+    }
+
+    func updateRight(id: UUID, right: String) {
+        guard let entry = entries.first(where: { $0.id == id }) else {
+            return
+        }
+        update(id: id, wrong: entry.wrong, right: right)
+    }
+
     func remove(id: UUID) {
         guard let index = entries.firstIndex(where: { $0.id == id }) else {
             return
@@ -56,6 +70,21 @@ final class DictionaryStore: ObservableObject {
 
     func remove(_ entry: DictionaryEntry) {
         remove(id: entry.id)
+    }
+
+    func importJSON(from sourceURL: URL) throws {
+        let data = try Data(contentsOf: sourceURL)
+        let importedEntries = try JSONDecoder().decode(
+            [DictionaryEntry].self,
+            from: data
+        )
+        entries = importedEntries
+        save()
+    }
+
+    func exportJSON(to destinationURL: URL) throws {
+        let data = try encodedEntries()
+        try data.write(to: destinationURL, options: .atomic)
     }
 
     private func load() {
@@ -81,13 +110,17 @@ final class DictionaryStore: ObservableObject {
                 withIntermediateDirectories: true
             )
 
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(entries)
+            let data = try encodedEntries()
             try data.write(to: fileURL, options: .atomic)
         } catch {
             print("dictionary failed to save: \(error.localizedDescription)")
         }
+    }
+
+    private func encodedEntries() throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(entries)
     }
 
     private static func defaultFileURL() -> URL {

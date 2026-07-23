@@ -4,11 +4,24 @@ import Foundation
 enum DictationMode: String, Codable, CaseIterable, Sendable {
     case dictation
     case command
+
+    var other: Self {
+        switch self {
+        case .dictation:
+            .command
+        case .command:
+            .dictation
+        }
+    }
 }
 
-struct HotkeyBinding: Codable, Equatable, Sendable {
+struct HotkeyBinding: Codable, Hashable, Identifiable, Sendable {
     let keyCode: CGKeyCode
     let displayName: String
+
+    var id: CGKeyCode {
+        keyCode
+    }
 
     static let fn = HotkeyBinding(keyCode: 63, displayName: "fn")
     static let rightOption = HotkeyBinding(
@@ -38,6 +51,16 @@ struct HotkeyBinding: Codable, Equatable, Sendable {
 
     static let dictation = fn
     static let command = rightOption
+
+    static let supported: [HotkeyBinding] = [
+        .fn,
+        .rightOption,
+        .leftOption,
+        .rightCommand,
+        .leftCommand,
+        .rightControl,
+        .leftControl,
+    ]
 
     static func defaultBinding(for mode: DictationMode) -> HotkeyBinding {
         switch mode {
