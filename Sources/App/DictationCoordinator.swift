@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import AppKit
 
 enum EnginePreparationState: Equatable, Sendable {
     case downloading(progress: Double)
@@ -92,6 +93,11 @@ final class DictationCoordinator: ObservableObject {
     private var delegationGate = DelegationGate()
     private var gateTimeoutTask: Task<Void, Never>?
     private var feedbackGeneration = 0
+    private let timelineClock = ContinuousClock()
+    private let timelineStore = UtteranceTimelineStore()
+    private var timelineSequence: UInt64 = 0
+    private var activeTimeline: UtteranceTimelineBuilder?
+    private var aboutWindowController: AboutWindowController?
 
     init(settings: AppSettings = .shared) {
         self.settings = settings
@@ -218,6 +224,28 @@ final class DictationCoordinator: ObservableObject {
         controller.present()
     }
 
+    func openAbout() {
+        let controller: AboutWindowController
+        if let aboutWindowController {
+            controller = aboutWindowController
+        } else {
+            controller = AboutWindowController()
+            aboutWindowController = controller
+        }
+        controller.present()
+    }
+
+    #if DEBUG
+    func copyTimings() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(
+            timelineStore.formattedTable(),
+            forType: .string
+        )
+    }
+    #endif
+
     func presentOnboardingIfNeeded() {
         guard !settings.onboardingCompleted else {
             isOnboardingPresented = false
@@ -280,6 +308,7 @@ final class DictationCoordinator: ObservableObject {
         if state == .recording {
             audioRecorder.cancel()
             activeMode = nil
+            activeTimeline = nil
             transition(to: .idle)
         }
 
@@ -306,6 +335,7 @@ final class DictationCoordinator: ObservableObject {
         if state == .recording {
             audioRecorder?.cancel()
             activeMode = nil
+            activeTimeline = nil
         }
 
         enginePrewarmTask?.cancel()
@@ -406,13 +436,27 @@ final class DictationCoordinator: ObservableObject {
             return
         }
 
+        timelineSequence &+= 1
+        let timelineID = timelineSequence
+        activeTimeline = UtteranceTimelineBuilder(
+            id: timelineID,
+            mode: mode,
+            keyDown: timelineClock.now
+        )
+
         do {
-            try audioRecorder.start()
+            try audioRecorder.start { [weak self] instant in
+                self?.recordFirstBuffer(
+                    at: instant,
+                    timelineID: timelineID
+                )
+            }
             activeMode = mode
             transition(to: .recording, mode: mode)
         } catch {
             print("audio recording failed to start: \(error.localizedDescription)")
             activeMode = nil
+            activeTimeline = nil
             transition(to: .idle)
         }
     }
@@ -427,6 +471,7 @@ final class DictationCoordinator: ObservableObject {
         if state == .recording, let audioRecorder {
             audioRecorder.cancel()
             activeMode = nil
+            activeTimeline = nil
         }
 
         transition(to: .idle)
@@ -441,6 +486,7 @@ final class DictationCoordinator: ObservableObject {
         }
 
         do {
+            activeTimeline?.keyUp = timelineClock.now
             let samples = try audioRecorder.stop()
             activeMode = nil
             transition(to: .transcribing, mode: mode)
@@ -448,6 +494,7 @@ final class DictationCoordinator: ObservableObject {
         } catch {
             print("audio recording failed to stop: \(error.localizedDescription)")
             activeMode = nil
+            activeTimeline = nil
             transition(to: .idle)
         }
     }
@@ -461,7 +508,19 @@ final class DictationCoordinator: ObservableObject {
 
         audioRecorder.cancel()
         activeMode = nil
+        activeTimeline = nil
         transition(to: .idle)
+    }
+
+    private func recordFirstBuffer(
+        at instant: ContinuousClock.Instant,
+        timelineID: UInt64
+    ) {
+        guard activeTimeline?.id == timelineID,
+              activeTimeline?.micFirstBuffer == nil else {
+            return
+        }
+        activeTimeline?.micFirstBuffer = instant
     }
 
     private func startPipeline(
@@ -495,6 +554,7 @@ final class DictationCoordinator: ObservableObject {
             guard generation == pipelineGeneration else {
                 return
             }
+            activeTimeline?.transcriptReady = timelineClock.now
 
             switch mode {
             case .dictation:
@@ -502,17 +562,28 @@ final class DictationCoordinator: ObservableObject {
                     entries: dictionaryStore.entries
                 )
                 let cleanedTranscript = cleaner.clean(transcript)
+                activeTimeline?.cleaned = timelineClock.now
                 guard !cleanedTranscript.trimmingCharacters(
                     in: .whitespacesAndNewlines
                 ).isEmpty else {
+                    activeTimeline = nil
                     return
                 }
                 await paster.paste(cleanedTranscript)
+                completeTimeline(
+                    at: timelineClock.now,
+                    stage: .pasteVerified
+                )
             case .command:
                 let commandTranscript = DictionarySubstituter(
                     entries: dictionaryStore.entries
                 ).apply(to: transcript)
+                activeTimeline?.cleaned = timelineClock.now
                 let command = commandRouter.route(commandTranscript)
+                completeTimeline(
+                    at: timelineClock.now,
+                    stage: .commandRouted
+                )
                 await commandExecutor.execute(command)
             }
         } catch is CancellationError {
@@ -526,6 +597,18 @@ final class DictationCoordinator: ObservableObject {
         pipelineGeneration += 1
         pipelineTask?.cancel()
         pipelineTask = nil
+        activeTimeline = nil
+    }
+
+    private func completeTimeline(
+        at instant: ContinuousClock.Instant,
+        stage: UtteranceTimeline.CompletionStage
+    ) {
+        defer { activeTimeline = nil }
+        guard let timeline = activeTimeline?.complete(stage, at: instant) else {
+            return
+        }
+        timelineStore.append(timeline)
     }
 
     private func finishPipeline(generation: Int) {

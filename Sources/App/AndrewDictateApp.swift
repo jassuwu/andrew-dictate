@@ -21,10 +21,20 @@ struct AndrewDictateApp: App {
             }
 
             #if DEBUG
+            Button("copy timings") {
+                coordinator.copyTimings()
+            }
+
             Button("run onboarding again") {
                 coordinator.runOnboardingAgain()
             }
             #endif
+
+            Button("about Andrew Dictate") {
+                coordinator.openAbout()
+            }
+
+            Divider()
 
             Button("quit Andrew Dictate") {
                 NSApp.terminate(nil)

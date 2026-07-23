@@ -53,6 +53,7 @@ targets:
       - Sources/Command/AppMatcher.swift
       - Sources/Command/AgentDelegator.swift
       - Sources/Command/DelegationGate.swift
+      - Sources/Instrumentation/UtteranceTimeline.swift
     settings:
       base:
         GENERATE_INFOPLIST_FILE: true

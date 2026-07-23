@@ -42,6 +42,7 @@ final class AudioRecorder {
 
     private let engine: AVAudioEngine
     private let levelStorage: AudioLevelStorage
+    private let firstBufferNotifier: AudioFirstBufferNotifier
     private var inputFormat: AVAudioFormat
     private var captureStorage: AudioCaptureStorage
     private var hasInstalledTap = false
@@ -63,6 +64,7 @@ final class AudioRecorder {
         }
 
         let levelStorage = AudioLevelStorage()
+        let firstBufferNotifier = AudioFirstBufferNotifier()
         let captureStorage = try Self.makeCaptureStorage(
             format: inputFormat,
             preRollEnabled: preRollEnabled
@@ -72,11 +74,13 @@ final class AudioRecorder {
         self.inputFormat = inputFormat
         self.captureStorage = captureStorage
         self.levelStorage = levelStorage
+        self.firstBufferNotifier = firstBufferNotifier
         isPreRollEnabled = preRollEnabled
 
         installCaptureTap(
             storage: captureStorage,
-            format: inputFormat
+            format: inputFormat,
+            firstBufferNotifier: firstBufferNotifier
         )
         engine.prepare()
 
@@ -137,11 +141,16 @@ final class AudioRecorder {
         }
     }
 
-    func start() throws {
+    func start(
+        onFirstBuffer: @escaping @MainActor @Sendable (
+            ContinuousClock.Instant
+        ) -> Void
+    ) throws {
         guard !isRecording else {
             throw AudioRecorderError.alreadyRecording
         }
 
+        firstBufferNotifier.arm(onFirstBuffer)
         captureStorage.begin()
         levelStorage.reset()
 
@@ -151,6 +160,7 @@ final class AudioRecorder {
             }
             isRecording = true
         } catch {
+            firstBufferNotifier.disarm()
             captureStorage.discard()
             levelStorage.reset()
             throw error
@@ -165,6 +175,7 @@ final class AudioRecorder {
         if !isPreRollEnabled {
             engine.pause()
         }
+        firstBufferNotifier.disarm()
         isRecording = false
         levelStorage.reset()
 
@@ -183,6 +194,7 @@ final class AudioRecorder {
         if !isPreRollEnabled {
             engine.pause()
         }
+        firstBufferNotifier.disarm()
         isRecording = false
         captureStorage.discard()
         levelStorage.reset()
@@ -216,7 +228,8 @@ final class AudioRecorder {
 
     private func installCaptureTap(
         storage: AudioCaptureStorage,
-        format: AVAudioFormat
+        format: AVAudioFormat,
+        firstBufferNotifier: AudioFirstBufferNotifier
     ) {
         let tapFrameCapacity = AVAudioFrameCount(
             max(1_024, ceil(format.sampleRate * Self.tapDuration))
@@ -226,9 +239,10 @@ final class AudioRecorder {
             onBus: 0,
             bufferSize: tapFrameCapacity,
             format: format
-        ) { [storage, levelStorage] buffer, _ in
+        ) { [storage, levelStorage, firstBufferNotifier] buffer, _ in
             if storage.appendCopy(of: buffer) {
                 levelStorage.update(from: buffer)
+                firstBufferNotifier.notify(at: ContinuousClock.now)
             }
         }
         hasInstalledTap = true
@@ -263,7 +277,8 @@ final class AudioRecorder {
 
         installCaptureTap(
             storage: newStorage,
-            format: newInputFormat
+            format: newInputFormat,
+            firstBufferNotifier: firstBufferNotifier
         )
         engine.prepare()
         try startContinuousCaptureIfNeeded()
@@ -360,6 +375,42 @@ final class AudioRecorder {
         }
 
         return samples
+    }
+}
+
+private final class AudioFirstBufferNotifier: @unchecked Sendable {
+    typealias Callback = @MainActor @Sendable (
+        ContinuousClock.Instant
+    ) -> Void
+
+    private let lock = NSLock()
+    private var callback: Callback?
+
+    func arm(_ callback: @escaping Callback) {
+        lock.lock()
+        self.callback = callback
+        lock.unlock()
+    }
+
+    func disarm() {
+        lock.lock()
+        callback = nil
+        lock.unlock()
+    }
+
+    func notify(at instant: ContinuousClock.Instant) {
+        lock.lock()
+        let callback = callback
+        self.callback = nil
+        lock.unlock()
+
+        guard let callback else {
+            return
+        }
+
+        Task { @MainActor in
+            callback(instant)
+        }
     }
 }
 
