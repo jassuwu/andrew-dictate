@@ -1,0 +1,37 @@
+name: AndrewDictate
+options:
+  bundleIdPrefix: gg.jass
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+packages:
+  FluidAudio:
+    url: https://github.com/FluidInference/FluidAudio
+    from: 0.15.5
+
+targets:
+  AndrewDictate:
+    type: application
+    platform: macOS
+    sources:
+      - Sources
+    dependencies:
+      - package: FluidAudio
+    settings:
+      base:
+        PRODUCT_NAME: Andrew Dictate
+        PRODUCT_BUNDLE_IDENTIFIER: gg.jass.andrew-dictate
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        ENABLE_HARDENED_RUNTIME: false
+        SWIFT_STRICT_CONCURRENCY: complete
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: Andrew Dictate
+        CFBundleShortVersionString: "0.0.1"
+        CFBundleVersion: "1"
+        LSUIElement: true
+        LSMinimumSystemVersion: "14.0"
+        NSMicrophoneUsageDescription: "andrew dictate listens only while you hold a key. everything is transcribed on this mac and never leaves it."
