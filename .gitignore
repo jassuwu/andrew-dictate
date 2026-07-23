@@ -1,0 +1,17 @@
+# macos
+.DS_Store
+
+# xcode / builds
+*.xcodeproj
+xcuserdata/
+DerivedData/
+.build/
+build/
+
+# local working docs (personal preference: ADRs & context stay untracked)
+CONTEXT.md
+docs/adr/
+
+# secrets & local config
+*.local
+.env
