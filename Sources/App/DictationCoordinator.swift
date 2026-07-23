@@ -24,6 +24,8 @@ final class DictationCoordinator: ObservableObject {
 
     @Published private(set) var state: State = .prewarming
 
+    let dictionaryStore: DictionaryStore
+
     private let hotkeyMonitor: HotkeyMonitor
     private let transcriptionEngine: ParakeetEngine
     private let paster: Paster
@@ -31,6 +33,7 @@ final class DictationCoordinator: ObservableObject {
     private var isPrewarmed = false
 
     init() {
+        dictionaryStore = DictionaryStore()
         transcriptionEngine = ParakeetEngine()
         paster = Paster()
 
@@ -126,7 +129,16 @@ final class DictationCoordinator: ObservableObject {
 
         do {
             let transcript = try await transcriptionEngine.transcribe(samples)
-            await paster.paste(transcript)
+            let cleaner = DeterministicCleaner(entries: dictionaryStore.entries)
+            let cleanedTranscript = cleaner.clean(transcript)
+
+            guard !cleanedTranscript.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).isEmpty else {
+                return
+            }
+
+            await paster.paste(cleanedTranscript)
         } catch {
             print("transcription failed: \(error.localizedDescription)")
         }

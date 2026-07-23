@@ -21,6 +21,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: Andrew Dictate
+        PRODUCT_MODULE_NAME: AndrewDictate
         PRODUCT_BUNDLE_IDENTIFIER: gg.jass.andrew-dictate
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGN_STYLE: Manual
@@ -35,3 +36,26 @@ targets:
         LSUIElement: true
         LSMinimumSystemVersion: "14.0"
         NSMicrophoneUsageDescription: "andrew dictate listens only while you hold a key. everything is transcribed on this mac and never leaves it."
+
+  AndrewDictateTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests
+      - Sources/Cleanup
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: true
+        SWIFT_STRICT_CONCURRENCY: complete
+
+schemes:
+  AndrewDictate:
+    build:
+      targets:
+        AndrewDictate: all
+        AndrewDictateTests:
+          - test
+    test:
+      config: Debug
+      targets:
+        - AndrewDictateTests
