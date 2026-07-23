@@ -11,16 +11,16 @@ final class HotkeyMonitor {
     var onLockCancel: ((DictationMode) -> Void)?
 
     private var monitors: [Any] = []
-    private let userDefaults: UserDefaults
+    private let settings: AppSettings
     private var bindings: [DictationMode: HotkeyBinding]
     private var pressedKeyCodes: Set<CGKeyCode> = []
     private var detector = TapLockDetector()
 
-    init(userDefaults: UserDefaults = .standard) {
-        self.userDefaults = userDefaults
+    init(settings: AppSettings = .shared) {
+        self.settings = settings
         bindings = Dictionary(
             uniqueKeysWithValues: DictationMode.allCases.map {
-                ($0, userDefaults.hotkeyBinding(for: $0))
+                ($0, settings.hotkeyBinding(for: $0))
             }
         )
         requestAccessibilityPermission()
@@ -37,7 +37,7 @@ final class HotkeyMonitor {
             pressedKeyCodes.remove(oldKeyCode)
         }
         bindings[mode] = binding
-        userDefaults.setHotkeyBinding(binding, for: mode)
+        settings.setHotkeyBinding(binding, for: mode)
     }
 
     private func requestAccessibilityPermission() {

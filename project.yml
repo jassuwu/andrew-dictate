@@ -35,7 +35,7 @@ targets:
         CFBundleVersion: "1"
         LSUIElement: true
         LSMinimumSystemVersion: "14.0"
-        NSMicrophoneUsageDescription: "andrew dictate listens only while you hold a key. everything is transcribed on this mac and never leaves it."
+        NSMicrophoneUsageDescription: "andrew dictate uses your microphone for local dictation. with pre-roll on, the mic stays warm while the app runs."
 
   AndrewDictateTests:
     type: bundle.unit-test
@@ -43,6 +43,8 @@ targets:
     sources:
       - Tests
       - Sources/Cleanup
+      - Sources/Audio/RingSplicer.swift
+      - Sources/Settings/AppSettings.swift
       - Sources/Hotkey/HotkeyBinding.swift
       - Sources/Hotkey/TapLockDetector.swift
     settings:

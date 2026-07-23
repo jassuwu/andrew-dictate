@@ -36,20 +36,24 @@ enum AudioRecorderError: LocalizedError {
 final class AudioRecorder {
     private static let targetSampleRate = 16_000.0
     private static let tapDuration = 0.1
+    private static let preRollDuration = 0.3
     private static let maximumUtteranceDuration = 5.0 * 60.0
     private static let conversionBufferCapacity: AVAudioFrameCount = 16_384
 
     private let engine: AVAudioEngine
-    private let inputFormat: AVAudioFormat
-    private let captureStorage: AudioCaptureStorage
     private let levelStorage: AudioLevelStorage
+    private var inputFormat: AVAudioFormat
+    private var captureStorage: AudioCaptureStorage
+    private var hasInstalledTap = false
     private var isRecording = false
+
+    private(set) var isPreRollEnabled: Bool
 
     var currentLevel: Float {
         levelStorage.currentLevel
     }
 
-    init() throws {
+    init(preRollEnabled: Bool = false) throws {
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
@@ -58,39 +62,78 @@ final class AudioRecorder {
             throw AudioRecorderError.invalidInputFormat
         }
 
-        let tapFrameCapacity = AVAudioFrameCount(
-            max(1_024, ceil(inputFormat.sampleRate * Self.tapDuration))
-        )
-        let maximumFrameCount = inputFormat.sampleRate * Self.maximumUtteranceDuration
-        let poolCount = Int(ceil(maximumFrameCount / Double(tapFrameCapacity))) + 1
-        let captureStorage = try AudioCaptureStorage(
-            format: inputFormat,
-            frameCapacity: tapFrameCapacity,
-            poolCount: poolCount
-        )
         let levelStorage = AudioLevelStorage()
+        let captureStorage = try Self.makeCaptureStorage(
+            format: inputFormat,
+            preRollEnabled: preRollEnabled
+        )
 
         self.engine = engine
         self.inputFormat = inputFormat
         self.captureStorage = captureStorage
         self.levelStorage = levelStorage
+        isPreRollEnabled = preRollEnabled
 
-        inputNode.installTap(
-            onBus: 0,
-            bufferSize: tapFrameCapacity,
+        installCaptureTap(
+            storage: captureStorage,
             format: inputFormat
-        ) { [captureStorage, levelStorage] buffer, _ in
-            captureStorage.appendCopy(of: buffer)
-            levelStorage.update(from: buffer)
-        }
+        )
         engine.prepare()
 
+        if preRollEnabled,
+           AVCaptureDevice.authorizationStatus(for: .audio) == .authorized {
+            try engine.start()
+        }
+
         AVCaptureDevice.requestAccess(for: .audio) { granted in
-            if granted {
-                print("microphone permission granted")
-            } else {
-                print("microphone permission denied")
+            Task { @MainActor [weak self] in
+                guard let self else {
+                    return
+                }
+
+                if granted {
+                    print("microphone permission granted")
+                    do {
+                        try self.startContinuousCaptureIfNeeded()
+                    } catch {
+                        print(
+                            "pre-roll audio capture failed to start: "
+                                + error.localizedDescription
+                        )
+                    }
+                } else {
+                    print("microphone permission denied")
+                }
             }
+        }
+    }
+
+    func applyPreRoll(_ enabled: Bool) throws {
+        guard enabled != isPreRollEnabled else {
+            try startContinuousCaptureIfNeeded()
+            return
+        }
+
+        if isRecording {
+            captureStorage.discard()
+            isRecording = false
+            levelStorage.reset()
+        }
+
+        let previousMode = isPreRollEnabled
+
+        do {
+            try rebuildCapturePath(preRollEnabled: enabled)
+        } catch {
+            do {
+                try rebuildCapturePath(preRollEnabled: previousMode)
+            } catch {
+                print(
+                    "audio capture rollback failed: "
+                        + error.localizedDescription
+                )
+            }
+            throw error
         }
     }
 
@@ -103,7 +146,9 @@ final class AudioRecorder {
         levelStorage.reset()
 
         do {
-            try engine.start()
+            if !engine.isRunning {
+                try engine.start()
+            }
             isRecording = true
         } catch {
             captureStorage.discard()
@@ -117,7 +162,9 @@ final class AudioRecorder {
             throw AudioRecorderError.notRecording
         }
 
-        engine.pause()
+        if !isPreRollEnabled {
+            engine.pause()
+        }
         isRecording = false
         levelStorage.reset()
 
@@ -133,10 +180,103 @@ final class AudioRecorder {
             return
         }
 
-        engine.pause()
+        if !isPreRollEnabled {
+            engine.pause()
+        }
         isRecording = false
         captureStorage.discard()
         levelStorage.reset()
+    }
+
+    private static func makeCaptureStorage(
+        format: AVAudioFormat,
+        preRollEnabled: Bool
+    ) throws -> AudioCaptureStorage {
+        let tapFrameCapacity = AVAudioFrameCount(
+            max(1_024, ceil(format.sampleRate * tapDuration))
+        )
+        let maximumFrameCount = Int(
+            ceil(format.sampleRate * maximumUtteranceDuration)
+        )
+        let poolCount = Int(
+            ceil(Double(maximumFrameCount) / Double(tapFrameCapacity))
+        ) + 1
+        let preRollFrameCapacity = preRollEnabled
+            ? Int(ceil(format.sampleRate * preRollDuration))
+            : 0
+
+        return try AudioCaptureStorage(
+            format: format,
+            frameCapacity: tapFrameCapacity,
+            poolCount: poolCount,
+            maximumFrameCount: maximumFrameCount,
+            preRollFrameCapacity: preRollFrameCapacity
+        )
+    }
+
+    private func installCaptureTap(
+        storage: AudioCaptureStorage,
+        format: AVAudioFormat
+    ) {
+        let tapFrameCapacity = AVAudioFrameCount(
+            max(1_024, ceil(format.sampleRate * Self.tapDuration))
+        )
+
+        engine.inputNode.installTap(
+            onBus: 0,
+            bufferSize: tapFrameCapacity,
+            format: format
+        ) { [storage, levelStorage] buffer, _ in
+            if storage.appendCopy(of: buffer) {
+                levelStorage.update(from: buffer)
+            }
+        }
+        hasInstalledTap = true
+    }
+
+    private func rebuildCapturePath(
+        preRollEnabled: Bool
+    ) throws {
+        let inputNode = engine.inputNode
+        let newInputFormat = inputNode.outputFormat(forBus: 0)
+
+        guard newInputFormat.sampleRate > 0,
+              newInputFormat.channelCount > 0 else {
+            throw AudioRecorderError.invalidInputFormat
+        }
+
+        let newStorage = try Self.makeCaptureStorage(
+            format: newInputFormat,
+            preRollEnabled: preRollEnabled
+        )
+
+        engine.stop()
+        if hasInstalledTap {
+            inputNode.removeTap(onBus: 0)
+            hasInstalledTap = false
+        }
+
+        inputFormat = newInputFormat
+        captureStorage = newStorage
+        isPreRollEnabled = preRollEnabled
+        levelStorage.reset()
+
+        installCaptureTap(
+            storage: newStorage,
+            format: newInputFormat
+        )
+        engine.prepare()
+        try startContinuousCaptureIfNeeded()
+    }
+
+    private func startContinuousCaptureIfNeeded() throws {
+        guard isPreRollEnabled,
+              !engine.isRunning,
+              AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
+            return
+        }
+
+        try engine.start()
     }
 
     private static func convertToTranscriptionFormat(
@@ -267,15 +407,25 @@ private final class AudioLevelStorage: @unchecked Sendable {
 private final class AudioCaptureStorage: @unchecked Sendable {
     private let lock = NSLock()
     private let pool: [AVAudioPCMBuffer]
+    private let maximumFrameCount: Int
+    private let bytesPerFrame: Int
+    private let preRollBuffer: AVAudioPCMBuffer?
+    private let preRollPrefixBuffer: AVAudioPCMBuffer?
+
     private var captured: [AVAudioPCMBuffer] = []
     private var nextPoolIndex = 0
+    private var utteranceFrameCount = 0
+    private var preRollPrefixFrameCount = 0
     private var isAcceptingAudio = false
-    private var didOverflow = false
+    private var captureError: AudioRecorderError?
+    private var ringSplicer: RingSplicer?
 
     init(
         format: AVAudioFormat,
         frameCapacity: AVAudioFrameCount,
-        poolCount: Int
+        poolCount: Int,
+        maximumFrameCount: Int,
+        preRollFrameCapacity: Int
     ) throws {
         var pool: [AVAudioPCMBuffer] = []
         pool.reserveCapacity(poolCount)
@@ -290,7 +440,47 @@ private final class AudioCaptureStorage: @unchecked Sendable {
             pool.append(buffer)
         }
 
+        let bytesPerFrame = Int(
+            format.streamDescription.pointee.mBytesPerFrame
+        )
+        guard bytesPerFrame > 0 else {
+            throw AudioRecorderError.invalidInputFormat
+        }
+
+        let preRollBuffer: AVAudioPCMBuffer?
+        let preRollPrefixBuffer: AVAudioPCMBuffer?
+        let ringSplicer: RingSplicer?
+
+        if preRollFrameCapacity > 0 {
+            let capacity = AVAudioFrameCount(preRollFrameCapacity)
+            guard let ringBuffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: capacity
+            ),
+            let prefixBuffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: capacity
+            ) else {
+                throw AudioRecorderError.unavailableBuffer
+            }
+
+            ringBuffer.frameLength = capacity
+            prefixBuffer.frameLength = 0
+            preRollBuffer = ringBuffer
+            preRollPrefixBuffer = prefixBuffer
+            ringSplicer = RingSplicer(capacity: preRollFrameCapacity)
+        } else {
+            preRollBuffer = nil
+            preRollPrefixBuffer = nil
+            ringSplicer = nil
+        }
+
         self.pool = pool
+        self.maximumFrameCount = maximumFrameCount
+        self.bytesPerFrame = bytesPerFrame
+        self.preRollBuffer = preRollBuffer
+        self.preRollPrefixBuffer = preRollPrefixBuffer
+        self.ringSplicer = ringSplicer
         captured.reserveCapacity(poolCount)
     }
 
@@ -300,31 +490,191 @@ private final class AudioCaptureStorage: @unchecked Sendable {
 
         captured.removeAll(keepingCapacity: true)
         nextPoolIndex = 0
-        didOverflow = false
+        utteranceFrameCount = 0
+        preRollPrefixFrameCount = 0
+        captureError = nil
+
+        if let ringSplicer,
+           let preRollBuffer,
+           let preRollPrefixBuffer {
+            let plan = ringSplicer.planRead()
+            preRollPrefixBuffer.frameLength =
+                preRollPrefixBuffer.frameCapacity
+
+            guard copy(
+                plan,
+                from: preRollBuffer,
+                to: preRollPrefixBuffer
+            ) else {
+                preRollPrefixBuffer.frameLength = 0
+                captureError = .unavailableBuffer
+                isAcceptingAudio = false
+                return
+            }
+
+            preRollPrefixBuffer.frameLength = AVAudioFrameCount(
+                plan.frameCount
+            )
+            preRollPrefixFrameCount = plan.frameCount
+            utteranceFrameCount = plan.frameCount
+        }
+
         isAcceptingAudio = true
     }
 
-    func appendCopy(of source: AVAudioPCMBuffer) {
+    @discardableResult
+    func appendCopy(of source: AVAudioPCMBuffer) -> Bool {
         lock.lock()
         defer { lock.unlock() }
 
+        if var ringSplicer,
+           let preRollBuffer {
+            let plan = ringSplicer.planWrite(
+                frameCount: Int(source.frameLength)
+            )
+            preRollBuffer.frameLength = preRollBuffer.frameCapacity
+
+            if copy(plan, from: source, to: preRollBuffer) {
+                self.ringSplicer = ringSplicer
+            } else {
+                ringSplicer.reset()
+                self.ringSplicer = ringSplicer
+                if isAcceptingAudio {
+                    failCapture(with: .unavailableBuffer)
+                }
+            }
+        }
+
         guard isAcceptingAudio else {
-            return
+            return false
+        }
+
+        let sourceFrameCount = Int(source.frameLength)
+        guard sourceFrameCount > 0 else {
+            return true
+        }
+        guard sourceFrameCount <= maximumFrameCount - utteranceFrameCount else {
+            failCapture(with: .captureCapacityExceeded)
+            return false
         }
         guard nextPoolIndex < pool.count else {
-            didOverflow = true
-            isAcceptingAudio = false
-            return
+            failCapture(with: .captureCapacityExceeded)
+            return false
         }
 
         let destination = pool[nextPoolIndex]
         guard source.frameLength <= destination.frameCapacity else {
-            didOverflow = true
-            isAcceptingAudio = false
-            return
+            failCapture(with: .captureCapacityExceeded)
+            return false
         }
 
         destination.frameLength = source.frameLength
+
+        guard copyFrames(
+            from: source,
+            sourceOffset: 0,
+            to: destination,
+            destinationOffset: 0,
+            frameCount: sourceFrameCount
+        ) else {
+            failCapture(with: .unavailableBuffer)
+            return false
+        }
+
+        captured.append(destination)
+        nextPoolIndex += 1
+        utteranceFrameCount += sourceFrameCount
+        return true
+    }
+
+    func finish() throws -> [AVAudioPCMBuffer] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        isAcceptingAudio = false
+
+        if let captureError {
+            resetUtterance()
+            preRollPrefixBuffer?.frameLength = 0
+            throw captureError
+        }
+
+        var result: [AVAudioPCMBuffer] = []
+        result.reserveCapacity(captured.count + 1)
+        if preRollPrefixFrameCount > 0,
+           let preRollPrefixBuffer {
+            result.append(preRollPrefixBuffer)
+        }
+        result.append(contentsOf: captured)
+
+        resetUtterance()
+        return result
+    }
+
+    func discard() {
+        lock.lock()
+        defer { lock.unlock() }
+
+        isAcceptingAudio = false
+        resetUtterance()
+        preRollPrefixBuffer?.frameLength = 0
+    }
+
+    private func failCapture(with error: AudioRecorderError) {
+        captureError = error
+        isAcceptingAudio = false
+    }
+
+    private func resetUtterance() {
+        captured.removeAll(keepingCapacity: true)
+        nextPoolIndex = 0
+        utteranceFrameCount = 0
+        preRollPrefixFrameCount = 0
+        captureError = nil
+    }
+
+    private func copy(
+        _ plan: RingWritePlan,
+        from source: AVAudioPCMBuffer,
+        to destination: AVAudioPCMBuffer
+    ) -> Bool {
+        copy(plan.first, from: source, to: destination)
+            && copy(plan.second, from: source, to: destination)
+    }
+
+    private func copy(
+        _ plan: RingReadPlan,
+        from source: AVAudioPCMBuffer,
+        to destination: AVAudioPCMBuffer
+    ) -> Bool {
+        copy(plan.first, from: source, to: destination)
+            && copy(plan.second, from: source, to: destination)
+    }
+
+    private func copy(
+        _ region: FrameCopyRegion,
+        from source: AVAudioPCMBuffer,
+        to destination: AVAudioPCMBuffer
+    ) -> Bool {
+        copyFrames(
+            from: source,
+            sourceOffset: region.sourceOffset,
+            to: destination,
+            destinationOffset: region.destinationOffset,
+            frameCount: region.frameCount
+        )
+    }
+
+    private func copyFrames(
+        from source: AVAudioPCMBuffer,
+        sourceOffset: Int,
+        to destination: AVAudioPCMBuffer,
+        destinationOffset: Int,
+        frameCount: Int
+    ) -> Bool {
+        guard frameCount > 0 else {
+            return true
+        }
 
         let sourceBuffers = UnsafeMutableAudioBufferListPointer(
             UnsafeMutablePointer(mutating: source.audioBufferList)
@@ -334,61 +684,34 @@ private final class AudioCaptureStorage: @unchecked Sendable {
         )
 
         guard sourceBuffers.count == destinationBuffers.count else {
-            didOverflow = true
-            isAcceptingAudio = false
-            return
+            return false
         }
+
+        let sourceByteOffset = sourceOffset * bytesPerFrame
+        let destinationByteOffset = destinationOffset * bytesPerFrame
+        let byteCount = frameCount * bytesPerFrame
 
         for index in sourceBuffers.indices {
             let sourceBuffer = sourceBuffers[index]
+            let destinationBuffer = destinationBuffers[index]
+
             guard let sourceData = sourceBuffer.mData,
-                  let destinationData = destinationBuffers[index].mData,
-                  sourceBuffer.mDataByteSize <= destinationBuffers[index].mDataByteSize else {
-                didOverflow = true
-                isAcceptingAudio = false
-                return
+                  let destinationData = destinationBuffer.mData,
+                  sourceByteOffset + byteCount
+                    <= Int(sourceBuffer.mDataByteSize),
+                  destinationByteOffset + byteCount
+                    <= Int(destinationBuffer.mDataByteSize) else {
+                return false
             }
 
             memcpy(
-                destinationData,
-                sourceData,
-                Int(sourceBuffer.mDataByteSize)
+                destinationData.advanced(by: destinationByteOffset),
+                sourceData.advanced(by: sourceByteOffset),
+                byteCount
             )
-            destinationBuffers[index].mDataByteSize = sourceBuffer.mDataByteSize
         }
 
-        captured.append(destination)
-        nextPoolIndex += 1
-    }
-
-    func finish() throws -> [AVAudioPCMBuffer] {
-        lock.lock()
-        defer { lock.unlock() }
-
-        isAcceptingAudio = false
-
-        guard !didOverflow else {
-            captured.removeAll(keepingCapacity: true)
-            nextPoolIndex = 0
-            didOverflow = false
-            throw AudioRecorderError.captureCapacityExceeded
-        }
-
-        let result = captured
-        captured = []
-        captured.reserveCapacity(pool.count)
-        nextPoolIndex = 0
-        return result
-    }
-
-    func discard() {
-        lock.lock()
-        defer { lock.unlock() }
-
-        isAcceptingAudio = false
-        captured.removeAll(keepingCapacity: true)
-        nextPoolIndex = 0
-        didOverflow = false
+        return true
     }
 }
 

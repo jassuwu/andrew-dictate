@@ -28,6 +28,7 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var state: State = .prewarming
 
     let dictionaryStore: DictionaryStore
+    let settings: AppSettings
 
     private let hotkeyMonitor: HotkeyMonitor
     private let transcriptionEngine: ParakeetEngine
@@ -39,15 +40,20 @@ final class DictationCoordinator: ObservableObject {
     private var activeMode: DictationMode?
     private var pipelineTask: Task<Void, Never>?
     private var pipelineGeneration = 0
+    private var settingsCancellables: Set<AnyCancellable> = []
+    private var isApplyingPreRollSetting = false
 
-    init() {
+    init(settings: AppSettings = .shared) {
+        self.settings = settings
         dictionaryStore = DictionaryStore()
         transcriptionEngine = ParakeetEngine()
         paster = Paster()
 
         let recorder: AudioRecorder?
         do {
-            recorder = try AudioRecorder()
+            recorder = try AudioRecorder(
+                preRollEnabled: settings.preRollEnabled
+            )
         } catch {
             recorder = nil
             print("audio recorder initialization failed: \(error.localizedDescription)")
@@ -61,7 +67,7 @@ final class DictationCoordinator: ObservableObject {
         hudViewModel = viewModel
         hudPanel = HUDPanel(viewModel: viewModel)
 
-        hotkeyMonitor = HotkeyMonitor()
+        hotkeyMonitor = HotkeyMonitor(settings: settings)
         hotkeyMonitor.onBegin = { [weak self] mode in
             self?.beginRecording(mode)
         }
@@ -81,8 +87,49 @@ final class DictationCoordinator: ObservableObject {
             self?.cancelRecording(mode)
         }
 
+        settings.$preRollEnabled
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] enabled in
+                self?.applyPreRoll(enabled)
+            }
+            .store(in: &settingsCancellables)
+
         Task { [weak self] in
             await self?.prewarm()
+        }
+    }
+
+    private func applyPreRoll(_ enabled: Bool) {
+        guard !isApplyingPreRollSetting,
+              let audioRecorder else {
+            return
+        }
+
+        isApplyingPreRollSetting = true
+        defer { isApplyingPreRollSetting = false }
+
+        if state == .recording {
+            audioRecorder.cancel()
+            activeMode = nil
+            transition(to: .idle)
+        }
+
+        do {
+            try audioRecorder.applyPreRoll(enabled)
+        } catch {
+            print(
+                "pre-roll setting failed to apply: "
+                    + error.localizedDescription
+            )
+            let appliedMode = audioRecorder.isPreRollEnabled
+            Task { [weak self] in
+                guard let self,
+                      self.settings.preRollEnabled != appliedMode else {
+                    return
+                }
+                self.settings.preRollEnabled = appliedMode
+            }
         }
     }
 

@@ -25,6 +25,6 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>andrew dictate listens only while you hold a key. everything is transcribed on this mac and never leaves it.</string>
+	<string>andrew dictate uses your microphone for local dictation. with pre-roll on, the mic stays warm while the app runs.</string>
 </dict>
 </plist>
