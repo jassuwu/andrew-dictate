@@ -1,4 +1,10 @@
-# Andrew Dictate
+<p align="center">
+  <img src="art/icon_1024.png" width="128" alt="Andrew Dictate" />
+</p>
+
+<h1 align="center">andrew dictate</h1>
+
+<p align="center">hold a key, talk, get text. — free · open source · fully local</p>
 
 Andrew Dictate is a native macOS menu-bar app for fast, local speech-to-text. hold a key, talk, and either paste clean text or route a spoken command.
 
