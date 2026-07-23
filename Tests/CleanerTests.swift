@@ -62,4 +62,15 @@ final class CleanerTests: XCTestCase {
     func testEmptyStringRemainsEmpty() {
         XCTAssertEqual(DeterministicCleaner().clean(""), "")
     }
+
+    func testDictionaryOnlyPassPreservesRawCommandText() {
+        let substituter = DictionarySubstituter(
+            entries: [DictionaryEntry(wrong: "gpt", right: "GPT")]
+        )
+
+        XCTAssertEqual(
+            substituter.apply(to: "  type um, gPt   EXACTLY  "),
+            "  type um, GPT   EXACTLY  "
+        )
+    }
 }

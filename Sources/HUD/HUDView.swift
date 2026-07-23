@@ -3,6 +3,8 @@ import SwiftUI
 @MainActor
 final class HUDViewModel: ObservableObject {
     @Published private(set) var state: DictationCoordinator.State
+    @Published private(set) var commandFeedback: String?
+    @Published private(set) var mode: DictationMode?
 
     private let audioRecorder: AudioRecorder?
 
@@ -18,8 +20,25 @@ final class HUDViewModel: ObservableObject {
         audioRecorder?.currentLevel ?? 0
     }
 
-    func update(state: DictationCoordinator.State) {
+    func update(
+        state: DictationCoordinator.State,
+        mode: DictationMode? = nil
+    ) {
         self.state = state
+        if let mode {
+            self.mode = mode
+        } else if state == .idle || state == .prewarming {
+            self.mode = nil
+        }
+        commandFeedback = nil
+    }
+
+    func showCommandFeedback(_ message: String) {
+        commandFeedback = message
+    }
+
+    func clearCommandFeedback() {
+        commandFeedback = nil
     }
 }
 
@@ -28,30 +47,39 @@ struct HUDView: View {
 
     var body: some View {
         Group {
-            switch viewModel.state {
-            case .idle:
-                EmptyView()
-            case .prewarming:
-                statusPill {
-                    subtleSpinner
-                    Text("warming up")
-                }
-            case .recording:
-                statusPill {
-                    Text("listening")
-                    TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { _ in
-                        LevelMeter(level: viewModel.currentLevel)
-                    }
-                }
-            case .transcribing:
-                statusPill {
-                    subtleSpinner
-                    Text("transcribing")
-                }
-            case .commandModeComingSoon:
+            if let commandFeedback = viewModel.commandFeedback {
                 statusPill {
                     Image(systemName: "terminal")
-                    Text("command mode coming soon")
+                        .opacity(0.75)
+                    Text(commandFeedback)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            } else {
+                switch viewModel.state {
+                case .idle:
+                    EmptyView()
+                case .prewarming:
+                    statusPill {
+                        subtleSpinner
+                        Text("warming up")
+                    }
+                case .recording:
+                    statusPill {
+                        commandModeMarker
+                        Text("listening")
+                        TimelineView(
+                            .periodic(from: .now, by: 1.0 / 30.0)
+                        ) { _ in
+                            LevelMeter(level: viewModel.currentLevel)
+                        }
+                    }
+                case .transcribing:
+                    statusPill {
+                        commandModeMarker
+                        subtleSpinner
+                        Text("transcribing")
+                    }
                 }
             }
         }
@@ -67,6 +95,16 @@ struct HUDView: View {
             .scaleEffect(0.75)
             .frame(width: 14, height: 14)
             .opacity(0.75)
+    }
+
+    @ViewBuilder
+    private var commandModeMarker: some View {
+        if viewModel.mode == .command {
+            Text(">")
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .opacity(0.65)
+                .accessibilityLabel("command mode")
+        }
     }
 
     private func statusPill<Content: View>(

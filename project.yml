@@ -49,6 +49,8 @@ targets:
       - Sources/Onboarding/OnboardingState.swift
       - Sources/Hotkey/HotkeyBinding.swift
       - Sources/Hotkey/TapLockDetector.swift
+      - Sources/Command/CommandRouter.swift
+      - Sources/Command/AppMatcher.swift
     settings:
       base:
         GENERATE_INFOPLIST_FILE: true

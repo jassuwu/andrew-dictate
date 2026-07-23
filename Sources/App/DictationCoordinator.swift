@@ -23,7 +23,6 @@ final class DictationCoordinator: ObservableObject {
         case prewarming
         case recording
         case transcribing
-        case commandModeComingSoon = "command mode coming soon"
 
         var systemImage: String {
             switch self {
@@ -35,8 +34,6 @@ final class DictationCoordinator: ObservableObject {
                 "waveform.badge.mic"
             case .transcribing:
                 "hourglass"
-            case .commandModeComingSoon:
-                "terminal"
             }
         }
     }
@@ -52,6 +49,8 @@ final class DictationCoordinator: ObservableObject {
     private let hotkeyMonitor: HotkeyMonitor
     private var transcriptionEngine: ParakeetEngine
     private let paster: Paster
+    private let commandRouter = CommandRouter()
+    private let commandExecutor: CommandExecutor
     private let audioRecorder: AudioRecorder?
     private let hudViewModel: HUDViewModel
     private let hudPanel: HUDPanel
@@ -75,7 +74,8 @@ final class DictationCoordinator: ObservableObject {
         transcriptionEngine = ParakeetEngine(
             version: settings.engineVersion
         )
-        paster = Paster()
+        let paster = Paster()
+        self.paster = paster
 
         let recorder: AudioRecorder?
         do {
@@ -93,7 +93,13 @@ final class DictationCoordinator: ObservableObject {
             audioRecorder: recorder
         )
         hudViewModel = viewModel
-        hudPanel = HUDPanel(viewModel: viewModel)
+        let panel = HUDPanel(viewModel: viewModel)
+        hudPanel = panel
+        commandExecutor = CommandExecutor(
+            paster: paster,
+            hudViewModel: viewModel,
+            hudPanel: panel
+        )
 
         hotkeyMonitor = HotkeyMonitor(settings: settings)
         hotkeyMonitor.onBegin = { [weak self] mode in
@@ -341,7 +347,7 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func beginRecording(_ mode: DictationMode) {
-        if state == .transcribing || state == .commandModeComingSoon {
+        if state == .transcribing {
             invalidatePipeline()
             transition(to: .idle)
         }
@@ -361,7 +367,7 @@ final class DictationCoordinator: ObservableObject {
         do {
             try audioRecorder.start()
             activeMode = mode
-            transition(to: .recording)
+            transition(to: .recording, mode: mode)
         } catch {
             print("audio recording failed to start: \(error.localizedDescription)")
             activeMode = nil
@@ -395,7 +401,7 @@ final class DictationCoordinator: ObservableObject {
         do {
             let samples = try audioRecorder.stop()
             activeMode = nil
-            transition(to: .transcribing)
+            transition(to: .transcribing, mode: mode)
             startPipeline(samples, mode: mode)
         } catch {
             print("audio recording failed to stop: \(error.localizedDescription)")
@@ -448,22 +454,24 @@ final class DictationCoordinator: ObservableObject {
                 return
             }
 
-            let cleaner = DeterministicCleaner(entries: dictionaryStore.entries)
-            let cleanedTranscript = cleaner.clean(transcript)
-
-            guard !cleanedTranscript.trimmingCharacters(
-                in: .whitespacesAndNewlines
-            ).isEmpty else {
-                return
-            }
-
             switch mode {
             case .dictation:
+                let cleaner = DeterministicCleaner(
+                    entries: dictionaryStore.entries
+                )
+                let cleanedTranscript = cleaner.clean(transcript)
+                guard !cleanedTranscript.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                ).isEmpty else {
+                    return
+                }
                 await paster.paste(cleanedTranscript)
             case .command:
-                print("command: \(cleanedTranscript)")
-                transition(to: .commandModeComingSoon)
-                try await Task.sleep(for: .milliseconds(1_500))
+                let commandTranscript = DictionarySubstituter(
+                    entries: dictionaryStore.entries
+                ).apply(to: transcript)
+                let command = commandRouter.route(commandTranscript)
+                await commandExecutor.execute(command)
             }
         } catch is CancellationError {
             return
@@ -487,9 +495,12 @@ final class DictationCoordinator: ObservableObject {
         transition(to: .idle)
     }
 
-    private func transition(to newState: State) {
+    private func transition(
+        to newState: State,
+        mode: DictationMode? = nil
+    ) {
         state = newState
-        hudViewModel.update(state: newState)
+        hudViewModel.update(state: newState, mode: mode)
 
         synchronizeHUD()
     }

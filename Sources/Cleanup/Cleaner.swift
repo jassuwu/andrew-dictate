@@ -4,16 +4,13 @@ protocol Cleaner {
     func clean(_ transcript: String) -> String
 }
 
-struct DeterministicCleaner: Cleaner {
+struct DictionarySubstituter {
     private struct Substitution {
         let expression: NSRegularExpression
         let replacementTemplate: String
     }
 
     private let substitutions: [Substitution]
-    private let fillerExpression: NSRegularExpression
-    private let whitespaceExpression: NSRegularExpression
-    private let spaceBeforePunctuationExpression: NSRegularExpression
 
     init(entries: [DictionaryEntry] = []) {
         substitutions = entries.compactMap { entry in
@@ -42,7 +39,27 @@ struct DeterministicCleaner: Cleaner {
                 )
             )
         }
+    }
 
+    func apply(to transcript: String) -> String {
+        substitutions.reduce(transcript) { result, substitution in
+            substitution.expression.stringByReplacingMatches(
+                in: result,
+                range: result.fullNSRange,
+                withTemplate: substitution.replacementTemplate
+            )
+        }
+    }
+}
+
+struct DeterministicCleaner: Cleaner {
+    private let dictionarySubstituter: DictionarySubstituter
+    private let fillerExpression: NSRegularExpression
+    private let whitespaceExpression: NSRegularExpression
+    private let spaceBeforePunctuationExpression: NSRegularExpression
+
+    init(entries: [DictionaryEntry] = []) {
+        dictionarySubstituter = DictionarySubstituter(entries: entries)
         fillerExpression = try! NSRegularExpression(
             pattern: """
             (?<![\\p{L}\\p{N}_])(?:um|uh|erm|uhm)(?![\\p{L}\\p{N}_]),?
@@ -58,15 +75,7 @@ struct DeterministicCleaner: Cleaner {
     }
 
     func clean(_ transcript: String) -> String {
-        var result = transcript
-
-        for substitution in substitutions {
-            result = substitution.expression.stringByReplacingMatches(
-                in: result,
-                range: result.fullNSRange,
-                withTemplate: substitution.replacementTemplate
-            )
-        }
+        var result = dictionarySubstituter.apply(to: transcript)
 
         result = fillerExpression.stringByReplacingMatches(
             in: result,
