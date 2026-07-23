@@ -38,6 +38,7 @@ final class SettingsWindowController: NSWindowController {
 
 struct SettingsView: View {
     private static let customAgentSelection = "custom"
+    private static let noAgentSelection = "none"
 
     private let coordinator: DictationCoordinator
 
@@ -186,6 +187,9 @@ struct SettingsView: View {
 
                 Text("custom")
                     .tag(Self.customAgentSelection)
+
+                Text("none")
+                    .tag(Self.noAgentSelection)
             }
             .labelsHidden()
             .onChange(of: selectedAgent) { _, newSelection in
@@ -215,6 +219,12 @@ struct SettingsView: View {
     }
 
     private func applyAgentSelection(_ selection: String) {
+        if selection == Self.noAgentSelection {
+            customTemplateIsInvalid = false
+            settings.agentCommandTemplate = ""
+            return
+        }
+
         guard selection != Self.customAgentSelection else {
             if AgentCommandTemplate.isValid(customAgentTemplate) {
                 settings.agentCommandTemplate = customAgentTemplate
@@ -249,6 +259,9 @@ struct SettingsView: View {
         template: String,
         detectedAgents: [DetectedAgentCLI]
     ) -> String {
+        guard !template.isEmpty else {
+            return noAgentSelection
+        }
         guard let cli = AgentCLI.allCases.first(where: {
             $0.commandTemplate == template
         }), detectedAgents.contains(where: { $0.cli == cli }) else {

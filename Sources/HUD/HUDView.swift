@@ -80,12 +80,17 @@ struct HUDView: View {
                         subtleSpinner
                         Text("transcribing")
                     }
+                case let .gatePending(commandPreview, confirmationKeyName):
+                    gatePill(
+                        commandPreview: commandPreview,
+                        confirmationKeyName: confirmationKeyName
+                    )
                 }
             }
         }
         .font(.system(size: 13, weight: .medium))
         .foregroundStyle(.primary)
-        .frame(width: 220, height: 58)
+        .frame(width: 360, height: 76)
     }
 
     private var subtleSpinner: some View {
@@ -119,6 +124,39 @@ struct HUDView: View {
                     .stroke(.primary.opacity(0.12), lineWidth: 0.5)
             }
             .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+    }
+
+    private func gatePill(
+        commandPreview: String,
+        confirmationKeyName: String
+    ) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: "terminal")
+                .opacity(0.75)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(commandPreview)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Text(
+                    "tap \(confirmationKeyName) to run · esc to cancel"
+                )
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .frame(width: 352, height: 56)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(.primary.opacity(0.12), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
     }
 }
 

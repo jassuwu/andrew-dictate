@@ -9,11 +9,15 @@ final class HotkeyMonitor {
     var onLockEnd: ((DictationMode) -> Void)?
     var onLockCancel: ((DictationMode) -> Void)?
     var onKeyDetected: ((DictationMode) -> Void)?
+    var onModeKeyPressed: ((DictationMode, TimeInterval) -> Bool)?
+    var onModeKeyReleased: ((DictationMode, TimeInterval) -> Void)?
+    var onEscape: (() -> Bool)?
 
     private var monitors: [Any] = []
     private let settings: AppSettings
     private var bindings: [DictationMode: HotkeyBinding]
     private var pressedKeyCodes: Set<CGKeyCode> = []
+    private var consumedKeyModes: [CGKeyCode: DictationMode] = [:]
     private var detector = TapLockDetector()
 
     init(settings: AppSettings = .shared) {
@@ -41,6 +45,7 @@ final class HotkeyMonitor {
         perform(detector.cancelForRebind(mode))
         if let oldKeyCode = bindings[mode]?.keyCode {
             pressedKeyCodes.remove(oldKeyCode)
+            consumedKeyModes.removeValue(forKey: oldKeyCode)
         }
         bindings[mode] = binding
         return true
@@ -88,34 +93,59 @@ final class HotkeyMonitor {
 
     private func handleFlagsChanged(_ event: NSEvent) {
         let keyCode = event.keyCode
-        guard let mode = mode(boundTo: keyCode),
-              let binding = bindings[mode],
-              let modifierFlag = modifierFlag(for: binding) else {
-            return
-        }
 
         if pressedKeyCodes.contains(keyCode) {
             pressedKeyCodes.remove(keyCode)
+            if let consumedMode = consumedKeyModes.removeValue(
+                forKey: keyCode
+            ) {
+                onModeKeyReleased?(consumedMode, event.timestamp)
+                return
+            }
+
+            guard let mode = mode(boundTo: keyCode) else {
+                return
+            }
             perform(
                 detector.modifierReleased(
                     mode,
                     at: event.timestamp
                 )
             )
-        } else if event.modifierFlags.contains(modifierFlag) {
-            pressedKeyCodes.insert(keyCode)
-            onKeyDetected?(mode)
-            perform(
-                detector.modifierPressed(
-                    mode,
-                    at: event.timestamp
-                )
-            )
+            return
         }
+
+        guard let mode = mode(boundTo: keyCode),
+              let binding = bindings[mode],
+              let modifierFlag = modifierFlag(for: binding),
+              event.modifierFlags.contains(modifierFlag) else {
+            return
+        }
+
+        pressedKeyCodes.insert(keyCode)
+        onKeyDetected?(mode)
+
+        if onModeKeyPressed?(mode, event.timestamp) == true {
+            consumedKeyModes[keyCode] = mode
+            _ = detector.keyDown(isEscape: false)
+            return
+        }
+
+        perform(
+            detector.modifierPressed(
+                mode,
+                at: event.timestamp
+            )
+        )
     }
 
     private func handleKeyDown(_ event: NSEvent) {
-        perform(detector.keyDown(isEscape: event.keyCode == 53))
+        let isEscape = event.keyCode == 53
+        if isEscape, onEscape?() == true {
+            _ = detector.keyDown(isEscape: false)
+            return
+        }
+        perform(detector.keyDown(isEscape: isEscape))
     }
 
     private func mode(boundTo keyCode: CGKeyCode) -> DictationMode? {

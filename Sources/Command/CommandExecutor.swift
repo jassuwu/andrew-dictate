@@ -3,6 +3,8 @@ import Foundation
 
 @MainActor
 final class CommandExecutor {
+    var onDelegate: ((String) async -> Void)?
+
     private let paster: Paster
     private let hudViewModel: HUDViewModel
     private let hudPanel: HUDPanel
@@ -50,8 +52,7 @@ final class CommandExecutor {
                 await flash("couldn't open \(label)")
             }
         case let .delegate(prompt):
-            print("command delegation stub: \(prompt)")
-            await flash("delegation coming soon")
+            await onDelegate?(prompt)
         }
     }
 

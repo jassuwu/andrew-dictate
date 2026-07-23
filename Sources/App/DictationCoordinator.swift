@@ -1,4 +1,5 @@
 import Combine
+import Foundation
 
 enum EnginePreparationState: Equatable, Sendable {
     case downloading(progress: Double)
@@ -18,11 +19,30 @@ struct HotkeyDetection: Equatable, Sendable {
 
 @MainActor
 final class DictationCoordinator: ObservableObject {
-    enum State: String, Equatable, Sendable {
+    enum State: Equatable, Sendable {
         case idle
         case prewarming
         case recording
         case transcribing
+        case gatePending(
+            commandPreview: String,
+            confirmationKeyName: String
+        )
+
+        var displayName: String {
+            switch self {
+            case .idle:
+                "idle"
+            case .prewarming:
+                "prewarming"
+            case .recording:
+                "recording"
+            case .transcribing:
+                "transcribing"
+            case .gatePending:
+                "gate pending"
+            }
+        }
 
         var systemImage: String {
             switch self {
@@ -34,6 +54,8 @@ final class DictationCoordinator: ObservableObject {
                 "waveform.badge.mic"
             case .transcribing:
                 "hourglass"
+            case .gatePending:
+                "terminal"
             }
         }
     }
@@ -51,6 +73,7 @@ final class DictationCoordinator: ObservableObject {
     private let paster: Paster
     private let commandRouter = CommandRouter()
     private let commandExecutor: CommandExecutor
+    private let agentDelegator: AgentDelegator
     private let audioRecorder: AudioRecorder?
     private let hudViewModel: HUDViewModel
     private let hudPanel: HUDPanel
@@ -66,6 +89,9 @@ final class DictationCoordinator: ObservableObject {
     private var onboardingWindowController: OnboardingWindowController?
     private var isOnboardingPresented: Bool
     private var hotkeyDetectionSequence = 0
+    private var delegationGate = DelegationGate()
+    private var gateTimeoutTask: Task<Void, Never>?
+    private var feedbackGeneration = 0
 
     init(settings: AppSettings = .shared) {
         self.settings = settings
@@ -95,32 +121,39 @@ final class DictationCoordinator: ObservableObject {
         hudViewModel = viewModel
         let panel = HUDPanel(viewModel: viewModel)
         hudPanel = panel
-        commandExecutor = CommandExecutor(
+        let executor = CommandExecutor(
             paster: paster,
             hudViewModel: viewModel,
             hudPanel: panel
         )
+        commandExecutor = executor
+        agentDelegator = AgentDelegator(settings: settings)
 
-        hotkeyMonitor = HotkeyMonitor(settings: settings)
-        hotkeyMonitor.onBegin = { [weak self] mode in
+        let monitor = HotkeyMonitor(settings: settings)
+        hotkeyMonitor = monitor
+
+        executor.onDelegate = { [weak self] prompt in
+            await self?.requestDelegation(prompt)
+        }
+        monitor.onBegin = { [weak self] mode in
             self?.beginRecording(mode)
         }
-        hotkeyMonitor.onEnd = { [weak self] mode in
+        monitor.onEnd = { [weak self] mode in
             self?.endRecording(mode)
         }
-        hotkeyMonitor.onCancel = { [weak self] mode in
+        monitor.onCancel = { [weak self] mode in
             self?.cancelRecording(mode)
         }
-        hotkeyMonitor.onLockBegin = { [weak self] mode in
+        monitor.onLockBegin = { [weak self] mode in
             self?.beginLockedRecording(mode)
         }
-        hotkeyMonitor.onLockEnd = { [weak self] mode in
+        monitor.onLockEnd = { [weak self] mode in
             self?.endRecording(mode)
         }
-        hotkeyMonitor.onLockCancel = { [weak self] mode in
+        monitor.onLockCancel = { [weak self] mode in
             self?.cancelRecording(mode)
         }
-        hotkeyMonitor.onKeyDetected = { [weak self] mode in
+        monitor.onKeyDetected = { [weak self] mode in
             guard let self else {
                 return
             }
@@ -129,6 +162,15 @@ final class DictationCoordinator: ObservableObject {
                 mode: mode,
                 sequence: self.hotkeyDetectionSequence
             )
+        }
+        monitor.onModeKeyPressed = { [weak self] mode, _ in
+            self?.consumeGateKeyPress(mode) ?? false
+        }
+        monitor.onModeKeyReleased = { [weak self] mode, _ in
+            self?.consumeGateKeyRelease(mode)
+        }
+        monitor.onEscape = { [weak self] in
+            self?.consumeGateEscape() ?? false
         }
 
         settings.$preRollEnabled
@@ -492,7 +534,143 @@ final class DictationCoordinator: ObservableObject {
         }
 
         pipelineTask = nil
-        transition(to: .idle)
+        if state == .transcribing {
+            transition(to: .idle)
+        }
+    }
+
+    private func requestDelegation(_ prompt: String) async {
+        let template = settings.agentCommandTemplate
+        guard AgentCommandTemplate.isValid(template) else {
+            await flashFeedback(
+                "no agent cli configured — set one in settings",
+                duration: 2
+            )
+            return
+        }
+
+        let commandPreview = AgentCommandTemplate.commandPreview(
+            template: template,
+            prompt: prompt
+        )
+        delegationGate.present(
+            prompt: prompt,
+            commandPreview: commandPreview
+        )
+
+        let keyName = settings.hotkeyBinding(for: .command).displayName
+        transition(
+            to: .gatePending(
+                commandPreview: commandPreview,
+                confirmationKeyName: keyName
+            )
+        )
+        scheduleGateTimeout()
+    }
+
+    private func consumeGateKeyPress(_ mode: DictationMode) -> Bool {
+        guard delegationGate.isPending else {
+            return false
+        }
+
+        switch mode {
+        case .command:
+            resolveGateOutcome(delegationGate.commandKeyPressed())
+        case .dictation:
+            resolveGateOutcome(delegationGate.cancel())
+        }
+        return true
+    }
+
+    private func consumeGateKeyRelease(_ mode: DictationMode) {
+        guard mode == .command else {
+            return
+        }
+        resolveGateOutcome(delegationGate.commandKeyReleased())
+    }
+
+    private func consumeGateEscape() -> Bool {
+        guard delegationGate.isPending else {
+            return false
+        }
+        resolveGateOutcome(delegationGate.cancel())
+        return true
+    }
+
+    private func resolveGateOutcome(
+        _ outcome: DelegationGate.Outcome
+    ) {
+        switch outcome {
+        case .none:
+            return
+        case .cancelled:
+            gateTimeoutTask?.cancel()
+            gateTimeoutTask = nil
+            transition(to: .idle)
+            Task { @MainActor [weak self] in
+                await self?.flashFeedback("cancelled")
+            }
+        case let .confirmed(prompt):
+            gateTimeoutTask?.cancel()
+            gateTimeoutTask = nil
+            transition(to: .idle)
+            Task { @MainActor [weak self] in
+                await self?.launchDelegation(prompt: prompt)
+            }
+        }
+    }
+
+    private func scheduleGateTimeout() {
+        gateTimeoutTask?.cancel()
+        guard let remainingTime = delegationGate.remainingTime else {
+            gateTimeoutTask = nil
+            return
+        }
+
+        gateTimeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(remainingTime))
+            guard !Task.isCancelled, let self else {
+                return
+            }
+            self.gateTimeoutTask = nil
+            let outcome = self.delegationGate.cancelIfTimedOut()
+            if outcome == .none {
+                self.scheduleGateTimeout()
+            } else {
+                self.resolveGateOutcome(outcome)
+            }
+        }
+    }
+
+    private func launchDelegation(prompt: String) async {
+        do {
+            try await agentDelegator.launch(prompt: prompt)
+            await flashFeedback("→ launched in terminal")
+        } catch {
+            print(
+                "agent delegation failed: "
+                    + error.localizedDescription
+            )
+            await flashFeedback("couldn't launch agent")
+        }
+    }
+
+    private func flashFeedback(
+        _ message: String,
+        duration: TimeInterval = 1.2
+    ) async {
+        feedbackGeneration += 1
+        let generation = feedbackGeneration
+        hudViewModel.showCommandFeedback(message)
+        hudPanel.present()
+
+        try? await Task.sleep(for: .seconds(duration))
+        guard generation == feedbackGeneration else {
+            return
+        }
+
+        hudViewModel.clearCommandFeedback()
+        synchronizeHUD()
     }
 
     private func transition(

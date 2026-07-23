@@ -10,7 +10,7 @@ struct AndrewDictateApp: App {
             "Andrew Dictate",
             systemImage: coordinator.state.systemImage
         ) {
-            Text(coordinator.state.rawValue)
+            Text(coordinator.state.displayName)
                 .foregroundStyle(.secondary)
                 .disabled(true)
 

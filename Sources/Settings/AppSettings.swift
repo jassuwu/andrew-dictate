@@ -79,7 +79,8 @@ final class AppSettings: ObservableObject {
             guard agentCommandTemplate != oldValue else {
                 return
             }
-            guard AgentCommandTemplate.isValid(agentCommandTemplate) else {
+            guard agentCommandTemplate.isEmpty
+                    || AgentCommandTemplate.isValid(agentCommandTemplate) else {
                 agentCommandTemplate = oldValue
                 return
             }
@@ -145,7 +146,7 @@ final class AppSettings: ObservableObject {
             forKey: Self.agentCommandTemplateKey
         )
         agentCommandTemplate = storedAgentTemplate.flatMap {
-            AgentCommandTemplate.isValid($0) ? $0 : nil
+            $0.isEmpty || AgentCommandTemplate.isValid($0) ? $0 : nil
         } ?? Self.defaultAgentCommandTemplate
 
         terminalBundleID = userDefaults.string(

@@ -68,6 +68,17 @@ final class AppSettingsTests: XCTestCase {
         )
     }
 
+    func testEmptyAgentTemplatePersistsAsNoConfiguration() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppSettings(userDefaults: userDefaults)
+        settings.agentCommandTemplate = ""
+
+        let reloaded = AppSettings(userDefaults: userDefaults)
+        XCTAssertEqual(reloaded.agentCommandTemplate, "")
+    }
+
     private func makeUserDefaults() -> (UserDefaults, String) {
         let suiteName = "AndrewDictateTests.AppSettings.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!

@@ -3,7 +3,7 @@ import SwiftUI
 
 @MainActor
 final class HUDPanel: NSPanel {
-    private static let contentSize = NSSize(width: 220, height: 58)
+    private static let contentSize = NSSize(width: 360, height: 76)
     private static let bottomOffset: CGFloat = 80
 
     override var canBecomeKey: Bool {
