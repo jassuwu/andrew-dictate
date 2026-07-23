@@ -7,6 +7,7 @@ final class DictationCoordinator: ObservableObject {
         case prewarming
         case recording
         case transcribing
+        case commandModeComingSoon = "command mode coming soon"
 
         var systemImage: String {
             switch self {
@@ -18,6 +19,8 @@ final class DictationCoordinator: ObservableObject {
                 "waveform.badge.mic"
             case .transcribing:
                 "hourglass"
+            case .commandModeComingSoon:
+                "terminal"
             }
         }
     }
@@ -33,6 +36,9 @@ final class DictationCoordinator: ObservableObject {
     private let hudViewModel: HUDViewModel
     private let hudPanel: HUDPanel
     private var isPrewarmed = false
+    private var activeMode: DictationMode?
+    private var pipelineTask: Task<Void, Never>?
+    private var pipelineGeneration = 0
 
     init() {
         dictionaryStore = DictionaryStore()
@@ -56,14 +62,23 @@ final class DictationCoordinator: ObservableObject {
         hudPanel = HUDPanel(viewModel: viewModel)
 
         hotkeyMonitor = HotkeyMonitor()
-        hotkeyMonitor.onBegin = { [weak self] in
-            self?.beginRecording()
+        hotkeyMonitor.onBegin = { [weak self] mode in
+            self?.beginRecording(mode)
         }
-        hotkeyMonitor.onEnd = { [weak self] in
-            self?.endRecording()
+        hotkeyMonitor.onEnd = { [weak self] mode in
+            self?.endRecording(mode)
         }
-        hotkeyMonitor.onCancel = { [weak self] in
-            self?.cancelRecording()
+        hotkeyMonitor.onCancel = { [weak self] mode in
+            self?.cancelRecording(mode)
+        }
+        hotkeyMonitor.onLockBegin = { [weak self] mode in
+            self?.beginLockedRecording(mode)
+        }
+        hotkeyMonitor.onLockEnd = { [weak self] mode in
+            self?.endRecording(mode)
+        }
+        hotkeyMonitor.onLockCancel = { [weak self] mode in
+            self?.cancelRecording(mode)
         }
 
         Task { [weak self] in
@@ -84,7 +99,12 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
-    private func beginRecording() {
+    private func beginRecording(_ mode: DictationMode) {
+        if state == .transcribing || state == .commandModeComingSoon {
+            invalidatePipeline()
+            transition(to: .idle)
+        }
+
         guard isPrewarmed else {
             transition(to: .prewarming)
             return
@@ -99,47 +119,94 @@ final class DictationCoordinator: ObservableObject {
 
         do {
             try audioRecorder.start()
+            activeMode = mode
             transition(to: .recording)
         } catch {
             print("audio recording failed to start: \(error.localizedDescription)")
+            activeMode = nil
             transition(to: .idle)
         }
     }
 
-    private func endRecording() {
-        guard state == .recording, let audioRecorder else {
+    private func beginLockedRecording(_ mode: DictationMode) {
+        if state == .recording, activeMode == mode {
+            return
+        }
+
+        invalidatePipeline()
+
+        if state == .recording, let audioRecorder {
+            audioRecorder.cancel()
+            activeMode = nil
+        }
+
+        transition(to: .idle)
+        beginRecording(mode)
+    }
+
+    private func endRecording(_ mode: DictationMode) {
+        guard state == .recording,
+              activeMode == mode,
+              let audioRecorder else {
             return
         }
 
         do {
             let samples = try audioRecorder.stop()
+            activeMode = nil
             transition(to: .transcribing)
-
-            Task { [weak self] in
-                await self?.transcribeAndPaste(samples)
-            }
+            startPipeline(samples, mode: mode)
         } catch {
             print("audio recording failed to stop: \(error.localizedDescription)")
+            activeMode = nil
             transition(to: .idle)
         }
     }
 
-    private func cancelRecording() {
-        guard state == .recording, let audioRecorder else {
+    private func cancelRecording(_ mode: DictationMode) {
+        guard state == .recording,
+              activeMode == mode,
+              let audioRecorder else {
             return
         }
 
         audioRecorder.cancel()
+        activeMode = nil
         transition(to: .idle)
     }
 
-    private func transcribeAndPaste(_ samples: [Float]) async {
+    private func startPipeline(
+        _ samples: [Float],
+        mode: DictationMode
+    ) {
+        pipelineGeneration += 1
+        let generation = pipelineGeneration
+
+        pipelineTask = Task { [weak self] in
+            await self?.transcribeAndRoute(
+                samples,
+                mode: mode,
+                generation: generation
+            )
+        }
+    }
+
+    private func transcribeAndRoute(
+        _ samples: [Float],
+        mode: DictationMode,
+        generation: Int
+    ) async {
         defer {
-            transition(to: .idle)
+            finishPipeline(generation: generation)
         }
 
         do {
             let transcript = try await transcriptionEngine.transcribe(samples)
+            try Task.checkCancellation()
+            guard generation == pipelineGeneration else {
+                return
+            }
+
             let cleaner = DeterministicCleaner(entries: dictionaryStore.entries)
             let cleanedTranscript = cleaner.clean(transcript)
 
@@ -149,10 +216,34 @@ final class DictationCoordinator: ObservableObject {
                 return
             }
 
-            await paster.paste(cleanedTranscript)
+            switch mode {
+            case .dictation:
+                await paster.paste(cleanedTranscript)
+            case .command:
+                print("command: \(cleanedTranscript)")
+                transition(to: .commandModeComingSoon)
+                try await Task.sleep(for: .milliseconds(1_500))
+            }
+        } catch is CancellationError {
+            return
         } catch {
             print("transcription failed: \(error.localizedDescription)")
         }
+    }
+
+    private func invalidatePipeline() {
+        pipelineGeneration += 1
+        pipelineTask?.cancel()
+        pipelineTask = nil
+    }
+
+    private func finishPipeline(generation: Int) {
+        guard generation == pipelineGeneration else {
+            return
+        }
+
+        pipelineTask = nil
+        transition(to: .idle)
     }
 
     private func transition(to newState: State) {

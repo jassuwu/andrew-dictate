@@ -48,6 +48,11 @@ struct HUDView: View {
                     subtleSpinner
                     Text("transcribing")
                 }
+            case .commandModeComingSoon:
+                statusPill {
+                    Image(systemName: "terminal")
+                    Text("command mode coming soon")
+                }
             }
         }
         .font(.system(size: 13, weight: .medium))

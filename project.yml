@@ -43,6 +43,8 @@ targets:
     sources:
       - Tests
       - Sources/Cleanup
+      - Sources/Hotkey/HotkeyBinding.swift
+      - Sources/Hotkey/TapLockDetector.swift
     settings:
       base:
         GENERATE_INFOPLIST_FILE: true
