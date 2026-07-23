@@ -1,4 +1,6 @@
+import Accelerate
 import AVFoundation
+import os
 
 enum AudioRecorderError: LocalizedError {
     case alreadyRecording
@@ -40,7 +42,12 @@ final class AudioRecorder {
     private let engine: AVAudioEngine
     private let inputFormat: AVAudioFormat
     private let captureStorage: AudioCaptureStorage
+    private let levelStorage: AudioLevelStorage
     private var isRecording = false
+
+    var currentLevel: Float {
+        levelStorage.currentLevel
+    }
 
     init() throws {
         let engine = AVAudioEngine()
@@ -61,17 +68,20 @@ final class AudioRecorder {
             frameCapacity: tapFrameCapacity,
             poolCount: poolCount
         )
+        let levelStorage = AudioLevelStorage()
 
         self.engine = engine
         self.inputFormat = inputFormat
         self.captureStorage = captureStorage
+        self.levelStorage = levelStorage
 
         inputNode.installTap(
             onBus: 0,
             bufferSize: tapFrameCapacity,
             format: inputFormat
-        ) { [captureStorage] buffer, _ in
+        ) { [captureStorage, levelStorage] buffer, _ in
             captureStorage.appendCopy(of: buffer)
+            levelStorage.update(from: buffer)
         }
         engine.prepare()
 
@@ -90,12 +100,14 @@ final class AudioRecorder {
         }
 
         captureStorage.begin()
+        levelStorage.reset()
 
         do {
             try engine.start()
             isRecording = true
         } catch {
             captureStorage.discard()
+            levelStorage.reset()
             throw error
         }
     }
@@ -107,6 +119,7 @@ final class AudioRecorder {
 
         engine.pause()
         isRecording = false
+        levelStorage.reset()
 
         let buffers = try captureStorage.finish()
         return try Self.convertToTranscriptionFormat(
@@ -123,6 +136,7 @@ final class AudioRecorder {
         engine.pause()
         isRecording = false
         captureStorage.discard()
+        levelStorage.reset()
     }
 
     private static func convertToTranscriptionFormat(
@@ -206,6 +220,47 @@ final class AudioRecorder {
         }
 
         return samples
+    }
+}
+
+private final class AudioLevelStorage: @unchecked Sendable {
+    private static let minimumDecibels: Float = -50
+
+    private let level = OSAllocatedUnfairLock(initialState: Float.zero)
+
+    var currentLevel: Float {
+        level.withLock { $0 }
+    }
+
+    func update(from buffer: AVAudioPCMBuffer) {
+        guard buffer.frameLength > 0,
+              let channel = buffer.floatChannelData?[0] else {
+            reset()
+            return
+        }
+
+        let channelMultiplier = buffer.format.isInterleaved
+            ? Int(buffer.format.channelCount)
+            : 1
+        let sampleCount = Int(buffer.frameLength) * channelMultiplier
+        var rms: Float = 0
+        vDSP_rmsqv(
+            channel,
+            1,
+            &rms,
+            vDSP_Length(sampleCount)
+        )
+
+        let decibels = 20 * log10f(max(rms, Float.leastNonzeroMagnitude))
+        let normalized = min(
+            max((decibels - Self.minimumDecibels) / -Self.minimumDecibels, 0),
+            1
+        )
+        level.withLock { $0 = normalized }
+    }
+
+    func reset() {
+        level.withLock { $0 = 0 }
     }
 }
 

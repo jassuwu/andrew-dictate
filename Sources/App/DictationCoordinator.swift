@@ -30,6 +30,8 @@ final class DictationCoordinator: ObservableObject {
     private let transcriptionEngine: ParakeetEngine
     private let paster: Paster
     private let audioRecorder: AudioRecorder?
+    private let hudViewModel: HUDViewModel
+    private let hudPanel: HUDPanel
     private var isPrewarmed = false
 
     init() {
@@ -37,12 +39,21 @@ final class DictationCoordinator: ObservableObject {
         transcriptionEngine = ParakeetEngine()
         paster = Paster()
 
+        let recorder: AudioRecorder?
         do {
-            audioRecorder = try AudioRecorder()
+            recorder = try AudioRecorder()
         } catch {
-            audioRecorder = nil
+            recorder = nil
             print("audio recorder initialization failed: \(error.localizedDescription)")
         }
+        audioRecorder = recorder
+
+        let viewModel = HUDViewModel(
+            state: .prewarming,
+            audioRecorder: recorder
+        )
+        hudViewModel = viewModel
+        hudPanel = HUDPanel(viewModel: viewModel)
 
         hotkeyMonitor = HotkeyMonitor()
         hotkeyMonitor.onBegin = { [weak self] in
@@ -62,7 +73,7 @@ final class DictationCoordinator: ObservableObject {
 
     private func prewarm() async {
         defer {
-            state = .idle
+            transition(to: .idle)
         }
 
         do {
@@ -75,7 +86,7 @@ final class DictationCoordinator: ObservableObject {
 
     private func beginRecording() {
         guard isPrewarmed else {
-            print("still warming up")
+            transition(to: .prewarming)
             return
         }
         guard state == .idle else {
@@ -88,10 +99,10 @@ final class DictationCoordinator: ObservableObject {
 
         do {
             try audioRecorder.start()
-            state = .recording
+            transition(to: .recording)
         } catch {
             print("audio recording failed to start: \(error.localizedDescription)")
-            state = .idle
+            transition(to: .idle)
         }
     }
 
@@ -102,14 +113,14 @@ final class DictationCoordinator: ObservableObject {
 
         do {
             let samples = try audioRecorder.stop()
-            state = .transcribing
+            transition(to: .transcribing)
 
             Task { [weak self] in
                 await self?.transcribeAndPaste(samples)
             }
         } catch {
             print("audio recording failed to stop: \(error.localizedDescription)")
-            state = .idle
+            transition(to: .idle)
         }
     }
 
@@ -119,12 +130,12 @@ final class DictationCoordinator: ObservableObject {
         }
 
         audioRecorder.cancel()
-        state = .idle
+        transition(to: .idle)
     }
 
     private func transcribeAndPaste(_ samples: [Float]) async {
         defer {
-            state = .idle
+            transition(to: .idle)
         }
 
         do {
@@ -141,6 +152,17 @@ final class DictationCoordinator: ObservableObject {
             await paster.paste(cleanedTranscript)
         } catch {
             print("transcription failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func transition(to newState: State) {
+        state = newState
+        hudViewModel.update(state: newState)
+
+        if newState == .idle {
+            hudPanel.dismiss()
+        } else {
+            hudPanel.present()
         }
     }
 }
