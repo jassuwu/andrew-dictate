@@ -98,7 +98,7 @@ working targets, not commitments: key-up → transcript ≤ 250ms, key-up → in
 
 ## 11. open questions (parked, non-blocking)
 
-- **branding — entirely undecided:** logo, app icon, phrases/taglines, og image, website. until that pass happens, the plain name "Andrew Dictate" is the only branding anything ships with.
+- **branding — v1 identity decided (2026-07-24):** five-bar waveform mark, charcoal `#1B1B1F` / cream `#EFEAE0` / persimmon accent `#E4593B` (the "held key" bar); lowercase wordmark in the system font; taglines fixed: "hold a key, talk, get text." + "free · open source · fully local". source of truth: `art/render.swift` (regenerates icon + og deterministically). website: still none, deliberately.
 - HUD placement/personality (bottom-center pill vs near-cursor) — decide with a prototype at M1.
 - "quit <app>" in tier 1: currently ungated (it's cmd-Q-equivalent); demote to gated if it ever bites.
 - dictation history beyond "copy last" — deliberately absent; revisit only if losing a transcript actually hurts.
