@@ -31,7 +31,7 @@ final class HotkeyLogicTests: XCTestCase {
         )
     }
 
-    func testTwoQuickTapsBeginLockedCapture() {
+    func testTwoQuickTapsDiscardProvisionalCaptureAndBeginLockedCapture() {
         var detector = TapLockDetector()
 
         XCTAssertEqual(
@@ -40,16 +40,17 @@ final class HotkeyLogicTests: XCTestCase {
         )
         XCTAssertEqual(
             detector.modifierReleased(.dictation, at: 1.1),
-            [.end(.dictation)]
+            [.provisionalEnd(.dictation)]
         )
         XCTAssertEqual(
             detector.modifierPressed(.dictation, at: 1.3),
-            [.begin(.dictation)]
+            []
         )
         XCTAssertEqual(
             detector.modifierReleased(.dictation, at: 1.4),
-            [.lockBegin(.dictation)]
+            [.cancel(.dictation), .lockBegin(.dictation)]
         )
+        XCTAssertEqual(detector.provisionalEndWindowExpired(), [])
     }
 
     func testSameKeyTapWhileLockedEndsLockedCapture() {
@@ -65,7 +66,7 @@ final class HotkeyLogicTests: XCTestCase {
         )
     }
 
-    func testQuickSingleTapStillBeginsAndEnds() {
+    func testQuickSingleTapDefersEndUntilDoubleTapWindowExpires() {
         var detector = TapLockDetector()
 
         XCTAssertEqual(
@@ -74,6 +75,10 @@ final class HotkeyLogicTests: XCTestCase {
         )
         XCTAssertEqual(
             detector.modifierReleased(.dictation, at: 1.1),
+            [.provisionalEnd(.dictation)]
+        )
+        XCTAssertEqual(
+            detector.provisionalEndWindowExpired(),
             [.end(.dictation)]
         )
 
@@ -83,6 +88,10 @@ final class HotkeyLogicTests: XCTestCase {
         )
         XCTAssertEqual(
             detector.modifierReleased(.dictation, at: 1.6),
+            [.provisionalEnd(.dictation)]
+        )
+        XCTAssertEqual(
+            detector.provisionalEndWindowExpired(),
             [.end(.dictation)]
         )
     }

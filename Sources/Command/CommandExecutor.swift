@@ -4,10 +4,9 @@ import Foundation
 @MainActor
 final class CommandExecutor {
     var onDelegate: ((String) async -> Void)?
+    var onFeedback: ((String) async -> Void)?
 
     private let paster: Paster
-    private let hudViewModel: HUDViewModel
-    private let hudPanel: HUDPanel
     private let fileManager: FileManager
     private let workspace: NSWorkspace
 
@@ -15,14 +14,10 @@ final class CommandExecutor {
 
     init(
         paster: Paster,
-        hudViewModel: HUDViewModel,
-        hudPanel: HUDPanel,
         fileManager: FileManager = .default,
         workspace: NSWorkspace = .shared
     ) {
         self.paster = paster
-        self.hudViewModel = hudViewModel
-        self.hudPanel = hudPanel
         self.fileManager = fileManager
         self.workspace = workspace
     }
@@ -251,14 +246,6 @@ final class CommandExecutor {
     }
 
     private func flash(_ message: String) async {
-        hudViewModel.showCommandFeedback(message)
-        hudPanel.present()
-
-        defer {
-            hudViewModel.clearCommandFeedback()
-            hudPanel.dismiss()
-        }
-
-        try? await Task.sleep(for: .milliseconds(1_200))
+        await onFeedback?(message)
     }
 }

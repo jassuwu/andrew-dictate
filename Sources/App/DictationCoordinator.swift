@@ -92,9 +92,11 @@ final class DictationCoordinator: ObservableObject {
     private var onboardingWindowController: OnboardingWindowController?
     private var isOnboardingPresented: Bool
     private var hotkeyDetectionSequence = 0
+    private var stateGeneration: UInt64 = 0
     private var delegationGate = DelegationGate()
     private var gateTimeoutTask: Task<Void, Never>?
-    private var feedbackGeneration = 0
+    private var feedbackGeneration: UInt64 = 0
+    private var activeFeedbackGeneration: UInt64?
     private let timelineClock = ContinuousClock()
     private let timelineStore = UtteranceTimelineStore()
     private var timelineSequence: UInt64 = 0
@@ -130,9 +132,7 @@ final class DictationCoordinator: ObservableObject {
         let panel = HUDPanel(viewModel: viewModel)
         hudPanel = panel
         let executor = CommandExecutor(
-            paster: paster,
-            hudViewModel: viewModel,
-            hudPanel: panel
+            paster: paster
         )
         commandExecutor = executor
         agentDelegator = AgentDelegator(settings: settings)
@@ -142,6 +142,9 @@ final class DictationCoordinator: ObservableObject {
 
         executor.onDelegate = { [weak self] prompt in
             await self?.requestDelegation(prompt)
+        }
+        executor.onFeedback = { [weak self] message in
+            await self?.flashFeedback(message)
         }
         monitor.onBegin = { [weak self] mode in
             self?.beginRecording(mode)
@@ -322,7 +325,7 @@ final class DictationCoordinator: ObservableObject {
             activeMode = nil
             activeFocusAnchor = nil
             activeTimeline = nil
-            transition(to: .idle)
+            setState(.idle)
         }
 
         do {
@@ -365,7 +368,7 @@ final class DictationCoordinator: ObservableObject {
         let generation = engineGeneration
         isPrewarmed = false
         enginePreparationState = .downloading(progress: 0)
-        transition(to: .prewarming)
+        setState(.prewarming)
 
         enginePrewarmTask = Task { [weak self] in
             do {
@@ -385,7 +388,7 @@ final class DictationCoordinator: ObservableObject {
                 self.isPrewarmed = true
                 self.enginePreparationState = .ready
                 self.enginePrewarmTask = nil
-                self.transition(to: .idle)
+                self.setState(.idle)
             } catch is CancellationError {
                 return
             } catch {
@@ -399,7 +402,7 @@ final class DictationCoordinator: ObservableObject {
                     "transcription engine prewarm failed: "
                         + error.localizedDescription
                 )
-                self.transition(to: .idle)
+                self.setState(.idle)
             }
         }
     }
@@ -435,11 +438,11 @@ final class DictationCoordinator: ObservableObject {
     private func beginRecording(_ mode: DictationMode) {
         if state == .transcribing {
             invalidatePipeline()
-            transition(to: .idle)
+            setState(.idle)
         }
 
         guard isPrewarmed else {
-            transition(to: .prewarming)
+            setState(.prewarming)
             return
         }
         guard state == .idle else {
@@ -470,13 +473,13 @@ final class DictationCoordinator: ObservableObject {
             }
             activeMode = mode
             activeFocusAnchor = focusAnchor
-            transition(to: .recording, mode: mode)
+            setState(.recording, mode: mode)
         } catch {
             print("audio recording failed to start: \(error.localizedDescription)")
             activeMode = nil
             activeFocusAnchor = nil
             activeTimeline = nil
-            transition(to: .idle)
+            setState(.idle)
         }
     }
 
@@ -494,7 +497,7 @@ final class DictationCoordinator: ObservableObject {
             activeTimeline = nil
         }
 
-        transition(to: .idle)
+        setState(.idle)
         beginRecording(mode)
     }
 
@@ -511,7 +514,7 @@ final class DictationCoordinator: ObservableObject {
             let focusAnchor = activeFocusAnchor
             activeMode = nil
             activeFocusAnchor = nil
-            transition(to: .transcribing, mode: mode)
+            setState(.transcribing, mode: mode)
             startPipeline(
                 samples,
                 mode: mode,
@@ -522,7 +525,7 @@ final class DictationCoordinator: ObservableObject {
             activeMode = nil
             activeFocusAnchor = nil
             activeTimeline = nil
-            transition(to: .idle)
+            setState(.idle)
         }
     }
 
@@ -537,7 +540,7 @@ final class DictationCoordinator: ObservableObject {
         activeMode = nil
         activeFocusAnchor = nil
         activeTimeline = nil
-        transition(to: .idle)
+        setState(.idle)
     }
 
     private func recordFirstBuffer(
@@ -695,7 +698,7 @@ final class DictationCoordinator: ObservableObject {
 
         pipelineTask = nil
         if state == .transcribing {
-            transition(to: .idle)
+            setState(.idle)
         }
     }
 
@@ -713,47 +716,70 @@ final class DictationCoordinator: ObservableObject {
             template: template,
             prompt: prompt
         )
-        delegationGate.present(
-            prompt: prompt,
-            commandPreview: commandPreview
-        )
-
         let keyName = settings.hotkeyBinding(for: .command).displayName
-        transition(
-            to: .gatePending(
+        setState(
+            .gatePending(
                 commandPreview: commandPreview,
                 confirmationKeyName: keyName
             )
+        )
+        delegationGate.present(
+            prompt: prompt,
+            commandPreview: commandPreview,
+            generation: stateGeneration
         )
         scheduleGateTimeout()
     }
 
     private func consumeGateKeyPress(_ mode: DictationMode) -> Bool {
-        guard delegationGate.isPending else {
+        guard case .gatePending = state,
+              delegationGate.isPending(
+                generation: stateGeneration
+              ) else {
             return false
         }
 
         switch mode {
         case .command:
-            resolveGateOutcome(delegationGate.commandKeyPressed())
+            resolveGateOutcome(
+                delegationGate.commandKeyPressed(
+                    generation: stateGeneration
+                )
+            )
         case .dictation:
-            resolveGateOutcome(delegationGate.cancel())
+            resolveGateOutcome(
+                delegationGate.cancel(
+                    generation: stateGeneration
+                )
+            )
         }
         return true
     }
 
     private func consumeGateKeyRelease(_ mode: DictationMode) {
-        guard mode == .command else {
+        guard mode == .command,
+              case .gatePending = state else {
             return
         }
-        resolveGateOutcome(delegationGate.commandKeyReleased())
+        resolveGateOutcome(
+            delegationGate.commandKeyReleased(
+                generation: stateGeneration
+            )
+        )
     }
 
     private func consumeGateEscape() -> Bool {
-        guard delegationGate.isPending else {
+        guard case .gatePending = state,
+              delegationGate.isPending(
+                generation: stateGeneration
+              ) else {
             return false
         }
-        resolveGateOutcome(delegationGate.cancel())
+        resolveGateOutcome(
+            delegationGate.cancel(
+                generation: stateGeneration
+            )
+        )
         return true
     }
 
@@ -764,16 +790,12 @@ final class DictationCoordinator: ObservableObject {
         case .none:
             return
         case .cancelled:
-            gateTimeoutTask?.cancel()
-            gateTimeoutTask = nil
-            transition(to: .idle)
+            setState(.idle)
             Task { @MainActor [weak self] in
                 await self?.flashFeedback("cancelled")
             }
         case let .confirmed(prompt):
-            gateTimeoutTask?.cancel()
-            gateTimeoutTask = nil
-            transition(to: .idle)
+            setState(.idle)
             Task { @MainActor [weak self] in
                 await self?.launchDelegation(prompt: prompt)
             }
@@ -782,7 +804,11 @@ final class DictationCoordinator: ObservableObject {
 
     private func scheduleGateTimeout() {
         gateTimeoutTask?.cancel()
-        guard let remainingTime = delegationGate.remainingTime else {
+        let generation = stateGeneration
+        guard case .gatePending = state,
+              let remainingTime = delegationGate.remainingTime(
+                generation: generation
+              ) else {
             gateTimeoutTask = nil
             return
         }
@@ -793,7 +819,13 @@ final class DictationCoordinator: ObservableObject {
                 return
             }
             self.gateTimeoutTask = nil
-            let outcome = self.delegationGate.cancelIfTimedOut()
+            guard case .gatePending = self.state,
+                  generation == self.stateGeneration else {
+                return
+            }
+            let outcome = self.delegationGate.cancelIfTimedOut(
+                generation: generation
+            )
             if outcome == .none {
                 self.scheduleGateTimeout()
             } else {
@@ -820,34 +852,51 @@ final class DictationCoordinator: ObservableObject {
         duration: TimeInterval = 1.2
     ) async {
         feedbackGeneration += 1
-        let generation = feedbackGeneration
+        let feedbackToken = feedbackGeneration
+        let stateToken = stateGeneration
+        activeFeedbackGeneration = feedbackToken
         hudViewModel.showCommandFeedback(message)
-        hudPanel.present()
+        synchronizeHUD()
 
         try? await Task.sleep(for: .seconds(duration))
-        guard generation == feedbackGeneration else {
+        guard stateToken == stateGeneration,
+              feedbackToken == feedbackGeneration,
+              activeFeedbackGeneration == feedbackToken else {
             return
         }
 
+        activeFeedbackGeneration = nil
         hudViewModel.clearCommandFeedback()
         synchronizeHUD()
     }
 
-    private func transition(
-        to newState: State,
+    private func setState(
+        _ newState: State,
         mode: DictationMode? = nil
     ) {
+        clearDelegationGateForStateReplacement()
+        stateGeneration += 1
+        feedbackGeneration += 1
+        activeFeedbackGeneration = nil
         state = newState
         hudViewModel.update(state: newState, mode: mode)
 
         synchronizeHUD()
     }
 
+    private func clearDelegationGateForStateReplacement() {
+        gateTimeoutTask?.cancel()
+        gateTimeoutTask = nil
+        _ = delegationGate.cancelForStateReplacement()
+    }
+
     private func synchronizeHUD() {
-        if isOnboardingPresented || state == .idle {
+        if isOnboardingPresented {
             hudPanel.dismiss()
-        } else {
+        } else if activeFeedbackGeneration != nil || state != .idle {
             hudPanel.present()
+        } else {
+            hudPanel.dismiss()
         }
     }
 }

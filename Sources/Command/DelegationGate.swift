@@ -4,6 +4,8 @@ struct DelegationGate {
     struct Pending: Equatable, Sendable {
         let prompt: String
         let commandPreview: String
+        let generation: UInt64
+        let armedAt: TimeInterval
         let expiresAt: TimeInterval
         fileprivate var commandKeyPressedAt: TimeInterval?
     }
@@ -21,6 +23,7 @@ struct DelegationGate {
 
     static let defaultTimeout: TimeInterval = 8
     static let maximumConfirmationTapDuration: TimeInterval = 0.300
+    static let minimumArmingDelay: TimeInterval = 0.250
 
     private(set) var state: State = .idle
 
@@ -37,15 +40,16 @@ struct DelegationGate {
         self.now = now
     }
 
-    var isPending: Bool {
-        if case .pending = state {
-            return true
+    func isPending(generation: UInt64) -> Bool {
+        guard case let .pending(pending) = state else {
+            return false
         }
-        return false
+        return pending.generation == generation
     }
 
-    var remainingTime: TimeInterval? {
-        guard case let .pending(pending) = state else {
+    func remainingTime(generation: UInt64) -> TimeInterval? {
+        guard case let .pending(pending) = state,
+              pending.generation == generation else {
             return nil
         }
         return max(0, pending.expiresAt - now())
@@ -53,21 +57,27 @@ struct DelegationGate {
 
     mutating func present(
         prompt: String,
-        commandPreview: String
+        commandPreview: String,
+        generation: UInt64
     ) {
         let presentedAt = now()
         state = .pending(
             Pending(
                 prompt: prompt,
                 commandPreview: commandPreview,
+                generation: generation,
+                armedAt: presentedAt + Self.minimumArmingDelay,
                 expiresAt: presentedAt + timeout,
                 commandKeyPressedAt: nil
             )
         )
     }
 
-    mutating func commandKeyPressed() -> Outcome {
-        guard case var .pending(pending) = state else {
+    mutating func commandKeyPressed(
+        generation: UInt64
+    ) -> Outcome {
+        guard case var .pending(pending) = state,
+              pending.generation == generation else {
             return .none
         }
         let pressedAt = now()
@@ -75,14 +85,20 @@ struct DelegationGate {
             state = .idle
             return .cancelled
         }
+        guard pressedAt >= pending.armedAt else {
+            return .none
+        }
 
         pending.commandKeyPressedAt = pressedAt
         state = .pending(pending)
         return .none
     }
 
-    mutating func commandKeyReleased() -> Outcome {
-        guard case var .pending(pending) = state else {
+    mutating func commandKeyReleased(
+        generation: UInt64
+    ) -> Outcome {
+        guard case var .pending(pending) = state,
+              pending.generation == generation else {
             return .none
         }
 
@@ -107,16 +123,28 @@ struct DelegationGate {
         return .confirmed(prompt: pending.prompt)
     }
 
-    mutating func cancel() -> Outcome {
-        guard isPending else {
+    mutating func cancel(generation: UInt64) -> Outcome {
+        guard case let .pending(pending) = state,
+              pending.generation == generation else {
             return .none
         }
         state = .idle
         return .cancelled
     }
 
-    mutating func cancelIfTimedOut() -> Outcome {
+    mutating func cancelForStateReplacement() -> Outcome {
+        guard case .pending = state else {
+            return .none
+        }
+        state = .idle
+        return .cancelled
+    }
+
+    mutating func cancelIfTimedOut(
+        generation: UInt64
+    ) -> Outcome {
         guard case let .pending(pending) = state,
+              pending.generation == generation,
               now() >= pending.expiresAt else {
             return .none
         }

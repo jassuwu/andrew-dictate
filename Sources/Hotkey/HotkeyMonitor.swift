@@ -19,6 +19,7 @@ final class HotkeyMonitor {
     private var pressedKeyCodes: Set<CGKeyCode> = []
     private var consumedKeyModes: [CGKeyCode: DictationMode] = [:]
     private var detector = TapLockDetector()
+    private var provisionalEndTask: Task<Void, Never>?
 
     init(settings: AppSettings = .shared) {
         self.settings = settings
@@ -179,17 +180,41 @@ final class HotkeyMonitor {
             switch action {
             case let .begin(mode):
                 onBegin?(mode)
+            case .provisionalEnd:
+                scheduleProvisionalEnd()
             case let .end(mode):
+                provisionalEndTask?.cancel()
+                provisionalEndTask = nil
                 onEnd?(mode)
             case let .cancel(mode):
+                provisionalEndTask?.cancel()
+                provisionalEndTask = nil
                 onCancel?(mode)
             case let .lockBegin(mode):
+                provisionalEndTask?.cancel()
+                provisionalEndTask = nil
                 onLockBegin?(mode)
             case let .lockEnd(mode):
                 onLockEnd?(mode)
             case let .lockCancel(mode):
                 onLockCancel?(mode)
             }
+        }
+    }
+
+    private func scheduleProvisionalEnd() {
+        provisionalEndTask?.cancel()
+        provisionalEndTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(
+                for: .seconds(TapLockDetector.maximumTapGap)
+            )
+            guard !Task.isCancelled, let self else {
+                return
+            }
+            self.provisionalEndTask = nil
+            self.perform(
+                self.detector.provisionalEndWindowExpired()
+            )
         }
     }
 }
