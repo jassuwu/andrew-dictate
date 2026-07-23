@@ -49,7 +49,9 @@ Andrew Dictate asks for microphone access to record speech and accessibility acc
 
 ## privacy
 
-transcription, cleanup, command routing, and the short pre-roll buffer all stay on this Mac. the app contains no network code beyond model download.
+dictation audio, transcription, cleanup, and the short pre-roll buffer stay on this Mac. Andrew Dictate itself makes no network calls except the one-time model download.
+
+command mode hands text to the browser or your chosen agent CLI. those tools follow their own network behavior.
 
 with pre-roll on, the microphone stays open while the app runs and about 300 ms of audio is held only in memory, continuously overwritten and discarded; this protects the first word from clipping. with pre-roll off, the microphone captures only while a mode key is held.
 

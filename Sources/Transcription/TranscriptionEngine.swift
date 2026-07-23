@@ -48,6 +48,11 @@ actor ParakeetEngine: TranscriptionEngine {
         return result.text
     }
 
+    func cancelPreparation() {
+        preparation?.task.cancel()
+        preparation = nil
+    }
+
     private func preparedManager(
         progressHandler: (
             @Sendable (TranscriptionPreparationUpdate) -> Void
@@ -112,6 +117,7 @@ actor ParakeetEngine: TranscriptionEngine {
                 )
             }
         )
+        try Task.checkCancellation()
 
         progressHandler?(.warmingUp)
         print("loading \(version.displayName) models")
@@ -119,6 +125,7 @@ actor ParakeetEngine: TranscriptionEngine {
             from: modelDirectory,
             version: asrVersion
         )
+        try Task.checkCancellation()
         let manager = AsrManager(config: .default, models: models)
 
         print("running transcription warmup")
@@ -129,6 +136,7 @@ actor ParakeetEngine: TranscriptionEngine {
             silence,
             decoderState: &decoderState
         )
+        try Task.checkCancellation()
         print("transcription engine ready")
 
         return manager

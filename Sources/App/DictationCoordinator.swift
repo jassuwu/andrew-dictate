@@ -1,6 +1,7 @@
 import Combine
 import Foundation
 import AppKit
+import AVFoundation
 
 enum EnginePreparationState: Equatable, Sendable {
     case downloading(progress: Double)
@@ -85,7 +86,10 @@ final class DictationCoordinator: ObservableObject {
     private var pipelineTask: Task<Void, Never>?
     private var pipelineGeneration = 0
     private var enginePrewarmTask: Task<Void, Never>?
+    private var engineSwapTask: Task<Void, Never>?
+    private var engineHealthTask: Task<Void, Never>?
     private var engineGeneration = 0
+    private var enginePreparationRequested: Bool
     private var settingsCancellables: Set<AnyCancellable> = []
     private var isApplyingPreRollSetting = false
     private var settingsWindowController: SettingsWindowController?
@@ -102,10 +106,13 @@ final class DictationCoordinator: ObservableObject {
     private var timelineSequence: UInt64 = 0
     private var activeTimeline: UtteranceTimelineBuilder?
     private var aboutWindowController: AboutWindowController?
+    private var workspaceNotificationObservers: [NSObjectProtocol] = []
+    private var distributedNotificationObservers: [NSObjectProtocol] = []
 
     init(settings: AppSettings = .shared) {
         self.settings = settings
         isOnboardingPresented = !settings.onboardingCompleted
+        enginePreparationRequested = settings.onboardingCompleted
         dictionaryStore = DictionaryStore()
         transcriptionEngine = ParakeetEngine(
             version: settings.engineVersion
@@ -183,6 +190,9 @@ final class DictationCoordinator: ObservableObject {
         monitor.onEscape = { [weak self] in
             self?.consumeGateEscape() ?? false
         }
+        recorder?.onInterruption = { [weak self] in
+            self?.handleCaptureInterruption()
+        }
 
         settings.$preRollEnabled
             .dropFirst()
@@ -200,7 +210,14 @@ final class DictationCoordinator: ObservableObject {
             }
             .store(in: &settingsCancellables)
 
-        startPrewarming(transcriptionEngine)
+        installSystemLifecycleObservers()
+
+        if enginePreparationRequested {
+            startPrewarming(transcriptionEngine)
+            Task { @MainActor [weak self] in
+                _ = await self?.requestMicrophoneAccess()
+            }
+        }
 
         if isOnboardingPresented {
             Task { @MainActor [weak self] in
@@ -275,8 +292,20 @@ final class DictationCoordinator: ObservableObject {
     }
 
     func finishOnboarding() {
+        hotkeyMonitor.setDetectionOnly(false)
         settings.onboardingCompleted = true
         onboardingWindowController?.close()
+    }
+
+    func onboardingStepDidChange(_ step: OnboardingStep) {
+        guard isOnboardingPresented else {
+            return
+        }
+
+        hotkeyMonitor.setDetectionOnly(step == .keysAndAgent)
+        if step == .model {
+            requestEnginePreparation()
+        }
     }
 
     func onboardingWindowDidClose(
@@ -287,18 +316,28 @@ final class DictationCoordinator: ObservableObject {
         }
         onboardingWindowController = nil
         isOnboardingPresented = false
+        hotkeyMonitor.setDetectionOnly(false)
         synchronizeHUD()
+    }
+
+    func requestMicrophoneAccess() async -> Bool {
+        if let audioRecorder {
+            return await audioRecorder.requestMicrophoneAccess()
+        }
+
+        return await AVCaptureDevice.requestAccess(for: .audio)
     }
 
     func retryEnginePrewarm() {
         guard enginePreparationState == .failed else {
             return
         }
-        startPrewarming(transcriptionEngine)
+        requestEnginePreparation()
     }
 
     private func presentOnboarding() {
         isOnboardingPresented = true
+        hotkeyMonitor.setDetectionOnly(false)
         hudPanel.dismiss()
 
         if let onboardingWindowController {
@@ -356,11 +395,43 @@ final class DictationCoordinator: ObservableObject {
         }
 
         enginePrewarmTask?.cancel()
+        enginePrewarmTask = nil
+        engineHealthTask?.cancel()
+        engineHealthTask = nil
+        engineGeneration += 1
+        let generation = engineGeneration
         isPrewarmed = false
+        enginePreparationState = .downloading(progress: 0)
+        setState(.prewarming)
 
+        let previousEngine = transcriptionEngine
         let replacement = ParakeetEngine(version: version)
         transcriptionEngine = replacement
-        startPrewarming(replacement)
+        engineSwapTask = Task { @MainActor [weak self] in
+            await previousEngine.cancelPreparation()
+
+            guard !Task.isCancelled,
+                  let self,
+                  generation == self.engineGeneration else {
+                return
+            }
+
+            self.engineSwapTask = nil
+            if self.enginePreparationRequested {
+                self.startPrewarming(replacement)
+            }
+        }
+    }
+
+    private func requestEnginePreparation() {
+        enginePreparationRequested = true
+        guard !isPrewarmed,
+              enginePrewarmTask == nil,
+              engineSwapTask == nil else {
+            return
+        }
+
+        startPrewarming(transcriptionEngine)
     }
 
     private func startPrewarming(_ engine: ParakeetEngine) {
@@ -432,6 +503,112 @@ final class DictationCoordinator: ObservableObject {
             }
         case .warmingUp:
             enginePreparationState = .warmingUp
+        }
+    }
+
+    private func installSystemLifecycleObservers() {
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
+        for name in [
+            NSWorkspace.willSleepNotification,
+            NSWorkspace.didWakeNotification
+        ] {
+            let observer = workspaceCenter.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                let isSleep =
+                    notification.name == NSWorkspace.willSleepNotification
+                Task { @MainActor [weak self] in
+                    if isSleep {
+                        self?.handleCaptureInterruption()
+                    } else {
+                        self?.handleSystemResume()
+                    }
+                }
+            }
+            workspaceNotificationObservers.append(observer)
+        }
+
+        let distributedCenter = DistributedNotificationCenter.default()
+        let lockedName = Notification.Name("com.apple.screenIsLocked")
+        let unlockedName = Notification.Name("com.apple.screenIsUnlocked")
+        for name in [lockedName, unlockedName] {
+            let observer = distributedCenter.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                let isLock = notification.name == lockedName
+                Task { @MainActor [weak self] in
+                    if isLock {
+                        self?.handleCaptureInterruption()
+                    } else {
+                        self?.handleSystemResume()
+                    }
+                }
+            }
+            distributedNotificationObservers.append(observer)
+        }
+    }
+
+    private func handleCaptureInterruption() {
+        switch state {
+        case .recording:
+            audioRecorder?.cancel()
+            activeMode = nil
+            activeFocusAnchor = nil
+            activeTimeline = nil
+            setState(.idle)
+        case .gatePending:
+            setState(.idle)
+        case .idle, .prewarming, .transcribing:
+            break
+        }
+
+        hotkeyMonitor.reset()
+    }
+
+    private func handleSystemResume() {
+        hotkeyMonitor.reset()
+        verifyEngineHealth()
+    }
+
+    private func verifyEngineHealth() {
+        guard isPrewarmed else {
+            return
+        }
+
+        engineHealthTask?.cancel()
+        let engine = transcriptionEngine
+        let generation = engineGeneration
+        engineHealthTask = Task { @MainActor [weak self] in
+            do {
+                try await engine.prewarm(progressHandler: nil)
+                try Task.checkCancellation()
+                guard let self,
+                      generation == self.engineGeneration else {
+                    return
+                }
+                self.engineHealthTask = nil
+            } catch is CancellationError {
+                return
+            } catch {
+                guard let self,
+                      generation == self.engineGeneration else {
+                    return
+                }
+                self.engineHealthTask = nil
+                self.isPrewarmed = false
+                self.enginePreparationState = .failed
+                print(
+                    "transcription engine health check failed: "
+                        + error.localizedDescription
+                )
+                if self.state == .prewarming {
+                    self.setState(.idle)
+                }
+            }
         }
     }
 

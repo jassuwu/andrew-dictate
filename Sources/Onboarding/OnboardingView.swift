@@ -45,20 +45,28 @@ final class OnboardingWindowController:
 
 @MainActor
 private final class OnboardingPermissionModel: ObservableObject {
-    @Published private(set) var microphoneGranted: Bool
+    @Published private(set) var microphoneStatus: AVAuthorizationStatus
     @Published private(set) var accessibilityGranted: Bool
 
     private var accessibilityPromptTriggered = false
 
+    var microphoneGranted: Bool {
+        microphoneStatus == .authorized
+    }
+
+    var microphoneActionTitle: String {
+        microphoneStatus == .denied ? "open settings" : "grant"
+    }
+
     init() {
-        microphoneGranted =
-            AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        microphoneStatus =
+            AVCaptureDevice.authorizationStatus(for: .audio)
         accessibilityGranted = AXIsProcessTrusted()
     }
 
     func refresh() {
-        microphoneGranted =
-            AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        microphoneStatus =
+            AVCaptureDevice.authorizationStatus(for: .audio)
         refreshAccessibility()
     }
 
@@ -66,10 +74,25 @@ private final class OnboardingPermissionModel: ObservableObject {
         accessibilityGranted = AXIsProcessTrusted()
     }
 
-    func requestMicrophone() {
+    func performMicrophoneAction(
+        requestAccess: @escaping @MainActor () async -> Bool
+    ) {
+        if microphoneStatus == .denied {
+            guard let url = URL(
+                string:
+                    "x-apple.systempreferences:"
+                        + "com.apple.preference.security?Privacy_Microphone"
+            ) else {
+                return
+            }
+            NSWorkspace.shared.open(url)
+            return
+        }
+
         Task { @MainActor [weak self] in
-            let granted = await AVCaptureDevice.requestAccess(for: .audio)
-            self?.microphoneGranted = granted
+            _ = await requestAccess()
+            self?.microphoneStatus =
+                AVCaptureDevice.authorizationStatus(for: .audio)
         }
     }
 
@@ -149,6 +172,10 @@ struct OnboardingView: View {
         .onAppear {
             permissions.refresh()
             synchronizeFlow()
+            coordinator.onboardingStepDidChange(flow.step)
+        }
+        .onChange(of: flow.step) {
+            coordinator.onboardingStepDidChange(flow.step)
         }
         .onChange(of: permissions.microphoneGranted) {
             synchronizePermissions()
@@ -216,7 +243,7 @@ struct OnboardingView: View {
                 .font(.system(size: 38, weight: .semibold))
 
             Text(
-                "hold a key, talk, get text — everything stays on this mac."
+                "hold a key, talk, get text — dictation stays on this mac."
             )
             .font(.title3)
             .foregroundStyle(.secondary)
@@ -238,7 +265,12 @@ struct OnboardingView: View {
                     title: "microphone",
                     reason: "to hear you while you hold the key",
                     granted: permissions.microphoneGranted,
-                    action: permissions.requestMicrophone
+                    actionTitle: permissions.microphoneActionTitle,
+                    action: {
+                        permissions.performMicrophoneAction {
+                            await coordinator.requestMicrophoneAccess()
+                        }
+                    }
                 )
 
                 permissionRow(
@@ -275,6 +307,7 @@ struct OnboardingView: View {
         title: String,
         reason: String,
         granted: Bool,
+        actionTitle: String = "grant",
         action: @escaping () -> Void
     ) -> some View {
         HStack(spacing: 18) {
@@ -293,9 +326,12 @@ struct OnboardingView: View {
                 .foregroundStyle(granted ? .green : .secondary)
                 .frame(width: 58, alignment: .trailing)
 
-            Button(granted ? "granted" : "grant", action: action)
-                .disabled(granted)
-                .frame(width: 72)
+            Button(
+                granted ? "granted" : actionTitle,
+                action: action
+            )
+            .disabled(granted)
+            .frame(width: 96)
         }
         .padding(16)
         .background(

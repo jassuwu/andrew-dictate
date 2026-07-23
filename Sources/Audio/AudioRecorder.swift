@@ -47,8 +47,10 @@ final class AudioRecorder {
     private var captureStorage: AudioCaptureStorage
     private var hasInstalledTap = false
     private var isRecording = false
+    private var configurationChangeObserver: NSObjectProtocol?
 
     private(set) var isPreRollEnabled: Bool
+    var onInterruption: (() -> Void)?
 
     var currentLevel: Float {
         levelStorage.currentLevel
@@ -89,27 +91,35 @@ final class AudioRecorder {
             try engine.start()
         }
 
-        AVCaptureDevice.requestAccess(for: .audio) { granted in
+        configurationChangeObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: .main
+        ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self else {
-                    return
-                }
-
-                if granted {
-                    print("microphone permission granted")
-                    do {
-                        try self.startContinuousCaptureIfNeeded()
-                    } catch {
-                        print(
-                            "pre-roll audio capture failed to start: "
-                                + error.localizedDescription
-                        )
-                    }
-                } else {
-                    print("microphone permission denied")
-                }
+                self?.handleConfigurationChange()
             }
         }
+    }
+
+    func requestMicrophoneAccess() async -> Bool {
+        let granted = await AVCaptureDevice.requestAccess(for: .audio)
+
+        if granted {
+            print("microphone permission granted")
+            do {
+                try startContinuousCaptureIfNeeded()
+            } catch {
+                print(
+                    "pre-roll audio capture failed to start: "
+                        + error.localizedDescription
+                )
+            }
+        } else {
+            print("microphone permission denied")
+        }
+
+        return granted
     }
 
     func applyPreRoll(_ enabled: Bool) throws {
@@ -282,6 +292,24 @@ final class AudioRecorder {
         )
         engine.prepare()
         try startContinuousCaptureIfNeeded()
+    }
+
+    private func handleConfigurationChange() {
+        firstBufferNotifier.disarm()
+        isRecording = false
+        captureStorage.discardAndClearPreRoll()
+        levelStorage.reset()
+
+        do {
+            try rebuildCapturePath(preRollEnabled: isPreRollEnabled)
+        } catch {
+            print(
+                "audio capture rebuild failed after configuration change: "
+                    + error.localizedDescription
+            )
+        }
+
+        onInterruption?()
     }
 
     private func startContinuousCaptureIfNeeded() throws {
@@ -669,6 +697,16 @@ private final class AudioCaptureStorage: @unchecked Sendable {
         isAcceptingAudio = false
         resetUtterance()
         preRollPrefixBuffer?.frameLength = 0
+    }
+
+    func discardAndClearPreRoll() {
+        lock.lock()
+        defer { lock.unlock() }
+
+        isAcceptingAudio = false
+        resetUtterance()
+        preRollPrefixBuffer?.frameLength = 0
+        ringSplicer?.reset()
     }
 
     private func failCapture(with error: AudioRecorderError) {

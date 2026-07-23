@@ -128,6 +128,25 @@ final class HotkeyLogicTests: XCTestCase {
         )
     }
 
+    func testResetCancelsHeldAndLockedCaptures() {
+        var heldDetector = TapLockDetector()
+        _ = heldDetector.modifierPressed(.dictation, at: 1.0)
+
+        XCTAssertEqual(heldDetector.reset(), [.cancel(.dictation)])
+        XCTAssertEqual(
+            heldDetector.modifierPressed(.dictation, at: 1.1),
+            [.begin(.dictation)]
+        )
+
+        var locked = lockedDetector(mode: .command)
+
+        XCTAssertEqual(locked.reset(), [.lockCancel(.command)])
+        XCTAssertEqual(
+            locked.modifierPressed(.command, at: 1.5),
+            [.begin(.command)]
+        )
+    }
+
     private func lockedDetector(mode: DictationMode) -> TapLockDetector {
         var detector = TapLockDetector()
         _ = detector.modifierPressed(mode, at: 1.0)

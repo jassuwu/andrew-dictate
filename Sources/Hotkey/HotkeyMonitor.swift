@@ -20,6 +20,7 @@ final class HotkeyMonitor {
     private var consumedKeyModes: [CGKeyCode: DictationMode] = [:]
     private var detector = TapLockDetector()
     private var provisionalEndTask: Task<Void, Never>?
+    private var isDetectionOnly = false
 
     init(settings: AppSettings = .shared) {
         self.settings = settings
@@ -50,6 +51,23 @@ final class HotkeyMonitor {
         }
         bindings[mode] = binding
         return true
+    }
+
+    func setDetectionOnly(_ enabled: Bool) {
+        guard enabled != isDetectionOnly else {
+            return
+        }
+
+        reset()
+        isDetectionOnly = enabled
+    }
+
+    func reset() {
+        provisionalEndTask?.cancel()
+        provisionalEndTask = nil
+        pressedKeyCodes.removeAll()
+        consumedKeyModes.removeAll()
+        perform(detector.reset())
     }
 
     private func installMonitors() {
@@ -97,6 +115,10 @@ final class HotkeyMonitor {
 
         if pressedKeyCodes.contains(keyCode) {
             pressedKeyCodes.remove(keyCode)
+            if isDetectionOnly {
+                consumedKeyModes.removeValue(forKey: keyCode)
+                return
+            }
             if let consumedMode = consumedKeyModes.removeValue(
                 forKey: keyCode
             ) {
@@ -126,6 +148,10 @@ final class HotkeyMonitor {
         pressedKeyCodes.insert(keyCode)
         onKeyDetected?(mode)
 
+        guard !isDetectionOnly else {
+            return
+        }
+
         if onModeKeyPressed?(mode, event.timestamp) == true {
             consumedKeyModes[keyCode] = mode
             _ = detector.keyDown(isEscape: false)
@@ -141,6 +167,10 @@ final class HotkeyMonitor {
     }
 
     private func handleKeyDown(_ event: NSEvent) {
+        guard !isDetectionOnly else {
+            return
+        }
+
         let isEscape = event.keyCode == 53
         if isEscape, onEscape?() == true {
             _ = detector.keyDown(isEscape: false)

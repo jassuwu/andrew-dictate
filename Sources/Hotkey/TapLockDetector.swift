@@ -181,4 +181,19 @@ struct TapLockDetector {
             return []
         }
     }
+
+    mutating func reset() -> [Action] {
+        defer { state = .idle }
+
+        switch state {
+        case let .holding(mode, _, _),
+             let .awaitingSecondTap(mode, _):
+            return [.cancel(mode)]
+        case let .locked(mode),
+             let .endingLock(mode):
+            return [.lockCancel(mode)]
+        case .idle, .cancelledHold:
+            return []
+        }
+    }
 }
