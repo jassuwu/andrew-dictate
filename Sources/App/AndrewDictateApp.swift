@@ -14,6 +14,11 @@ struct AndrewDictateApp: App {
                 .foregroundStyle(.secondary)
                 .disabled(true)
 
+            Button("copy last") {
+                coordinator.copyLastTranscript()
+            }
+            .disabled(coordinator.lastTranscript == nil)
+
             Divider()
 
             Button("settings…") {

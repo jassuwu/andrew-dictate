@@ -43,7 +43,7 @@ final class CommandExecutor {
                 feedback: "→ go to \(urlString)"
             )
         case let .typeLiteral(text):
-            await paster.paste(text)
+            _ = await paster.paste(text)
             await flash("→ type \(text)")
         case let .template(url, label):
             if workspace.open(url) {

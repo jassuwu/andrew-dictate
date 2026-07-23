@@ -65,6 +65,7 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var enginePreparationState:
         EnginePreparationState = .downloading(progress: 0)
     @Published private(set) var hotkeyDetection: HotkeyDetection?
+    @Published private(set) var lastTranscript: String?
 
     let dictionaryStore: DictionaryStore
     let settings: AppSettings
@@ -80,6 +81,7 @@ final class DictationCoordinator: ObservableObject {
     private let hudPanel: HUDPanel
     private var isPrewarmed = false
     private var activeMode: DictationMode?
+    private var activeFocusAnchor: FocusAnchor?
     private var pipelineTask: Task<Void, Never>?
     private var pipelineGeneration = 0
     private var enginePrewarmTask: Task<Void, Never>?
@@ -235,6 +237,16 @@ final class DictationCoordinator: ObservableObject {
         controller.present()
     }
 
+    func copyLastTranscript() {
+        guard let lastTranscript else {
+            return
+        }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        _ = pasteboard.setString(lastTranscript, forType: .string)
+    }
+
     #if DEBUG
     func copyTimings() {
         let pasteboard = NSPasteboard.general
@@ -308,6 +320,7 @@ final class DictationCoordinator: ObservableObject {
         if state == .recording {
             audioRecorder.cancel()
             activeMode = nil
+            activeFocusAnchor = nil
             activeTimeline = nil
             transition(to: .idle)
         }
@@ -335,6 +348,7 @@ final class DictationCoordinator: ObservableObject {
         if state == .recording {
             audioRecorder?.cancel()
             activeMode = nil
+            activeFocusAnchor = nil
             activeTimeline = nil
         }
 
@@ -443,6 +457,9 @@ final class DictationCoordinator: ObservableObject {
             mode: mode,
             keyDown: timelineClock.now
         )
+        let focusAnchor = mode == .dictation
+            ? FocusAnchor.capture()
+            : nil
 
         do {
             try audioRecorder.start { [weak self] instant in
@@ -452,10 +469,12 @@ final class DictationCoordinator: ObservableObject {
                 )
             }
             activeMode = mode
+            activeFocusAnchor = focusAnchor
             transition(to: .recording, mode: mode)
         } catch {
             print("audio recording failed to start: \(error.localizedDescription)")
             activeMode = nil
+            activeFocusAnchor = nil
             activeTimeline = nil
             transition(to: .idle)
         }
@@ -471,6 +490,7 @@ final class DictationCoordinator: ObservableObject {
         if state == .recording, let audioRecorder {
             audioRecorder.cancel()
             activeMode = nil
+            activeFocusAnchor = nil
             activeTimeline = nil
         }
 
@@ -488,12 +508,19 @@ final class DictationCoordinator: ObservableObject {
         do {
             activeTimeline?.keyUp = timelineClock.now
             let samples = try audioRecorder.stop()
+            let focusAnchor = activeFocusAnchor
             activeMode = nil
+            activeFocusAnchor = nil
             transition(to: .transcribing, mode: mode)
-            startPipeline(samples, mode: mode)
+            startPipeline(
+                samples,
+                mode: mode,
+                focusAnchor: focusAnchor
+            )
         } catch {
             print("audio recording failed to stop: \(error.localizedDescription)")
             activeMode = nil
+            activeFocusAnchor = nil
             activeTimeline = nil
             transition(to: .idle)
         }
@@ -508,6 +535,7 @@ final class DictationCoordinator: ObservableObject {
 
         audioRecorder.cancel()
         activeMode = nil
+        activeFocusAnchor = nil
         activeTimeline = nil
         transition(to: .idle)
     }
@@ -525,7 +553,8 @@ final class DictationCoordinator: ObservableObject {
 
     private func startPipeline(
         _ samples: [Float],
-        mode: DictationMode
+        mode: DictationMode,
+        focusAnchor: FocusAnchor?
     ) {
         pipelineGeneration += 1
         let generation = pipelineGeneration
@@ -534,6 +563,7 @@ final class DictationCoordinator: ObservableObject {
             await self?.transcribeAndRoute(
                 samples,
                 mode: mode,
+                focusAnchor: focusAnchor,
                 generation: generation
             )
         }
@@ -542,6 +572,7 @@ final class DictationCoordinator: ObservableObject {
     private func transcribeAndRoute(
         _ samples: [Float],
         mode: DictationMode,
+        focusAnchor: FocusAnchor?,
         generation: Int
     ) async {
         defer {
@@ -569,11 +600,40 @@ final class DictationCoordinator: ObservableObject {
                     activeTimeline = nil
                     return
                 }
-                await paster.paste(cleanedTranscript)
-                completeTimeline(
-                    at: timelineClock.now,
-                    stage: .pasteVerified
+                lastTranscript = cleanedTranscript
+                let pasteResult = await paster.paste(
+                    cleanedTranscript,
+                    reasonForLeavingOnPasteboard: {
+                        switch focusAnchor?.revalidationDecision()
+                            ?? .copyFocusChanged {
+                        case .paste:
+                            nil
+                        case .copySecure:
+                            .secureField
+                        case .copyFocusChanged:
+                            .focusChanged
+                        }
+                    }
                 )
+                guard generation == pipelineGeneration else {
+                    return
+                }
+
+                switch pasteResult {
+                case .pasted:
+                    completeTimeline(
+                        at: timelineClock.now,
+                        stage: .pasteVerified
+                    )
+                case let .leftOnPasteboard(reason):
+                    completeTimeline(
+                        at: timelineClock.now,
+                        stage: .leftOnPasteboard
+                    )
+                    await flashFeedback(
+                        feedbackMessage(for: reason)
+                    )
+                }
             case .command:
                 let commandTranscript = DictionarySubstituter(
                     entries: dictionaryStore.entries
@@ -598,6 +658,23 @@ final class DictationCoordinator: ObservableObject {
         pipelineTask?.cancel()
         pipelineTask = nil
         activeTimeline = nil
+    }
+
+    private func feedbackMessage(
+        for reason: LeftOnPasteboardReason
+    ) -> String {
+        switch reason {
+        case .secureField:
+            "copied — secure field"
+        case .focusChanged:
+            "copied — focus changed"
+        case .accessibilityUnavailable,
+             .shortcutUnavailable,
+             .cancelled:
+            "copied — paste unavailable"
+        case .pasteboardUnavailable:
+            "couldn't copy transcript"
+        }
     }
 
     private func completeTimeline(

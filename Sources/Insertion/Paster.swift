@@ -1,11 +1,25 @@
 import AppKit
 @preconcurrency import ApplicationServices
 
+enum PasteResult: Equatable, Sendable {
+    case pasted
+    case leftOnPasteboard(LeftOnPasteboardReason)
+}
+
+enum LeftOnPasteboardReason: Equatable, Sendable {
+    case secureField
+    case focusChanged
+    case accessibilityUnavailable
+    case shortcutUnavailable
+    case cancelled
+    case pasteboardUnavailable
+}
+
 @MainActor
 final class Paster {
-    private struct Snapshot {
-        struct Item {
-            struct Representation {
+    private struct Snapshot: Sendable {
+        struct Item: Sendable {
+            struct Representation: Sendable {
                 let type: String
                 let data: Data
             }
@@ -19,8 +33,12 @@ final class Paster {
 
     private var isPasting = false
     private var pasteWaiters: [CheckedContinuation<Void, Never>] = []
+    private let keyCodeResolver = PasteKeyCodeResolver()
 
-    func paste(_ text: String) async {
+    func paste(
+        _ text: String,
+        reasonForLeavingOnPasteboard: (() -> LeftOnPasteboardReason?)? = nil
+    ) async -> PasteResult {
         await acquirePasteTransaction()
         defer { releasePasteTransaction() }
 
@@ -33,37 +51,42 @@ final class Paster {
         }
 
         guard let ourChangeCount = Self.writeTranscript(text, to: pasteboard) else {
-            return
+            return .leftOnPasteboard(.pasteboardUnavailable)
+        }
+        if let reason = reasonForLeavingOnPasteboard?() {
+            return .leftOnPasteboard(reason)
         }
         guard CGPreflightPostEventAccess() else {
-            return
+            return .leftOnPasteboard(.accessibilityUnavailable)
         }
-        guard await Self.postPasteShortcut() else {
-            return
-        }
-
-        do {
-            try await Task.sleep(for: .milliseconds(300))
-        } catch {
-            return
+        guard !Task.isCancelled else {
+            return .leftOnPasteboard(.cancelled)
         }
 
-        guard let snapshot,
-              let restoredItems = Self.makePasteboardItems(from: snapshot),
-              pasteboard.changeCount == ourChangeCount else {
-            return
+        let keyCode = keyCodeResolver.keyCodeForV()
+        if let reason = reasonForLeavingOnPasteboard?() {
+            return .leftOnPasteboard(reason)
+        }
+        guard Self.postPasteKey(keyCode, keyDown: true) else {
+            return .leftOnPasteboard(.shortcutUnavailable)
         }
 
-        pasteboard.clearContents()
-
-        guard !snapshot.items.isEmpty else {
-            return
+        let restoreTask = Task.detached {
+            try? await Task.sleep(for: .milliseconds(10))
+            await MainActor.run {
+                _ = Self.postPasteKey(keyCode, keyDown: false)
+            }
+            try? await Task.sleep(for: .milliseconds(290))
+            await MainActor.run {
+                Self.restore(
+                    snapshot,
+                    expectedChangeCount: ourChangeCount,
+                    transcript: text
+                )
+            }
         }
-
-        guard pasteboard.writeObjects(restoredItems) else {
-            _ = Self.writeTranscript(text, to: pasteboard)
-            return
-        }
+        await restoreTask.value
+        return .pasted
     }
 
     private func acquirePasteTransaction() async {
@@ -129,48 +152,56 @@ final class Paster {
     ) -> Int? {
         pasteboard.clearContents()
 
-        guard pasteboard.setString(text, forType: .string) else {
+        if !pasteboard.setString(text, forType: .string) {
             pasteboard.clearContents()
-            _ = pasteboard.setString(text, forType: .string)
-            return nil
+            guard pasteboard.setString(text, forType: .string) else {
+                return nil
+            }
         }
 
         return pasteboard.changeCount
     }
 
-    private static func postPasteShortcut() async -> Bool {
+    private static func postPasteKey(
+        _ keyCode: CGKeyCode,
+        keyDown: Bool
+    ) -> Bool {
         guard let source = CGEventSource(stateID: .hidSystemState),
-              let keyDown = CGEvent(
+              let event = CGEvent(
                   keyboardEventSource: source,
-                  virtualKey: 9,
-                  keyDown: true
-              ),
-              let keyUp = CGEvent(
-                  keyboardEventSource: source,
-                  virtualKey: 9,
-                  keyDown: false
+                  virtualKey: keyCode,
+                  keyDown: keyDown
               ) else {
             return false
         }
 
-        keyDown.flags = .maskCommand
-        keyUp.flags = .maskCommand
+        event.flags = .maskCommand
+        event.post(tap: .cghidEventTap)
+        return true
+    }
 
-        guard !Task.isCancelled else {
-            return false
+    private static func restore(
+        _ snapshot: Snapshot?,
+        expectedChangeCount: Int,
+        transcript: String
+    ) {
+        let pasteboard = NSPasteboard.general
+        guard let snapshot,
+              let restoredItems = makePasteboardItems(from: snapshot),
+              pasteboard.changeCount == expectedChangeCount else {
+            return
         }
 
-        keyDown.post(tap: .cghidEventTap)
+        pasteboard.clearContents()
 
-        do {
-            try await Task.sleep(for: .milliseconds(10))
-        } catch {
-            keyUp.post(tap: .cghidEventTap)
-            return false
+        guard !snapshot.items.isEmpty else {
+            return
         }
 
-        keyUp.post(tap: .cghidEventTap)
-        return !Task.isCancelled
+        guard pasteboard.writeObjects(restoredItems) else {
+            _ = writeTranscript(transcript, to: pasteboard)
+            return
+        }
     }
 
     private static func makePasteboardItems(

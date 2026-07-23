@@ -6,6 +6,7 @@ struct UtteranceTimeline: Sendable {
 
     enum CompletionStage: String, Sendable {
         case pasteVerified
+        case leftOnPasteboard
         case commandRouted
     }
 
