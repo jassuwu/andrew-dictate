@@ -127,4 +127,19 @@ final class HUDLayoutEngineTests: XCTestCase {
             HUDLayoutEngine.minimumSize.height
         )
     }
+
+    func testAnswerPreviewKeepsShortTextAndEllipsizesLongText() {
+        XCTAssertEqual(HUDAnswerFormatter.preview(" short answer \n"), "short answer")
+
+        let longAnswer = String(
+            repeating: "a",
+            count: HUDAnswerFormatter.maximumPreviewCharacters + 1
+        )
+        let preview = HUDAnswerFormatter.preview(longAnswer)
+        XCTAssertEqual(
+            preview.count,
+            HUDAnswerFormatter.maximumPreviewCharacters + 2
+        )
+        XCTAssertTrue(preview.hasSuffix(" ⋯"))
+    }
 }

@@ -46,6 +46,15 @@ final class HUDViewModel: ObservableObject {
             return .wave
         case .prewarming:
             return .prewarming
+        case .asking:
+            return .text(primary: "asking…", secondary: nil)
+        case let .askAnswer(answer, _):
+            return .text(
+                primary: HUDAnswerFormatter.preview(answer),
+                secondary: nil
+            )
+        case .askThreadOpen:
+            return .text(primary: "follow up…", secondary: nil)
         case let .gatePending(
             commandPreview,
             confirmationKeyName
@@ -57,6 +66,23 @@ final class HUDViewModel: ObservableObject {
             )
         case let .transcriptFlash(transcript):
             return .text(primary: transcript, secondary: nil)
+        }
+    }
+
+    var isThreadOpen: Bool {
+        switch state {
+        case let .asking(threadOpen),
+             let .askAnswer(_, threadOpen):
+            threadOpen
+        case .askThreadOpen:
+            true
+        case .idle,
+             .prewarming,
+             .recording,
+             .transcribing,
+             .gatePending,
+             .transcriptFlash:
+            false
         }
     }
 
@@ -174,6 +200,12 @@ struct HUDView: View {
                         livePill(phase: .recording)
                     case .transcribing:
                         livePill(phase: .transcribing)
+                    case .asking:
+                        textPill("asking…")
+                    case let .askAnswer(answer, _):
+                        textPill(HUDAnswerFormatter.preview(answer))
+                    case .askThreadOpen:
+                        textPill("follow up…")
                     case let .gatePending(
                         commandPreview,
                         confirmationKeyName
@@ -302,16 +334,34 @@ struct HUDView: View {
                 )
             }
             .overlay {
-                RoundedRectangle(
-                    cornerRadius: 22,
-                    style: .continuous
-                )
+                ZStack(alignment: .topTrailing) {
+                    RoundedRectangle(
+                        cornerRadius: 22,
+                        style: .continuous
+                    )
                     .stroke(
                         HUDGold.mid.opacity(
                             isCommandMode ? 0.70 : 0.35
                         ),
                         lineWidth: 1
                     )
+
+                    if viewModel.isThreadOpen {
+                        Circle()
+                            .fill(HUDGold.mid)
+                            .frame(width: 7, height: 7)
+                            .overlay {
+                                Circle()
+                                    .stroke(
+                                        HUDGold.black.opacity(0.82),
+                                        lineWidth: 1
+                                    )
+                            }
+                            .padding(.top, 1)
+                            .padding(.trailing, 12)
+                            .accessibilityHidden(true)
+                    }
+                }
             }
     }
 }

@@ -28,4 +28,32 @@ final class UtteranceTimelineTests: XCTestCase {
             )
         )
     }
+
+    func testCancellationStagesMeasureCancelRequestedToIdle() {
+        let keyDown = ContinuousClock.now
+        var builder = UtteranceTimelineBuilder(
+            id: 1,
+            mode: .command,
+            keyDown: keyDown
+        )
+        builder.micFirstBuffer = keyDown.advanced(
+            by: .milliseconds(10)
+        )
+        builder.keyUp = keyDown.advanced(by: .milliseconds(500))
+        builder.transcriptReady = keyDown.advanced(
+            by: .milliseconds(700)
+        )
+        builder.cleaned = keyDown.advanced(by: .milliseconds(702))
+
+        let timeline = builder.cancelled(
+            requestedAt: keyDown.advanced(by: .milliseconds(900)),
+            idleAt: keyDown.advanced(by: .milliseconds(940))
+        )
+
+        XCTAssertEqual(timeline.completionStage, .cancelled)
+        XCTAssertEqual(
+            timeline.durations.cancelToIdle,
+            .milliseconds(40)
+        )
+    }
 }

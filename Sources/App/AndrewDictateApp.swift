@@ -12,10 +12,15 @@ struct AndrewDictateApp: App {
                 .foregroundStyle(.secondary)
                 .disabled(true)
 
-            Button("copy last") {
+            Button("copy last transcript") {
                 coordinator.copyLastTranscript()
             }
             .disabled(coordinator.lastTranscript == nil)
+
+            Button("copy last answer") {
+                coordinator.copyLastAnswer()
+            }
+            .disabled(coordinator.lastAnswer == nil)
 
             Divider()
 

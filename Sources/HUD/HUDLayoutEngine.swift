@@ -96,3 +96,25 @@ enum HUDLayoutEngine {
         return ceil(bounds.width)
     }
 }
+
+enum HUDAnswerFormatter {
+    static let maximumPreviewCharacters = 280
+
+    static func preview(_ answer: String) -> String {
+        let trimmed = answer.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        guard trimmed.count > maximumPreviewCharacters else {
+            return trimmed
+        }
+
+        let endIndex = trimmed.index(
+            trimmed.startIndex,
+            offsetBy: maximumPreviewCharacters
+        )
+        let prefix = trimmed[..<endIndex].trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        return prefix + " ⋯"
+    }
+}

@@ -77,6 +77,18 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var voiceAnswersEnabled: Bool {
+        didSet {
+            guard voiceAnswersEnabled != oldValue else {
+                return
+            }
+            userDefaults.set(
+                voiceAnswersEnabled,
+                forKey: Self.voiceAnswersKey
+            )
+        }
+    }
+
     @Published private(set) var dictationHotkey: HotkeyBinding {
         didSet {
             guard dictationHotkey != oldValue else {
@@ -153,6 +165,8 @@ final class AppSettings: ObservableObject {
     private static let preRollKey = "AndrewDictate.preRollEnabled"
     private static let soundFeedbackKey =
         "AndrewDictate.soundFeedbackEnabled"
+    private static let voiceAnswersKey =
+        "AndrewDictate.voiceAnswersEnabled"
     private static let engineVersionKey = "AndrewDictate.engineVersion"
     private static let agentCommandTemplateKey =
         "AndrewDictate.agentCommandTemplate"
@@ -178,6 +192,9 @@ final class AppSettings: ObservableObject {
         ) == nil
             ? true
             : userDefaults.bool(forKey: Self.soundFeedbackKey)
+        voiceAnswersEnabled = userDefaults.bool(
+            forKey: Self.voiceAnswersKey
+        )
 
         let loadedDictationHotkey = userDefaults.hotkeyBinding(for: .dictation)
         let loadedCommandHotkey = userDefaults.hotkeyBinding(for: .command)

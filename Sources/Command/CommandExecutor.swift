@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class CommandExecutor {
     var onDelegate: ((String) async -> Void)?
+    var onAsk: ((String) async -> Void)?
     var onFeedback: ((String) async -> Void)?
 
     private let paster: Paster
@@ -44,6 +45,8 @@ final class CommandExecutor {
             await openTemplate(url, label: label)
         case let .delegate(prompt):
             await onDelegate?(prompt)
+        case let .ask(prompt):
+            await onAsk?(prompt)
         }
     }
 

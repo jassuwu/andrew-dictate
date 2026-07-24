@@ -27,6 +27,9 @@ final class DictationCoordinator: ObservableObject {
         case prewarming
         case recording
         case transcribing
+        case asking(threadOpen: Bool)
+        case askAnswer(String, threadOpen: Bool)
+        case askThreadOpen
         case gatePending(
             commandPreview: String,
             confirmationKeyName: String
@@ -43,6 +46,12 @@ final class DictationCoordinator: ObservableObject {
                 "recording"
             case .transcribing:
                 "transcribing"
+            case .asking:
+                "asking"
+            case .askAnswer:
+                "answer"
+            case .askThreadOpen:
+                "follow-up open"
             case .gatePending:
                 "gate pending"
             case .transcriptFlash:
@@ -57,6 +66,7 @@ final class DictationCoordinator: ObservableObject {
         EnginePreparationState = .notStarted
     @Published private(set) var hotkeyDetection: HotkeyDetection?
     @Published private(set) var lastTranscript: String?
+    @Published private(set) var lastAnswer: String?
 
     let dictionaryStore: DictionaryStore
     let settings: AppSettings
@@ -67,8 +77,10 @@ final class DictationCoordinator: ObservableObject {
     private let commandRouter = CommandRouter()
     private let commandExecutor: CommandExecutor
     private let agentDelegator: AgentDelegator
+    private let askEngine: AskEngine
     private let audioRecorder: AudioRecorder?
     private let feedbackSounds: FeedbackSounds
+    private let answerSpeaker = AVSpeechSynthesizer()
     private let hudViewModel: HUDViewModel
     private var hudPanelStorage: HUDPanel?
 
@@ -109,6 +121,7 @@ final class DictationCoordinator: ObservableObject {
     private var stateGeneration: UInt64 = 0
     private var delegationGate = DelegationGate()
     private var gateTimeoutTask: Task<Void, Never>?
+    private var answerVisibilityTask: Task<Void, Never>?
     private var feedbackGeneration: UInt64 = 0
     private var activeFeedbackGeneration: UInt64?
     private let timelineClock = ContinuousClock()
@@ -152,6 +165,7 @@ final class DictationCoordinator: ObservableObject {
         )
         commandExecutor = executor
         agentDelegator = AgentDelegator(settings: settings)
+        askEngine = AskEngine(settings: settings)
 
         let monitor = HotkeyMonitor(settings: settings)
         hotkeyMonitor = monitor
@@ -159,8 +173,14 @@ final class DictationCoordinator: ObservableObject {
         executor.onDelegate = { [weak self] prompt in
             await self?.requestDelegation(prompt)
         }
+        executor.onAsk = { [weak self] prompt in
+            await self?.requestAsk(prompt)
+        }
         executor.onFeedback = { [weak self] message in
             await self?.flashFeedback(message)
+        }
+        askEngine.onThreadExpired = { [weak self] in
+            self?.threadDidExpire()
         }
         monitor.onBegin = { [weak self] mode in
             self?.beginRecording(mode)
@@ -191,13 +211,13 @@ final class DictationCoordinator: ObservableObject {
             )
         }
         monitor.onModeKeyPressed = { [weak self] mode, _ in
-            self?.consumeGateKeyPress(mode) ?? false
+            self?.handleModeKeyPressed(mode) ?? false
         }
         monitor.onModeKeyReleased = { [weak self] mode, _ in
             self?.consumeGateKeyRelease(mode)
         }
         monitor.onEscape = { [weak self] in
-            self?.consumeGateEscape() ?? false
+            self?.handleEscape() ?? false
         }
         recorder?.onInterruption = { [weak self] in
             self?.handleCaptureInterruption()
@@ -278,6 +298,16 @@ final class DictationCoordinator: ObservableObject {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         _ = pasteboard.setString(lastTranscript, forType: .string)
+    }
+
+    func copyLastAnswer() {
+        guard let lastAnswer else {
+            return
+        }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        _ = pasteboard.setString(lastAnswer, forType: .string)
     }
 
     #if DEBUG
@@ -608,7 +638,15 @@ final class DictationCoordinator: ObservableObject {
             activeFocusAnchor = nil
             activeTimeline = nil
             setState(.idle)
-        case .gatePending, .transcriptFlash:
+        case .asking,
+             .askAnswer,
+             .askThreadOpen,
+             .gatePending,
+             .transcriptFlash:
+            answerSpeaker.stopSpeaking(at: .immediate)
+            askEngine.cancel()
+            answerVisibilityTask?.cancel()
+            answerVisibilityTask = nil
             setState(.idle)
         case .idle, .prewarming, .transcribing:
             break
@@ -885,11 +923,22 @@ final class DictationCoordinator: ObservableObject {
                     entries: dictionaryStore.entries
                 ).apply(to: transcript)
                 activeTimeline?.cleaned = timelineClock.now
+
+                if askEngine.hasOpenThread {
+                    await requestAsk(commandTranscript)
+                    return
+                }
+
                 let command = commandRouter.route(commandTranscript)
-                completeTimeline(
-                    at: timelineClock.now,
-                    stage: .commandRouted
-                )
+                if case .ask = command {
+                    // Ask completion owns the timeline so Esc can measure
+                    // cancelRequested → idle while the CLI is in flight.
+                } else {
+                    completeTimeline(
+                        at: timelineClock.now,
+                        stage: .commandRouted
+                    )
+                }
                 await commandExecutor.execute(command)
             }
         } catch is CancellationError {
@@ -960,6 +1009,118 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
+    private func requestAsk(_ prompt: String) async {
+        let isFollowUp = askEngine.hasOpenThread
+        setState(.asking(threadOpen: isFollowUp), mode: .command)
+        let generation = stateGeneration
+
+        do {
+            let result = try await askEngine.ask(
+                prompt: prompt,
+                voiceAnswersEnabled: settings.voiceAnswersEnabled
+            )
+            try Task.checkCancellation()
+            guard generation == stateGeneration,
+                  case .asking = state else {
+                return
+            }
+
+            lastAnswer = result.answer
+            completeTimeline(
+                at: timelineClock.now,
+                stage: .askAnswered
+            )
+            setState(
+                .askAnswer(
+                    result.answer,
+                    threadOpen: result.hasOpenThread
+                ),
+                mode: .command
+            )
+            scheduleAnswerVisibility(
+                threadOpen: result.hasOpenThread
+            )
+
+            if settings.voiceAnswersEnabled {
+                speakAnswer(result.answer)
+            }
+        } catch is CancellationError {
+            return
+        } catch let error as AskEngineError {
+            guard generation == stateGeneration else {
+                return
+            }
+            activeTimeline = nil
+            setState(.idle)
+
+            switch error {
+            case .unknownAgentCLI:
+                await flashFeedback(
+                    "ask needs a known agent cli",
+                    duration: 2
+                )
+            case .timedOut:
+                await flashFeedback("ask timed out")
+            case .cancelled:
+                return
+            case .unableToLaunch, .failed, .emptyAnswer:
+                await flashFeedback("couldn't ask agent")
+            }
+        } catch {
+            guard generation == stateGeneration else {
+                return
+            }
+            activeTimeline = nil
+            setState(.idle)
+            await flashFeedback("couldn't ask agent")
+        }
+    }
+
+    private func scheduleAnswerVisibility(threadOpen: Bool) {
+        answerVisibilityTask?.cancel()
+        let generation = stateGeneration
+        answerVisibilityTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(
+                for: .seconds(AskEngine.answerVisibilityDuration)
+            )
+            guard !Task.isCancelled,
+                  let self,
+                  generation == self.stateGeneration,
+                  case .askAnswer = self.state else {
+                return
+            }
+            self.answerVisibilityTask = nil
+
+            if threadOpen, self.askEngine.hasOpenThread {
+                self.setState(.askThreadOpen, mode: .command)
+            } else {
+                self.setState(.idle)
+            }
+        }
+    }
+
+    private func threadDidExpire() {
+        switch state {
+        case .askAnswer, .askThreadOpen:
+            answerVisibilityTask?.cancel()
+            answerVisibilityTask = nil
+            setState(.idle)
+        case .idle,
+             .prewarming,
+             .recording,
+             .transcribing,
+             .asking,
+             .gatePending,
+             .transcriptFlash:
+            break
+        }
+    }
+
+    private func speakAnswer(_ answer: String) {
+        answerSpeaker.stopSpeaking(at: .immediate)
+        answerSpeaker.speak(AVSpeechUtterance(string: answer))
+    }
+
     private func requestDelegation(_ prompt: String) async {
         let template = settings.agentCommandTemplate
         guard AgentCommandTemplate.isValid(template) else {
@@ -987,6 +1148,88 @@ final class DictationCoordinator: ObservableObject {
             generation: stateGeneration
         )
         scheduleGateTimeout()
+    }
+
+    private func handleModeKeyPressed(
+        _ mode: DictationMode
+    ) -> Bool {
+        answerSpeaker.stopSpeaking(at: .immediate)
+
+        if case .gatePending = state {
+            return consumeGateKeyPress(mode)
+        }
+
+        switch state {
+        case .transcribing, .asking:
+            cancelCurrentInteraction(clearThread: true)
+        case .askAnswer, .askThreadOpen:
+            if mode == .command {
+                askEngine.reserveThreadForUtterance()
+            }
+            answerVisibilityTask?.cancel()
+            answerVisibilityTask = nil
+            setState(.idle)
+        case .transcriptFlash:
+            if mode == .command {
+                askEngine.reserveThreadForUtterance()
+            }
+            cancelCurrentInteraction(clearThread: false)
+        case .idle, .prewarming, .recording:
+            if activeFeedbackGeneration != nil {
+                setState(.idle)
+            }
+        case .gatePending:
+            break
+        }
+
+        return false
+    }
+
+    private func handleEscape() -> Bool {
+        let hasThread = askEngine.hasOpenThread
+        let hasActivePresentation =
+            activeFeedbackGeneration != nil
+            || state != .idle
+            || answerSpeaker.isSpeaking
+            || hasThread
+
+        guard hasActivePresentation, state != .prewarming else {
+            return false
+        }
+
+        cancelCurrentInteraction(clearThread: true)
+        return true
+    }
+
+    private func cancelCurrentInteraction(clearThread: Bool) {
+        let cancelRequested = timelineClock.now
+
+        answerSpeaker.stopSpeaking(at: .immediate)
+        answerVisibilityTask?.cancel()
+        answerVisibilityTask = nil
+        if clearThread {
+            askEngine.cancel()
+        }
+
+        if state == .recording {
+            audioRecorder?.cancel()
+            activeMode = nil
+            activeFocusAnchor = nil
+        }
+
+        pipelineGeneration += 1
+        pipelineTask?.cancel()
+        pipelineTask = nil
+        setState(.idle, fastHUDDismiss: true)
+        let idle = timelineClock.now
+
+        if let timeline = activeTimeline?.cancelled(
+            requestedAt: cancelRequested,
+            idleAt: idle
+        ) {
+            timelineStore.append(timeline)
+        }
+        activeTimeline = nil
     }
 
     private func consumeGateKeyPress(_ mode: DictationMode) -> Bool {
@@ -1048,10 +1291,7 @@ final class DictationCoordinator: ObservableObject {
         case .none:
             return
         case .cancelled:
-            setState(.idle)
-            Task { @MainActor [weak self] in
-                await self?.flashFeedback("cancelled")
-            }
+            setState(.idle, fastHUDDismiss: true)
         case let .confirmed(prompt):
             setState(.idle)
             Task { @MainActor [weak self] in
@@ -1130,7 +1370,8 @@ final class DictationCoordinator: ObservableObject {
 
     private func setState(
         _ newState: State,
-        mode: DictationMode? = nil
+        mode: DictationMode? = nil,
+        fastHUDDismiss: Bool = false
     ) {
         clearDelegationGateForStateReplacement()
         stateGeneration += 1
@@ -1139,7 +1380,7 @@ final class DictationCoordinator: ObservableObject {
         state = newState
         hudViewModel.update(state: newState, mode: mode)
 
-        synchronizeHUD()
+        synchronizeHUD(fastDismiss: fastHUDDismiss)
     }
 
     private func clearDelegationGateForStateReplacement() {
@@ -1148,20 +1389,20 @@ final class DictationCoordinator: ObservableObject {
         _ = delegationGate.cancelForStateReplacement()
     }
 
-    private func synchronizeHUD() {
+    private func synchronizeHUD(fastDismiss: Bool = false) {
         withHUDPanel { [weak self] panel in
             guard let self else {
                 return
             }
 
             if self.isOnboardingPresented {
-                panel.dismiss()
+                panel.dismiss(fast: fastDismiss)
                 return
             }
 
             guard self.activeFeedbackGeneration != nil
                     || self.state != .idle else {
-                panel.dismiss()
+                panel.dismiss(fast: fastDismiss)
                 return
             }
 

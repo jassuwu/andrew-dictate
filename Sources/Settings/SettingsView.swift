@@ -95,7 +95,7 @@ struct SettingsView: View {
                     }
                 }
 
-                settingsSection("dictation") {
+                settingsSection("dictation & ask") {
                     VStack(alignment: .leading, spacing: 13) {
                         settingToggle(
                             "pre-roll",
@@ -111,6 +111,14 @@ struct SettingsView: View {
                                 "plays a subtle cue when listening starts "
                                 + "and stops.",
                             isOn: $settings.soundFeedbackEnabled
+                        )
+                        cardDivider
+                        settingToggle(
+                            "spoken answers",
+                            explanation:
+                                "reads ask answers aloud in two short "
+                                + "spoken sentences.",
+                            isOn: $settings.voiceAnswersEnabled
                         )
                     }
                 }

@@ -14,6 +14,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(settings.onboardingCompleted)
         XCTAssertFalse(settings.preRollEnabled)
         XCTAssertTrue(settings.soundFeedbackEnabled)
+        XCTAssertFalse(settings.voiceAnswersEnabled)
         XCTAssertEqual(settings.dictationHotkey, .dictation)
         XCTAssertEqual(settings.commandHotkey, .command)
         XCTAssertEqual(settings.engineVersion, .v2)
@@ -36,6 +37,7 @@ final class AppSettingsTests: XCTestCase {
         settings.onboardingCompleted = true
         settings.preRollEnabled = true
         settings.soundFeedbackEnabled = false
+        settings.voiceAnswersEnabled = true
         settings.setHotkeyBinding(.leftCommand, for: .dictation)
         settings.setHotkeyBinding(.rightControl, for: .command)
         settings.engineVersion = .v3
@@ -48,6 +50,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(reloaded.onboardingCompleted)
         XCTAssertTrue(reloaded.preRollEnabled)
         XCTAssertFalse(reloaded.soundFeedbackEnabled)
+        XCTAssertTrue(reloaded.voiceAnswersEnabled)
         XCTAssertEqual(reloaded.dictationHotkey, .leftCommand)
         XCTAssertEqual(reloaded.commandHotkey, .rightControl)
         XCTAssertEqual(reloaded.engineVersion, .v3)

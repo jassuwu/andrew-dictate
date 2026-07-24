@@ -17,13 +17,90 @@ enum RoutedCommand: Equatable {
     case typeLiteral(text: String)
     case template(url: URL, label: String)
     case delegate(prompt: String)
+    case ask(prompt: String)
 }
 
 struct CommandRouter {
+    typealias CustomImperativeMatcher = (String) -> Bool
+
     private struct SiteTemplate {
         let baseURLString: String
         let queryItemName: String
     }
+
+    static let imperativeLeadingTokens: Set<String> = [
+        "add",
+        "brew",
+        "build",
+        "bun",
+        "cargo",
+        "checkout",
+        "commit",
+        "configure",
+        "copy",
+        "create",
+        "debug",
+        "delete",
+        "deploy",
+        "docker",
+        "edit",
+        "execute",
+        "fix",
+        "format",
+        "git",
+        "go",
+        "install",
+        "kill",
+        "launch",
+        "lint",
+        "make",
+        "merge",
+        "move",
+        "npm",
+        "open",
+        "pnpm",
+        "publish",
+        "pull",
+        "push",
+        "quit",
+        "rebuild",
+        "refactor",
+        "remove",
+        "rename",
+        "restart",
+        "run",
+        "set",
+        "ship",
+        "start",
+        "stop",
+        "switch",
+        "test",
+        "type",
+        "uninstall",
+        "update",
+        "upgrade",
+        "write",
+        "yarn",
+    ]
+
+    static let questionLeadingTokens: Set<String> = [
+        "are",
+        "can",
+        "could",
+        "does",
+        "explain",
+        "how",
+        "is",
+        "summarize",
+        "tell",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "why",
+        "would",
+    ]
 
     private static let siteTemplates: [String: SiteTemplate] = [
         "chatgpt": SiteTemplate(
@@ -47,6 +124,14 @@ struct CommandRouter {
             queryItemName: "search_query"
         ),
     ]
+
+    private let customImperativeMatcher: CustomImperativeMatcher?
+
+    init(
+        customImperativeMatcher: CustomImperativeMatcher? = nil
+    ) {
+        self.customImperativeMatcher = customImperativeMatcher
+    }
 
     func route(_ transcript: String) -> RoutedCommand {
         if let query = remainder(after: ["open"], in: transcript) {
@@ -92,7 +177,50 @@ struct CommandRouter {
             return command
         }
 
-        return .delegate(prompt: transcript)
+        if Self.isQuestionShape(transcript) {
+            return .ask(prompt: transcript)
+        }
+
+        if Self.isImperativeShape(transcript)
+            || customImperativeMatcher?(transcript) == true {
+            return .delegate(prompt: transcript)
+        }
+
+        return .ask(prompt: transcript)
+    }
+
+    static func isImperativeShape(_ transcript: String) -> Bool {
+        guard let token = normalizedLeadingToken(in: transcript) else {
+            return false
+        }
+        return imperativeLeadingTokens.contains(token)
+    }
+
+    static func isQuestionShape(_ transcript: String) -> Bool {
+        guard let token = normalizedLeadingToken(in: transcript) else {
+            return false
+        }
+        return questionLeadingTokens.contains(token)
+    }
+
+    private static func normalizedLeadingToken(
+        in transcript: String
+    ) -> String? {
+        guard let rawToken = transcript
+            .split(whereSeparator: \.isWhitespace)
+            .first else {
+            return nil
+        }
+
+        let token = rawToken
+            .drop(while: { !$0.isLetter && !$0.isNumber })
+            .reversed()
+            .drop(while: { !$0.isLetter && !$0.isNumber })
+            .reversed()
+        guard !token.isEmpty else {
+            return nil
+        }
+        return String(token).lowercased()
     }
 
     private func routeTemplate(_ transcript: String) -> RoutedCommand? {

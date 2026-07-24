@@ -6,6 +6,7 @@ import SwiftUI
 final class HUDPanel: NSPanel {
     private static let bottomOffset: CGFloat = 80
     private var hudHostingView: NSHostingView<HUDView>?
+    private var visibilityGeneration: UInt64 = 0
 
     override var canBecomeKey: Bool {
         false
@@ -54,13 +55,38 @@ final class HUDPanel: NSPanel {
     }
 
     func present() {
+        visibilityGeneration &+= 1
+        alphaValue = 1
         positionOnPointerScreen()
         invalidateShadow()
         orderFrontRegardless()
     }
 
-    func dismiss() {
-        orderOut(nil)
+    func dismiss(fast: Bool = false) {
+        visibilityGeneration &+= 1
+        let generation = visibilityGeneration
+        guard fast, isVisible else {
+            alphaValue = 1
+            orderOut(nil)
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.12
+            context.timingFunction = CAMediaTimingFunction(
+                name: .easeOut
+            )
+            animator().alphaValue = 0
+        } completionHandler: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      self.visibilityGeneration == generation else {
+                    return
+                }
+                self.orderOut(nil)
+                self.alphaValue = 1
+            }
+        }
     }
 
     func presentationScreenWidth() -> CGFloat {

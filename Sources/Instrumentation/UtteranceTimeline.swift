@@ -8,6 +8,13 @@ struct UtteranceTimeline: Sendable {
         case pasteVerified
         case leftOnPasteboard
         case commandRouted
+        case askAnswered
+        case cancelled
+    }
+
+    struct CancellationStages: Equatable, Sendable {
+        let cancelRequested: Instant
+        let idle: Instant
     }
 
     struct Durations: Equatable, Sendable {
@@ -19,6 +26,29 @@ struct UtteranceTimeline: Sendable {
         let delivery: Duration
         let keyUpToCompletion: Duration
         let total: Duration
+        let cancelToIdle: Duration?
+
+        init(
+            microphoneStartup: Duration,
+            held: Duration,
+            capturedAudio: Duration,
+            transcription: Duration,
+            cleanup: Duration,
+            delivery: Duration,
+            keyUpToCompletion: Duration,
+            total: Duration,
+            cancelToIdle: Duration? = nil
+        ) {
+            self.microphoneStartup = microphoneStartup
+            self.held = held
+            self.capturedAudio = capturedAudio
+            self.transcription = transcription
+            self.cleanup = cleanup
+            self.delivery = delivery
+            self.keyUpToCompletion = keyUpToCompletion
+            self.total = total
+            self.cancelToIdle = cancelToIdle
+        }
     }
 
     let mode: DictationMode
@@ -29,6 +59,29 @@ struct UtteranceTimeline: Sendable {
     let cleaned: Instant
     let completionStage: CompletionStage
     let completed: Instant
+    let cancellationStages: CancellationStages?
+
+    init(
+        mode: DictationMode,
+        keyDown: Instant,
+        micFirstBuffer: Instant,
+        keyUp: Instant,
+        transcriptReady: Instant,
+        cleaned: Instant,
+        completionStage: CompletionStage,
+        completed: Instant,
+        cancellationStages: CancellationStages? = nil
+    ) {
+        self.mode = mode
+        self.keyDown = keyDown
+        self.micFirstBuffer = micFirstBuffer
+        self.keyUp = keyUp
+        self.transcriptReady = transcriptReady
+        self.cleaned = cleaned
+        self.completionStage = completionStage
+        self.completed = completed
+        self.cancellationStages = cancellationStages
+    }
 
     var durations: Durations {
         Durations(
@@ -39,7 +92,10 @@ struct UtteranceTimeline: Sendable {
             cleanup: transcriptReady.duration(to: cleaned),
             delivery: cleaned.duration(to: completed),
             keyUpToCompletion: keyUp.duration(to: completed),
-            total: keyDown.duration(to: completed)
+            total: keyDown.duration(to: completed),
+            cancelToIdle: cancellationStages.map {
+                $0.cancelRequested.duration(to: $0.idle)
+            }
         )
     }
 }
@@ -75,6 +131,31 @@ struct UtteranceTimelineBuilder {
             cleaned: cleaned,
             completionStage: completionStage,
             completed: completed
+        )
+    }
+
+    func cancelled(
+        requestedAt: Instant,
+        idleAt: Instant
+    ) -> UtteranceTimeline {
+        let effectiveMicFirstBuffer = micFirstBuffer ?? keyDown
+        let effectiveKeyUp = keyUp ?? requestedAt
+        let effectiveTranscriptReady = transcriptReady ?? requestedAt
+        let effectiveCleaned = cleaned ?? requestedAt
+
+        return UtteranceTimeline(
+            mode: mode,
+            keyDown: keyDown,
+            micFirstBuffer: effectiveMicFirstBuffer,
+            keyUp: effectiveKeyUp,
+            transcriptReady: effectiveTranscriptReady,
+            cleaned: effectiveCleaned,
+            completionStage: .cancelled,
+            completed: idleAt,
+            cancellationStages: .init(
+                cancelRequested: requestedAt,
+                idle: idleAt
+            )
         )
     }
 }
@@ -113,6 +194,7 @@ final class UtteranceTimelineStore {
             "deliver_ms=\(Self.milliseconds(durations.delivery))",
             "keyup_done_ms=\(Self.milliseconds(durations.keyUpToCompletion))",
             "total_ms=\(Self.milliseconds(durations.total))",
+            "cancel_idle_ms=\(Self.milliseconds(durations.cancelToIdle))",
         ].joined(separator: " ")
         Self.logger.info("\(line, privacy: .public)")
     }
@@ -130,6 +212,7 @@ final class UtteranceTimelineStore {
             "deliver ms",
             "keyup→done ms",
             "total ms",
+            "cancel→idle ms",
         ].joined(separator: "\t")
 
         let rows = orderedTimelines.enumerated().map { offset, timeline in
@@ -146,6 +229,7 @@ final class UtteranceTimelineStore {
                 Self.milliseconds(durations.delivery),
                 Self.milliseconds(durations.keyUpToCompletion),
                 Self.milliseconds(durations.total),
+                Self.milliseconds(durations.cancelToIdle),
             ].joined(separator: "\t")
         }
 
@@ -169,5 +253,12 @@ final class UtteranceTimelineStore {
             Double(components.seconds) * 1_000
             + Double(components.attoseconds) / 1_000_000_000_000_000
         return String(format: "%.1f", milliseconds)
+    }
+
+    private static func milliseconds(_ duration: Duration?) -> String {
+        guard let duration else {
+            return "—"
+        }
+        return milliseconds(duration)
     }
 }

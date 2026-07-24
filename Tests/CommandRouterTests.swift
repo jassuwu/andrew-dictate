@@ -92,7 +92,7 @@ final class CommandRouterTests: XCTestCase {
     func testVerbMustBeAWholeLeadingWord() {
         XCTAssertEqual(
             router.route("opening Arc"),
-            .delegate(prompt: "opening Arc")
+            .ask(prompt: "opening Arc")
         )
     }
 
@@ -178,22 +178,22 @@ final class CommandRouterTests: XCTestCase {
     func testTemplateRequiresANonemptyQuery() {
         XCTAssertEqual(
             router.route("google"),
-            .delegate(prompt: "google")
+            .ask(prompt: "google")
         )
         XCTAssertEqual(
             router.route("google search"),
-            .delegate(prompt: "google search")
+            .ask(prompt: "google search")
         )
     }
 
     func testTemplateRequiresTheKnownSiteAsTheExactFirstWord() {
         XCTAssertEqual(
             router.route("googley swift actors"),
-            .delegate(prompt: "googley swift actors")
+            .ask(prompt: "googley swift actors")
         )
         XCTAssertEqual(
             router.route("please google swift actors"),
-            .delegate(prompt: "please google swift actors")
+            .ask(prompt: "please google swift actors")
         )
     }
 
@@ -222,19 +222,80 @@ final class CommandRouterTests: XCTestCase {
         XCTAssertTrue(command.url.absoluteString.contains("%23"))
     }
 
-    func testUnknownInputDelegatesUnchanged() {
+    func testImperativeInputDelegatesUnchanged() {
         XCTAssertEqual(
             router.route("brew install arc"),
             .delegate(prompt: "brew install arc")
         )
     }
 
-    func testEmptyWhitespaceAndGarbageInputsDelegateUnchanged() {
-        XCTAssertEqual(router.route(""), .delegate(prompt: ""))
-        XCTAssertEqual(router.route("   \n"), .delegate(prompt: "   \n"))
+    func testEmptyWhitespaceAndGarbageInputsAskUnchanged() {
+        XCTAssertEqual(router.route(""), .ask(prompt: ""))
+        XCTAssertEqual(router.route("   \n"), .ask(prompt: "   \n"))
         XCTAssertEqual(
             router.route("?! 123"),
-            .delegate(prompt: "?! 123")
+            .ask(prompt: "?! 123")
+        )
+    }
+
+    func testAskActJudgmentTable() {
+        let cases: [(String, RoutedCommand)] = [
+            ("what is actor isolation", .ask(prompt: "what is actor isolation")),
+            ("why did the build fail", .ask(prompt: "why did the build fail")),
+            ("how do I undo this", .ask(prompt: "how do I undo this")),
+            ("is docker running", .ask(prompt: "is docker running")),
+            ("can you run the tests", .ask(prompt: "can you run the tests")),
+            ("explain git rebase", .ask(prompt: "explain git rebase")),
+            ("summarize this project", .ask(prompt: "summarize this project")),
+            ("tell me whether to deploy", .ask(prompt: "tell me whether to deploy")),
+            ("status of the build", .ask(prompt: "status of the build")),
+            ("please deploy the app", .ask(prompt: "please deploy the app")),
+            ("run the tests", .delegate(prompt: "run the tests")),
+            ("build status", .delegate(prompt: "build status")),
+            ("restart?", .delegate(prompt: "restart?")),
+            ("fix what is broken", .delegate(prompt: "fix what is broken")),
+            ("git status", .delegate(prompt: "git status")),
+            ("docker compose up", .delegate(prompt: "docker compose up")),
+            ("npm install", .delegate(prompt: "npm install")),
+            ("delete the cache", .delegate(prompt: "delete the cache")),
+            ("write a release note", .delegate(prompt: "write a release note")),
+            ("maybe the cache is stale", .ask(prompt: "maybe the cache is stale")),
+        ]
+
+        for (phrase, expected) in cases {
+            XCTAssertEqual(
+                router.route(phrase),
+                expected,
+                "unexpected route for '\(phrase)'"
+            )
+        }
+    }
+
+    func testImperativeDetectorUsesOnlyTheNormalizedLeadingToken() {
+        XCTAssertTrue(CommandRouter.isImperativeShape("  RUN tests"))
+        XCTAssertTrue(CommandRouter.isImperativeShape("“docker” ps"))
+        XCTAssertTrue(CommandRouter.isImperativeShape("delete?"))
+        XCTAssertFalse(CommandRouter.isImperativeShape("running tests"))
+        XCTAssertFalse(CommandRouter.isImperativeShape("please run tests"))
+        XCTAssertFalse(CommandRouter.isImperativeShape(""))
+    }
+
+    func testQuestionDetectorUsesWholeLeadingTokens() {
+        XCTAssertTrue(CommandRouter.isQuestionShape("  WHAT now"))
+        XCTAssertTrue(CommandRouter.isQuestionShape("“explain:” actors"))
+        XCTAssertTrue(CommandRouter.isQuestionShape("can build finish"))
+        XCTAssertFalse(CommandRouter.isQuestionShape("whatever works"))
+        XCTAssertFalse(CommandRouter.isQuestionShape("please explain actors"))
+        XCTAssertFalse(CommandRouter.isQuestionShape("?!"))
+    }
+
+    func testCustomImperativeMatcherIsACleanFutureSeam() {
+        let customRouter = CommandRouter {
+            $0.lowercased().hasPrefix("andrew please ")
+        }
+        XCTAssertEqual(
+            customRouter.route("andrew please archive this"),
+            .delegate(prompt: "andrew please archive this")
         )
     }
 
