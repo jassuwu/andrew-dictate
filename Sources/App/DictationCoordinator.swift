@@ -66,7 +66,26 @@ final class DictationCoordinator: ObservableObject {
     private let agentDelegator: AgentDelegator
     private let audioRecorder: AudioRecorder?
     private let hudViewModel: HUDViewModel
-    private let hudPanel: HUDPanel
+    private var hudPanelStorage: HUDPanel?
+
+    /// The HUD panel must never be created or touched synchronously from a
+    /// SwiftUI transaction: the coordinator is built inside @StateObject init
+    /// (itself inside a MenuBarExtra graph update), and constructing/ordering
+    /// an NSHostingView there nests AttributeGraph updates and aborts.
+    /// All panel work therefore hops to the next main-run-loop turn.
+    private func withHUDPanel(_ action: @escaping (HUDPanel) -> Void) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let panel: HUDPanel
+            if let existing = self.hudPanelStorage {
+                panel = existing
+            } else {
+                panel = HUDPanel(viewModel: self.hudViewModel)
+                self.hudPanelStorage = panel
+            }
+            action(panel)
+        }
+    }
     private var isPrewarmed = false
     private var activeMode: DictationMode?
     private var activeFocusAnchor: FocusAnchor?
@@ -123,8 +142,6 @@ final class DictationCoordinator: ObservableObject {
             audioRecorder: recorder
         )
         hudViewModel = viewModel
-        let panel = HUDPanel(viewModel: viewModel)
-        hudPanel = panel
         let executor = CommandExecutor(
             paster: paster
         )
@@ -337,7 +354,7 @@ final class DictationCoordinator: ObservableObject {
     private func presentOnboarding() {
         isOnboardingPresented = true
         hotkeyMonitor.setDetectionOnly(false)
-        hudPanel.dismiss()
+        withHUDPanel { $0.dismiss() }
 
         if let onboardingWindowController {
             onboardingWindowController.present()
@@ -1075,11 +1092,11 @@ final class DictationCoordinator: ObservableObject {
 
     private func synchronizeHUD() {
         if isOnboardingPresented {
-            hudPanel.dismiss()
+            withHUDPanel { $0.dismiss() }
         } else if activeFeedbackGeneration != nil || state != .idle {
-            hudPanel.present()
+            withHUDPanel { $0.present() }
         } else {
-            hudPanel.dismiss()
+            withHUDPanel { $0.dismiss() }
         }
     }
 }

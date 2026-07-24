@@ -31,13 +31,17 @@ final class HUDPanel: NSPanel {
         isReleasedWhenClosed = false
 
         let hostingView = NSHostingView(rootView: HUDView(viewModel: viewModel))
-        hostingView.sizingOptions = [.intrinsicContentSize]
+        // fixed size, no forced layout: measuring the hosting view here starts a
+        // nested AttributeGraph update, which aborts if a SwiftUI update is already
+        // in flight. the capsule is constant-size by design (HUDView.panelSize).
+        hostingView.sizingOptions = []
+        let size = NSSize(
+            width: HUDView.panelSize.width,
+            height: HUDView.panelSize.height
+        )
         contentView = hostingView
-        hostingView.layoutSubtreeIfNeeded()
-
-        let fittedSize = hostingView.fittingSize
-        setContentSize(fittedSize)
-        hostingView.frame = NSRect(origin: .zero, size: fittedSize)
+        setContentSize(size)
+        hostingView.frame = NSRect(origin: .zero, size: size)
     }
 
     func present() {
