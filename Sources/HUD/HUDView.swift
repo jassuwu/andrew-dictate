@@ -5,6 +5,8 @@ final class HUDViewModel: ObservableObject {
     @Published private(set) var state: DictationCoordinator.State
     @Published private(set) var commandFeedback: String?
     @Published private(set) var mode: DictationMode?
+    @Published private(set) var layout: HUDLayout
+    @Published private(set) var presentationGeneration = 0
     @Published private(set) var levelRing = BrandLineLevelRing()
     @Published private(set) var waveTransitionStartedAt = Date()
 
@@ -17,6 +19,37 @@ final class HUDViewModel: ObservableObject {
     ) {
         self.state = state
         self.audioRecorder = audioRecorder
+        layout = HUDLayoutEngine.layout(
+            for: .prewarming,
+            screenWidth: 1_440
+        )
+    }
+
+    var content: HUDContent {
+        if let commandFeedback {
+            return .text(
+                primary: commandFeedback,
+                secondary: nil
+            )
+        }
+
+        switch state {
+        case .idle, .recording, .transcribing:
+            return .wave
+        case .prewarming:
+            return .prewarming
+        case let .gatePending(
+            commandPreview,
+            confirmationKeyName
+        ):
+            return .text(
+                primary: commandPreview,
+                secondary:
+                    "tap \(confirmationKeyName) to run · esc to cancel"
+            )
+        case let .transcriptFlash(transcript):
+            return .text(primary: transcript, secondary: nil)
+        }
     }
 
     func update(
@@ -41,14 +74,24 @@ final class HUDViewModel: ObservableObject {
         )
         self.state = state
         commandFeedback = nil
+        presentationGeneration += 1
     }
 
     func showCommandFeedback(_ message: String) {
         commandFeedback = message
+        presentationGeneration += 1
     }
 
     func clearCommandFeedback() {
         commandFeedback = nil
+        presentationGeneration += 1
+    }
+
+    func updateLayout(_ layout: HUDLayout) {
+        guard layout != self.layout else {
+            return
+        }
+        self.layout = layout
     }
 
     private func configureLevelSampling(
@@ -93,40 +136,53 @@ final class HUDViewModel: ObservableObject {
 }
 
 struct HUDView: View {
-    static let panelSize = CGSize(width: 180, height: 44)
-
-    private static let capsuleSize = CGSize(width: 180, height: 44)
-
     @ObservedObject var viewModel: HUDViewModel
 
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
+
     var body: some View {
-        Group {
-            if let commandFeedback = viewModel.commandFeedback {
-                feedbackPill(commandFeedback)
-            } else {
-                switch viewModel.state {
-                case .idle:
-                    EmptyView()
-                case .prewarming:
-                    prewarmingPill
-                case .recording:
-                    livePill(phase: .recording)
-                case .transcribing:
-                    livePill(phase: .transcribing)
-                case let .gatePending(
-                    commandPreview,
-                    confirmationKeyName
-                ):
-                    gatePill(
-                        commandPreview: commandPreview,
-                        confirmationKeyName: confirmationKeyName
-                    )
+        ZStack {
+            Group {
+                if let commandFeedback = viewModel.commandFeedback {
+                    textPill(commandFeedback)
+                } else {
+                    switch viewModel.state {
+                    case .idle:
+                        EmptyView()
+                    case .prewarming:
+                        prewarmingPill
+                    case .recording:
+                        livePill(phase: .recording)
+                    case .transcribing:
+                        livePill(phase: .transcribing)
+                    case let .gatePending(
+                        commandPreview,
+                        confirmationKeyName
+                    ):
+                        gatePill(
+                            commandPreview: commandPreview,
+                            confirmationKeyName: confirmationKeyName
+                        )
+                    case let .transcriptFlash(transcript):
+                        textPill(transcript)
+                    }
                 }
             }
+            .id(viewModel.presentationGeneration)
+            .transition(
+                .opacity.combined(with: .scale(scale: 0.94))
+            )
         }
+        .animation(
+            reduceMotion
+                ? nil
+                : .snappy(duration: 0.32, extraBounce: 0.12),
+            value: viewModel.presentationGeneration
+        )
         .frame(
-            width: Self.panelSize.width,
-            height: Self.panelSize.height
+            width: viewModel.layout.size.width,
+            height: viewModel.layout.size.height
         )
     }
 
@@ -164,14 +220,18 @@ struct HUDView: View {
         )
     }
 
-    private func feedbackPill(_ message: String) -> some View {
+    private func textPill(_ message: String) -> some View {
         capsule {
             Text(message)
-                .font(.system(size: 12, weight: .medium))
+                .font(Font(HUDLayoutEngine.primaryFont))
                 .foregroundStyle(HUDGold.pale)
-                .lineLimit(1)
+                .lineLimit(viewModel.layout.lineCount)
+                .lineSpacing(HUDLayoutEngine.wrappedLineSpacing)
                 .truncationMode(.tail)
-                .padding(.horizontal, 14)
+                .padding(
+                    .horizontal,
+                    HUDLayoutEngine.horizontalPadding
+                )
         }
     }
 
@@ -182,20 +242,24 @@ struct HUDView: View {
         capsule {
             VStack(alignment: .leading, spacing: 2) {
                 Text(commandPreview)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(Font(HUDLayoutEngine.primaryFont))
                     .foregroundStyle(HUDGold.pale)
-                    .lineLimit(1)
+                    .lineLimit(viewModel.layout.lineCount)
+                    .lineSpacing(HUDLayoutEngine.wrappedLineSpacing)
                     .truncationMode(.tail)
 
                 Text(
                     "tap \(confirmationKeyName) to run · esc to cancel"
                 )
-                .font(.system(size: 9.5, weight: .regular))
+                .font(Font(HUDLayoutEngine.secondaryFont))
                 .foregroundStyle(HUDGold.pale.opacity(0.68))
                 .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14)
+            .padding(
+                .horizontal,
+                HUDLayoutEngine.horizontalPadding
+            )
         }
     }
 
@@ -204,18 +268,26 @@ struct HUDView: View {
     ) -> some View {
         content()
             .frame(
-                width: Self.capsuleSize.width,
-                height: Self.capsuleSize.height
+                width: viewModel.layout.size.width,
+                height: viewModel.layout.size.height
             )
             .background {
                 ZStack {
                     HUDGlassBackground()
                     HUDGold.black.opacity(0.22)
                 }
-                .clipShape(Capsule())
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: 22,
+                        style: .continuous
+                    )
+                )
             }
             .overlay {
-                Capsule()
+                RoundedRectangle(
+                    cornerRadius: 22,
+                    style: .continuous
+                )
                     .stroke(
                         HUDGold.mid.opacity(
                             isCommandMode ? 0.70 : 0.35

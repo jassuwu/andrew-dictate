@@ -1,9 +1,11 @@
 import AppKit
+import QuartzCore
 import SwiftUI
 
 @MainActor
 final class HUDPanel: NSPanel {
     private static let bottomOffset: CGFloat = 80
+    private var hudHostingView: NSHostingView<HUDView>?
 
     override var canBecomeKey: Bool {
         false
@@ -30,22 +32,22 @@ final class HUDPanel: NSPanel {
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
 
-        let hostingView = NSHostingView(rootView: HUDView(viewModel: viewModel))
-        // fixed size, no forced layout: measuring the hosting view here starts a
-        // nested AttributeGraph update, which aborts if a SwiftUI update is already
-        // in flight. the capsule is constant-size by design (HUDView.panelSize).
-        hostingView.sizingOptions = []
-        let size = NSSize(
-            width: HUDView.panelSize.width,
-            height: HUDView.panelSize.height
+        let hostingView = NSHostingView(
+            rootView: HUDView(viewModel: viewModel)
         )
+        // Never ask the hosting view to measure itself. The layout engine is the
+        // sole source of truth for both this view and the panel frame.
+        hostingView.sizingOptions = []
+        let size = HUDLayoutEngine.minimumSize
         // the window IS the capsule: behind-window blur composites over the whole
         // window rect regardless of SwiftUI clipping, so the only reliable shape
-        // is the window itself — exact capsule size, layer-rounded and masked.
+        // is the window itself — exact HUD size, layer-rounded and masked.
         hostingView.wantsLayer = true
-        hostingView.layer?.cornerRadius = size.height / 2
+        hostingView.layer?.cornerRadius = min(size.height, 44) / 2
         hostingView.layer?.cornerCurve = .continuous
         hostingView.layer?.masksToBounds = true
+        hostingView.autoresizingMask = [.width, .height]
+        hudHostingView = hostingView
         contentView = hostingView
         setContentSize(size)
         hostingView.frame = NSRect(origin: .zero, size: size)
@@ -61,13 +63,48 @@ final class HUDPanel: NSPanel {
         orderOut(nil)
     }
 
-    private func positionOnPointerScreen() {
-        let pointerLocation = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first {
-            NSMouseInRect(pointerLocation, $0.frame, false)
-        } ?? NSScreen.main
+    func presentationScreenWidth() -> CGFloat {
+        pointerScreen()?.frame.width
+            ?? NSScreen.main?.frame.width
+            ?? 1_440
+    }
 
-        guard let screen else {
+    func morph(to size: CGSize, animated: Bool) {
+        let targetFrame = NSRect(
+            x: frame.midX - size.width / 2,
+            y: frame.minY,
+            width: size.width,
+            height: size.height
+        )
+        let hostingFrame = NSRect(origin: .zero, size: size)
+        let cornerRadius = min(size.height, 44) / 2
+
+        guard animated else {
+            setFrame(targetFrame, display: true)
+            hudHostingView?.frame = hostingFrame
+            hudHostingView?.layer?.cornerRadius = cornerRadius
+            invalidateShadow()
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.32
+            context.timingFunction = CAMediaTimingFunction(
+                controlPoints: 0.2,
+                1.3,
+                0.3,
+                1
+            )
+            context.allowsImplicitAnimation = true
+            animator().setFrame(targetFrame, display: true)
+            hudHostingView?.animator().frame = hostingFrame
+            hudHostingView?.layer?.cornerRadius = cornerRadius
+        }
+        invalidateShadow()
+    }
+
+    private func positionOnPointerScreen() {
+        guard let screen = pointerScreen() else {
             return
         }
 
@@ -77,5 +114,12 @@ final class HUDPanel: NSPanel {
             y: visibleFrame.minY + Self.bottomOffset
         )
         setFrameOrigin(origin)
+    }
+
+    private func pointerScreen() -> NSScreen? {
+        let pointerLocation = NSEvent.mouseLocation
+        return NSScreen.screens.first {
+            NSMouseInRect(pointerLocation, $0.frame, false)
+        } ?? NSScreen.main
     }
 }

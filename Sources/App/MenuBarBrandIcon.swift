@@ -19,7 +19,7 @@ enum MenuBarBrandIcon {
             return brandImage(isRecording: false)
         case .recording:
             return brandImage(isRecording: true)
-        case .idle, .prewarming, .gatePending:
+        case .idle, .prewarming, .gatePending, .transcriptFlash:
             return brandImage(isRecording: false)
         }
     }

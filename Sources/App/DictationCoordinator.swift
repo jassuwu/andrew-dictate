@@ -31,6 +31,7 @@ final class DictationCoordinator: ObservableObject {
             commandPreview: String,
             confirmationKeyName: String
         )
+        case transcriptFlash(String)
 
         var displayName: String {
             switch self {
@@ -44,6 +45,8 @@ final class DictationCoordinator: ObservableObject {
                 "transcribing"
             case .gatePending:
                 "gate pending"
+            case .transcriptFlash:
+                "transcript flash"
             }
         }
 
@@ -609,7 +612,7 @@ final class DictationCoordinator: ObservableObject {
             activeFocusAnchor = nil
             activeTimeline = nil
             setState(.idle)
-        case .gatePending:
+        case .gatePending, .transcriptFlash:
             setState(.idle)
         case .idle, .prewarming, .transcribing:
             break
@@ -662,7 +665,7 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func beginRecording(_ mode: DictationMode) {
-        if state == .transcribing {
+        if state == .transcribing || state.isTranscriptFlash {
             invalidatePipeline()
             setState(.idle)
         }
@@ -841,6 +844,7 @@ final class DictationCoordinator: ObservableObject {
                     return
                 }
                 lastTranscript = cleanedTranscript
+                showTranscriptFlash(cleanedTranscript)
                 let pasteResult = await paster.paste(
                     cleanedTranscript,
                     reasonForLeavingOnPasteboard: {
@@ -875,6 +879,7 @@ final class DictationCoordinator: ObservableObject {
                         at: timelineClock.now,
                         stage: .leftOnPasteboard
                     )
+                    setState(.idle)
                     await flashFeedback(
                         feedbackMessage(for: reason)
                     )
@@ -941,6 +946,21 @@ final class DictationCoordinator: ObservableObject {
         pipelineTask = nil
         if state == .transcribing {
             setState(.idle)
+        }
+    }
+
+    private func showTranscriptFlash(_ transcript: String) {
+        setState(.transcriptFlash(transcript))
+        let generation = stateGeneration
+
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1.2))
+            guard let self,
+                  generation == self.stateGeneration,
+                  case .transcriptFlash = self.state else {
+                return
+            }
+            self.setState(.idle)
         }
     }
 
@@ -1133,12 +1153,43 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func synchronizeHUD() {
-        if isOnboardingPresented {
-            withHUDPanel { $0.dismiss() }
-        } else if activeFeedbackGeneration != nil || state != .idle {
-            withHUDPanel { $0.present() }
-        } else {
-            withHUDPanel { $0.dismiss() }
+        withHUDPanel { [weak self] panel in
+            guard let self else {
+                return
+            }
+
+            if self.isOnboardingPresented {
+                panel.dismiss()
+                return
+            }
+
+            guard self.activeFeedbackGeneration != nil
+                    || self.state != .idle else {
+                panel.dismiss()
+                return
+            }
+
+            let screenWidth = panel.presentationScreenWidth()
+            let layout = HUDLayoutEngine.layout(
+                for: self.hudViewModel.content,
+                screenWidth: screenWidth
+            )
+            panel.present()
+            self.hudViewModel.updateLayout(layout)
+            panel.morph(
+                to: layout.size,
+                animated: !NSWorkspace.shared
+                    .accessibilityDisplayShouldReduceMotion
+            )
         }
+    }
+}
+
+private extension DictationCoordinator.State {
+    var isTranscriptFlash: Bool {
+        if case .transcriptFlash = self {
+            return true
+        }
+        return false
     }
 }
