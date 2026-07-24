@@ -49,10 +49,31 @@ jobs:
           xcodebuild -project AndrewDictate.xcodeproj -scheme AndrewDictate \
             -configuration Release build -derivedDataPath .build
 
+      - name: sign
+        env:
+          SIGNING_CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: |
+          APP=".build/Build/Products/Release/Andrew Dictate.app"
+          if [ -n "$SIGNING_CERT_P12" ]; then
+            # stable self-signed identity: keeps the TCC designated requirement
+            # constant across releases so accessibility grants survive updates
+            echo "$SIGNING_CERT_P12" | base64 -d > /tmp/sign.p12
+            security create-keychain -p "" build.keychain
+            security default-keychain -s build.keychain
+            security unlock-keychain -p "" build.keychain
+            security import /tmp/sign.p12 -k build.keychain -P "$SIGNING_CERT_PASSWORD" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain > /dev/null
+            codesign --force --deep -s "Andrew Dictate Signing" "$APP"
+            rm -f /tmp/sign.p12
+          else
+            echo "no signing cert secret — falling back to ad-hoc"
+            codesign --force --deep -s - "$APP"
+          fi
+
       - name: dmg
         run: |
           APP=".build/Build/Products/Release/Andrew Dictate.app"
-          codesign --force --deep -s - "$APP"
           STAGE="$(mktemp -d)"
           cp -R "$APP" "$STAGE/"
           ln -s /Applications "$STAGE/Applications"
