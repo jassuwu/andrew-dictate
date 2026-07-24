@@ -61,6 +61,7 @@ struct UtteranceTimeline: Sendable {
     let transcriptReady: Instant
     let cleaned: Instant
     let polished: Instant
+    let polishGateDecision: Bool?
     let completionStage: CompletionStage
     let completed: Instant
     let cancellationStages: CancellationStages?
@@ -73,6 +74,7 @@ struct UtteranceTimeline: Sendable {
         transcriptReady: Instant,
         cleaned: Instant,
         polished: Instant? = nil,
+        polishGateDecision: Bool? = nil,
         completionStage: CompletionStage,
         completed: Instant,
         cancellationStages: CancellationStages? = nil
@@ -84,6 +86,7 @@ struct UtteranceTimeline: Sendable {
         self.transcriptReady = transcriptReady
         self.cleaned = cleaned
         self.polished = polished ?? cleaned
+        self.polishGateDecision = polishGateDecision
         self.completionStage = completionStage
         self.completed = completed
         self.cancellationStages = cancellationStages
@@ -118,6 +121,7 @@ struct UtteranceTimelineBuilder {
     var transcriptReady: Instant?
     var cleaned: Instant?
     var polished: Instant?
+    var polishGateDecision: Bool?
 
     func complete(
         _ completionStage: UtteranceTimeline.CompletionStage,
@@ -139,6 +143,7 @@ struct UtteranceTimelineBuilder {
             transcriptReady: transcriptReady,
             cleaned: cleaned,
             polished: polished,
+            polishGateDecision: polishGateDecision,
             completionStage: completionStage,
             completed: completed
         )
@@ -162,6 +167,7 @@ struct UtteranceTimelineBuilder {
             transcriptReady: effectiveTranscriptReady,
             cleaned: effectiveCleaned,
             polished: effectivePolished,
+            polishGateDecision: polishGateDecision,
             completionStage: .cancelled,
             completed: idleAt,
             cancellationStages: .init(
@@ -203,6 +209,7 @@ final class UtteranceTimelineStore {
             "audio_ms=\(Self.milliseconds(durations.capturedAudio))",
             "stt_ms=\(Self.milliseconds(durations.transcription))",
             "clean_ms=\(Self.milliseconds(durations.cleanup))",
+            "polish_gate=\(Self.boolean(timeline.polishGateDecision))",
             "polish_ms=\(Self.milliseconds(durations.polish))",
             "deliver_ms=\(Self.milliseconds(durations.delivery))",
             "keyup_done_ms=\(Self.milliseconds(durations.keyUpToCompletion))",
@@ -222,6 +229,7 @@ final class UtteranceTimelineStore {
             "audio ms",
             "stt ms",
             "clean ms",
+            "polish gate",
             "polish ms",
             "deliver ms",
             "keyup→done ms",
@@ -240,6 +248,7 @@ final class UtteranceTimelineStore {
                 Self.milliseconds(durations.capturedAudio),
                 Self.milliseconds(durations.transcription),
                 Self.milliseconds(durations.cleanup),
+                Self.boolean(timeline.polishGateDecision),
                 Self.milliseconds(durations.polish),
                 Self.milliseconds(durations.delivery),
                 Self.milliseconds(durations.keyUpToCompletion),
@@ -275,5 +284,9 @@ final class UtteranceTimelineStore {
             return "—"
         }
         return milliseconds(duration)
+    }
+
+    private static func boolean(_ value: Bool?) -> String {
+        value.map { String($0) } ?? "—"
     }
 }

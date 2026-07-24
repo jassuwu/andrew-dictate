@@ -58,4 +58,26 @@ final class UtteranceTimelineTests: XCTestCase {
             .milliseconds(40)
         )
     }
+
+    func testPolishGateDecisionIsRetainedByBuilder() {
+        let keyDown = ContinuousClock.now
+        var builder = UtteranceTimelineBuilder(
+            id: 1,
+            mode: .dictation,
+            keyDown: keyDown
+        )
+        builder.micFirstBuffer = keyDown
+        builder.keyUp = keyDown
+        builder.transcriptReady = keyDown
+        builder.cleaned = keyDown
+        builder.polished = keyDown
+        builder.polishGateDecision = false
+
+        let timeline = builder.complete(
+            .pasteVerified,
+            at: keyDown
+        )
+
+        XCTAssertEqual(timeline?.polishGateDecision, false)
+    }
 }

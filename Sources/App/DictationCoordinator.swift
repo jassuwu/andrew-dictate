@@ -1108,6 +1108,13 @@ final class DictationCoordinator: ObservableObject {
 
             switch mode {
             case .dictation:
+                let rawHadCorrections = SelfCorrections.containsMarker(
+                    in: transcript
+                )
+                let rawHadDuplicates =
+                    RepetitionCollapse.containsImmediateDuplicate(
+                        in: transcript
+                    )
                 let cleaner = DeterministicCleaner(
                     entries: dictionaryStore.entries
                 )
@@ -1125,39 +1132,53 @@ final class DictationCoordinator: ObservableObject {
                     activeTimeline?.polished = timelineClock.now
                     pasteTranscript = rawTranscript
                 case .on, .always:
-                    // on: tight budget, raw on timeout. always: waits, with a
-                    // hard safety ceiling so a hung model can't eat a dictation.
-                    let budget: Duration = settings.cleanupMode == .on
-                        ? .milliseconds(600)
-                        : .seconds(15)
-                    let timedResult = await polishWithinDeadline(
+                    let protectedTerms = cleanupProtectedTerms()
+                    let shouldPolish = MessyGate().shouldPolish(
                         rawTranscript,
-                        protectedTerms: cleanupProtectedTerms(),
-                        using: transcriptPolisher,
-                        deadline: transcriptReady.advanced(by: budget)
+                        rawHadCorrections: rawHadCorrections,
+                        rawHadDuplicates: rawHadDuplicates,
+                        dictionaryTerms: protectedTerms
                     )
-                    try Task.checkCancellation()
-                    guard generation == pipelineGeneration else {
-                        return
-                    }
-                    activeTimeline?.polished = timelineClock.now
-                    let pasteChoice = cleanupPasteChoice(
-                        raw: rawTranscript,
-                        polishResult: timedResult.result,
-                        deadline: timedResult.deadline
-                    )
-                    pasteTranscript = pasteChoice.text
-                    if pasteChoice.text != rawTranscript {
-                        logCleanupPair(
+                    activeTimeline?.polishGateDecision = shouldPolish
+                    if shouldPolish {
+                        // on: tight budget, raw on timeout. always: waits,
+                        // with a hard ceiling so a hung model cannot consume
+                        // an entire dictation interaction.
+                        let budget: Duration = settings.cleanupMode == .on
+                            ? .milliseconds(600)
+                            : .seconds(15)
+                        let timedResult = await polishWithinDeadline(
+                            rawTranscript,
+                            protectedTerms: protectedTerms,
+                            using: transcriptPolisher,
+                            deadline: transcriptReady.advanced(by: budget)
+                        )
+                        try Task.checkCancellation()
+                        guard generation == pipelineGeneration else {
+                            return
+                        }
+                        activeTimeline?.polished = timelineClock.now
+                        let pasteChoice = cleanupPasteChoice(
                             raw: rawTranscript,
-                            cleaned: pasteChoice.text,
-                            started: transcriptReady
+                            polishResult: timedResult.result,
+                            deadline: timedResult.deadline
                         )
-                    }
-                    if timedResult.result == .failure {
-                        cleanupLogger.notice(
-                            "foreground polish fell back to raw"
-                        )
+                        pasteTranscript = pasteChoice.text
+                        if pasteChoice.text != rawTranscript {
+                            logCleanupPair(
+                                raw: rawTranscript,
+                                cleaned: pasteChoice.text,
+                                started: transcriptReady
+                            )
+                        }
+                        if timedResult.result == .failure {
+                            cleanupLogger.notice(
+                                "foreground polish fell back to raw"
+                            )
+                        }
+                    } else {
+                        activeTimeline?.polished = timelineClock.now
+                        pasteTranscript = rawTranscript
                     }
                 }
 
