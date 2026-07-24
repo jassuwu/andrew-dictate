@@ -23,6 +23,27 @@ enum EngineVersion: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum CleanupMode: String, CaseIterable, Identifiable, Sendable {
+    case off
+    case on
+    case always
+
+    var id: Self {
+        self
+    }
+
+    var explanation: String {
+        switch self {
+        case .off:
+            "uses deterministic cleanup only."
+        case .on:
+            "cleans when it's fast enough, raw otherwise."
+        case .always:
+            "waits for the clean version."
+        }
+    }
+}
+
 struct ModelRemovalDecision: Equatable, Sendable {
     let isAllowed: Bool
     let requiresRepreparation: Bool
@@ -119,6 +140,18 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var cleanupMode: CleanupMode {
+        didSet {
+            guard cleanupMode != oldValue else {
+                return
+            }
+            userDefaults.set(
+                cleanupMode.rawValue,
+                forKey: Self.cleanupModeKey
+            )
+        }
+    }
+
     @Published var agentCommandTemplate: String {
         didSet {
             guard agentCommandTemplate != oldValue else {
@@ -168,6 +201,7 @@ final class AppSettings: ObservableObject {
     private static let voiceAnswersKey =
         "AndrewDictate.voiceAnswersEnabled"
     private static let engineVersionKey = "AndrewDictate.engineVersion"
+    private static let cleanupModeKey = "AndrewDictate.cleanupMode"
     private static let agentCommandTemplateKey =
         "AndrewDictate.agentCommandTemplate"
     private static let terminalBundleIDKey = "AndrewDictate.terminalBundleID"
@@ -214,6 +248,13 @@ final class AppSettings: ObservableObject {
         engineVersion = userDefaults
             .string(forKey: Self.engineVersionKey)
             .flatMap(EngineVersion.init(rawValue:)) ?? .v2
+        // "shadow" existed briefly pre-release; migrate it to "on"
+        let storedCleanupMode = userDefaults
+            .string(forKey: Self.cleanupModeKey)
+        cleanupMode = storedCleanupMode == "shadow"
+            ? .on
+            : storedCleanupMode
+                .flatMap(CleanupMode.init(rawValue:)) ?? .off
 
         var initialAgentCommandTemplate: String
         var shouldPersistInitialAgentCommandTemplate: Bool

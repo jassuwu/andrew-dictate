@@ -23,6 +23,7 @@ struct UtteranceTimeline: Sendable {
         let capturedAudio: Duration
         let transcription: Duration
         let cleanup: Duration
+        let polish: Duration
         let delivery: Duration
         let keyUpToCompletion: Duration
         let total: Duration
@@ -34,6 +35,7 @@ struct UtteranceTimeline: Sendable {
             capturedAudio: Duration,
             transcription: Duration,
             cleanup: Duration,
+            polish: Duration,
             delivery: Duration,
             keyUpToCompletion: Duration,
             total: Duration,
@@ -44,6 +46,7 @@ struct UtteranceTimeline: Sendable {
             self.capturedAudio = capturedAudio
             self.transcription = transcription
             self.cleanup = cleanup
+            self.polish = polish
             self.delivery = delivery
             self.keyUpToCompletion = keyUpToCompletion
             self.total = total
@@ -57,6 +60,7 @@ struct UtteranceTimeline: Sendable {
     let keyUp: Instant
     let transcriptReady: Instant
     let cleaned: Instant
+    let polished: Instant
     let completionStage: CompletionStage
     let completed: Instant
     let cancellationStages: CancellationStages?
@@ -68,6 +72,7 @@ struct UtteranceTimeline: Sendable {
         keyUp: Instant,
         transcriptReady: Instant,
         cleaned: Instant,
+        polished: Instant? = nil,
         completionStage: CompletionStage,
         completed: Instant,
         cancellationStages: CancellationStages? = nil
@@ -78,6 +83,7 @@ struct UtteranceTimeline: Sendable {
         self.keyUp = keyUp
         self.transcriptReady = transcriptReady
         self.cleaned = cleaned
+        self.polished = polished ?? cleaned
         self.completionStage = completionStage
         self.completed = completed
         self.cancellationStages = cancellationStages
@@ -90,7 +96,8 @@ struct UtteranceTimeline: Sendable {
             capturedAudio: micFirstBuffer.duration(to: keyUp),
             transcription: keyUp.duration(to: transcriptReady),
             cleanup: transcriptReady.duration(to: cleaned),
-            delivery: cleaned.duration(to: completed),
+            polish: cleaned.duration(to: polished),
+            delivery: polished.duration(to: completed),
             keyUpToCompletion: keyUp.duration(to: completed),
             total: keyDown.duration(to: completed),
             cancelToIdle: cancellationStages.map {
@@ -110,6 +117,7 @@ struct UtteranceTimelineBuilder {
     var keyUp: Instant?
     var transcriptReady: Instant?
     var cleaned: Instant?
+    var polished: Instant?
 
     func complete(
         _ completionStage: UtteranceTimeline.CompletionStage,
@@ -118,7 +126,8 @@ struct UtteranceTimelineBuilder {
         guard let micFirstBuffer,
               let keyUp,
               let transcriptReady,
-              let cleaned else {
+              let cleaned,
+              let polished else {
             return nil
         }
 
@@ -129,6 +138,7 @@ struct UtteranceTimelineBuilder {
             keyUp: keyUp,
             transcriptReady: transcriptReady,
             cleaned: cleaned,
+            polished: polished,
             completionStage: completionStage,
             completed: completed
         )
@@ -142,6 +152,7 @@ struct UtteranceTimelineBuilder {
         let effectiveKeyUp = keyUp ?? requestedAt
         let effectiveTranscriptReady = transcriptReady ?? requestedAt
         let effectiveCleaned = cleaned ?? requestedAt
+        let effectivePolished = polished ?? effectiveCleaned
 
         return UtteranceTimeline(
             mode: mode,
@@ -150,6 +161,7 @@ struct UtteranceTimelineBuilder {
             keyUp: effectiveKeyUp,
             transcriptReady: effectiveTranscriptReady,
             cleaned: effectiveCleaned,
+            polished: effectivePolished,
             completionStage: .cancelled,
             completed: idleAt,
             cancellationStages: .init(
@@ -191,6 +203,7 @@ final class UtteranceTimelineStore {
             "audio_ms=\(Self.milliseconds(durations.capturedAudio))",
             "stt_ms=\(Self.milliseconds(durations.transcription))",
             "clean_ms=\(Self.milliseconds(durations.cleanup))",
+            "polish_ms=\(Self.milliseconds(durations.polish))",
             "deliver_ms=\(Self.milliseconds(durations.delivery))",
             "keyup_done_ms=\(Self.milliseconds(durations.keyUpToCompletion))",
             "total_ms=\(Self.milliseconds(durations.total))",
@@ -209,6 +222,7 @@ final class UtteranceTimelineStore {
             "audio ms",
             "stt ms",
             "clean ms",
+            "polish ms",
             "deliver ms",
             "keyup→done ms",
             "total ms",
@@ -226,6 +240,7 @@ final class UtteranceTimelineStore {
                 Self.milliseconds(durations.capturedAudio),
                 Self.milliseconds(durations.transcription),
                 Self.milliseconds(durations.cleanup),
+                Self.milliseconds(durations.polish),
                 Self.milliseconds(durations.delivery),
                 Self.milliseconds(durations.keyUpToCompletion),
                 Self.milliseconds(durations.total),

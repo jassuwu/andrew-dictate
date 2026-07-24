@@ -10,6 +10,7 @@ final class UtteranceTimelineTests: XCTestCase {
             keyUp: keyDown.advanced(by: .milliseconds(1_012)),
             transcriptReady: keyDown.advanced(by: .milliseconds(1_212)),
             cleaned: keyDown.advanced(by: .milliseconds(1_215)),
+            polished: keyDown.advanced(by: .milliseconds(1_495)),
             completionStage: .pasteVerified,
             completed: keyDown.advanced(by: .milliseconds(1_515))
         )
@@ -22,7 +23,8 @@ final class UtteranceTimelineTests: XCTestCase {
                 capturedAudio: .milliseconds(1_000),
                 transcription: .milliseconds(200),
                 cleanup: .milliseconds(3),
-                delivery: .milliseconds(300),
+                polish: .milliseconds(280),
+                delivery: .milliseconds(20),
                 keyUpToCompletion: .milliseconds(503),
                 total: .milliseconds(1_515)
             )

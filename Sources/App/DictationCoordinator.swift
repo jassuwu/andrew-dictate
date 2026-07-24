@@ -31,6 +31,10 @@ final class DictationCoordinator: ObservableObject {
         subsystem: "gg.jass.dictate",
         category: "engine"
     )
+    private let cleanupLogger = Logger(
+        subsystem: "gg.jass.dictate",
+        category: "cleanup"
+    )
     enum State: Equatable, Sendable {
         case idle
         case prewarming
@@ -99,6 +103,8 @@ final class DictationCoordinator: ObservableObject {
     private let screenCapture: ScreenCapture
     private let audioRecorder: AudioRecorder?
     private let feedbackSounds: FeedbackSounds
+    private let transcriptPolisher = FoundationModelPolisher()
+    private let cleanupLabStore = LabStore()
     private let answerSpeaker = AVSpeechSynthesizer()
     private let hudViewModel: HUDViewModel
     private var hudPanelStorage: HUDPanel?
@@ -158,6 +164,7 @@ final class DictationCoordinator: ObservableObject {
     private var timelineSequence: UInt64 = 0
     private var activeTimeline: UtteranceTimelineBuilder?
     private var aboutWindowController: AboutWindowController?
+    private var cleanupLabWindowController: CleanupLabWindowController?
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
     private var distributedNotificationObservers: [NSObjectProtocol] = []
 
@@ -343,6 +350,36 @@ final class DictationCoordinator: ObservableObject {
             aboutWindowController = controller
         }
         controller.present()
+    }
+
+    var isCleanupAvailable: Bool {
+        transcriptPolisher.isAvailable
+    }
+
+    func openCleanupLab() {
+        let controller: CleanupLabWindowController
+        if let cleanupLabWindowController {
+            controller = cleanupLabWindowController
+        } else {
+            controller = CleanupLabWindowController(
+                store: cleanupLabStore
+            )
+            cleanupLabWindowController = controller
+        }
+        controller.present()
+    }
+
+    func clearCleanupLabData() {
+        Task { [weak self, cleanupLabStore] in
+            do {
+                try await cleanupLabStore.clear()
+                self?.cleanupLabWindowController?.reload()
+            } catch {
+                self?.cleanupLogger.error(
+                    "cleanup lab clear failed: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
     }
 
     func copyLastTranscript() {
@@ -1066,25 +1103,68 @@ final class DictationCoordinator: ObservableObject {
             guard generation == pipelineGeneration else {
                 return
             }
-            activeTimeline?.transcriptReady = timelineClock.now
+            let transcriptReady = timelineClock.now
+            activeTimeline?.transcriptReady = transcriptReady
 
             switch mode {
             case .dictation:
                 let cleaner = DeterministicCleaner(
                     entries: dictionaryStore.entries
                 )
-                let cleanedTranscript = cleaner.clean(transcript)
+                let rawTranscript = cleaner.clean(transcript)
                 activeTimeline?.cleaned = timelineClock.now
-                guard !cleanedTranscript.trimmingCharacters(
+                guard !rawTranscript.trimmingCharacters(
                     in: .whitespacesAndNewlines
                 ).isEmpty else {
                     activeTimeline = nil
                     return
                 }
-                lastTranscript = cleanedTranscript
-                showTranscriptFlash(cleanedTranscript)
+                let pasteTranscript: String
+                switch settings.cleanupMode {
+                case .off:
+                    activeTimeline?.polished = timelineClock.now
+                    pasteTranscript = rawTranscript
+                case .on, .always:
+                    // on: tight budget, raw on timeout. always: waits, with a
+                    // hard safety ceiling so a hung model can't eat a dictation.
+                    let budget: Duration = settings.cleanupMode == .on
+                        ? .milliseconds(600)
+                        : .seconds(15)
+                    let timedResult = await polishWithinDeadline(
+                        rawTranscript,
+                        protectedTerms: cleanupProtectedTerms(),
+                        using: transcriptPolisher,
+                        deadline: transcriptReady.advanced(by: budget)
+                    )
+                    try Task.checkCancellation()
+                    guard generation == pipelineGeneration else {
+                        return
+                    }
+                    activeTimeline?.polished = timelineClock.now
+                    let pasteChoice = cleanupPasteChoice(
+                        raw: rawTranscript,
+                        polishResult: timedResult.result,
+                        deadline: timedResult.deadline
+                    )
+                    pasteTranscript = pasteChoice.text
+                    if pasteChoice.text != rawTranscript {
+                        logCleanupPair(
+                            raw: rawTranscript,
+                            cleaned: pasteChoice.text,
+                            started: transcriptReady
+                        )
+                    }
+                    if timedResult.result == .failure {
+                        cleanupLogger.notice(
+                            "foreground polish fell back to raw"
+                        )
+                    }
+                }
+
+                lastTranscript = rawTranscript
+                showTranscriptFlash(pasteTranscript)
                 let pasteResult = await paster.paste(
-                    cleanedTranscript,
+                    pasteTranscript,
                     reasonForLeavingOnPasteboard: {
                         switch focusAnchor?.revalidationDecision()
                             ?? .copyFocusChanged {
@@ -1100,7 +1180,7 @@ final class DictationCoordinator: ObservableObject {
                 if pasteResult != .leftOnPasteboard(
                     .pasteboardUnavailable
                 ) {
-                    settings.recordDictatedTranscript(cleanedTranscript)
+                    settings.recordDictatedTranscript(rawTranscript)
                 }
                 guard generation == pipelineGeneration else {
                     return
@@ -1127,6 +1207,7 @@ final class DictationCoordinator: ObservableObject {
                     entries: dictionaryStore.entries
                 ).apply(to: transcript)
                 activeTimeline?.cleaned = timelineClock.now
+                activeTimeline?.polished = timelineClock.now
                 let command = commandRouter.route(
                     commandTranscript,
                     customActions: customActionStore.actions
@@ -1180,6 +1261,49 @@ final class DictationCoordinator: ObservableObject {
             askEngine.discardSpeculativeAsk(reason: "transcription-error")
             print("transcription failed: \(error.localizedDescription)")
         }
+    }
+
+    private func cleanupProtectedTerms() -> [String] {
+        var seen: Set<String> = []
+        return dictionaryStore.entries.compactMap { entry in
+            let term = entry.right
+            guard !term.isEmpty, seen.insert(term).inserted else {
+                return nil
+            }
+            return term
+        }
+    }
+
+    private func logCleanupPair(
+        raw: String,
+        cleaned: String,
+        started: ContinuousClock.Instant
+    ) {
+        let latency = started.duration(to: ContinuousClock().now)
+        Task {
+            do {
+                try await cleanupLabStore.append(
+                    CleanupLabEntry(
+                        ts: Date(),
+                        backend: FoundationModelPolisher.backendName,
+                        latencyMs: cleanupMilliseconds(latency),
+                        raw: raw,
+                        cleaned: cleaned
+                    )
+                )
+            } catch {
+                cleanupLogger.error(
+                    "lab append failed: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+    }
+
+    private func cleanupMilliseconds(_ duration: Duration) -> Double {
+        let components = duration.components
+        return Double(components.seconds) * 1_000
+            + Double(components.attoseconds)
+                / 1_000_000_000_000_000
     }
 
     private func invalidatePipeline() {

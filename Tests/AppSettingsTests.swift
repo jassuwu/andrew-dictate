@@ -18,6 +18,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.dictationHotkey, .dictation)
         XCTAssertEqual(settings.commandHotkey, .command)
         XCTAssertEqual(settings.engineVersion, .v2)
+        XCTAssertEqual(settings.cleanupMode, .off)
         XCTAssertEqual(
             settings.agentCommandTemplate,
             AgentCLI.codex.commandTemplate
@@ -41,6 +42,7 @@ final class AppSettingsTests: XCTestCase {
         settings.setHotkeyBinding(.leftCommand, for: .dictation)
         settings.setHotkeyBinding(.rightControl, for: .command)
         settings.engineVersion = .v3
+        settings.cleanupMode = .always
         settings.agentCommandTemplate = "claude -p {prompt}"
         settings.terminalBundleID = "com.mitchellh.ghostty"
         settings.recordDictatedTranscript("two dictated words")
@@ -54,6 +56,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(reloaded.dictationHotkey, .leftCommand)
         XCTAssertEqual(reloaded.commandHotkey, .rightControl)
         XCTAssertEqual(reloaded.engineVersion, .v3)
+        XCTAssertEqual(reloaded.cleanupMode, .always)
         XCTAssertEqual(
             reloaded.agentCommandTemplate,
             "claude -p {prompt}"
@@ -83,6 +86,37 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(
             settings.agentCommandTemplate,
             AgentCLI.codex.commandTemplate
+        )
+    }
+
+    func testCleanupModePersistsOnAndFallsBackToOffForUnknownValue() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppSettings(
+            userDefaults: userDefaults,
+            detectedAgents: []
+        )
+        settings.cleanupMode = .on
+
+        XCTAssertEqual(
+            AppSettings(
+                userDefaults: userDefaults,
+                detectedAgents: []
+            ).cleanupMode,
+            .on
+        )
+
+        userDefaults.set(
+            "future-mode",
+            forKey: "AndrewDictate.cleanupMode"
+        )
+        XCTAssertEqual(
+            AppSettings(
+                userDefaults: userDefaults,
+                detectedAgents: []
+            ).cleanupMode,
+            .off
         )
     }
 
@@ -198,5 +232,17 @@ final class AppSettingsTests: XCTestCase {
             cli: cli,
             executableURL: URL(fileURLWithPath: "/usr/local/bin/\(cli.rawValue)")
         )
+    }
+}
+
+
+extension AppSettingsTests {
+    @MainActor
+    func testShadowModeMigratesToOn() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { UserDefaults().removePersistentDomain(forName: suiteName) }
+        userDefaults.set("shadow", forKey: "AndrewDictate.cleanupMode")
+        let settings = AppSettings(userDefaults: userDefaults)
+        XCTAssertEqual(settings.cleanupMode, CleanupMode.on)
     }
 }

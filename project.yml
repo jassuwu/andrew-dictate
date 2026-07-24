@@ -54,7 +54,9 @@ targets:
     sources:
       - Tests
       - Sources/Actions
-      - Sources/Cleanup
+      - path: Sources/Cleanup
+        excludes:
+          - CleanupLabView.swift
       - Sources/Audio/RingSplicer.swift
       - Sources/HUD/BrandLineMath.swift
       - Sources/HUD/HUDLayoutEngine.swift

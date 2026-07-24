@@ -50,6 +50,7 @@ struct SettingsView: View {
     @State private var installedModels: [InstalledModel] = []
     @State private var pendingModelRemoval: EngineVersion?
     @State private var modelStoreMessage: String?
+    @State private var isCleanupAvailable: Bool
 
     init(coordinator: DictationCoordinator) {
         let settings = coordinator.settings
@@ -69,6 +70,9 @@ struct SettingsView: View {
         )
         _detectedAgents = State(initialValue: detectedAgents)
         _installedTerminals = State(initialValue: installedTerminals)
+        _isCleanupAvailable = State(
+            initialValue: coordinator.isCleanupAvailable
+        )
     }
 
     var body: some View {
@@ -101,6 +105,12 @@ struct SettingsView: View {
                                 + "and stops.",
                             isOn: $settings.soundFeedbackEnabled
                         )
+                        if isCleanupAvailable {
+                            cardDivider
+                            aiCleanupEditor
+                        }
+                        cardDivider
+                        cleanupLabControls
                         cardDivider
                         SettingsToggleRow(
                             "spoken answers",
@@ -162,6 +172,7 @@ struct SettingsView: View {
             loginItem.refresh()
             selectAvailableTerminalIfNeeded()
             refreshInstalledModels()
+            isCleanupAvailable = coordinator.isCleanupAvailable
         }
         .onChange(of: coordinator.enginePreparationState) { _, state in
             if state == .ready || state == .failed {
@@ -238,6 +249,60 @@ struct SettingsView: View {
             .fill(BrandUI.hairline)
             .frame(height: 1)
             .accessibilityHidden(true)
+    }
+
+    private var aiCleanupEditor: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Text("ai cleanup")
+                    .font(BrandUI.bodyFont.weight(.medium))
+
+                Spacer(minLength: 12)
+
+                Picker("", selection: $settings.cleanupMode) {
+                    ForEach(CleanupMode.allCases) { mode in
+                        Text(mode.rawValue)
+                            .tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 210)
+            }
+
+            Text(settings.cleanupMode.explanation)
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
+                .lineLimit(1)
+        }
+    }
+
+    private var cleanupLabControls: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Text("cleanup lab")
+                    .font(BrandUI.bodyFont.weight(.medium))
+
+                Spacer(minLength: 12)
+
+                Button("view cleanup lab") {
+                    coordinator.openCleanupLab()
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(BrandUI.gold)
+
+                Button("clear lab data") {
+                    coordinator.clearCleanupLabData()
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(BrandUI.textSecondary)
+            }
+
+            Text("compares recent raw/cleaned pairs newest first.")
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
+                .lineLimit(1)
+        }
     }
 
     private var engineEditor: some View {
