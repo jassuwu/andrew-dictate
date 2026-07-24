@@ -449,13 +449,18 @@ final class CommandRouterTests: XCTestCase {
         XCTAssertFalse(CommandRouter.isQuestionShape("?!"))
     }
 
-    func testCustomImperativeMatcherIsACleanFutureSeam() {
-        let customRouter = CommandRouter {
-            $0.lowercased().hasPrefix("andrew please ")
-        }
+    func testCustomActionWinsBeforeBuiltInVerb() {
+        let action = CustomAction(
+            trigger: "open arc",
+            type: .ask,
+            payload: "why arc?"
+        )
         XCTAssertEqual(
-            customRouter.route("andrew please archive records"),
-            .delegate(prompt: "andrew please archive records")
+            router.route(
+                "OPEN, ARC!",
+                customActions: [action]
+            ),
+            .custom(action: action, capturedArgument: nil)
         )
     }
 

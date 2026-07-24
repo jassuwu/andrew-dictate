@@ -43,6 +43,7 @@ struct SettingsView: View {
     @ObservedObject private var coordinator: DictationCoordinator
     @ObservedObject private var settings: AppSettings
     @ObservedObject private var dictionaryStore: DictionaryStore
+    @ObservedObject private var customActionStore: CustomActionStore
     @StateObject private var loginItem = LoginItemController()
 
     private let modelStore: ModelStore
@@ -65,6 +66,9 @@ struct SettingsView: View {
         _settings = ObservedObject(wrappedValue: settings)
         _dictionaryStore = ObservedObject(
             wrappedValue: coordinator.dictionaryStore
+        )
+        _customActionStore = ObservedObject(
+            wrappedValue: coordinator.customActionStore
         )
         modelStore = ModelStore(
             activeVersion: { settings.engineVersion }
@@ -129,6 +133,10 @@ struct SettingsView: View {
 
                 settingsSection("dictionary") {
                     DictionaryEditor(store: dictionaryStore)
+                }
+
+                settingsSection("actions") {
+                    CustomActionEditor(store: customActionStore)
                 }
 
                 settingsSection("command mode") {
@@ -604,6 +612,306 @@ struct SettingsView: View {
             return customAgentSelection
         }
         return "cli.\(cli.rawValue)"
+    }
+}
+
+private struct CustomActionEditor: View {
+    @ObservedObject var store: CustomActionStore
+
+    @State private var message: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            actionHeader
+
+            if store.actions.isEmpty {
+                Text("add a phrase to run something.")
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.textSecondary)
+                    .frame(maxWidth: .infinity, minHeight: 64)
+            } else {
+                ForEach(store.actions) { action in
+                    CustomActionRow(
+                        action: action,
+                        store: store,
+                        onRemove: {
+                            store.remove(action)
+                        }
+                    )
+
+                    if action.id != store.actions.last?.id {
+                        Rectangle()
+                            .fill(BrandUI.hairline)
+                            .frame(height: 1)
+                            .accessibilityHidden(true)
+                    }
+                }
+            }
+
+            HStack(spacing: 9) {
+                Button(action: addAction) {
+                    Image(systemName: "plus")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(BrandUI.gold)
+                .help("add action")
+
+                Spacer()
+
+                Button("import", action: importActions)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(BrandUI.textSecondary)
+
+                Button("export", action: exportActions)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(BrandUI.textSecondary)
+
+                Button("open actions file", action: revealActionsFile)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(BrandUI.textSecondary)
+            }
+            .padding(.horizontal, 2)
+            .padding(.top, 2)
+
+            if let message {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.gold)
+            }
+        }
+    }
+
+    private var actionHeader: some View {
+        HStack(spacing: 8) {
+            Text("trigger")
+                .frame(width: 106, alignment: .leading)
+            Text("type")
+                .frame(width: 76, alignment: .leading)
+            Text("payload")
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("allow")
+                .frame(width: 38, alignment: .center)
+            Color.clear
+                .frame(width: 14)
+        }
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(BrandUI.textSecondary)
+        .padding(.horizontal, 2)
+    }
+
+    private func addAction() {
+        var suffix = 1
+        var trigger = "new action"
+        let normalizedKeys = Set(store.actions.compactMap {
+            try? CustomActionMatcher.triggerPattern(
+                for: $0.trigger
+            ).normalizedKey
+        })
+
+        while normalizedKeys.contains(
+            CustomActionMatcher.normalize(trigger)
+        ) {
+            suffix += 1
+            trigger = "new action \(suffix)"
+        }
+
+        do {
+            _ = try store.add(
+                trigger: trigger,
+                type: .open,
+                payload: "finder"
+            )
+            message = nil
+        } catch {
+            message = error.localizedDescription.lowercased()
+        }
+    }
+
+    private func importActions() {
+        let panel = NSOpenPanel()
+        panel.title = "import actions"
+        panel.prompt = "import"
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+
+        guard panel.runModal() == .OK,
+              let sourceURL = panel.url else {
+            return
+        }
+
+        do {
+            try store.importJSON(from: sourceURL)
+            message = nil
+        } catch let error as CustomActionValidationError {
+            message = error.localizedDescription
+        } catch {
+            message = "couldn't import actions"
+        }
+    }
+
+    private func exportActions() {
+        let panel = NSSavePanel()
+        panel.title = "export actions"
+        panel.prompt = "export"
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "actions.json"
+
+        guard panel.runModal() == .OK,
+              let destinationURL = panel.url else {
+            return
+        }
+
+        do {
+            try store.exportJSON(to: destinationURL)
+            message = nil
+        } catch {
+            message = "couldn't export actions"
+        }
+    }
+
+    private func revealActionsFile() {
+        do {
+            try store.ensureFileExists()
+            NSWorkspace.shared.activateFileViewerSelecting(
+                [store.fileURL]
+            )
+            message = nil
+        } catch {
+            message = "couldn't open actions file"
+        }
+    }
+}
+
+private struct CustomActionRow: View {
+    private enum Field: Hashable {
+        case trigger
+        case payload
+    }
+
+    let action: CustomAction
+    @ObservedObject var store: CustomActionStore
+    let onRemove: () -> Void
+
+    @State private var draft: CustomAction
+    @FocusState private var focusedField: Field?
+
+    init(
+        action: CustomAction,
+        store: CustomActionStore,
+        onRemove: @escaping () -> Void
+    ) {
+        self.action = action
+        self.store = store
+        self.onRemove = onRemove
+        _draft = State(initialValue: action)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .center, spacing: 8) {
+                field(
+                    prompt: "phrase",
+                    text: $draft.trigger
+                )
+                .frame(width: 106)
+                .focused($focusedField, equals: .trigger)
+
+                Picker("", selection: $draft.type) {
+                    ForEach(ActionType.allCases) { type in
+                        Text(type.rawValue)
+                            .tag(type)
+                    }
+                }
+                .labelsHidden()
+                .brandMenuStyle()
+                .frame(width: 76)
+                .onChange(of: draft.type) {
+                    commitIfValid()
+                }
+
+                field(
+                    prompt: "value",
+                    text: $draft.payload
+                )
+                .frame(maxWidth: .infinity)
+                .focused($focusedField, equals: .payload)
+
+                Group {
+                    if draft.type == .shell || draft.type == .ask {
+                        Toggle("", isOn: $draft.alwaysAllow)
+                            .labelsHidden()
+                            .brandToggleStyle()
+                            .scaleEffect(0.78)
+                            .onChange(of: draft.alwaysAllow) {
+                                commitIfValid()
+                            }
+                            .help("always allow")
+                    } else {
+                        Color.clear
+                    }
+                }
+                .frame(width: 38)
+
+                Button(action: onRemove) {
+                    Image(systemName: "minus")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(BrandUI.textSecondary)
+                .frame(width: 14)
+                .help("remove action")
+            }
+
+            if let validationError {
+                Text(validationError.localizedDescription)
+                    .font(.caption2)
+                    .foregroundStyle(BrandUI.gold)
+                    .padding(.leading, 2)
+            }
+        }
+        .padding(.vertical, 3)
+        .onSubmit(commitIfValid)
+        .onChange(of: focusedField) { oldField, newField in
+            if oldField != nil, newField == nil {
+                commitIfValid()
+            }
+        }
+        .onChange(of: action) { _, newAction in
+            if focusedField == nil {
+                draft = newAction
+            }
+        }
+    }
+
+    private var validationError: CustomActionValidationError? {
+        store.validationError(for: draft)
+    }
+
+    private func field(
+        prompt: String,
+        text: Binding<String>
+    ) -> some View {
+        TextField("", text: text, prompt: Text(prompt))
+            .labelsHidden()
+            .font(BrandUI.valueFont)
+            .textFieldStyle(.plain)
+            .padding(.horizontal, 6)
+            .frame(height: 27)
+            .background {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(BrandUI.windowBg)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .stroke(BrandUI.hairline, lineWidth: 1)
+            }
+    }
+
+    private func commitIfValid() {
+        guard validationError == nil, draft != action else {
+            return
+        }
+        try? store.update(draft)
     }
 }
 

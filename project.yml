@@ -53,6 +53,7 @@ targets:
     platform: macOS
     sources:
       - Tests
+      - Sources/Actions
       - Sources/Cleanup
       - Sources/Audio/RingSplicer.swift
       - Sources/HUD/BrandLineMath.swift

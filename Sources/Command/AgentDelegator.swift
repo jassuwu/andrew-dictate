@@ -83,6 +83,10 @@ final class AgentDelegator {
             settings.agentCommandTemplate,
             prompt: prompt
         )
+        try await launchCommand(commandLine)
+    }
+
+    func launchCommand(_ commandLine: String) async throws {
         let scriptURL = try writeScript(commandLine: commandLine)
 
         if let terminalURL = terminalApplicationURL() {

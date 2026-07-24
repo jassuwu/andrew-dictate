@@ -6,6 +6,11 @@ final class CommandExecutor {
     var onDelegate: ((String) async -> Void)?
     var onAsk: ((String) async -> Void)?
     var onScreenAsk: ((String, ScreenAskScope) async -> Void)?
+    var onCustomActionGate: ((
+        CustomActionInvocation,
+        String
+    ) async -> Void)?
+    var onShell: ((String, String) async -> Void)?
     var onFeedback: ((String) async -> Void)?
 
     private let paster: Paster
@@ -28,6 +33,13 @@ final class CommandExecutor {
         refreshApplicationIndexIfNeeded()
 
         switch command {
+        case let .custom(action, capturedArgument):
+            await executeCustomAction(
+                CustomActionInvocation(
+                    action: action,
+                    capturedArgument: capturedArgument
+                )
+            )
         case let .openApp(query):
             await openApplication(matching: query)
         case let .switchToApp(query):
@@ -50,6 +62,205 @@ final class CommandExecutor {
             await onAsk?(prompt)
         case let .screenAsk(prompt, scope):
             await onScreenAsk?(prompt, scope)
+        }
+    }
+
+    func executeCustomAction(
+        _ invocation: CustomActionInvocation,
+        bypassingGate: Bool = false
+    ) async {
+        let action = invocation.action
+        let argument = invocation.capturedArgument
+        let feedback = "→ \(action.trigger)"
+
+        switch action.type {
+        case .open:
+            let target = CustomActionPayload.raw(
+                action.payload,
+                argument: argument
+            )
+            await openCustomTarget(target, feedback: feedback)
+
+        case .url:
+            guard let urlString = CustomActionPayload.url(
+                action.payload,
+                argument: argument
+            ),
+            let url = URL(string: urlString),
+            url.scheme?.isEmpty == false else {
+                await flash("couldn't open action url")
+                return
+            }
+
+            if url.isHTTPOrHTTPS {
+                guard workspace.open(url) else {
+                    await flash("couldn't open action url")
+                    return
+                }
+                await flash(feedback)
+            } else if bypassingGate {
+                guard workspace.open(url) else {
+                    await flash("couldn't open action url")
+                    return
+                }
+                await flash(feedback)
+            } else {
+                await onCustomActionGate?(
+                    invocation,
+                    "→ open \(urlString)"
+                )
+            }
+
+        case .shortcut:
+            let shortcutName = CustomActionPayload.raw(
+                action.payload,
+                argument: argument
+            )
+            if await runShortcut(
+                named: shortcutName,
+                input: argument
+            ) {
+                await flash(feedback)
+            } else {
+                await flash("couldn't run shortcut")
+            }
+
+        case .shell:
+            let command = CustomActionPayload.shell(
+                action.payload,
+                argument: argument
+            )
+            if action.alwaysAllow || bypassingGate {
+                await onShell?(command, action.trigger)
+            } else {
+                await onCustomActionGate?(
+                    invocation,
+                    "→ shell: \(command)"
+                )
+            }
+
+        case .type:
+            let text = CustomActionPayload.raw(
+                action.payload,
+                argument: argument
+            )
+            _ = await paster.paste(text)
+            await flash(feedback)
+
+        case .ask:
+            let prompt = CustomActionPayload.raw(
+                action.payload,
+                argument: argument
+            )
+            if action.alwaysAllow || bypassingGate {
+                await onAsk?(prompt)
+            } else {
+                await onCustomActionGate?(
+                    invocation,
+                    "→ ask: \(prompt)"
+                )
+            }
+        }
+    }
+
+    private func openCustomTarget(
+        _ target: String,
+        feedback: String
+    ) async {
+        if let fileURL = fileURLIfTargetLooksLikePath(target) {
+            guard workspace.open(fileURL) else {
+                await flash("couldn't open \(target)")
+                return
+            }
+            await flash(feedback)
+            return
+        }
+
+        guard let application = resolveApplication(target) else {
+            await flash("no app matching '\(target)'")
+            return
+        }
+
+        do {
+            _ = try await workspace.openApplication(
+                at: application.url,
+                configuration: NSWorkspace.OpenConfiguration()
+            )
+            await flash(feedback)
+        } catch {
+            print(
+                "custom app open failed for \(application.displayName): "
+                    + error.localizedDescription
+            )
+            await flash("couldn't open \(application.displayName)")
+        }
+    }
+
+    private func fileURLIfTargetLooksLikePath(
+        _ target: String
+    ) -> URL? {
+        let trimmed = target.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        if let url = URL(string: trimmed), url.isFileURL {
+            return url
+        }
+
+        let looksLikePath =
+            trimmed.hasPrefix("/")
+            || trimmed.hasPrefix("~/")
+            || trimmed.hasPrefix("./")
+            || trimmed.hasPrefix("../")
+        guard looksLikePath else {
+            return nil
+        }
+
+        let expanded = NSString(string: trimmed).expandingTildeInPath
+        return URL(fileURLWithPath: expanded)
+    }
+
+    private func runShortcut(
+        named shortcutName: String,
+        input: String?
+    ) async -> Bool {
+        let process = Process()
+        process.executableURL = URL(
+            fileURLWithPath: "/usr/bin/shortcuts"
+        )
+        process.arguments = ["run", shortcutName]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+
+        let inputPipe: Pipe?
+        if input != nil {
+            let pipe = Pipe()
+            process.arguments? += ["-i", "-"]
+            process.standardInput = pipe
+            inputPipe = pipe
+        } else {
+            process.standardInput = FileHandle.nullDevice
+            inputPipe = nil
+        }
+
+        return await withCheckedContinuation { continuation in
+            process.terminationHandler = { finishedProcess in
+                continuation.resume(
+                    returning: finishedProcess.terminationStatus == 0
+                )
+            }
+
+            do {
+                try process.run()
+                if let input, let inputPipe {
+                    inputPipe.fileHandleForWriting.write(
+                        Data(input.utf8)
+                    )
+                    try? inputPipe.fileHandleForWriting.close()
+                }
+            } catch {
+                process.terminationHandler = nil
+                continuation.resume(returning: false)
+            }
         }
     }
 

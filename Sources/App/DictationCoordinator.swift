@@ -72,6 +72,7 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var lastAnswer: String?
 
     let dictionaryStore: DictionaryStore
+    let customActionStore: CustomActionStore
     let settings: AppSettings
 
     private let hotkeyMonitor: HotkeyMonitor
@@ -124,6 +125,11 @@ final class DictationCoordinator: ObservableObject {
     private var hotkeyDetectionSequence = 0
     private var stateGeneration: UInt64 = 0
     private var delegationGate = DelegationGate()
+    private enum PendingGatedExecution {
+        case delegation(prompt: String)
+        case customAction(CustomActionInvocation)
+    }
+    private var pendingGatedExecution: PendingGatedExecution?
     private var gateTimeoutTask: Task<Void, Never>?
     private var answerVisibilityTask: Task<Void, Never>?
     private var feedbackGeneration: UInt64 = 0
@@ -141,6 +147,7 @@ final class DictationCoordinator: ObservableObject {
         isOnboardingPresented = !settings.onboardingCompleted
         enginePreparationRequested = settings.onboardingCompleted
         dictionaryStore = DictionaryStore()
+        customActionStore = CustomActionStore()
         transcriptionEngine = ParakeetEngine(
             version: settings.engineVersion
         )
@@ -183,6 +190,19 @@ final class DictationCoordinator: ObservableObject {
         }
         executor.onScreenAsk = { [weak self] prompt, scope in
             await self?.requestScreenAsk(prompt, scope: scope)
+        }
+        executor.onCustomActionGate = {
+            [weak self] invocation, preview in
+            await self?.requestCustomActionConfirmation(
+                invocation,
+                preview: preview
+            )
+        }
+        executor.onShell = { [weak self] command, trigger in
+            await self?.launchCustomShell(
+                command,
+                trigger: trigger
+            )
         }
         executor.onFeedback = { [weak self] message in
             await self?.flashFeedback(message)
@@ -933,10 +953,20 @@ final class DictationCoordinator: ObservableObject {
                     entries: dictionaryStore.entries
                 ).apply(to: transcript)
                 activeTimeline?.cleaned = timelineClock.now
+                let command = commandRouter.route(
+                    commandTranscript,
+                    customActions: customActionStore.actions
+                )
 
                 if askEngine.hasOpenThread {
-                    if case let .screenAsk(_, scope) =
-                        commandRouter.route(commandTranscript) {
+                    if case .custom = command {
+                        askEngine.clearThread()
+                        completeTimeline(
+                            at: timelineClock.now,
+                            stage: .commandRouted
+                        )
+                        await commandExecutor.execute(command)
+                    } else if case let .screenAsk(_, scope) = command {
                         await requestScreenAsk(
                             commandTranscript,
                             scope: scope
@@ -947,7 +977,6 @@ final class DictationCoordinator: ObservableObject {
                     return
                 }
 
-                let command = commandRouter.route(commandTranscript)
                 if case .ask = command {
                     // Ask completion owns the timeline so Esc can measure
                     // cancelRequested → idle while the CLI is in flight.
@@ -1243,9 +1272,30 @@ final class DictationCoordinator: ObservableObject {
                 confirmationKeyName: keyName
             )
         )
+        pendingGatedExecution = .delegation(prompt: prompt)
         delegationGate.present(
             prompt: prompt,
             commandPreview: commandPreview,
+            generation: stateGeneration
+        )
+        scheduleGateTimeout()
+    }
+
+    private func requestCustomActionConfirmation(
+        _ invocation: CustomActionInvocation,
+        preview: String
+    ) async {
+        let keyName = settings.hotkeyBinding(for: .command).displayName
+        setState(
+            .gatePending(
+                commandPreview: preview,
+                confirmationKeyName: keyName
+            )
+        )
+        pendingGatedExecution = .customAction(invocation)
+        delegationGate.present(
+            prompt: invocation.action.trigger,
+            commandPreview: preview,
             generation: stateGeneration
         )
         scheduleGateTimeout()
@@ -1395,9 +1445,23 @@ final class DictationCoordinator: ObservableObject {
         case .cancelled:
             setState(.idle, fastHUDDismiss: true)
         case let .confirmed(prompt):
+            let pendingExecution = pendingGatedExecution
+                ?? .delegation(prompt: prompt)
+            pendingGatedExecution = nil
             setState(.idle)
             Task { @MainActor [weak self] in
-                await self?.launchDelegation(prompt: prompt)
+                guard let self else {
+                    return
+                }
+                switch pendingExecution {
+                case let .delegation(prompt):
+                    await self.launchDelegation(prompt: prompt)
+                case let .customAction(invocation):
+                    await self.commandExecutor.executeCustomAction(
+                        invocation,
+                        bypassingGate: true
+                    )
+                }
             }
         }
     }
@@ -1447,6 +1511,22 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
+    private func launchCustomShell(
+        _ command: String,
+        trigger: String
+    ) async {
+        do {
+            try await agentDelegator.launchCommand(command)
+            await flashFeedback("→ \(trigger)")
+        } catch {
+            print(
+                "custom shell action failed: "
+                    + error.localizedDescription
+            )
+            await flashFeedback("couldn't run action")
+        }
+    }
+
     private func flashFeedback(
         _ message: String,
         duration: TimeInterval = 1.2
@@ -1488,6 +1568,7 @@ final class DictationCoordinator: ObservableObject {
     private func clearDelegationGateForStateReplacement() {
         gateTimeoutTask?.cancel()
         gateTimeoutTask = nil
+        pendingGatedExecution = nil
         _ = delegationGate.cancelForStateReplacement()
     }
 

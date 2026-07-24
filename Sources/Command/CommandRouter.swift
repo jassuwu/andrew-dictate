@@ -10,6 +10,7 @@ extension URL {
 }
 
 enum RoutedCommand: Equatable {
+    case custom(action: CustomAction, capturedArgument: String?)
     case openApp(query: String)
     case switchToApp(query: String)
     case quitApp(query: String)
@@ -27,8 +28,6 @@ enum ScreenAskScope: Equatable, Sendable {
 }
 
 struct CommandRouter {
-    typealias CustomImperativeMatcher = (String) -> Bool
-
     private struct SiteTemplate {
         let baseURLString: String
         let queryItemName: String
@@ -146,15 +145,20 @@ struct CommandRouter {
         ),
     ]
 
-    private let customImperativeMatcher: CustomImperativeMatcher?
+    func route(
+        _ transcript: String,
+        customActions: [CustomAction] = []
+    ) -> RoutedCommand {
+        if let match = CustomActionMatcher.match(
+            transcript,
+            actions: customActions
+        ) {
+            return .custom(
+                action: match.action,
+                capturedArgument: match.capturedArgument
+            )
+        }
 
-    init(
-        customImperativeMatcher: CustomImperativeMatcher? = nil
-    ) {
-        self.customImperativeMatcher = customImperativeMatcher
-    }
-
-    func route(_ transcript: String) -> RoutedCommand {
         if let query = remainder(after: ["open"], in: transcript) {
             return .openApp(query: query)
         }
@@ -206,8 +210,7 @@ struct CommandRouter {
             return .ask(prompt: transcript)
         }
 
-        if Self.isImperativeShape(transcript)
-            || customImperativeMatcher?(transcript) == true {
+        if Self.isImperativeShape(transcript) {
             return .delegate(prompt: transcript)
         }
 
