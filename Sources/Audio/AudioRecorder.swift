@@ -443,7 +443,7 @@ private final class AudioFirstBufferNotifier: @unchecked Sendable {
 }
 
 private final class AudioLevelStorage: @unchecked Sendable {
-    private static let minimumDecibels: Float = -50
+    private static let minimumDecibels: Float = -42
 
     private let level = OSAllocatedUnfairLock(initialState: Float.zero)
 

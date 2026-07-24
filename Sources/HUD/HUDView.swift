@@ -8,6 +8,14 @@ final class HUDViewModel: ObservableObject {
     @Published private(set) var layout: HUDLayout
     @Published private(set) var presentationGeneration = 0
     @Published private(set) var levelRing = BrandLineLevelRing()
+    @Published private(set) var displayLevels: [Float] = Array(
+        repeating: 0,
+        count: GoldSoundWave.barCount
+    )
+
+    private var waveSmoother = WaveDisplaySmoother(
+        barCount: GoldSoundWave.barCount
+    )
     @Published private(set) var waveTransitionStartedAt = Date()
 
     private let audioRecorder: AudioRecorder?
@@ -104,6 +112,8 @@ final class HUDViewModel: ObservableObject {
 
             if state != .transcribing {
                 levelRing.reset()
+                waveSmoother.reset()
+                displayLevels = waveSmoother.display
             }
             return
         }
@@ -132,6 +142,14 @@ final class HUDViewModel: ObservableObject {
         var updatedRing = levelRing
         updatedRing.push(audioRecorder?.currentLevel ?? 0)
         levelRing = updatedRing
+
+        let delayed = BrandLineJointMapper.delayedLevels(
+            in: updatedRing,
+            jointCount: GoldSoundWave.barCount
+        )
+        displayLevels = waveSmoother.update(
+            with: delayed.map(WaveLevelShaper.shape)
+        )
     }
 }
 
@@ -208,7 +226,7 @@ struct HUDView: View {
         capsule {
             GoldSoundWave(
                 phase: phase,
-                levels: viewModel.levelRing,
+                levels: viewModel.displayLevels,
                 transitionStartedAt:
                     viewModel.waveTransitionStartedAt,
                 isCommandMode: isCommandMode
@@ -326,29 +344,25 @@ private enum HUDGold {
     )
 }
 
-private enum GoldWavePhase: Equatable {
+enum GoldWavePhase: Equatable {
     case recording
     case transcribing
 }
 
-private struct GoldSoundWave: View {
-    private static let barCount = 7
-    private static let barWidth: CGFloat = 3.5
-    private static let barSpacing: CGFloat = 4
-    private static let minimumHeight: CGFloat = 4
-    private static let maximumHeight: CGFloat = 27
-    private static let envelope: [CGFloat] = [
-        0.48,
-        0.68,
-        0.86,
-        1,
-        0.86,
-        0.68,
-        0.48,
-    ]
+struct GoldSoundWave: View {
+    static let barCount = 11
+    private static let barWidth: CGFloat = 2.5
+    private static let barSpacing: CGFloat = 3
+    private static let minimumHeight: CGFloat = 3
+    private static let maximumHeight: CGFloat = 26
+    /// smooth cosine bell, center-weighted like the badge's flanking waves
+    private static let envelope: [CGFloat] = (0..<barCount).map { index in
+        let position = (CGFloat(index) + 0.5) / CGFloat(barCount)
+        return 0.30 + 0.70 * sin(.pi * position)
+    }
 
     let phase: GoldWavePhase
-    let levels: BrandLineLevelRing
+    let levels: [Float]
     let transitionStartedAt: Date
     let isCommandMode: Bool
 
@@ -414,18 +428,12 @@ private struct GoldSoundWave: View {
     }
 
     private func levelScaledHeights() -> [CGFloat] {
-        let delayedLevels = BrandLineJointMapper.delayedLevels(
-            in: levels,
-            jointCount: Self.barCount
-        )
-
-        return delayedLevels.enumerated().map { index, level in
-            let response = 0.18
-                + 0.82 * CGFloat(Double(level).squareRoot())
+        (0..<Self.barCount).map { index in
+            let level = index < levels.count ? CGFloat(levels[index]) : 0
             return Self.minimumHeight
                 + (Self.maximumHeight - Self.minimumHeight)
                 * Self.envelope[index]
-                * response
+                * level
         }
     }
 

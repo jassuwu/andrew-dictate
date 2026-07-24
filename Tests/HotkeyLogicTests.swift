@@ -156,3 +156,28 @@ final class HotkeyLogicTests: XCTestCase {
         return detector
     }
 }
+
+final class WaveLevelTests: XCTestCase {
+    func testShaperGatesRoomTone() {
+        XCTAssertEqual(WaveLevelShaper.shape(0), 0)
+        XCTAssertEqual(WaveLevelShaper.shape(0.10), 0)
+        XCTAssertEqual(WaveLevelShaper.shape(0.12), 0)
+    }
+
+    func testShaperIsMonotonicAndReachesOne() {
+        let a = WaveLevelShaper.shape(0.3)
+        let b = WaveLevelShaper.shape(0.6)
+        let c = WaveLevelShaper.shape(1.0)
+        XCTAssertLessThan(a, b)
+        XCTAssertLessThan(b, c)
+        XCTAssertEqual(c, 1.0, accuracy: 0.0001)
+    }
+
+    func testSmootherAttacksInstantlyAndReleasesGradually() {
+        var smoother = WaveDisplaySmoother(barCount: 1, release: 0.5)
+        XCTAssertEqual(smoother.update(with: [0.8])[0], 0.8)
+        let afterSilence = smoother.update(with: [0])[0]
+        XCTAssertEqual(afterSilence, 0.4, accuracy: 0.0001)
+        XCTAssertEqual(smoother.update(with: [0.9])[0], 0.9)
+    }
+}

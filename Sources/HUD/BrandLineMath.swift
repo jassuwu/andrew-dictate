@@ -1,3 +1,5 @@
+import Foundation
+
 struct BrandLineLevelRing: Equatable, Sendable {
     let capacity: Int
     let smoothingFactor: Float
@@ -94,5 +96,48 @@ enum BrandLineJointMapper {
             .map { index, level in
                 level * amplitude * directions[index % directions.count]
             }
+    }
+}
+
+
+/// perceptual level shaping: a noise gate collapses room tone to silence and a
+/// gamma curve expands the dynamics where speech actually lives — without this,
+/// sqrt-style response curves pin the meter near the top for any speech at all.
+enum WaveLevelShaper {
+    static let gate: Float = 0.12
+    static let gamma: Float = 2.0
+
+    static func shape(_ raw: Float) -> Float {
+        let bounded = min(max(raw, 0), 1)
+        guard bounded > gate else { return 0 }
+        let x = (bounded - gate) / (1 - gate)
+        return pow(x, gamma)
+    }
+}
+
+/// fast-attack / slow-release per-bar smoothing: bars bloom instantly with the
+/// voice and fall gracefully, which is what makes a meter feel alive.
+struct WaveDisplaySmoother: Equatable, Sendable {
+    let barCount: Int
+    let release: Float
+
+    private(set) var display: [Float]
+
+    init(barCount: Int, release: Float = 0.80) {
+        self.barCount = max(1, barCount)
+        self.release = min(max(release, 0), 1)
+        display = Array(repeating: 0, count: self.barCount)
+    }
+
+    mutating func update(with shapedLevels: [Float]) -> [Float] {
+        for index in 0..<barCount {
+            let incoming = index < shapedLevels.count ? shapedLevels[index] : 0
+            display[index] = max(incoming, display[index] * release)
+        }
+        return display
+    }
+
+    mutating func reset() {
+        display = Array(repeating: 0, count: barCount)
     }
 }
