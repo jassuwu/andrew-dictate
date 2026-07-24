@@ -25,6 +25,8 @@ local speech-to-text and voice commands for macOS. free, open source, runs entir
 
 spoken answers are a toggle; talking over it interrupts it. a personal dictionary fixes the words it mishears ("jason" → `json`).
 
+cleanup is built in: spoken punctuation ("comma", "new paragraph"), emails ("john at cypher dot io" → `john@cypher.io`), numbers ("five hundred dollars" → $500), self-corrections ("ship it friday, actually monday" → "ship it monday"), and stumble removal — all deterministic, all on-device, all instant. optional ai polish on top (apple's on-device model, off by default, three modes: off / on / always) with a local "cleanup lab" showing raw-vs-cleaned pairs so you can judge it on your own speech before trusting it.
+
 ## install
 
 ```sh
@@ -48,7 +50,7 @@ first run: one click, ~450 mb model download, mic + accessibility permissions. d
 
 - apple silicon, macOS 14+.
 - english by default; multilingual model optional in settings.
-- no llm rewriting of transcripts yet (deterministic cleanup + dictionary only).
+- ai polish uses apple's on-device model (macos 26) — no downloadable model option yet.
 - ask/screen-ask need an agent cli installed; everything else works without one.
 
 ## credits
