@@ -1,8 +1,10 @@
 <p align="center">
-  <img src="art/icon_1024.png" width="128" alt="Andrew Dictate" />
+  <img src="art/logo-character.svg" width="140" alt="Andrew Dictate" />
 </p>
 
 <h1 align="center">andrew dictate</h1>
+
+<p align="center"><strong>escape the keyboard.</strong></p>
 
 <p align="center">hold a key, talk, get text. — free · open source · fully local</p>
 
@@ -66,5 +68,5 @@ Andrew Dictate is released under the [MIT license](LICENSE).
 
 <p align="center">
   <img src="art/mark-shades.png" width="72" alt="" /><br/>
-  <sub>what color is your keyboard?</sub>
+  <sub>the matrix wants you typing.</sub>
 </p>

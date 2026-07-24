@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 300" width="960" height="300">
+  <!-- andrew dictate — wordmark lockup. -->
+  <rect width="960" height="300" rx="28" fill="#1B1B1F"/>
+  <!-- bars mark -->
+  <g>
+    <rect x="70"  y="128" width="16" height="44"  rx="8" fill="#EFEAE0"/>
+    <rect x="98"  y="110" width="16" height="80"  rx="8" fill="#E4593B"/>
+    <rect x="126" y="94"  width="16" height="112" rx="8" fill="#EFEAE0"/>
+    <rect x="154" y="118" width="16" height="64"  rx="8" fill="#EFEAE0"/>
+    <rect x="182" y="136" width="16" height="28"  rx="8" fill="#EFEAE0"/>
+  </g>
+  <text x="238" y="160" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="76" font-weight="600" letter-spacing="-1.5" fill="#EFEAE0">andrew dictate</text>
+  <text x="241" y="216" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="30" fill="#E4593B">escape the keyboard.</text>
+</svg>

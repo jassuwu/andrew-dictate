@@ -58,7 +58,7 @@ func renderOG(to url: URL) {
     let mark = CGRect(x: 120, y: h/2 + 30, width: 150, height: 150)
     drawBars(in: mark)
     let name = "andrew dictate"
-    let tagline = "hold a key, talk, get text."
+    let tagline = "escape the keyboard."
     let sub = "free · open source · fully local"
     let nameAttrs: [NSAttributedString.Key: Any] = [
         .font: NSFont.systemFont(ofSize: 84, weight: .semibold), .foregroundColor: cream,
