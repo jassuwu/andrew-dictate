@@ -1,16 +1,19 @@
 import Darwin
 import Foundation
+import OSLog
 
 struct AskInvocation: Equatable, Sendable {
     let cli: AgentCLI
     let executable: String
     let arguments: [String]
     let environment: [String: String]
+    let promptOnStandardInput: Bool
 }
 
 enum AskInvocationCompositionError: Error, Equatable {
     case invalidTemplate
     case unknownAgentCLI
+    case standardInputUnsupported
 }
 
 enum AskPromptComposer {
@@ -39,7 +42,8 @@ enum AskInvocationComposer {
         prompt: String,
         resumeSessionID: String? = nil,
         forcedCLI: AgentCLI? = nil,
-        imagePath: String? = nil
+        imagePath: String? = nil,
+        promptOnStandardInput: Bool = false
     ) throws -> AskInvocation {
         let parsed: AgentCommandTemplate.Parsed
         do {
@@ -73,9 +77,11 @@ enum AskInvocationComposer {
                     userArguments: userArguments,
                     prompt: prompt,
                     resumeSessionID: resumeSessionID,
-                    imagePath: imagePath
+                    imagePath: imagePath,
+                    promptOnStandardInput: promptOnStandardInput
                 ),
-                environment: [:]
+                environment: [:],
+                promptOnStandardInput: promptOnStandardInput
             )
         case .claude:
             return AskInvocation(
@@ -85,11 +91,20 @@ enum AskInvocationComposer {
                     userArguments: userArguments,
                     prompt: prompt,
                     resumeSessionID: resumeSessionID,
-                    imagePath: imagePath
+                    imagePath: imagePath,
+                    promptOnStandardInput: promptOnStandardInput
                 ),
-                environment: [:]
+                environment: [:],
+                promptOnStandardInput: promptOnStandardInput
             )
         case .opencode:
+            guard !promptOnStandardInput else {
+                // `opencode run` documents positional message arguments but
+                // no prompt-on-stdin mode. Do not speculate without a proven
+                // side-effect-free hold-open contract.
+                throw AskInvocationCompositionError
+                    .standardInputUnsupported
+            }
             return AskInvocation(
                 cli: cli,
                 executable: executable,
@@ -102,7 +117,8 @@ enum AskInvocationComposer {
                 environment: [
                     "OPENCODE_PERMISSION": opencodePermissions,
                     "OPENCODE_DISABLE_AUTOUPDATE": "true",
-                ]
+                ],
+                promptOnStandardInput: false
             )
         }
     }
@@ -128,7 +144,8 @@ enum AskInvocationComposer {
         userArguments: [String],
         prompt: String,
         resumeSessionID: String?,
-        imagePath: String?
+        imagePath: String?,
+        promptOnStandardInput: Bool
     ) -> [String] {
         var arguments = retainedOptionPairs(
             from: userArguments,
@@ -160,7 +177,10 @@ enum AskInvocationComposer {
         if let resumeSessionID {
             arguments += [resumeSessionID]
         }
-        arguments += [prompt]
+        // Codex 0.144 documents `-` for both fresh and resumed exec as
+        // "read the prompt from stdin". Keeping the marker explicit also
+        // prevents future changes to implicit piped-stdin behavior.
+        arguments += [promptOnStandardInput ? "-" : prompt]
         return arguments
     }
 
@@ -168,7 +188,8 @@ enum AskInvocationComposer {
         userArguments: [String],
         prompt: String,
         resumeSessionID: String?,
-        imagePath: String?
+        imagePath: String?,
+        promptOnStandardInput: Bool
     ) -> [String] {
         var arguments = [
             "-p",
@@ -181,7 +202,9 @@ enum AskInvocationComposer {
             "mcp__*",
             "--strict-mcp-config",
             "--output-format",
-            "json",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
         ]
         arguments += retainedOptionPairs(
             from: userArguments,
@@ -194,13 +217,15 @@ enum AskInvocationComposer {
         if let resumeSessionID {
             arguments += ["--resume", resumeSessionID]
         }
-        arguments += [
-            imagePath.map {
-                "Inspect the image at this path when answering: \($0)"
-                    + "\n\n"
-                    + prompt
-            } ?? prompt,
-        ]
+        if !promptOnStandardInput {
+            arguments += [
+                imagePath.map {
+                    "Inspect the image at this path when answering: \($0)"
+                        + "\n\n"
+                        + prompt
+                } ?? prompt,
+            ]
+        }
         return arguments
     }
 
@@ -325,6 +350,184 @@ struct AskResult: Equatable, Sendable {
     }
 }
 
+struct AskStreamUpdate: Equatable, Sendable {
+    let answer: String
+    let sessionID: String?
+}
+
+/// Deliberately simple streaming speech segmentation. A sentence completes at
+/// `. `, `? `, `! `, or a newline. Abbreviation detection is intentionally out
+/// of scope: voice answers already ask the agent for two short sentences.
+enum SentenceBoundarySplitter {
+    struct Split: Equatable, Sendable {
+        let sentences: [String]
+        let remainder: String
+    }
+
+    static func split(_ text: String) -> Split {
+        var sentences: [String] = []
+        var sentenceStart = text.startIndex
+        var index = text.startIndex
+
+        while index < text.endIndex {
+            let character = text[index]
+            let next = text.index(after: index)
+            let punctuationBoundary =
+                (character == "." || character == "?"
+                    || character == "!")
+                && next < text.endIndex
+                && text[next] == " "
+            let newlineBoundary = character == "\n"
+
+            guard punctuationBoundary || newlineBoundary else {
+                index = next
+                continue
+            }
+
+            let sentenceEnd = newlineBoundary ? index : next
+            appendNonempty(
+                text[sentenceStart..<sentenceEnd],
+                to: &sentences
+            )
+
+            var nextStart = next
+            while nextStart < text.endIndex,
+                  text[nextStart] == " " || text[nextStart] == "\n" {
+                nextStart = text.index(after: nextStart)
+            }
+            sentenceStart = nextStart
+            index = nextStart
+        }
+
+        return Split(
+            sentences: sentences,
+            remainder: String(text[sentenceStart...])
+        )
+    }
+
+    private static func appendNonempty(
+        _ substring: Substring,
+        to sentences: inout [String]
+    ) {
+        let sentence = substring.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        if !sentence.isEmpty {
+            sentences.append(sentence)
+        }
+    }
+}
+
+struct StreamingSentenceAccumulator: Sendable {
+    private(set) var observedText = ""
+    private(set) var remainder = ""
+
+    mutating func ingest(_ answer: String) -> [String] {
+        guard answer.hasPrefix(observedText) else {
+            // A provider may replace its final snapshot after streaming. Text
+            // that was already spoken cannot be corrected without repetition,
+            // so discard the changed unsaid tail.
+            observedText = answer
+            remainder = ""
+            return []
+        }
+
+        remainder += answer.dropFirst(observedText.count)
+        observedText = answer
+        let split = SentenceBoundarySplitter.split(remainder)
+        remainder = split.remainder
+        return split.sentences
+    }
+
+    mutating func finish(with answer: String) -> [String] {
+        var sentences = ingest(answer)
+        let trailing = remainder.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        if !trailing.isEmpty {
+            sentences.append(trailing)
+        }
+        remainder = ""
+        return sentences
+    }
+}
+
+protocol SpeculativeProcessHandle: AnyObject {
+    func commit(prompt: String) throws
+    func kill()
+}
+
+struct SpeculativeProcessMetrics: Equatable, Sendable {
+    private(set) var hits = 0
+    private(set) var misses = 0
+    private(set) var kills = 0
+
+    fileprivate mutating func recordHit() {
+        hits += 1
+    }
+
+    fileprivate mutating func recordMiss() {
+        misses += 1
+    }
+
+    fileprivate mutating func recordKill() {
+        kills += 1
+    }
+}
+
+/// Owns at most one prompt-less process. The handle is injectable so lifecycle
+/// semantics can be tested without launching an agent CLI.
+struct SpeculativeProcessLifecycle<Handle: SpeculativeProcessHandle> {
+    private(set) var activeHandle: Handle?
+    private(set) var metrics = SpeculativeProcessMetrics()
+
+    mutating func spawn(_ handle: Handle) {
+        kill()
+        activeHandle = handle
+    }
+
+    mutating func commit(
+        prompt: String,
+        if matches: (Handle) -> Bool
+    ) -> Handle? {
+        guard let handle = activeHandle else {
+            metrics.recordMiss()
+            return nil
+        }
+        guard matches(handle) else {
+            kill()
+            metrics.recordMiss()
+            return nil
+        }
+
+        do {
+            try handle.commit(prompt: prompt)
+            activeHandle = nil
+            metrics.recordHit()
+            return handle
+        } catch {
+            kill()
+            metrics.recordMiss()
+            return nil
+        }
+    }
+
+    @discardableResult
+    mutating func kill() -> Bool {
+        guard let handle = activeHandle else {
+            return false
+        }
+        activeHandle = nil
+        handle.kill()
+        metrics.recordKill()
+        return true
+    }
+
+    mutating func recordMiss() {
+        metrics.recordMiss()
+    }
+}
+
 enum AskEngineError: Error, Equatable {
     case unknownAgentCLI
     case unableToLaunch
@@ -338,15 +541,12 @@ enum AskEngineError: Error, Equatable {
 final class AskEngine {
     static let answerVisibilityDuration: TimeInterval = 8
     static let timeout: TimeInterval = 60
-    static let forceKillDelay: TimeInterval = 2
 
     var onThreadExpired: (() -> Void)?
 
     private struct ActiveRun {
         let id: UUID
-        let process: Process
-        let standardOutput: ProcessPipeCapture
-        let standardError: ProcessPipeCapture
+        let process: LaunchedAskProcess
     }
 
     private enum StopReason {
@@ -354,6 +554,10 @@ final class AskEngine {
         case timedOut
     }
 
+    private let askLogger = Logger(
+        subsystem: "gg.jass.dictate",
+        category: "ask"
+    )
     private let settings: AppSettings
     private var threadWindow = AskThreadWindow()
     private var reservedThread: AskThreadHandle?
@@ -361,6 +565,8 @@ final class AskEngine {
     private var timeoutTask: Task<Void, Never>?
     private var activeRun: ActiveRun?
     private var stoppedRuns: [UUID: StopReason] = [:]
+    private var speculative =
+        SpeculativeProcessLifecycle<LaunchedAskProcess>()
 
     init(settings: AppSettings) {
         self.settings = settings
@@ -380,10 +586,55 @@ final class AskEngine {
         threadExpiryTask = nil
     }
 
+    /// Starts a read-only CLI with an open stdin before transcription knows the
+    /// route. No prompt is sent here, so a discarded process cannot create an
+    /// agent turn. Screen asks intentionally cannot reuse this process because
+    /// their image flag is only known after capture.
+    func prepareSpeculativeAsk() {
+        discardSpeculativeAsk(reason: "replace")
+
+        let priorThread = reservedThread ?? threadWindow.current()
+        let requestedCLI = priorThread?.cli
+        let template = selectedTemplate(for: requestedCLI)
+        guard !template.isEmpty else {
+            return
+        }
+
+        do {
+            let invocation = try AskInvocationComposer.compose(
+                template: template,
+                prompt: "",
+                resumeSessionID: priorThread?.sessionID,
+                forcedCLI: requestedCLI,
+                promptOnStandardInput: true
+            )
+            let process = try LaunchedAskProcess(invocation: invocation)
+            speculative.spawn(process)
+            logSpeculative(event: "spawn")
+        } catch AskInvocationCompositionError.standardInputUnsupported {
+            // OpenCode documents raw JSON output, but not prompt-on-stdin.
+            // Skipping speculation is safer than sending an empty turn.
+        } catch {
+            askLogger.error(
+                "speculative launch failed: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    func discardSpeculativeAsk(reason: String = "route") {
+        guard speculative.kill() else {
+            return
+        }
+        logSpeculative(event: "kill-\(reason)")
+    }
+
     func ask(
         prompt: String,
         voiceAnswersEnabled: Bool,
-        imagePath: String? = nil
+        imagePath: String? = nil,
+        onUpdate: @escaping @MainActor @Sendable (
+            AskStreamUpdate
+        ) -> Void = { _ in }
     ) async throws -> AskResult {
         let priorThread = reservedThread ?? threadWindow.consume()
         reservedThread = nil
@@ -391,17 +642,10 @@ final class AskEngine {
         threadExpiryTask = nil
 
         let requestedCLI = priorThread?.cli
-        let configuredTemplate = settings.agentCommandTemplate
-        let template: String
-        if let requestedCLI,
-           AskInvocationComposer.cli(forTemplate: configuredTemplate)
-                != requestedCLI {
-            template = requestedCLI.commandTemplate
-        } else {
-            template = configuredTemplate
-        }
+        let template = selectedTemplate(for: requestedCLI)
 
         guard !template.isEmpty else {
+            discardSpeculativeAsk(reason: "invalid-template")
             throw AskEngineError.unknownAgentCLI
         }
 
@@ -409,9 +653,9 @@ final class AskEngine {
             prompt,
             voiceAnswersEnabled: voiceAnswersEnabled
         )
-        let invocation: AskInvocation
+        let argumentInvocation: AskInvocation
         do {
-            invocation = try AskInvocationComposer.compose(
+            argumentInvocation = try AskInvocationComposer.compose(
                 template: template,
                 prompt: composedPrompt,
                 resumeSessionID: priorThread?.sessionID,
@@ -419,16 +663,47 @@ final class AskEngine {
                 imagePath: imagePath
             )
         } catch AskInvocationCompositionError.unknownAgentCLI {
+            discardSpeculativeAsk(reason: "unknown-cli")
             throw AskEngineError.unknownAgentCLI
         } catch {
+            discardSpeculativeAsk(reason: "invalid-invocation")
             throw AskEngineError.unknownAgentCLI
         }
 
-        let output = try await run(invocation)
-        let parsed = AskOutputParser.parse(
-            output.standardOutput,
-            cli: invocation.cli
-        )
+        let process: LaunchedAskProcess
+        if imagePath == nil,
+           let standardInputInvocation =
+            try? AskInvocationComposer.compose(
+                template: template,
+                prompt: composedPrompt,
+                resumeSessionID: priorThread?.sessionID,
+                forcedCLI: requestedCLI,
+                promptOnStandardInput: true
+            ),
+           let committed = speculative.commit(
+                prompt: composedPrompt,
+                if: { $0.invocation == standardInputInvocation }
+           ) {
+            process = committed
+            logSpeculative(event: "hit")
+        } else {
+            if imagePath != nil {
+                discardSpeculativeAsk(reason: "screen-flags")
+                speculative.recordMiss()
+            } else if argumentInvocation.cli == .opencode {
+                speculative.recordMiss()
+            }
+            logSpeculative(event: "miss")
+            do {
+                process = try LaunchedAskProcess(
+                    invocation: argumentInvocation
+                )
+            } catch {
+                throw AskEngineError.unableToLaunch
+            }
+        }
+
+        let parsed = try await run(process, onUpdate: onUpdate)
         let answer = parsed.answer.trimmingCharacters(
             in: .whitespacesAndNewlines
         )
@@ -439,7 +714,7 @@ final class AskEngine {
         let sessionID = parsed.sessionID ?? priorThread?.sessionID
         if let sessionID {
             threadWindow.open(
-                cli: invocation.cli,
+                cli: argumentInvocation.cli,
                 sessionID: sessionID,
                 answerVisibleDuration: Self.answerVisibilityDuration
             )
@@ -448,7 +723,7 @@ final class AskEngine {
 
         return AskResult(
             answer: answer,
-            cli: invocation.cli,
+            cli: argumentInvocation.cli,
             sessionID: sessionID
         )
     }
@@ -462,92 +737,48 @@ final class AskEngine {
 
     func cancel() {
         clearThread()
+        discardSpeculativeAsk(reason: "cancel")
         stopActiveRun(reason: .cancelled)
     }
 
+    private func selectedTemplate(
+        for requestedCLI: AgentCLI?
+    ) -> String {
+        let configuredTemplate = settings.agentCommandTemplate
+        if let requestedCLI,
+           AskInvocationComposer.cli(forTemplate: configuredTemplate)
+                != requestedCLI {
+            return requestedCLI.commandTemplate
+        }
+        return configuredTemplate
+    }
+
     private func run(
-        _ invocation: AskInvocation
-    ) async throws -> (
-        standardOutput: Data,
-        standardError: Data
-    ) {
-        let process = Process()
-        let standardOutput = ProcessPipeCapture()
-        let standardError = ProcessPipeCapture()
-        let runID = UUID()
-
-        let executableURL: URL
-        if invocation.executable.contains("/") {
-            executableURL = URL(fileURLWithPath: invocation.executable)
-            process.arguments = invocation.arguments
-        } else if let detected = AgentCLIDetector.detect().first(where: {
-            $0.cli == invocation.cli
-        }) {
-            executableURL = detected.executableURL
-            process.arguments = invocation.arguments
-        } else {
-            executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = [
-                invocation.executable,
-            ] + invocation.arguments
-        }
-
-        process.executableURL = executableURL
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = standardOutput.pipe
-        process.standardError = standardError.pipe
-        // GUI apps inherit a minimal PATH. CLIs installed via nvm are node
-        // scripts whose `#!/usr/bin/env node` shebang needs node on PATH —
-        // and node lives next to the CLI. Prepend the CLI's directory so
-        // shebang resolution works regardless of launch context.
-        var environment = ProcessInfo.processInfo.environment
-            .merging(invocation.environment) { _, invocationValue in
-                invocationValue
+        _ process: LaunchedAskProcess,
+        onUpdate: @escaping @MainActor @Sendable (
+            AskStreamUpdate
+        ) -> Void
+    ) async throws -> AskOutputParser.Parsed {
+        let runID = process.id
+        activeRun = ActiveRun(id: runID, process: process)
+        process.setStreamHandler { [weak self] update in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      self.activeRun?.id == runID else {
+                    return
+                }
+                onUpdate(update)
             }
-        let executableDirectory = executableURL
-            .deletingLastPathComponent()
-            .path
-        let inheritedPath = environment["PATH"] ?? "/usr/bin:/bin"
-        if !inheritedPath.split(separator: ":").map(String.init)
-            .contains(executableDirectory) {
-            environment["PATH"] = executableDirectory + ":" + inheritedPath
         }
-        process.environment = environment
+        scheduleTimeout(for: runID)
 
         let status: Int32
-        do {
-            status = try await withTaskCancellationHandler {
-                try await withCheckedThrowingContinuation {
-                    (continuation: CheckedContinuation<Int32, Error>) in
-                    process.terminationHandler = { finishedProcess in
-                        continuation.resume(
-                            returning: finishedProcess.terminationStatus
-                        )
-                    }
-
-                    do {
-                        try process.run()
-                        activeRun = ActiveRun(
-                            id: runID,
-                            process: process,
-                            standardOutput: standardOutput,
-                            standardError: standardError
-                        )
-                        scheduleTimeout(for: runID)
-                    } catch {
-                        process.terminationHandler = nil
-                        continuation.resume(throwing: error)
-                    }
-                }
-            } onCancel: {
-                Task { @MainActor [weak self] in
-                    self?.cancel()
-                }
+        status = await withTaskCancellationHandler {
+            await process.waitForExit()
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancel()
             }
-        } catch {
-            standardOutput.finish()
-            standardError.finish()
-            throw AskEngineError.unableToLaunch
         }
 
         timeoutTask?.cancel()
@@ -556,10 +787,8 @@ final class AskEngine {
             activeRun = nil
         }
 
-        standardOutput.finish()
-        standardError.finish()
-        let outputData = standardOutput.data
-        let errorData = standardError.data
+        let parsed = process.finishOutput()
+        let errorData = process.standardErrorData
 
         if let stopReason = stoppedRuns.removeValue(forKey: runID) {
             switch stopReason {
@@ -580,7 +809,7 @@ final class AskEngine {
             )
         }
 
-        return (outputData, errorData)
+        return parsed
     }
 
     private func scheduleTimeout(for runID: UUID) {
@@ -606,20 +835,16 @@ final class AskEngine {
         timeoutTask?.cancel()
         timeoutTask = nil
 
-        let process = activeRun.process
-        if process.isRunning {
-            process.terminate()
-        }
+        // Barge-in and Esc are hard cancellation boundaries. SIGKILL avoids
+        // leaving a CLI's shutdown hooks or queued stream output alive.
+        activeRun.process.kill()
+    }
 
-        Task { @MainActor in
-            try? await Task.sleep(
-                for: .seconds(Self.forceKillDelay)
-            )
-            guard process.isRunning else {
-                return
-            }
-            Darwin.kill(process.processIdentifier, SIGKILL)
-        }
+    private func logSpeculative(event: String) {
+        let metrics = speculative.metrics
+        askLogger.notice(
+            "speculative \(event, privacy: .public) hits=\(metrics.hits) misses=\(metrics.misses) kills=\(metrics.kills)"
+        )
     }
 
     private func scheduleThreadExpiry() {
@@ -644,13 +869,217 @@ final class AskEngine {
     }
 }
 
+private enum AskProcessLaunchConfiguration {
+    struct Configuration {
+        let executableURL: URL
+        let arguments: [String]
+        let environment: [String: String]
+    }
+
+    static func compose(
+        _ invocation: AskInvocation
+    ) -> Configuration {
+        let executableURL: URL
+        let arguments: [String]
+        if invocation.executable.contains("/") {
+            executableURL = URL(
+                fileURLWithPath: invocation.executable
+            )
+            arguments = invocation.arguments
+        } else if let detected = AgentCLIDetector.detect().first(
+            where: { $0.cli == invocation.cli }
+        ) {
+            executableURL = detected.executableURL
+            arguments = invocation.arguments
+        } else {
+            executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            arguments = [
+                invocation.executable,
+            ] + invocation.arguments
+        }
+
+        // GUI apps inherit a minimal PATH. CLIs installed via nvm are node
+        // scripts whose `#!/usr/bin/env node` shebang needs node on PATH.
+        // Normal and speculative launches both use this exact composition.
+        var environment = ProcessInfo.processInfo.environment
+            .merging(invocation.environment) { _, invocationValue in
+                invocationValue
+            }
+        let executableDirectory = executableURL
+            .deletingLastPathComponent()
+            .path
+        let inheritedPath = environment["PATH"] ?? "/usr/bin:/bin"
+        if !inheritedPath.split(separator: ":").map(String.init)
+            .contains(executableDirectory) {
+            environment["PATH"] = executableDirectory + ":" + inheritedPath
+        }
+
+        return Configuration(
+            executableURL: executableURL,
+            arguments: arguments,
+            environment: environment
+        )
+    }
+}
+
+private enum SpeculativeCommitError: Error {
+    case unavailable
+}
+
+private final class LaunchedAskProcess:
+    SpeculativeProcessHandle,
+    @unchecked Sendable {
+    let id = UUID()
+    let invocation: AskInvocation
+
+    private let process = Process()
+    private let standardInputPipe: Pipe?
+    private let standardOutput: ProcessPipeCapture
+    private let standardError: ProcessPipeCapture
+    private let streamAccumulator: AskStreamAccumulator
+    private let exitWaiter = ProcessExitWaiter()
+
+    init(invocation: AskInvocation) throws {
+        self.invocation = invocation
+        let accumulator = AskStreamAccumulator(cli: invocation.cli)
+        streamAccumulator = accumulator
+        standardOutput = ProcessPipeCapture {
+            [accumulator] data in
+            accumulator.consume(data)
+        }
+        standardError = ProcessPipeCapture()
+
+        let standardInputPipe: Pipe?
+        if invocation.promptOnStandardInput {
+            standardInputPipe = Pipe()
+        } else {
+            standardInputPipe = nil
+        }
+        self.standardInputPipe = standardInputPipe
+
+        let configuration = AskProcessLaunchConfiguration.compose(
+            invocation
+        )
+        process.executableURL = configuration.executableURL
+        process.arguments = configuration.arguments
+        process.environment = configuration.environment
+        if let standardInputPipe {
+            process.standardInput = standardInputPipe
+        } else {
+            process.standardInput = FileHandle.nullDevice
+        }
+        process.standardOutput = standardOutput.pipe
+        process.standardError = standardError.pipe
+        process.terminationHandler = { [exitWaiter] finishedProcess in
+            exitWaiter.complete(
+                status: finishedProcess.terminationStatus
+            )
+        }
+
+        do {
+            try process.run()
+        } catch {
+            process.terminationHandler = nil
+            throw error
+        }
+    }
+
+    func commit(prompt: String) throws {
+        guard let standardInputPipe, process.isRunning else {
+            throw SpeculativeCommitError.unavailable
+        }
+
+        let writer = standardInputPipe.fileHandleForWriting
+        do {
+            try writer.write(contentsOf: Data(prompt.utf8))
+            try writer.close()
+        } catch {
+            try? writer.close()
+            throw error
+        }
+    }
+
+    func kill() {
+        if let writer = standardInputPipe?.fileHandleForWriting {
+            try? writer.close()
+        }
+        guard process.isRunning else {
+            return
+        }
+        Darwin.kill(process.processIdentifier, SIGKILL)
+    }
+
+    func setStreamHandler(
+        _ handler: @escaping @Sendable (AskStreamUpdate) -> Void
+    ) {
+        streamAccumulator.setHandler(handler)
+    }
+
+    func waitForExit() async -> Int32 {
+        await exitWaiter.wait()
+    }
+
+    func finishOutput() -> AskOutputParser.Parsed {
+        standardOutput.finish()
+        standardError.finish()
+        return streamAccumulator.finish(
+            fallback: standardOutput.data
+        )
+    }
+
+    var standardErrorData: Data {
+        standardError.data
+    }
+}
+
+private final class ProcessExitWaiter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var status: Int32?
+    private var continuations:
+        [CheckedContinuation<Int32, Never>] = []
+
+    func complete(status: Int32) {
+        let pending: [CheckedContinuation<Int32, Never>] =
+            lock.withLock {
+                guard self.status == nil else {
+                    return []
+                }
+                self.status = status
+                defer { continuations.removeAll() }
+                return continuations
+            }
+        for continuation in pending {
+            continuation.resume(returning: status)
+        }
+    }
+
+    func wait() async -> Int32 {
+        await withCheckedContinuation { continuation in
+            let completedStatus: Int32? = lock.withLock {
+                if let status {
+                    return status
+                }
+                continuations.append(continuation)
+                return nil
+            }
+            if let completedStatus {
+                continuation.resume(returning: completedStatus)
+            }
+        }
+    }
+}
+
 private final class ProcessPipeCapture: @unchecked Sendable {
     let pipe = Pipe()
 
     private let lock = NSLock()
     private var storage = Data()
+    private let onChunk: (@Sendable (Data) -> Void)?
 
-    init() {
+    init(
+        onChunk: (@Sendable (Data) -> Void)? = nil
+    ) {
+        self.onChunk = onChunk
         pipe.fileHandleForReading.readabilityHandler = {
             [weak self] handle in
             let chunk = handle.availableData
@@ -679,107 +1108,251 @@ private final class ProcessPipeCapture: @unchecked Sendable {
         lock.withLock {
             storage.append(data)
         }
+        onChunk?(data)
     }
 }
 
-private enum AskOutputParser {
-    struct Parsed {
+private final class AskStreamAccumulator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var parser: AskStreamEventParser
+    private var handler: (@Sendable (AskStreamUpdate) -> Void)?
+
+    init(cli: AgentCLI) {
+        parser = AskStreamEventParser(cli: cli)
+    }
+
+    func consume(_ data: Data) {
+        let delivery: (
+            [AskStreamUpdate],
+            (@Sendable (AskStreamUpdate) -> Void)?
+        ) = lock.withLock {
+            (parser.consume(data), handler)
+        }
+        guard let handler = delivery.1 else {
+            return
+        }
+        for update in delivery.0 {
+            handler(update)
+        }
+    }
+
+    func setHandler(
+        _ handler: @escaping @Sendable (AskStreamUpdate) -> Void
+    ) {
+        let currentUpdate: AskStreamUpdate? = lock.withLock {
+            self.handler = handler
+            return parser.currentUpdate
+        }
+        if let currentUpdate {
+            handler(currentUpdate)
+        }
+    }
+
+    func finish(fallback data: Data) -> AskOutputParser.Parsed {
+        let parsed: AskOutputParser.Parsed = lock.withLock {
+            _ = parser.finish()
+            return parser.parsed
+        }
+        guard parsed.answer.isEmpty else {
+            return parsed
+        }
+        return AskOutputParser.parse(data, cli: parser.cli)
+    }
+}
+
+enum AskOutputParser {
+    struct Parsed: Equatable, Sendable {
         var answer = ""
         var sessionID: String?
     }
 
     static func parse(_ data: Data, cli: AgentCLI) -> Parsed {
-        let text = String(decoding: data, as: UTF8.self)
-        switch cli {
-        case .codex:
-            return parseCodex(text)
-        case .claude:
-            return parseClaude(data, fallback: text)
-        case .opencode:
-            return parseOpenCode(text)
-        }
-    }
-
-    private static func parseCodex(_ text: String) -> Parsed {
-        var parsed = Parsed()
-        for object in jsonObjects(in: text) {
-            if string(in: object, keys: ["type"]) == "thread.started" {
-                parsed.sessionID = string(
-                    in: object,
-                    keys: ["thread_id", "threadID", "session_id"]
-                )
-            }
-
-            guard string(in: object, keys: ["type"])
-                    == "item.completed",
-                  let item = object["item"] as? [String: Any],
-                  string(in: item, keys: ["type"])
-                    == "agent_message",
-                  let answer = string(in: item, keys: ["text"]) else {
-                continue
-            }
-            parsed.answer = answer
-        }
+        var parser = AskStreamEventParser(cli: cli)
+        _ = parser.consume(data)
+        _ = parser.finish()
+        var parsed = parser.parsed
         if parsed.answer.isEmpty {
-            parsed.answer = text
+            parsed.answer = String(decoding: data, as: UTF8.self)
         }
         return parsed
     }
+}
 
-    private static func parseClaude(
-        _ data: Data,
-        fallback: String
-    ) -> Parsed {
-        guard let object = try? JSONSerialization.jsonObject(
-            with: data
-        ) as? [String: Any] else {
-            return Parsed(answer: fallback, sessionID: nil)
+struct AskStreamEventParser: Sendable {
+    let cli: AgentCLI
+    private var lineBuffer = Data()
+    private(set) var parsed = AskOutputParser.Parsed()
+
+    var currentUpdate: AskStreamUpdate? {
+        guard !parsed.answer.isEmpty else {
+            return nil
         }
-        return Parsed(
-            answer: string(in: object, keys: ["result"]) ?? fallback,
-            sessionID: string(
-                in: object,
-                keys: ["session_id", "sessionID", "sessionId"]
-            )
+        return AskStreamUpdate(
+            answer: parsed.answer,
+            sessionID: parsed.sessionID
         )
     }
 
-    private static func parseOpenCode(_ text: String) -> Parsed {
-        var parsed = Parsed()
-        var answerParts: [String] = []
-        for object in jsonObjects(in: text) {
-            if parsed.sessionID == nil {
-                parsed.sessionID = recursiveString(
-                    in: object,
-                    keys: ["sessionID", "session_id", "sessionId"]
-                )
-            }
-
-            if string(in: object, keys: ["type"]) == "text",
-               let part = object["part"] as? [String: Any],
-               let answer = string(in: part, keys: ["text"]) {
-                answerParts.append(answer)
-            } else if string(in: object, keys: ["type"]) == "text",
-                      let answer = string(in: object, keys: ["text"]) {
-                answerParts.append(answer)
-            }
-        }
-        parsed.answer = answerParts.isEmpty
-            ? text
-            : answerParts.joined()
-        return parsed
+    init(cli: AgentCLI) {
+        self.cli = cli
     }
 
-    private static func jsonObjects(
-        in text: String
-    ) -> [[String: Any]] {
-        text.split(whereSeparator: \.isNewline).compactMap { line in
-            guard let data = String(line).data(using: .utf8) else {
-                return nil
+    mutating func consume(_ data: Data) -> [AskStreamUpdate] {
+        lineBuffer.append(data)
+        var updates: [AskStreamUpdate] = []
+
+        while let newline = lineBuffer.firstIndex(of: 0x0A) {
+            let line = lineBuffer[..<newline]
+            lineBuffer.removeSubrange(...newline)
+            if let update = parseLine(Data(line)) {
+                updates.append(update)
             }
-            return try? JSONSerialization.jsonObject(
-                with: data
-            ) as? [String: Any]
+        }
+        return updates
+    }
+
+    mutating func finish() -> [AskStreamUpdate] {
+        guard !lineBuffer.isEmpty else {
+            return []
+        }
+        let line = lineBuffer
+        lineBuffer.removeAll(keepingCapacity: false)
+        return parseLine(line).map { [$0] } ?? []
+    }
+
+    private mutating func parseLine(
+        _ data: Data
+    ) -> AskStreamUpdate? {
+        guard let object = try? JSONSerialization.jsonObject(
+            with: data
+        ) as? [String: Any] else {
+            return nil
+        }
+
+        let priorAnswer = parsed.answer
+        switch cli {
+        case .codex:
+            parseCodex(object)
+        case .claude:
+            parseClaude(object)
+        case .opencode:
+            parseOpenCode(object)
+        }
+
+        guard parsed.answer != priorAnswer,
+              !parsed.answer.isEmpty else {
+            return nil
+        }
+        return AskStreamUpdate(
+            answer: parsed.answer,
+            sessionID: parsed.sessionID
+        )
+    }
+
+    private mutating func parseCodex(
+        _ object: [String: Any]
+    ) {
+        let type = Self.string(in: object, keys: ["type"])
+        if type == "thread.started" {
+            parsed.sessionID = Self.string(
+                in: object,
+                keys: ["thread_id", "threadID", "session_id"]
+            )
+        }
+
+        if type == "item.updated" || type == "item.completed",
+           let item = object["item"] as? [String: Any],
+           Self.string(in: item, keys: ["type"]) == "agent_message",
+           let answer = Self.string(in: item, keys: ["text"]) {
+            parsed.answer = answer
+            return
+        }
+
+        // Codex exec 0.144 publishes growing agent-message snapshots as
+        // item.updated. These delta-shaped cases also tolerate older/future
+        // builds that expose the internal content delta directly.
+        if type == "item.delta"
+            || type == "agent_message.delta"
+            || type == "agent_message_content_delta" {
+            if let delta = Self.string(
+                in: object,
+                keys: ["delta", "text"]
+            ) {
+                parsed.answer += delta
+            } else if let item = object["item"] as? [String: Any],
+                      let delta = Self.string(
+                        in: item,
+                        keys: ["delta", "text"]
+                      ) {
+                parsed.answer += delta
+            }
+        }
+    }
+
+    private mutating func parseClaude(
+        _ object: [String: Any]
+    ) {
+        if let sessionID = Self.string(
+            in: object,
+            keys: ["session_id", "sessionID", "sessionId"]
+        ) {
+            parsed.sessionID = sessionID
+        }
+
+        let type = Self.string(in: object, keys: ["type"])
+        if type == "stream_event",
+           let event = object["event"] as? [String: Any],
+           Self.string(in: event, keys: ["type"])
+                == "content_block_delta",
+           let delta = event["delta"] as? [String: Any],
+           Self.string(in: delta, keys: ["type"]) == "text_delta",
+           let text = Self.string(in: delta, keys: ["text"]) {
+            parsed.answer += text
+            return
+        }
+
+        if type == "result",
+           let answer = Self.string(in: object, keys: ["result"]) {
+            parsed.answer = answer
+            return
+        }
+
+        if type == "assistant",
+           parsed.answer.isEmpty,
+           let message = object["message"] as? [String: Any],
+           let content = message["content"] as? [[String: Any]] {
+            parsed.answer = content.compactMap { block in
+                guard Self.string(in: block, keys: ["type"]) == "text"
+                else {
+                    return nil
+                }
+                return Self.string(in: block, keys: ["text"])
+            }.joined()
+        }
+    }
+
+    private mutating func parseOpenCode(
+        _ object: [String: Any]
+    ) {
+        if parsed.sessionID == nil {
+            parsed.sessionID = Self.recursiveString(
+                in: object,
+                keys: ["sessionID", "session_id", "sessionId"]
+            )
+        }
+
+        guard Self.string(in: object, keys: ["type"]) == "text"
+        else {
+            return
+        }
+        if let part = object["part"] as? [String: Any],
+           let answer = Self.string(in: part, keys: ["text"]) {
+            parsed.answer += answer
+        } else if let answer = Self.string(
+            in: object,
+            keys: ["text"]
+        ) {
+            parsed.answer += answer
         }
     }
 

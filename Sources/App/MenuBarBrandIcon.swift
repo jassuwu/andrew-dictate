@@ -23,6 +23,7 @@ enum MenuBarBrandIcon {
              .prewarming,
              .asking,
              .screenAsking,
+             .askStreaming,
              .askAnswer,
              .askThreadOpen,
              .gatePending,

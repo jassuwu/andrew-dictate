@@ -72,7 +72,9 @@ final class AskEngineTests: XCTestCase {
                 "mcp__*",
                 "--strict-mcp-config",
                 "--output-format",
-                "json",
+                "stream-json",
+                "--verbose",
+                "--include-partial-messages",
                 "--model",
                 "sonnet",
                 "--resume",
@@ -209,6 +211,50 @@ final class AskEngineTests: XCTestCase {
         )
     }
 
+    func testSpeculativeInvocationsUseVerifiedStandardInputMechanics()
+        throws {
+        let codex = try AskInvocationComposer.compose(
+            template: "codex exec --model gpt-5 {prompt}",
+            prompt: "",
+            promptOnStandardInput: true
+        )
+        let resumedCodex = try AskInvocationComposer.compose(
+            template: "codex exec {prompt}",
+            prompt: "",
+            resumeSessionID: "codex-session",
+            promptOnStandardInput: true
+        )
+        let claude = try AskInvocationComposer.compose(
+            template: "claude -p {prompt}",
+            prompt: "",
+            promptOnStandardInput: true
+        )
+
+        XCTAssertTrue(codex.promptOnStandardInput)
+        XCTAssertEqual(codex.arguments.last, "-")
+        XCTAssertEqual(
+            Array(resumedCodex.arguments.suffix(2)),
+            ["codex-session", "-"]
+        )
+        XCTAssertTrue(claude.promptOnStandardInput)
+        XCTAssertEqual(
+            claude.arguments.last,
+            "--include-partial-messages"
+        )
+        XCTAssertThrowsError(
+            try AskInvocationComposer.compose(
+                template: "opencode run {prompt}",
+                prompt: "",
+                promptOnStandardInput: true
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? AskInvocationCompositionError,
+                .standardInputUnsupported
+            )
+        }
+    }
+
     func testUnknownCustomTemplateCannotRunUngatedAsk() {
         XCTAssertThrowsError(
             try AskInvocationComposer.compose(
@@ -285,6 +331,178 @@ final class AskEngineTests: XCTestCase {
         XCTAssertNil(window.current())
     }
 
+    func testSentenceBoundarySplitterUsesSimpleSpokenBoundaries() {
+        XCTAssertEqual(
+            SentenceBoundarySplitter.split(
+                "First sentence. Second question? Third!\nTail"
+            ),
+            .init(
+                sentences: [
+                    "First sentence.",
+                    "Second question?",
+                    "Third!",
+                ],
+                remainder: "Tail"
+            )
+        )
+        XCTAssertEqual(
+            SentenceBoundarySplitter.split("No boundary yet."),
+            .init(sentences: [], remainder: "No boundary yet.")
+        )
+        // Abbreviation tolerance is deliberately not part of this splitter.
+        XCTAssertEqual(
+            SentenceBoundarySplitter.split("Use e.g. this form. "),
+            .init(
+                sentences: ["Use e.g.", "this form."],
+                remainder: ""
+            )
+        )
+    }
+
+    func testStreamingSentenceAccumulatorQueuesOnlyNewSentences() {
+        var accumulator = StreamingSentenceAccumulator()
+
+        XCTAssertEqual(accumulator.ingest("One"), [])
+        XCTAssertEqual(
+            accumulator.ingest("One. Two"),
+            ["One."]
+        )
+        XCTAssertEqual(
+            accumulator.ingest("One. Two? Three"),
+            ["Two?"]
+        )
+        XCTAssertEqual(
+            accumulator.finish(with: "One. Two? Three"),
+            ["Three"]
+        )
+    }
+
+    func testCodexJSONLParserStreamsUpdatedAgentMessageSnapshots() {
+        let fixture = """
+        {"type":"thread.started","thread_id":"codex-thread"}
+        {"type":"item.started","item":{"id":"1","type":"agent_message","text":""}}
+        {"type":"item.updated","item":{"id":"1","type":"agent_message","text":"Partial"}}
+        {"type":"item.updated","item":{"id":"1","type":"agent_message","text":"Partial answer."}}
+        {"type":"item.completed","item":{"id":"1","type":"agent_message","text":"Final Codex answer."}}
+        {"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":2}}
+
+        """
+        var parser = AskStreamEventParser(cli: .codex)
+        let updates = parser.consume(Data(fixture.utf8))
+
+        XCTAssertEqual(
+            updates,
+            [
+                AskStreamUpdate(
+                    answer: "Partial",
+                    sessionID: "codex-thread"
+                ),
+                AskStreamUpdate(
+                    answer: "Partial answer.",
+                    sessionID: "codex-thread"
+                ),
+                AskStreamUpdate(
+                    answer: "Final Codex answer.",
+                    sessionID: "codex-thread"
+                ),
+            ]
+        )
+        XCTAssertEqual(
+            parser.parsed,
+            .init(
+                answer: "Final Codex answer.",
+                sessionID: "codex-thread"
+            )
+        )
+    }
+
+    func testClaudeStreamJSONParserEmitsTextDeltasAndSession() {
+        let fixture = """
+        {"type":"system","subtype":"init","session_id":"claude-session"}
+        {"type":"stream_event","session_id":"claude-session","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}}
+        {"type":"stream_event","session_id":"claude-session","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":" world."}}}
+        {"type":"result","subtype":"success","result":"Hello world.","session_id":"claude-session"}
+
+        """
+        let bytes = Data(fixture.utf8)
+        let splitIndex = bytes.count / 2
+        var parser = AskStreamEventParser(cli: .claude)
+        let first = parser.consume(bytes.prefix(splitIndex))
+        let second = parser.consume(bytes.suffix(from: splitIndex))
+        let updates = first + second + parser.finish()
+
+        XCTAssertEqual(
+            updates.map(\.answer),
+            ["Hello", "Hello world."]
+        )
+        XCTAssertEqual(parser.parsed.sessionID, "claude-session")
+        XCTAssertEqual(parser.parsed.answer, "Hello world.")
+    }
+
+    func testOpenCodeRawJSONEventsStreamTextParts() {
+        let fixture = """
+        {"type":"step_start","sessionID":"open-session","part":{"type":"step-start"}}
+        {"type":"text","sessionID":"open-session","part":{"type":"text","text":"Open"}}
+        {"type":"text","sessionID":"open-session","part":{"type":"text","text":"Code"}}
+
+        """
+        var parser = AskStreamEventParser(cli: .opencode)
+        let updates = parser.consume(Data(fixture.utf8))
+
+        XCTAssertEqual(updates.map(\.answer), ["Open", "OpenCode"])
+        XCTAssertEqual(parser.parsed.sessionID, "open-session")
+    }
+
+    func testSpeculativeLifecycleSpawnCommitKillAndReplace() {
+        let first = FakeSpeculativeProcess()
+        let second = FakeSpeculativeProcess()
+        let third = FakeSpeculativeProcess()
+        var lifecycle =
+            SpeculativeProcessLifecycle<FakeSpeculativeProcess>()
+
+        lifecycle.spawn(first)
+        XCTAssertTrue(lifecycle.activeHandle === first)
+
+        lifecycle.spawn(second)
+        XCTAssertTrue(first.wasKilled)
+        XCTAssertEqual(lifecycle.metrics.kills, 1)
+        XCTAssertTrue(lifecycle.activeHandle === second)
+
+        let committed = lifecycle.commit(
+            prompt: "composed prompt",
+            if: { $0 === second }
+        )
+        XCTAssertTrue(committed === second)
+        XCTAssertEqual(second.committedPrompt, "composed prompt")
+        XCTAssertNil(lifecycle.activeHandle)
+        XCTAssertEqual(lifecycle.metrics.hits, 1)
+
+        lifecycle.spawn(third)
+        XCTAssertTrue(lifecycle.kill())
+        XCTAssertTrue(third.wasKilled)
+        XCTAssertEqual(lifecycle.metrics.kills, 2)
+    }
+
+    func testSpeculativeLifecycleMismatchKillsAndRecordsMiss() {
+        let process = FakeSpeculativeProcess()
+        var lifecycle =
+            SpeculativeProcessLifecycle<FakeSpeculativeProcess>()
+        lifecycle.spawn(process)
+
+        XCTAssertNil(
+            lifecycle.commit(prompt: "unused", if: { _ in false })
+        )
+        XCTAssertTrue(process.wasKilled)
+        XCTAssertEqual(
+            lifecycle.metrics,
+            SpeculativeProcessMetrics(
+                hits: 0,
+                misses: 1,
+                kills: 1
+            )
+        )
+    }
+
     func testEphemeralScreenCaptureIsPrivateAndDeletedIdempotently()
         throws {
         let fileManager = FileManager.default
@@ -324,5 +542,18 @@ final class AskEngineTests: XCTestCase {
         XCTAssertFalse(fileManager.fileExists(atPath: capture.url.path))
         capture.delete(fileManager: fileManager)
         XCTAssertFalse(fileManager.fileExists(atPath: capture.url.path))
+    }
+}
+
+private final class FakeSpeculativeProcess: SpeculativeProcessHandle {
+    private(set) var committedPrompt: String?
+    private(set) var wasKilled = false
+
+    func commit(prompt: String) throws {
+        committedPrompt = prompt
+    }
+
+    func kill() {
+        wasKilled = true
     }
 }

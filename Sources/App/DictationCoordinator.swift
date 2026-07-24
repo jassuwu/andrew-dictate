@@ -38,6 +38,7 @@ final class DictationCoordinator: ObservableObject {
         case transcribing
         case asking(threadOpen: Bool)
         case screenAsking(threadOpen: Bool)
+        case askStreaming(String, threadOpen: Bool)
         case askAnswer(String, threadOpen: Bool)
         case askThreadOpen
         case gatePending(
@@ -60,6 +61,8 @@ final class DictationCoordinator: ObservableObject {
                 "asking"
             case .screenAsking:
                 "screen asking"
+            case .askStreaming:
+                "streaming answer"
             case .askAnswer:
                 "answer"
             case .askThreadOpen:
@@ -145,6 +148,9 @@ final class DictationCoordinator: ObservableObject {
     private var pendingGatedExecution: PendingGatedExecution?
     private var gateTimeoutTask: Task<Void, Never>?
     private var answerVisibilityTask: Task<Void, Never>?
+    private var streamingHUDMorphTask: Task<Void, Never>?
+    private var lastStreamingHUDMorphTime: TimeInterval?
+    private var streamingSentences: StreamingSentenceAccumulator?
     private var feedbackGeneration: UInt64 = 0
     private var activeFeedbackGeneration: UInt64?
     private let timelineClock = ContinuousClock()
@@ -442,6 +448,7 @@ final class DictationCoordinator: ObservableObject {
         invalidatePipeline()
         if state == .recording {
             audioRecorder?.cancel()
+            askEngine.discardSpeculativeAsk(reason: "model-removal")
             activeMode = nil
             activeFocusAnchor = nil
             activeTimeline = nil
@@ -490,6 +497,7 @@ final class DictationCoordinator: ObservableObject {
 
         if state == .recording {
             audioRecorder.cancel()
+            askEngine.discardSpeculativeAsk(reason: "pre-roll-change")
             activeMode = nil
             activeFocusAnchor = nil
             activeTimeline = nil
@@ -816,17 +824,20 @@ final class DictationCoordinator: ObservableObject {
         switch state {
         case .recording:
             audioRecorder?.cancel()
+            askEngine.discardSpeculativeAsk(reason: "interruption")
             activeMode = nil
             activeFocusAnchor = nil
             activeTimeline = nil
             setState(.idle)
         case .asking,
              .screenAsking,
+             .askStreaming,
              .askAnswer,
              .askThreadOpen,
              .gatePending,
              .transcriptFlash:
-            answerSpeaker.stopSpeaking(at: .immediate)
+            stopAnswerSpeech()
+            cancelStreamingHUDMorph()
             screenCapture.cancelPendingCapture()
             askEngine.cancel()
             answerVisibilityTask?.cancel()
@@ -923,6 +934,13 @@ final class DictationCoordinator: ObservableObject {
                     timelineID: timelineID
                 )
             }
+            if mode == .command {
+                askEngine.prepareSpeculativeAsk()
+            } else {
+                askEngine.discardSpeculativeAsk(
+                    reason: "dictation-keydown"
+                )
+            }
             activeMode = mode
             activeFocusAnchor = focusAnchor
             if !isOnboardingPresented {
@@ -947,6 +965,7 @@ final class DictationCoordinator: ObservableObject {
 
         if state == .recording, let audioRecorder {
             audioRecorder.cancel()
+            askEngine.discardSpeculativeAsk(reason: "lock-restart")
             activeMode = nil
             activeFocusAnchor = nil
             activeTimeline = nil
@@ -995,6 +1014,7 @@ final class DictationCoordinator: ObservableObject {
         }
 
         audioRecorder.cancel()
+        askEngine.discardSpeculativeAsk(reason: "recording-cancel")
         activeMode = nil
         activeFocusAnchor = nil
         activeTimeline = nil
@@ -1114,6 +1134,9 @@ final class DictationCoordinator: ObservableObject {
 
                 if askEngine.hasOpenThread {
                     if case .custom = command {
+                        askEngine.discardSpeculativeAsk(
+                            reason: "follow-up-custom"
+                        )
                         askEngine.clearThread()
                         completeTimeline(
                             at: timelineClock.now,
@@ -1121,6 +1144,9 @@ final class DictationCoordinator: ObservableObject {
                         )
                         await commandExecutor.execute(command)
                     } else if case let .screenAsk(_, scope) = command {
+                        askEngine.discardSpeculativeAsk(
+                            reason: "follow-up-screen"
+                        )
                         await requestScreenAsk(
                             commandTranscript,
                             scope: scope
@@ -1135,9 +1161,11 @@ final class DictationCoordinator: ObservableObject {
                     // Ask completion owns the timeline so Esc can measure
                     // cancelRequested → idle while the CLI is in flight.
                 } else if case .screenAsk = command {
+                    askEngine.discardSpeculativeAsk(reason: "screen-route")
                     // Ask completion owns the timeline so Esc can measure
                     // cancelRequested → idle while the CLI is in flight.
                 } else {
+                    askEngine.discardSpeculativeAsk(reason: "non-ask-route")
                     completeTimeline(
                         at: timelineClock.now,
                         stage: .commandRouted
@@ -1146,13 +1174,16 @@ final class DictationCoordinator: ObservableObject {
                 await commandExecutor.execute(command)
             }
         } catch is CancellationError {
+            askEngine.discardSpeculativeAsk(reason: "pipeline-cancel")
             return
         } catch {
+            askEngine.discardSpeculativeAsk(reason: "transcription-error")
             print("transcription failed: \(error.localizedDescription)")
         }
     }
 
     private func invalidatePipeline() {
+        askEngine.discardSpeculativeAsk(reason: "pipeline-invalidated")
         pipelineGeneration += 1
         pipelineTask?.cancel()
         pipelineTask = nil
@@ -1215,6 +1246,7 @@ final class DictationCoordinator: ObservableObject {
 
     private func requestAsk(_ prompt: String) async {
         let isFollowUp = askEngine.hasOpenThread
+        beginStreamingAnswer()
         setState(.asking(threadOpen: isFollowUp), mode: .command)
         let generation = stateGeneration
 
@@ -1223,7 +1255,8 @@ final class DictationCoordinator: ObservableObject {
                 prompt: prompt,
                 imagePath: nil,
                 generation: generation,
-                isScreenAsk: false
+                isScreenAsk: false,
+                threadOpenWhileStreaming: isFollowUp
             )
         } catch {
             await handleAskFailure(error, generation: generation)
@@ -1235,6 +1268,9 @@ final class DictationCoordinator: ObservableObject {
         scope: ScreenAskScope
     ) async {
         let isFollowUp = askEngine.hasOpenThread
+        // Screen capture determines an image flag after recording, so its
+        // prompt-less speculative process was discarded at routing.
+        beginStreamingAnswer()
         setState(
             .screenAsking(threadOpen: isFollowUp),
             mode: .command
@@ -1249,7 +1285,8 @@ final class DictationCoordinator: ObservableObject {
                 prompt: prompt,
                 imagePath: capture.url.path,
                 generation: generation,
-                isScreenAsk: true
+                isScreenAsk: true,
+                threadOpenWhileStreaming: isFollowUp
             )
         } catch {
             await handleAskFailure(error, generation: generation)
@@ -1260,27 +1297,43 @@ final class DictationCoordinator: ObservableObject {
         prompt: String,
         imagePath: String?,
         generation: UInt64,
-        isScreenAsk: Bool
+        isScreenAsk: Bool,
+        threadOpenWhileStreaming: Bool
     ) async throws {
         let result = try await askEngine.ask(
             prompt: prompt,
             voiceAnswersEnabled: settings.voiceAnswersEnabled,
             imagePath: imagePath
-        )
+        ) { [weak self] update in
+            self?.receiveAskStreamUpdate(
+                update,
+                generation: generation,
+                isScreenAsk: isScreenAsk,
+                threadOpenAtStart: threadOpenWhileStreaming
+            )
+        }
         try Task.checkCancellation()
         guard generation == stateGeneration else {
             return
         }
         if isScreenAsk {
-            guard case .screenAsking = state else {
+            switch state {
+            case .screenAsking, .askStreaming:
+                break
+            default:
                 return
             }
         } else {
-            guard case .asking = state else {
+            switch state {
+            case .asking, .askStreaming:
+                break
+            default:
                 return
             }
         }
 
+        finishStreamingSpeech(with: result.answer)
+        cancelStreamingHUDMorph()
         lastAnswer = result.answer
         completeTimeline(
             at: timelineClock.now,
@@ -1296,10 +1349,6 @@ final class DictationCoordinator: ObservableObject {
         scheduleAnswerVisibility(
             threadOpen: result.hasOpenThread
         )
-
-        if settings.voiceAnswersEnabled {
-            speakAnswer(result.answer)
-        }
     }
 
     private func handleAskFailure(
@@ -1313,6 +1362,8 @@ final class DictationCoordinator: ObservableObject {
             return
         }
 
+        stopAnswerSpeech()
+        cancelStreamingHUDMorph()
         activeTimeline = nil
         setState(.idle)
 
@@ -1402,15 +1453,123 @@ final class DictationCoordinator: ObservableObject {
              .transcribing,
              .asking,
              .screenAsking,
+             .askStreaming,
              .gatePending,
              .transcriptFlash:
             break
         }
     }
 
-    private func speakAnswer(_ answer: String) {
+    private func beginStreamingAnswer() {
+        cancelStreamingHUDMorph()
+        lastStreamingHUDMorphTime = nil
         answerSpeaker.stopSpeaking(at: .immediate)
-        answerSpeaker.speak(AVSpeechUtterance(string: answer))
+        streamingSentences = settings.voiceAnswersEnabled
+            ? StreamingSentenceAccumulator()
+            : nil
+    }
+
+    private func receiveAskStreamUpdate(
+        _ update: AskStreamUpdate,
+        generation: UInt64,
+        isScreenAsk: Bool,
+        threadOpenAtStart: Bool
+    ) {
+        guard generation == stateGeneration else {
+            return
+        }
+        switch state {
+        case .asking where !isScreenAsk,
+             .screenAsking where isScreenAsk,
+             .askStreaming:
+            break
+        default:
+            return
+        }
+
+        let threadOpen =
+            threadOpenAtStart || update.sessionID != nil
+        state = .askStreaming(
+            update.answer,
+            threadOpen: threadOpen
+        )
+        hudViewModel.updateStreamingAnswer(
+            update.answer,
+            threadOpen: threadOpen
+        )
+        synchronizeStreamingHUD()
+
+        guard var accumulator = streamingSentences else {
+            return
+        }
+        let sentences = accumulator.ingest(update.answer)
+        streamingSentences = accumulator
+        speak(sentences)
+    }
+
+    private func finishStreamingSpeech(with answer: String) {
+        guard var accumulator = streamingSentences else {
+            return
+        }
+        let sentences = accumulator.finish(with: answer)
+        streamingSentences = nil
+        speak(sentences)
+    }
+
+    private func speak(_ sentences: [String]) {
+        for sentence in sentences where !sentence.isEmpty {
+            answerSpeaker.speak(
+                AVSpeechUtterance(string: sentence)
+            )
+        }
+    }
+
+    private func stopAnswerSpeech() {
+        streamingSentences = nil
+        answerSpeaker.stopSpeaking(at: .immediate)
+    }
+
+    private func synchronizeStreamingHUD() {
+        let now = ProcessInfo.processInfo.systemUptime
+        let interval: TimeInterval = 0.25
+        if let lastStreamingHUDMorphTime {
+            let elapsed = now - lastStreamingHUDMorphTime
+            guard elapsed < interval else {
+                streamingHUDMorphTask?.cancel()
+                streamingHUDMorphTask = nil
+                self.lastStreamingHUDMorphTime = now
+                synchronizeHUD()
+                return
+            }
+
+            guard streamingHUDMorphTask == nil else {
+                return
+            }
+            streamingHUDMorphTask = Task {
+                @MainActor [weak self] in
+                try? await Task.sleep(
+                    for: .seconds(interval - elapsed)
+                )
+                guard !Task.isCancelled,
+                      let self else {
+                    return
+                }
+                self.streamingHUDMorphTask = nil
+                self.lastStreamingHUDMorphTime =
+                    ProcessInfo.processInfo.systemUptime
+                self.synchronizeHUD()
+            }
+            return
+        }
+
+        lastStreamingHUDMorphTime = now
+        synchronizeHUD()
+    }
+
+    private func cancelStreamingHUDMorph() {
+        streamingHUDMorphTask?.cancel()
+        streamingHUDMorphTask = nil
+        lastStreamingHUDMorphTime = nil
     }
 
     private func requestDelegation(_ prompt: String) async {
@@ -1466,14 +1625,14 @@ final class DictationCoordinator: ObservableObject {
     private func handleModeKeyPressed(
         _ mode: DictationMode
     ) -> Bool {
-        answerSpeaker.stopSpeaking(at: .immediate)
+        stopAnswerSpeech()
 
         if case .gatePending = state {
             return consumeGateKeyPress(mode)
         }
 
         switch state {
-        case .transcribing, .asking, .screenAsking:
+        case .transcribing, .asking, .screenAsking, .askStreaming:
             cancelCurrentInteraction(clearThread: true)
         case .askAnswer, .askThreadOpen:
             if mode == .command {
@@ -1517,7 +1676,8 @@ final class DictationCoordinator: ObservableObject {
     private func cancelCurrentInteraction(clearThread: Bool) {
         let cancelRequested = timelineClock.now
 
-        answerSpeaker.stopSpeaking(at: .immediate)
+        stopAnswerSpeech()
+        cancelStreamingHUDMorph()
         screenCapture.cancelPendingCapture()
         answerVisibilityTask?.cancel()
         answerVisibilityTask = nil

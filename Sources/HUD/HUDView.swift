@@ -53,6 +53,11 @@ final class HUDViewModel: ObservableObject {
                 primary: "looking at your screen…",
                 secondary: nil
             )
+        case let .askStreaming(answer, _):
+            return .text(
+                primary: HUDAnswerFormatter.preview(answer),
+                secondary: nil
+            )
         case let .askAnswer(answer, _):
             return .text(
                 primary: HUDAnswerFormatter.preview(answer),
@@ -78,6 +83,7 @@ final class HUDViewModel: ObservableObject {
         switch state {
         case let .asking(threadOpen),
              let .screenAsking(threadOpen),
+             let .askStreaming(_, threadOpen),
              let .askAnswer(_, threadOpen):
             threadOpen
         case .askThreadOpen:
@@ -120,6 +126,16 @@ final class HUDViewModel: ObservableObject {
     func showCommandFeedback(_ message: String) {
         commandFeedback = message
         presentationGeneration += 1
+    }
+
+    func updateStreamingAnswer(
+        _ answer: String,
+        threadOpen: Bool
+    ) {
+        state = .askStreaming(
+            answer,
+            threadOpen: threadOpen
+        )
     }
 
     func clearCommandFeedback() {
@@ -210,6 +226,8 @@ struct HUDView: View {
                         textPill("asking…")
                     case .screenAsking:
                         textPill("looking at your screen…")
+                    case let .askStreaming(answer, _):
+                        textPill(HUDAnswerFormatter.preview(answer))
                     case let .askAnswer(answer, _):
                         textPill(HUDAnswerFormatter.preview(answer))
                     case .askThreadOpen:
