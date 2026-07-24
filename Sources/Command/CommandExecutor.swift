@@ -5,6 +5,7 @@ import Foundation
 final class CommandExecutor {
     var onDelegate: ((String) async -> Void)?
     var onAsk: ((String) async -> Void)?
+    var onScreenAsk: ((String, ScreenAskScope) async -> Void)?
     var onFeedback: ((String) async -> Void)?
 
     private let paster: Paster
@@ -47,6 +48,8 @@ final class CommandExecutor {
             await onDelegate?(prompt)
         case let .ask(prompt):
             await onAsk?(prompt)
+        case let .screenAsk(prompt, scope):
+            await onScreenAsk?(prompt, scope)
         }
     }
 

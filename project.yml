@@ -66,6 +66,7 @@ targets:
       - Sources/Command/AppMatcher.swift
       - Sources/Command/AgentDelegator.swift
       - Sources/Command/AskEngine.swift
+      - Sources/Command/ScreenCapture.swift
       - Sources/Command/DelegationGate.swift
       - Sources/Insertion/FocusAnchor.swift
       - Sources/Instrumentation/UtteranceTimeline.swift

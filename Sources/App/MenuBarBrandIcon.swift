@@ -22,6 +22,7 @@ enum MenuBarBrandIcon {
         case .idle,
              .prewarming,
              .asking,
+             .screenAsking,
              .askAnswer,
              .askThreadOpen,
              .gatePending,

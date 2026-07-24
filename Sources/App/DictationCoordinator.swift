@@ -28,6 +28,7 @@ final class DictationCoordinator: ObservableObject {
         case recording
         case transcribing
         case asking(threadOpen: Bool)
+        case screenAsking(threadOpen: Bool)
         case askAnswer(String, threadOpen: Bool)
         case askThreadOpen
         case gatePending(
@@ -48,6 +49,8 @@ final class DictationCoordinator: ObservableObject {
                 "transcribing"
             case .asking:
                 "asking"
+            case .screenAsking:
+                "screen asking"
             case .askAnswer:
                 "answer"
             case .askThreadOpen:
@@ -78,6 +81,7 @@ final class DictationCoordinator: ObservableObject {
     private let commandExecutor: CommandExecutor
     private let agentDelegator: AgentDelegator
     private let askEngine: AskEngine
+    private let screenCapture: ScreenCapture
     private let audioRecorder: AudioRecorder?
     private let feedbackSounds: FeedbackSounds
     private let answerSpeaker = AVSpeechSynthesizer()
@@ -166,6 +170,7 @@ final class DictationCoordinator: ObservableObject {
         commandExecutor = executor
         agentDelegator = AgentDelegator(settings: settings)
         askEngine = AskEngine(settings: settings)
+        screenCapture = ScreenCapture()
 
         let monitor = HotkeyMonitor(settings: settings)
         hotkeyMonitor = monitor
@@ -175,6 +180,9 @@ final class DictationCoordinator: ObservableObject {
         }
         executor.onAsk = { [weak self] prompt in
             await self?.requestAsk(prompt)
+        }
+        executor.onScreenAsk = { [weak self] prompt, scope in
+            await self?.requestScreenAsk(prompt, scope: scope)
         }
         executor.onFeedback = { [weak self] message in
             await self?.flashFeedback(message)
@@ -639,11 +647,13 @@ final class DictationCoordinator: ObservableObject {
             activeTimeline = nil
             setState(.idle)
         case .asking,
+             .screenAsking,
              .askAnswer,
              .askThreadOpen,
              .gatePending,
              .transcriptFlash:
             answerSpeaker.stopSpeaking(at: .immediate)
+            screenCapture.cancelPendingCapture()
             askEngine.cancel()
             answerVisibilityTask?.cancel()
             answerVisibilityTask = nil
@@ -925,12 +935,23 @@ final class DictationCoordinator: ObservableObject {
                 activeTimeline?.cleaned = timelineClock.now
 
                 if askEngine.hasOpenThread {
-                    await requestAsk(commandTranscript)
+                    if case let .screenAsk(_, scope) =
+                        commandRouter.route(commandTranscript) {
+                        await requestScreenAsk(
+                            commandTranscript,
+                            scope: scope
+                        )
+                    } else {
+                        await requestAsk(commandTranscript)
+                    }
                     return
                 }
 
                 let command = commandRouter.route(commandTranscript)
                 if case .ask = command {
+                    // Ask completion owns the timeline so Esc can measure
+                    // cancelRequested → idle while the CLI is in flight.
+                } else if case .screenAsk = command {
                     // Ask completion owns the timeline so Esc can measure
                     // cancelRequested → idle while the CLI is in flight.
                 } else {
@@ -1015,45 +1036,128 @@ final class DictationCoordinator: ObservableObject {
         let generation = stateGeneration
 
         do {
-            let result = try await askEngine.ask(
+            try await performAsk(
                 prompt: prompt,
-                voiceAnswersEnabled: settings.voiceAnswersEnabled
+                imagePath: nil,
+                generation: generation,
+                isScreenAsk: false
             )
-            try Task.checkCancellation()
-            guard generation == stateGeneration,
-                  case .asking = state else {
-                return
-            }
+        } catch {
+            await handleAskFailure(error, generation: generation)
+        }
+    }
 
-            lastAnswer = result.answer
-            completeTimeline(
-                at: timelineClock.now,
-                stage: .askAnswered
-            )
-            setState(
-                .askAnswer(
-                    result.answer,
-                    threadOpen: result.hasOpenThread
-                ),
-                mode: .command
-            )
-            scheduleAnswerVisibility(
-                threadOpen: result.hasOpenThread
-            )
+    private func requestScreenAsk(
+        _ prompt: String,
+        scope: ScreenAskScope
+    ) async {
+        let isFollowUp = askEngine.hasOpenThread
+        setState(
+            .screenAsking(threadOpen: isFollowUp),
+            mode: .command
+        )
+        let generation = stateGeneration
 
-            if settings.voiceAnswersEnabled {
-                speakAnswer(result.answer)
-            }
-        } catch is CancellationError {
+        do {
+            let capture = try await screenCapture.capture(scope: scope)
+            defer { capture.delete() }
+
+            try await performAsk(
+                prompt: prompt,
+                imagePath: capture.url.path,
+                generation: generation,
+                isScreenAsk: true
+            )
+        } catch {
+            await handleAskFailure(error, generation: generation)
+        }
+    }
+
+    private func performAsk(
+        prompt: String,
+        imagePath: String?,
+        generation: UInt64,
+        isScreenAsk: Bool
+    ) async throws {
+        let result = try await askEngine.ask(
+            prompt: prompt,
+            voiceAnswersEnabled: settings.voiceAnswersEnabled,
+            imagePath: imagePath
+        )
+        try Task.checkCancellation()
+        guard generation == stateGeneration else {
             return
-        } catch let error as AskEngineError {
-            guard generation == stateGeneration else {
+        }
+        if isScreenAsk {
+            guard case .screenAsking = state else {
                 return
             }
-            activeTimeline = nil
-            setState(.idle)
+        } else {
+            guard case .asking = state else {
+                return
+            }
+        }
 
-            switch error {
+        lastAnswer = result.answer
+        completeTimeline(
+            at: timelineClock.now,
+            stage: .askAnswered
+        )
+        setState(
+            .askAnswer(
+                result.answer,
+                threadOpen: result.hasOpenThread
+            ),
+            mode: .command
+        )
+        scheduleAnswerVisibility(
+            threadOpen: result.hasOpenThread
+        )
+
+        if settings.voiceAnswersEnabled {
+            speakAnswer(result.answer)
+        }
+    }
+
+    private func handleAskFailure(
+        _ error: Error,
+        generation: UInt64
+    ) async {
+        if error is CancellationError {
+            return
+        }
+        guard generation == stateGeneration else {
+            return
+        }
+
+        activeTimeline = nil
+        setState(.idle)
+
+        if let captureError = error as? ScreenCaptureError {
+            switch captureError {
+            case .permissionDenied:
+                _ = NSWorkspace.shared.open(
+                    ScreenCapture.screenRecordingSettingsURL
+                )
+                await flashFeedback(
+                    "screen access needed — grant in settings",
+                    duration: 2
+                )
+            case .noCaptureTarget,
+                 .captureFailed,
+                 .emptyCapture,
+                 .unableToEncode,
+                 .unableToWrite:
+                await flashFeedback(
+                    "couldn't look at your screen",
+                    duration: 2
+                )
+            }
+            return
+        }
+
+        if let askError = error as? AskEngineError {
+            switch askError {
             case .unknownAgentCLI:
                 await flashFeedback(
                     "ask needs a known agent cli",
@@ -1066,14 +1170,10 @@ final class DictationCoordinator: ObservableObject {
             case .unableToLaunch, .failed, .emptyAnswer:
                 await flashFeedback("couldn't ask agent")
             }
-        } catch {
-            guard generation == stateGeneration else {
-                return
-            }
-            activeTimeline = nil
-            setState(.idle)
-            await flashFeedback("couldn't ask agent")
+            return
         }
+
+        await flashFeedback("couldn't ask agent")
     }
 
     private func scheduleAnswerVisibility(threadOpen: Bool) {
@@ -1110,6 +1210,7 @@ final class DictationCoordinator: ObservableObject {
              .recording,
              .transcribing,
              .asking,
+             .screenAsking,
              .gatePending,
              .transcriptFlash:
             break
@@ -1160,7 +1261,7 @@ final class DictationCoordinator: ObservableObject {
         }
 
         switch state {
-        case .transcribing, .asking:
+        case .transcribing, .asking, .screenAsking:
             cancelCurrentInteraction(clearThread: true)
         case .askAnswer, .askThreadOpen:
             if mode == .command {
@@ -1205,6 +1306,7 @@ final class DictationCoordinator: ObservableObject {
         let cancelRequested = timelineClock.now
 
         answerSpeaker.stopSpeaking(at: .immediate)
+        screenCapture.cancelPendingCapture()
         answerVisibilityTask?.cancel()
         answerVisibilityTask = nil
         if clearThread {

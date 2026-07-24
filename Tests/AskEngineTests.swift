@@ -115,6 +115,100 @@ final class AskEngineTests: XCTestCase {
         )
     }
 
+    func testCodexScreenAskUsesImageFlagForFreshAndResumedCalls()
+        throws {
+        let fresh = try AskInvocationComposer.compose(
+            template: "codex exec {prompt}",
+            prompt: "explain this",
+            imagePath: "/tmp/screen.png"
+        )
+        let resumed = try AskInvocationComposer.compose(
+            template: "codex exec {prompt}",
+            prompt: "look again",
+            resumeSessionID: "codex-session",
+            imagePath: "/tmp/next-screen.png"
+        )
+
+        XCTAssertEqual(
+            fresh.arguments,
+            [
+                "-s",
+                "read-only",
+                "-a",
+                "never",
+                "exec",
+                "--skip-git-repo-check",
+                "--json",
+                "-i",
+                "/tmp/screen.png",
+                "explain this",
+            ]
+        )
+        XCTAssertEqual(
+            resumed.arguments,
+            [
+                "-s",
+                "read-only",
+                "-a",
+                "never",
+                "exec",
+                "resume",
+                "--skip-git-repo-check",
+                "--json",
+                "-i",
+                "/tmp/next-screen.png",
+                "codex-session",
+                "look again",
+            ]
+        )
+    }
+
+    func testClaudeScreenAskMentionsImagePathInPromptAndResumes()
+        throws {
+        let invocation = try AskInvocationComposer.compose(
+            template: "claude -p {prompt}",
+            prompt: "explain this error",
+            resumeSessionID: "claude-session",
+            imagePath: "/tmp/screen with space.png"
+        )
+
+        XCTAssertEqual(
+            Array(invocation.arguments.suffix(3)),
+            [
+                "--resume",
+                "claude-session",
+                "Inspect the image at this path when answering: "
+                    + "/tmp/screen with space.png"
+                    + "\n\nexplain this error",
+            ]
+        )
+    }
+
+    func testOpenCodeScreenAskUsesDocumentedFileFlagAndSession()
+        throws {
+        let invocation = try AskInvocationComposer.compose(
+            template: "opencode run {prompt}",
+            prompt: "explain everything",
+            resumeSessionID: "opencode-session",
+            imagePath: "/tmp/screen.png"
+        )
+
+        XCTAssertEqual(
+            invocation.arguments,
+            [
+                "--pure",
+                "run",
+                "--format",
+                "json",
+                "--session",
+                "opencode-session",
+                "--file",
+                "/tmp/screen.png",
+                "explain everything",
+            ]
+        )
+    }
+
     func testUnknownCustomTemplateCannotRunUngatedAsk() {
         XCTAssertThrowsError(
             try AskInvocationComposer.compose(
@@ -189,5 +283,46 @@ final class AskEngineTests: XCTestCase {
         )
         window.clear()
         XCTAssertNil(window.current())
+    }
+
+    func testEphemeralScreenCaptureIsPrivateAndDeletedIdempotently()
+        throws {
+        let fileManager = FileManager.default
+        let temporaryDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent(
+                "AndrewDictateTests.ScreenCapture.\(UUID().uuidString)",
+                isDirectory: true
+            )
+        try fileManager.createDirectory(
+            at: temporaryDirectory,
+            withIntermediateDirectories: false
+        )
+        defer {
+            try? fileManager.removeItem(at: temporaryDirectory)
+        }
+
+        let pngData = Data([0x89, 0x50, 0x4E, 0x47])
+        let capture = try EphemeralScreenCapture.create(
+            pngData: pngData,
+            temporaryDirectory: temporaryDirectory,
+            fileManager: fileManager
+        )
+
+        XCTAssertEqual(
+            try Data(contentsOf: capture.url),
+            pngData
+        )
+        let attributes = try fileManager.attributesOfItem(
+            atPath: capture.url.path
+        )
+        XCTAssertEqual(
+            (attributes[.posixPermissions] as? NSNumber)?.intValue,
+            0o600
+        )
+
+        capture.delete(fileManager: fileManager)
+        XCTAssertFalse(fileManager.fileExists(atPath: capture.url.path))
+        capture.delete(fileManager: fileManager)
+        XCTAssertFalse(fileManager.fileExists(atPath: capture.url.path))
     }
 }

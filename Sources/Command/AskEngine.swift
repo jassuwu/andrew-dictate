@@ -38,7 +38,8 @@ enum AskInvocationComposer {
         template: String,
         prompt: String,
         resumeSessionID: String? = nil,
-        forcedCLI: AgentCLI? = nil
+        forcedCLI: AgentCLI? = nil,
+        imagePath: String? = nil
     ) throws -> AskInvocation {
         let parsed: AgentCommandTemplate.Parsed
         do {
@@ -71,7 +72,8 @@ enum AskInvocationComposer {
                 arguments: codexArguments(
                     userArguments: userArguments,
                     prompt: prompt,
-                    resumeSessionID: resumeSessionID
+                    resumeSessionID: resumeSessionID,
+                    imagePath: imagePath
                 ),
                 environment: [:]
             )
@@ -82,7 +84,8 @@ enum AskInvocationComposer {
                 arguments: claudeArguments(
                     userArguments: userArguments,
                     prompt: prompt,
-                    resumeSessionID: resumeSessionID
+                    resumeSessionID: resumeSessionID,
+                    imagePath: imagePath
                 ),
                 environment: [:]
             )
@@ -93,7 +96,8 @@ enum AskInvocationComposer {
                 arguments: opencodeArguments(
                     userArguments: userArguments,
                     prompt: prompt,
-                    resumeSessionID: resumeSessionID
+                    resumeSessionID: resumeSessionID,
+                    imagePath: imagePath
                 ),
                 environment: [
                     "OPENCODE_PERMISSION": opencodePermissions,
@@ -123,7 +127,8 @@ enum AskInvocationComposer {
     private static func codexArguments(
         userArguments: [String],
         prompt: String,
-        resumeSessionID: String?
+        resumeSessionID: String?,
+        imagePath: String?
     ) -> [String] {
         var arguments = retainedOptionPairs(
             from: userArguments,
@@ -149,6 +154,9 @@ enum AskInvocationComposer {
             "--skip-git-repo-check",
             "--json",
         ]
+        if let imagePath {
+            arguments += ["-i", imagePath]
+        }
         if let resumeSessionID {
             arguments += [resumeSessionID]
         }
@@ -159,7 +167,8 @@ enum AskInvocationComposer {
     private static func claudeArguments(
         userArguments: [String],
         prompt: String,
-        resumeSessionID: String?
+        resumeSessionID: String?,
+        imagePath: String?
     ) -> [String] {
         var arguments = [
             "-p",
@@ -185,14 +194,21 @@ enum AskInvocationComposer {
         if let resumeSessionID {
             arguments += ["--resume", resumeSessionID]
         }
-        arguments += [prompt]
+        arguments += [
+            imagePath.map {
+                "Inspect the image at this path when answering: \($0)"
+                    + "\n\n"
+                    + prompt
+            } ?? prompt,
+        ]
         return arguments
     }
 
     private static func opencodeArguments(
         userArguments: [String],
         prompt: String,
-        resumeSessionID: String?
+        resumeSessionID: String?,
+        imagePath: String?
     ) -> [String] {
         var arguments = ["--pure", "run", "--format", "json"]
         arguments += retainedOptionPairs(
@@ -205,6 +221,9 @@ enum AskInvocationComposer {
         )
         if let resumeSessionID {
             arguments += ["--session", resumeSessionID]
+        }
+        if let imagePath {
+            arguments += ["--file", imagePath]
         }
         arguments += [prompt]
         return arguments
@@ -363,7 +382,8 @@ final class AskEngine {
 
     func ask(
         prompt: String,
-        voiceAnswersEnabled: Bool
+        voiceAnswersEnabled: Bool,
+        imagePath: String? = nil
     ) async throws -> AskResult {
         let priorThread = reservedThread ?? threadWindow.consume()
         reservedThread = nil
@@ -395,7 +415,8 @@ final class AskEngine {
                 template: template,
                 prompt: composedPrompt,
                 resumeSessionID: priorThread?.sessionID,
-                forcedCLI: requestedCLI
+                forcedCLI: requestedCLI,
+                imagePath: imagePath
             )
         } catch AskInvocationCompositionError.unknownAgentCLI {
             throw AskEngineError.unknownAgentCLI

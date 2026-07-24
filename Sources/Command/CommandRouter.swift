@@ -18,6 +18,12 @@ enum RoutedCommand: Equatable {
     case template(url: URL, label: String)
     case delegate(prompt: String)
     case ask(prompt: String)
+    case screenAsk(prompt: String, scope: ScreenAskScope)
+}
+
+enum ScreenAskScope: Equatable, Sendable {
+    case frontWindow
+    case activeDisplay
 }
 
 struct CommandRouter {
@@ -102,6 +108,21 @@ struct CommandRouter {
         "would",
     ]
 
+    static let frontWindowScreenCues: [[String]] = [
+        ["this"],
+        ["this", "error"],
+        ["this", "page"],
+        ["this", "window"],
+        ["here"],
+    ]
+
+    static let activeDisplayScreenCues: [[String]] = [
+        ["my", "screen"],
+        ["the", "screen"],
+        ["everything"],
+        ["this", "display"],
+    ]
+
     private static let siteTemplates: [String: SiteTemplate] = [
         "chatgpt": SiteTemplate(
             baseURLString: "https://chatgpt.com/",
@@ -177,6 +198,10 @@ struct CommandRouter {
             return command
         }
 
+        if let scope = Self.screenAskScope(in: transcript) {
+            return .screenAsk(prompt: transcript, scope: scope)
+        }
+
         if Self.isQuestionShape(transcript) {
             return .ask(prompt: transcript)
         }
@@ -203,6 +228,26 @@ struct CommandRouter {
         return questionLeadingTokens.contains(token)
     }
 
+    static func screenAskScope(
+        in transcript: String
+    ) -> ScreenAskScope? {
+        let tokens = normalizedTokens(in: transcript)
+
+        // A display cue is more specific than the overlapping "this" window
+        // cue, so display always wins when both are present.
+        if activeDisplayScreenCues.contains(where: {
+            tokens.containsPhrase($0)
+        }) {
+            return .activeDisplay
+        }
+        if frontWindowScreenCues.contains(where: {
+            tokens.containsPhrase($0)
+        }) {
+            return .frontWindow
+        }
+        return nil
+    }
+
     private static func normalizedLeadingToken(
         in transcript: String
     ) -> String? {
@@ -221,6 +266,16 @@ struct CommandRouter {
             return nil
         }
         return String(token).lowercased()
+    }
+
+    private static func normalizedTokens(
+        in transcript: String
+    ) -> [String] {
+        transcript
+            .split {
+                !$0.isLetter && !$0.isNumber
+            }
+            .map { $0.lowercased() }
     }
 
     private func routeTemplate(_ transcript: String) -> RoutedCommand? {
@@ -382,5 +437,21 @@ struct CommandRouter {
             return nil
         }
         return String(scheme)
+    }
+}
+
+private extension Array where Element == String {
+    func containsPhrase(_ phrase: [String]) -> Bool {
+        guard !phrase.isEmpty, phrase.count <= count else {
+            return false
+        }
+
+        return indices.contains { startIndex in
+            let endIndex = startIndex + phrase.count
+            guard endIndex <= count else {
+                return false
+            }
+            return Array(self[startIndex..<endIndex]) == phrase
+        }
     }
 }

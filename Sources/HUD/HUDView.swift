@@ -48,6 +48,11 @@ final class HUDViewModel: ObservableObject {
             return .prewarming
         case .asking:
             return .text(primary: "asking…", secondary: nil)
+        case .screenAsking:
+            return .text(
+                primary: "looking at your screen…",
+                secondary: nil
+            )
         case let .askAnswer(answer, _):
             return .text(
                 primary: HUDAnswerFormatter.preview(answer),
@@ -72,6 +77,7 @@ final class HUDViewModel: ObservableObject {
     var isThreadOpen: Bool {
         switch state {
         case let .asking(threadOpen),
+             let .screenAsking(threadOpen),
              let .askAnswer(_, threadOpen):
             threadOpen
         case .askThreadOpen:
@@ -202,6 +208,8 @@ struct HUDView: View {
                         livePill(phase: .transcribing)
                     case .asking:
                         textPill("asking…")
+                    case .screenAsking:
+                        textPill("looking at your screen…")
                     case let .askAnswer(answer, _):
                         textPill(HUDAnswerFormatter.preview(answer))
                     case .askThreadOpen:

@@ -242,11 +242,23 @@ final class CommandRouterTests: XCTestCase {
         let cases: [(String, RoutedCommand)] = [
             ("what is actor isolation", .ask(prompt: "what is actor isolation")),
             ("why did the build fail", .ask(prompt: "why did the build fail")),
-            ("how do I undo this", .ask(prompt: "how do I undo this")),
+            (
+                "how do I undo this",
+                .screenAsk(
+                    prompt: "how do I undo this",
+                    scope: .frontWindow
+                )
+            ),
             ("is docker running", .ask(prompt: "is docker running")),
             ("can you run the tests", .ask(prompt: "can you run the tests")),
             ("explain git rebase", .ask(prompt: "explain git rebase")),
-            ("summarize this project", .ask(prompt: "summarize this project")),
+            (
+                "summarize this project",
+                .screenAsk(
+                    prompt: "summarize this project",
+                    scope: .frontWindow
+                )
+            ),
             ("tell me whether to deploy", .ask(prompt: "tell me whether to deploy")),
             ("status of the build", .ask(prompt: "status of the build")),
             ("please deploy the app", .ask(prompt: "please deploy the app")),
@@ -269,6 +281,154 @@ final class CommandRouterTests: XCTestCase {
                 "unexpected route for '\(phrase)'"
             )
         }
+    }
+
+    func testScreenAskCueRoutingTable() {
+        let cases: [
+            (phrase: String, expected: RoutedCommand)
+        ] = [
+            (
+                "what is this",
+                .screenAsk(
+                    prompt: "what is this",
+                    scope: .frontWindow
+                )
+            ),
+            (
+                "explain this error",
+                .screenAsk(
+                    prompt: "explain this error",
+                    scope: .frontWindow
+                )
+            ),
+            (
+                "what changed on this page?",
+                .screenAsk(
+                    prompt: "what changed on this page?",
+                    scope: .frontWindow
+                )
+            ),
+            (
+                "summarize this window",
+                .screenAsk(
+                    prompt: "summarize this window",
+                    scope: .frontWindow
+                )
+            ),
+            (
+                "what happened here",
+                .screenAsk(
+                    prompt: "what happened here",
+                    scope: .frontWindow
+                )
+            ),
+            (
+                "THIS looks wrong",
+                .screenAsk(
+                    prompt: "THIS looks wrong",
+                    scope: .frontWindow
+                )
+            ),
+            (
+                "what is on my screen",
+                .screenAsk(
+                    prompt: "what is on my screen",
+                    scope: .activeDisplay
+                )
+            ),
+            (
+                "summarize the screen",
+                .screenAsk(
+                    prompt: "summarize the screen",
+                    scope: .activeDisplay
+                )
+            ),
+            (
+                "explain everything",
+                .screenAsk(
+                    prompt: "explain everything",
+                    scope: .activeDisplay
+                )
+            ),
+            (
+                "what is on this display",
+                .screenAsk(
+                    prompt: "what is on this display",
+                    scope: .activeDisplay
+                )
+            ),
+            (
+                "what is this on my screen",
+                .screenAsk(
+                    prompt: "what is this on my screen",
+                    scope: .activeDisplay
+                )
+            ),
+            (
+                "compare here with the screen",
+                .screenAsk(
+                    prompt: "compare here with the screen",
+                    scope: .activeDisplay
+                )
+            ),
+            (
+                "what is actor isolation",
+                .ask(prompt: "what is actor isolation")
+            ),
+            (
+                "why did that page fail",
+                .ask(prompt: "why did that page fail")
+            ),
+            (
+                "what is on that screen",
+                .ask(prompt: "what is on that screen")
+            ),
+        ]
+
+        for testCase in cases {
+            XCTAssertEqual(
+                router.route(testCase.phrase),
+                testCase.expected,
+                "unexpected route for '\(testCase.phrase)'"
+            )
+        }
+    }
+
+    func testDisplayCuesWinScopeConflicts() {
+        XCTAssertEqual(
+            CommandRouter.screenAskScope(
+                in: "this error is also on my screen"
+            ),
+            .activeDisplay
+        )
+        XCTAssertEqual(
+            CommandRouter.screenAskScope(
+                in: "look here on this display"
+            ),
+            .activeDisplay
+        )
+        XCTAssertEqual(
+            CommandRouter.screenAskScope(
+                in: "compare this window with the screen"
+            ),
+            .activeDisplay
+        )
+        XCTAssertEqual(
+            CommandRouter.screenAskScope(in: "this error here"),
+            .frontWindow
+        )
+        XCTAssertNil(
+            CommandRouter.screenAskScope(
+                in: "what is on that monitor"
+            )
+        )
+    }
+
+    func testTierOneLiteralTypingStillWinsBeforeScreenAsk() {
+        XCTAssertEqual(
+            router.route("type this exactly"),
+            .typeLiteral(text: "this exactly")
+        )
     }
 
     func testImperativeDetectorUsesOnlyTheNormalizedLeadingToken() {
@@ -294,8 +454,8 @@ final class CommandRouterTests: XCTestCase {
             $0.lowercased().hasPrefix("andrew please ")
         }
         XCTAssertEqual(
-            customRouter.route("andrew please archive this"),
-            .delegate(prompt: "andrew please archive this")
+            customRouter.route("andrew please archive records"),
+            .delegate(prompt: "andrew please archive records")
         )
     }
 
