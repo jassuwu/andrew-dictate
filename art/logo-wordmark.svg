@@ -1,9 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 300" width="960" height="300">
   <defs>
-    <radialGradient id="bgGlow" cx="52%" cy="42%" r="75%">
-      <stop offset="0%" stop-color="#232329"/>
-      <stop offset="100%" stop-color="#161619"/>
+    <radialGradient id="bgGlow" cx="52%" cy="40%" r="78%">
+      <stop offset="0%" stop-color="#242430"/>
+      <stop offset="100%" stop-color="#141418"/>
     </radialGradient>
+    <linearGradient id="skin" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#EDC79F"/>
+      <stop offset="70%" stop-color="#DDAF83"/>
+      <stop offset="100%" stop-color="#C99A6E"/>
+    </linearGradient>
+    <linearGradient id="beard" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2E241B"/>
+      <stop offset="100%" stop-color="#191310"/>
+    </linearGradient>
+    <linearGradient id="suit" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1C1C22"/>
+      <stop offset="100%" stop-color="#0D0D10"/>
+    </linearGradient>
     <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#835231"/>
       <stop offset="55%" stop-color="#6E4226"/>
@@ -26,38 +39,81 @@
       <stop offset="100%" stop-color="#F0805F" stop-opacity="0"/>
     </radialGradient>
   </defs>
-  <!-- andrew dictate — wordmark lockup: the character + name + tagline. -->
   <rect width="960" height="300" rx="28" fill="#1B1B1F"/>
-  <g transform="translate(38 22) scale(0.5)">
-<!-- ember glow halo -->
-  <circle cx="328" cy="282" r="44" fill="url(#emberGlow)"/>
+  <g transform="translate(-16 8) scale(0.55)">
+<!-- suit shoulders -->
+  <path d="M116 512 C 126 434, 168 396, 256 396 C 344 396, 386 434, 396 512 Z" fill="url(#suit)"/>
+  <!-- open collar: shirt + skin V -->
+  <path d="M226 398 L 286 398 L 256 452 Z" fill="#EFEAE0"/>
+  <path d="M238 398 L 274 398 L 256 434 Z" fill="url(#skin)"/>
 
-  <!-- cigar -->
-  <g transform="rotate(-20 215 326)">
-    <rect x="100" y="302" width="200" height="46" rx="23" fill="url(#body)"/>
-    <!-- cap seam -->
-    <rect x="134" y="303" width="3" height="44" fill="#3E2413" opacity="0.35"/>
-    <!-- band with foil edges -->
-    <rect x="154" y="302" width="24" height="46" fill="url(#band)"/>
-    <rect x="154" y="302" width="3" height="46" fill="#8F3320" opacity="0.6"/>
-    <rect x="175" y="302" width="3" height="46" fill="#8F3320" opacity="0.6"/>
-    <!-- ash -->
-    <rect x="300" y="302" width="26" height="46" fill="url(#ash)"/>
-    <!-- ember -->
-    <rect x="326" y="302" width="18" height="46" rx="9" fill="url(#ember)"/>
-    <!-- body top highlight -->
-    <rect x="112" y="306" width="180" height="7" rx="3.5" fill="#FFFFFF" opacity="0.10"/>
+  <!-- neck -->
+  <rect x="230" y="340" width="52" height="64" rx="14" fill="url(#skin)"/>
+  <rect x="230" y="340" width="52" height="18" fill="#B8895E" opacity="0.55"/>
+
+  <!-- head: shaved, strong jaw -->
+  <rect x="168" y="118" width="176" height="244" rx="62" fill="url(#skin)"/>
+  <!-- dome highlight -->
+  <ellipse cx="240" cy="144" rx="44" ry="13" fill="#FFFFFF" opacity="0.08"/>
+
+  <!-- beard + mustache: one groomed mass, high cheek line -->
+  <path d="M170 250
+           C 178 288, 198 296, 218 290
+           C 234 280, 278 280, 294 290
+           C 314 296, 334 288, 342 250
+           L 344 268
+           C 344 330, 316 362, 256 362
+           C 196 362, 168 330, 168 268
+           Z" fill="url(#beard)"/>
+  <!-- mouth shadow under mustache -->
+  <ellipse cx="248" cy="310" rx="15" ry="5" fill="#0D0906" opacity="0.6"/>
+  <!-- beard texture strokes -->
+  <g stroke="#4A3826" stroke-width="2" opacity="0.5" fill="none" stroke-linecap="round">
+    <path d="M200 320 C 204 330, 210 338, 218 344"/>
+    <path d="M312 320 C 308 330, 302 338, 294 344"/>
+    <path d="M240 348 C 246 352, 250 353, 256 354"/>
+    <path d="M272 348 C 268 352, 262 353, 256 354"/>
   </g>
 
-  <!-- the smoke is the soundwave: brand bars, dissipating as they rise -->
+  <!-- wraparound shades -->
+  <path d="M164 196
+           L 348 196
+           C 354 196, 356 200, 355 208
+           L 351 232
+           C 350 240, 344 244, 336 244
+           L 176 244
+           C 168 244, 162 240, 161 232
+           L 157 208
+           C 156 200, 158 196, 164 196
+           Z" fill="#0A0A0D"/>
+  <!-- lens reflection -->
+  <path d="M180 204 L 230 204 L 214 236 L 172 236 Z" fill="#FFFFFF" opacity="0.08"/>
+  <path d="M292 204 L 326 204 L 314 236 L 282 236 Z" fill="#FFFFFF" opacity="0.06"/>
+
+  <!-- nose shadow -->
+  <path d="M247 268 L 265 268 L 256 250 Z" fill="#B8895E" opacity="0.5"/>
+
+  <!-- cigar from mouth, detailed -->
+  <g transform="rotate(-16 288 300)">
+    <rect x="282" y="290" width="118" height="26" rx="13" fill="url(#body)"/>
+    <rect x="316" y="290" width="15" height="26" fill="url(#band)"/>
+    <rect x="316" y="290" width="2.5" height="26" fill="#8F3320" opacity="0.6"/>
+    <rect x="328.5" y="290" width="2.5" height="26" fill="#8F3320" opacity="0.6"/>
+    <rect x="374" y="290" width="15" height="26" fill="url(#ash)"/>
+    <rect x="389" y="290" width="12" height="26" rx="6" fill="url(#ember)"/>
+    <rect x="286" y="292" width="106" height="4" rx="2" fill="#FFFFFF" opacity="0.10"/>
+  </g>
+  <circle cx="392" cy="262" r="36" fill="url(#emberGlow)"/>
+
+  <!-- the smoke is the soundwave -->
   <g fill="#EFEAE0">
-    <rect x="332" y="210" width="15" height="64"  rx="7.5" opacity="0.95"/>
-    <rect x="357" y="142" width="15" height="116" rx="7.5" fill="#E4593B"/>
-    <rect x="382" y="82"  width="15" height="160" rx="7.5" opacity="0.88"/>
-    <rect x="407" y="134" width="15" height="94"  rx="7.5" opacity="0.72"/>
-    <rect x="432" y="164" width="15" height="52"  rx="7.5" opacity="0.55"/>
+    <rect x="386" y="212" width="13" height="48"  rx="6.5" opacity="0.95"/>
+    <rect x="408" y="156" width="13" height="92"  rx="6.5" fill="#E4593B"/>
+    <rect x="430" y="106" width="13" height="128" rx="6.5" opacity="0.85"/>
+    <rect x="452" y="156" width="13" height="72"  rx="6.5" opacity="0.68"/>
+    <rect x="474" y="186" width="13" height="40"  rx="6.5" opacity="0.5"/>
   </g>
   </g>
-  <text x="308" y="158" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="76" font-weight="600" letter-spacing="-1.5" fill="#EFEAE0">andrew dictate</text>
-  <text x="311" y="214" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="30" fill="#E4593B">escape the keyboard.</text>
+  <text x="300" y="158" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="76" font-weight="600" letter-spacing="-1.5" fill="#EFEAE0">andrew dictate</text>
+  <text x="303" y="214" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="30" fill="#E4593B">escape the keyboard.</text>
 </svg>
