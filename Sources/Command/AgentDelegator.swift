@@ -117,7 +117,7 @@ final class AgentDelegator {
     }
 
     static func scriptContents(commandLine: String) -> String {
-        "#!/bin/zsh\nrm -- \"$0\"\n\(commandLine)\n"
+        "#!/bin/zsh\nrm -- \"$0\"\ncd \"$HOME\"\n\(commandLine)\n"
     }
 
     private func prepareRunDirectory() throws {

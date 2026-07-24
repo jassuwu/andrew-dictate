@@ -198,8 +198,8 @@ final class AppSettings: ObservableObject {
             .string(forKey: Self.engineVersionKey)
             .flatMap(EngineVersion.init(rawValue:)) ?? .v2
 
-        let initialAgentCommandTemplate: String
-        let shouldPersistInitialAgentCommandTemplate: Bool
+        var initialAgentCommandTemplate: String
+        var shouldPersistInitialAgentCommandTemplate: Bool
         if userDefaults.object(forKey: Self.agentCommandTemplateKey) != nil {
             let storedAgentTemplate = userDefaults.string(
                 forKey: Self.agentCommandTemplateKey
@@ -213,6 +213,12 @@ final class AppSettings: ObservableObject {
             initialAgentCommandTemplate = Self.initialAgentCommandTemplate(
                 detectedAgents: detectedAgents ?? AgentCLIDetector.detect()
             )
+            shouldPersistInitialAgentCommandTemplate = true
+        }
+        // migrate the pre-0.1.3 codex default: without --skip-git-repo-check,
+        // codex refuses to run from the (non-repo) delegation script directory
+        if initialAgentCommandTemplate == "codex exec {prompt}" {
+            initialAgentCommandTemplate = "codex exec --skip-git-repo-check {prompt}"
             shouldPersistInitialAgentCommandTemplate = true
         }
         agentCommandTemplate = initialAgentCommandTemplate

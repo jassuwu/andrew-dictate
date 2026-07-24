@@ -19,7 +19,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.engineVersion, .v2)
         XCTAssertEqual(
             settings.agentCommandTemplate,
-            "codex exec {prompt}"
+            AgentCLI.codex.commandTemplate
         )
         XCTAssertEqual(settings.terminalBundleID, "com.apple.Terminal")
         XCTAssertEqual(settings.totalWordsDictated, 0)
@@ -79,7 +79,7 @@ final class AppSettingsTests: XCTestCase {
         settings.agentCommandTemplate = "codex exec without a placeholder"
         XCTAssertEqual(
             settings.agentCommandTemplate,
-            "codex exec {prompt}"
+            AgentCLI.codex.commandTemplate
         )
     }
 

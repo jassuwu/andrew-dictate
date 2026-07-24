@@ -12,7 +12,7 @@ enum AgentCLI: String, CaseIterable, Identifiable, Sendable {
     var commandTemplate: String {
         switch self {
         case .codex:
-            "codex exec {prompt}"
+            "codex exec --skip-git-repo-check {prompt}"
         case .claude:
             "claude -p {prompt}"
         case .opencode:

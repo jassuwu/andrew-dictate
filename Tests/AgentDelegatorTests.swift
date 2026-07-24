@@ -97,6 +97,7 @@ final class AgentDelegatorTests: XCTestCase {
             ),
             "#!/bin/zsh\n"
                 + "rm -- \"$0\"\n"
+                + "cd \"$HOME\"\n"
                 + "exec 'codex' 'exec' 'hello'\n"
         )
     }
