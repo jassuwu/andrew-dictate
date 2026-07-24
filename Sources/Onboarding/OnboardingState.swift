@@ -1,9 +1,9 @@
 import Foundation
 
-enum OnboardingMissingItem: String, CaseIterable, Equatable, Sendable {
-    case microphone
-    case accessibility
-    case model
+enum OnboardingRowStatus: Equatable, Sendable {
+    case pending
+    case actionRequired
+    case ready
 }
 
 enum OnboardingCompletion: Equatable, Sendable {
@@ -13,57 +13,53 @@ enum OnboardingCompletion: Equatable, Sendable {
 }
 
 struct OnboardingState: Equatable, Sendable {
-    private(set) var setupConsented = false
-    private(set) var modelPreparationStarted = false
-    private(set) var microphoneGranted = false
-    private(set) var accessibilityGranted = false
-    private(set) var engineReady = false
+    private(set) var consented = false
+    private(set) var microphoneStatus: OnboardingRowStatus = .pending
+    private(set) var accessibilityStatus: OnboardingRowStatus = .pending
+    private(set) var modelStatus: OnboardingRowStatus = .pending
     private(set) var completion: OnboardingCompletion = .pending
 
-    var sectionsEnabled: Bool {
-        setupConsented || modelPreparationStarted
-    }
-
-    var finishEnabled: Bool {
-        missingItems.isEmpty
-    }
-
-    var missingItems: [OnboardingMissingItem] {
-        OnboardingMissingItem.allCases.filter { item in
-            switch item {
-            case .microphone:
-                !microphoneGranted
-            case .accessibility:
-                !accessibilityGranted
-            case .model:
-                !engineReady
-            }
-        }
-    }
-
-    mutating func consentToSetup() {
-        setupConsented = true
-    }
-
-    mutating func updatePermissions(
-        microphoneGranted: Bool,
-        accessibilityGranted: Bool
-    ) {
-        self.microphoneGranted = microphoneGranted
-        self.accessibilityGranted = accessibilityGranted
-    }
-
-    mutating func updateEngine(
-        preparationStarted: Bool,
-        ready: Bool
-    ) {
-        modelPreparationStarted = preparationStarted || ready
-        engineReady = ready
+    var autoFinishArmed: Bool {
+        completion == .pending
+            && microphoneStatus == .ready
+            && accessibilityStatus == .ready
+            && modelStatus == .ready
     }
 
     @discardableResult
-    mutating func finish() -> Bool {
-        guard finishEnabled else {
+    mutating func consentToSetup() -> Bool {
+        guard completion == .pending, !consented else {
+            return false
+        }
+
+        consented = true
+        if accessibilityStatus == .pending {
+            accessibilityStatus = .actionRequired
+        }
+        return true
+    }
+
+    mutating func updateMicrophoneStatus(
+        _ status: OnboardingRowStatus
+    ) {
+        microphoneStatus = status
+    }
+
+    mutating func updateAccessibility(granted: Bool) {
+        accessibilityStatus = granted
+            ? .ready
+            : consented ? .actionRequired : .pending
+    }
+
+    mutating func updateModelStatus(
+        _ status: OnboardingRowStatus
+    ) {
+        modelStatus = status
+    }
+
+    @discardableResult
+    mutating func finishAutomatically() -> Bool {
+        guard autoFinishArmed else {
             return false
         }
         completion = .finished
@@ -72,7 +68,7 @@ struct OnboardingState: Equatable, Sendable {
 
     @discardableResult
     mutating func skipForNow() -> Bool {
-        guard sectionsEnabled else {
+        guard completion == .pending else {
             return false
         }
         completion = .skipped

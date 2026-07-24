@@ -221,6 +221,10 @@ final class DictationCoordinator: ObservableObject {
 
         installSystemLifecycleObservers()
 
+        if isOnboardingPresented {
+            hotkeyMonitor.setDetectionOnly(true)
+        }
+
         if enginePreparationRequested {
             startPrewarming(transcriptionEngine)
             Task { @MainActor [weak self] in
@@ -308,14 +312,6 @@ final class DictationCoordinator: ObservableObject {
         completeOnboarding()
     }
 
-    func onboardingSectionsDidChange(enabled: Bool) {
-        guard isOnboardingPresented else {
-            return
-        }
-
-        hotkeyMonitor.setDetectionOnly(enabled)
-    }
-
     private func completeOnboarding() {
         hotkeyMonitor.setDetectionOnly(false)
         settings.onboardingCompleted = true
@@ -387,7 +383,7 @@ final class DictationCoordinator: ObservableObject {
 
     private func presentOnboarding() {
         isOnboardingPresented = true
-        hotkeyMonitor.setDetectionOnly(false)
+        hotkeyMonitor.setDetectionOnly(true)
         withHUDPanel { $0.dismiss() }
 
         if let onboardingWindowController {

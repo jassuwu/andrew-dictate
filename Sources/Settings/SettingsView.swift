@@ -39,6 +39,11 @@ final class SettingsWindowController: NSWindowController {
 struct SettingsView: View {
     private static let customAgentSelection = "custom"
     private static let noAgentSelection = "none"
+    private static let modelProgressGold = Color(
+        red: 0xE5 / 255,
+        green: 0xBE / 255,
+        blue: 0x62 / 255
+    )
 
     @ObservedObject private var coordinator: DictationCoordinator
     @ObservedObject private var settings: AppSettings
@@ -155,11 +160,11 @@ struct SettingsView: View {
                 ),
                 message: Text(
                     isActive
-                        ? "Andrew Dictate can't dictate until it "
-                            + "re-downloads. it will re-download the next "
-                            + "time you dictate or when you select it in "
-                            + "settings. other apps using FluidAudio models "
-                            + "(like Hex) share this storage."
+                        ? "dictation will stop working until it downloads "
+                            + "again. it re-downloads the next time you "
+                            + "dictate or when you select it here. other "
+                            + "apps using FluidAudio models (like Hex) "
+                            + "share this storage."
                         : "it will re-download if selected again. "
                             + "other apps using FluidAudio models (like Hex) "
                             + "share this storage and may re-download it too."
@@ -181,6 +186,8 @@ struct SettingsView: View {
                 }
             }
             .labelsHidden()
+
+            enginePreparationStatus
 
             ForEach(installedModels.filter(\.isDownloaded)) { model in
                 HStack(spacing: 8) {
@@ -211,6 +218,52 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    @ViewBuilder
+    private var enginePreparationStatus: some View {
+        switch coordinator.enginePreparationState {
+        case let .downloading(progress):
+            HStack(spacing: 8) {
+                ProgressView(value: bounded(progress))
+                    .progressViewStyle(.linear)
+                    .tint(Self.modelProgressGold)
+                    .frame(width: 140)
+
+                Text("\(Int(bounded(progress) * 100))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(Self.modelProgressGold)
+                    .frame(width: 34, alignment: .trailing)
+
+                Text("downloading")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+        case .warmingUp:
+            Text("warming up")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+        case .failed:
+            HStack(spacing: 8) {
+                Text("download failed")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Button("retry") {
+                    coordinator.retryEnginePrewarm()
+                }
+                .buttonStyle(.link)
+            }
+
+        case .notStarted, .ready:
+            EmptyView()
+        }
+    }
+
+    private func bounded(_ progress: Double) -> Double {
+        min(max(progress, 0), 1)
     }
 
     private func refreshInstalledModels() {

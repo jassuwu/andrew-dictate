@@ -1,98 +1,113 @@
 import XCTest
 
 final class OnboardingStateTests: XCTestCase {
-    func testConsentEnablesSectionsAndGatesSkip() {
+    func testSingleConsentIsTheOnlySetupStartSignal() {
         var state = OnboardingState()
+        var setupStartCount = 0
 
-        XCTAssertFalse(state.sectionsEnabled)
-        XCTAssertFalse(state.skipForNow())
-        XCTAssertEqual(state.completion, .pending)
+        XCTAssertFalse(state.consented)
+        XCTAssertFalse(state.autoFinishArmed)
+        XCTAssertEqual(setupStartCount, 0)
 
-        state.consentToSetup()
+        if state.consentToSetup() {
+            setupStartCount += 1
+        }
+        if state.consentToSetup() {
+            setupStartCount += 1
+        }
 
-        XCTAssertTrue(state.sectionsEnabled)
+        XCTAssertTrue(state.consented)
+        XCTAssertEqual(setupStartCount, 1)
+        XCTAssertEqual(state.accessibilityStatus, .actionRequired)
     }
 
-    func testFinishGatingForEveryReadinessCombination() {
-        for microphoneGranted in [false, true] {
-            for accessibilityGranted in [false, true] {
-                for engineReady in [false, true] {
+    func testAutoFinishArmsOnlyWhenAllThreeRowsAreReady() {
+        for microphoneReady in [false, true] {
+            for accessibilityReady in [false, true] {
+                for modelReady in [false, true] {
                     var state = OnboardingState()
-                    state.consentToSetup()
-                    state.updatePermissions(
-                        microphoneGranted: microphoneGranted,
-                        accessibilityGranted: accessibilityGranted
+                    _ = state.consentToSetup()
+                    state.updateMicrophoneStatus(
+                        microphoneReady ? .ready : .pending
                     )
-                    state.updateEngine(
-                        preparationStarted: true,
-                        ready: engineReady
+                    state.updateAccessibility(
+                        granted: accessibilityReady
+                    )
+                    state.updateModelStatus(
+                        modelReady ? .ready : .pending
                     )
 
-                    var expectedMissingItems:
-                        [OnboardingMissingItem] = []
-                    if !microphoneGranted {
-                        expectedMissingItems.append(.microphone)
-                    }
-                    if !accessibilityGranted {
-                        expectedMissingItems.append(.accessibility)
-                    }
-                    if !engineReady {
-                        expectedMissingItems.append(.model)
-                    }
-                    let shouldFinish =
-                        microphoneGranted
-                            && accessibilityGranted
-                            && engineReady
-
+                    let allReady =
+                        microphoneReady
+                            && accessibilityReady
+                            && modelReady
+                    XCTAssertEqual(state.autoFinishArmed, allReady)
                     XCTAssertEqual(
-                        state.missingItems,
-                        expectedMissingItems
+                        state.finishAutomatically(),
+                        allReady
                     )
-                    XCTAssertEqual(state.finishEnabled, shouldFinish)
-                    XCTAssertEqual(state.finish(), shouldFinish)
                     XCTAssertEqual(
                         state.completion,
-                        shouldFinish ? .finished : .pending
+                        allReady ? .finished : .pending
                     )
                 }
             }
         }
     }
 
-    func testSkipCompletesWithoutPermissionsOrReadyModel() {
+    func testDeniedMicrophoneKeepsCardOpenWithSettingsStatus() {
         var state = OnboardingState()
-        state.consentToSetup()
-        state.updateEngine(
-            preparationStarted: true,
-            ready: false
-        )
+        _ = state.consentToSetup()
+        state.updateMicrophoneStatus(.actionRequired)
+        state.updateAccessibility(granted: true)
+        state.updateModelStatus(.ready)
 
-        XCTAssertFalse(state.finishEnabled)
-        XCTAssertTrue(state.skipForNow())
-        XCTAssertEqual(state.completion, .skipped)
+        XCTAssertEqual(state.microphoneStatus, .actionRequired)
+        XCTAssertFalse(state.autoFinishArmed)
+        XCTAssertFalse(state.finishAutomatically())
+        XCTAssertEqual(state.completion, .pending)
     }
 
-    func testReadyModelRelaunchEnablesSectionsWithoutNewConsent() {
+    func testSkipCompletesWithoutConsentOrStartingSetup() {
         var state = OnboardingState()
-        state.updateEngine(
-            preparationStarted: true,
-            ready: true
-        )
 
-        XCTAssertFalse(state.setupConsented)
-        XCTAssertTrue(state.sectionsEnabled)
-        XCTAssertEqual(
-            state.missingItems,
-            [.microphone, .accessibility]
-        )
+        XCTAssertTrue(state.skipForNow())
+        XCTAssertEqual(state.completion, .skipped)
+        XCTAssertFalse(state.consented)
+        XCTAssertFalse(state.consentToSetup())
+        XCTAssertFalse(state.finishAutomatically())
+    }
 
-        state.updatePermissions(
-            microphoneGranted: true,
-            accessibilityGranted: true
-        )
+    func testAllGreenRelaunchAutoFinishesWithoutSetupRetrigger() {
+        var state = OnboardingState()
+        var setupStartCount = 0
+        state.updateMicrophoneStatus(.ready)
+        state.updateAccessibility(granted: true)
+        state.updateModelStatus(.ready)
 
-        XCTAssertTrue(state.finishEnabled)
-        XCTAssertTrue(state.finish())
+        XCTAssertFalse(state.consented)
+        XCTAssertEqual(setupStartCount, 0)
+        XCTAssertTrue(state.autoFinishArmed)
+        XCTAssertTrue(state.finishAutomatically())
         XCTAssertEqual(state.completion, .finished)
+
+        if state.consentToSetup() {
+            setupStartCount += 1
+        }
+        XCTAssertEqual(setupStartCount, 0)
+    }
+
+    func testLosingReadinessDisarmsAutoFinish() {
+        var state = OnboardingState()
+        state.updateMicrophoneStatus(.ready)
+        state.updateAccessibility(granted: true)
+        state.updateModelStatus(.ready)
+        XCTAssertTrue(state.autoFinishArmed)
+
+        state.updateModelStatus(.actionRequired)
+
+        XCTAssertFalse(state.autoFinishArmed)
+        XCTAssertEqual(state.modelStatus, .actionRequired)
+        XCTAssertEqual(state.completion, .pending)
     }
 }

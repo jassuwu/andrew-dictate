@@ -61,14 +61,15 @@ one nonactivating, click-through `NSPanel` (borderless, floating, all-spaces). s
 
 no dock icon. menu-bar item: tiny glyph → menu: copy last, settings, about, quit.
 
-## 6. onboarding (once, ~60 seconds)
+## 6. onboarding (once, one app click)
 
-1. **welcome** — one screen, one sentence, "get started."
-2. **permissions** — mic, then accessibility, each with a one-line why. functional checks, not boolean checks.
-3. **model** — parakeet v2 download (~443MB) with progress; hotkey test enabled the moment it's warm.
-4. **keys, agent & first word** — shows the two defaults with press-to-test; fn "Do Nothing" system hint; detected agent CLIs with codex preselected + custom entry; the pre-roll choice, stated honestly ("never lose your first word — keeps the mic warm while the app runs" vs "mic only while holding a key"); skip allowed.
+one fixed card introduces Andrew Dictate and has one consent action: "set up Andrew Dictate." nothing downloads and hotkeys remain detection-only before that click.
 
-done. no account, no tour, no newsletter.
+the click starts the parakeet v2 download and warmup, requests microphone access, and prompts for accessibility together. one live checklist shows microphone, accessibility, and speech-model status; download progress stays inline, denied permissions link to system settings, and model failures can retry.
+
+keys, pre-roll, agent, and dictionary configuration are omitted. defaults apply: fn for dictation, right-option for commands, pre-roll off, and codex when detected (otherwise no agent). settings owns every option.
+
+when all three rows are ready, the card says "ready — hold fn and speak." and closes automatically after a short confirmation. "skip for now" closes into a degraded but re-runnable app. no account, no tour, no newsletter.
 
 ## 7. settings (one sheet)
 
