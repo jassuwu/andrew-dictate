@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="art/icon_1024.png" width="140" alt="Andrew Dictate" />
+  <img src="apps/mac/art/icon_1024.png" width="140" alt="Andrew Dictate" />
 </p>
 
 <h1 align="center">andrew dictate</h1>
@@ -25,7 +25,7 @@ local speech-to-text and voice commands for macOS. free, open source, runs entir
 
 spoken answers are a toggle; talking over it interrupts it. a personal dictionary fixes the words it mishears ("jason" → `json`).
 
-cleanup is built in: spoken punctuation ("comma", "new paragraph"), emails ("john at cypher dot io" → `john@cypher.io`), numbers ("five hundred dollars" → $500), self-corrections ("ship it friday, actually monday" → "ship it monday"), and stumble removal — all deterministic, all on-device, all instant. optional ai polish on top (apple's on-device model, off by default, three modes: off / on / always) with a local "cleanup lab" showing raw-vs-cleaned pairs so you can judge it on your own speech before trusting it.
+cleanup is built in: spoken punctuation ("comma", "new paragraph"), emails ("jass at jass dot gg" → `jass@jass.gg`), numbers ("five hundred dollars" → $500), self-corrections ("ship it friday, actually monday" → "ship it monday"), and stumble removal — all deterministic, all on-device, all instant. optional ai polish on top (apple's on-device model, off by default, three modes: off / on / always) with a local "cleanup lab" showing raw-vs-cleaned pairs so you can judge it on your own speech before trusting it.
 
 ## install
 
@@ -60,6 +60,6 @@ first run: one click, ~450 mb model download, mic + accessibility permissions. d
 ---
 
 <p align="center">
-  <img src="art/icon_1024.png" width="72" alt="" /><br/>
+  <img src="apps/mac/art/icon_1024.png" width="72" alt="" /><br/>
   <sub>the matrix wants you typing.</sub>
 </p>
