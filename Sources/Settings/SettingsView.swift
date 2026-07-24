@@ -40,27 +40,34 @@ struct SettingsView: View {
     private static let customAgentSelection = "custom"
     private static let noAgentSelection = "none"
 
-    private let coordinator: DictationCoordinator
-
+    @ObservedObject private var coordinator: DictationCoordinator
     @ObservedObject private var settings: AppSettings
     @ObservedObject private var dictionaryStore: DictionaryStore
     @StateObject private var loginItem = LoginItemController()
+
+    private let modelStore: ModelStore
 
     @State private var detectedAgents: [DetectedAgentCLI]
     @State private var installedTerminals: [TerminalOption]
     @State private var selectedAgent: String
     @State private var customAgentTemplate: String
     @State private var customTemplateIsInvalid = false
+    @State private var installedModels: [InstalledModel] = []
+    @State private var pendingModelRemoval: EngineVersion?
+    @State private var modelStoreMessage: String?
 
     init(coordinator: DictationCoordinator) {
         let settings = coordinator.settings
         let detectedAgents = AgentCLIDetector.detect()
         let installedTerminals = TerminalDetector.detectInstalled()
 
-        self.coordinator = coordinator
+        _coordinator = ObservedObject(wrappedValue: coordinator)
         _settings = ObservedObject(wrappedValue: settings)
         _dictionaryStore = ObservedObject(
             wrappedValue: coordinator.dictionaryStore
+        )
+        modelStore = ModelStore(
+            activeVersion: { settings.engineVersion }
         )
         _detectedAgents = State(initialValue: detectedAgents)
         _installedTerminals = State(initialValue: installedTerminals)
@@ -82,11 +89,8 @@ struct SettingsView: View {
 
             Toggle("pre-roll", isOn: $settings.preRollEnabled)
 
-            Picker("engine", selection: $settings.engineVersion) {
-                ForEach(EngineVersion.allCases) { version in
-                    Text(version.displayName)
-                        .tag(version)
-                }
+            LabeledContent("engine") {
+                engineEditor
             }
 
             LabeledContent("dictionary") {
@@ -130,7 +134,84 @@ struct SettingsView: View {
         .onAppear {
             loginItem.refresh()
             selectAvailableTerminalIfNeeded()
+            refreshInstalledModels()
         }
+        .onChange(of: coordinator.enginePreparationState) { _, state in
+            if state == .ready || state == .failed {
+                refreshInstalledModels()
+            }
+        }
+        .alert(item: $pendingModelRemoval) { version in
+            Alert(
+                title: Text(
+                    "remove parakeet \(version.rawValue) download?"
+                ),
+                message: Text(
+                    "it will re-download if selected again. "
+                        + "other apps using FluidAudio models (like Hex) "
+                        + "share this storage and may re-download it too."
+                ),
+                primaryButton: .destructive(Text("remove download")) {
+                    removeDownload(version)
+                },
+                secondaryButton: .cancel(Text("cancel"))
+            )
+        }
+    }
+
+    private var engineEditor: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Picker("", selection: $settings.engineVersion) {
+                ForEach(EngineVersion.allCases) { version in
+                    Text(version.displayName)
+                        .tag(version)
+                }
+            }
+            .labelsHidden()
+
+            ForEach(installedModels.filter(\.isDownloaded)) { model in
+                HStack(spacing: 8) {
+                    Text(
+                        "parakeet \(model.version.rawValue) "
+                            + "· \(model.onDiskSize)"
+                    )
+                    .foregroundStyle(.secondary)
+
+                    Spacer(minLength: 8)
+
+                    if model.version == settings.engineVersion {
+                        Text("active")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Button("remove download") {
+                            pendingModelRemoval = model.version
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                .font(.caption)
+            }
+
+            if let modelStoreMessage {
+                Text(modelStoreMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func refreshInstalledModels() {
+        installedModels = modelStore.installedModels()
+    }
+
+    private func removeDownload(_ version: EngineVersion) {
+        do {
+            try modelStore.remove(version)
+            modelStoreMessage = nil
+        } catch {
+            modelStoreMessage = "couldn’t remove download"
+        }
+        refreshInstalledModels()
     }
 
     @ViewBuilder

@@ -143,7 +143,7 @@ actor ParakeetEngine: TranscriptionEngine {
     }
 }
 
-private extension EngineVersion {
+extension EngineVersion {
     var asrModelVersion: AsrModelVersion {
         switch self {
         case .v2:

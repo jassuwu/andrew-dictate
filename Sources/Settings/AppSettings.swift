@@ -19,6 +19,15 @@ enum EngineVersion: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum ModelRemovalPolicy {
+    static func allowsRemoval(
+        of version: EngineVersion,
+        activeVersion: EngineVersion
+    ) -> Bool {
+        version != activeVersion
+    }
+}
+
 @MainActor
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()

@@ -145,6 +145,21 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.agentCommandTemplate, "")
     }
 
+    func testActiveEngineVersionCannotBeRemoved() {
+        XCTAssertFalse(
+            ModelRemovalPolicy.allowsRemoval(
+                of: .v2,
+                activeVersion: .v2
+            )
+        )
+        XCTAssertTrue(
+            ModelRemovalPolicy.allowsRemoval(
+                of: .v3,
+                activeVersion: .v2
+            )
+        )
+    }
+
     private func makeUserDefaults() -> (UserDefaults, String) {
         let suiteName = "AndrewDictateTests.AppSettings.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
