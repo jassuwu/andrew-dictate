@@ -1,4 +1,5 @@
 import Combine
+import OSLog
 import Foundation
 import AppKit
 import AVFoundation
@@ -22,6 +23,10 @@ struct HotkeyDetection: Equatable, Sendable {
 
 @MainActor
 final class DictationCoordinator: ObservableObject {
+    private let askLogger = Logger(
+        subsystem: "gg.jass.dictate",
+        category: "ask"
+    )
     enum State: Equatable, Sendable {
         case idle
         case prewarming
@@ -1196,7 +1201,15 @@ final class DictationCoordinator: ObservableObject {
                 await flashFeedback("ask timed out")
             case .cancelled:
                 return
-            case .unableToLaunch, .failed, .emptyAnswer:
+            case .unableToLaunch:
+                askLogger.error(
+                    "ask launch failed: \(String(describing: askError))"
+                )
+                await flashFeedback("couldn't launch the agent cli")
+            case .failed, .emptyAnswer:
+                askLogger.error(
+                    "ask failed: \(String(describing: askError))"
+                )
                 await flashFeedback("couldn't ask agent")
             }
             return

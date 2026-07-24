@@ -496,12 +496,23 @@ final class AskEngine {
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = standardOutput.pipe
         process.standardError = standardError.pipe
-        if !invocation.environment.isEmpty {
-            process.environment = ProcessInfo.processInfo.environment
-                .merging(invocation.environment) { _, invocationValue in
-                    invocationValue
-                }
+        // GUI apps inherit a minimal PATH. CLIs installed via nvm are node
+        // scripts whose `#!/usr/bin/env node` shebang needs node on PATH —
+        // and node lives next to the CLI. Prepend the CLI's directory so
+        // shebang resolution works regardless of launch context.
+        var environment = ProcessInfo.processInfo.environment
+            .merging(invocation.environment) { _, invocationValue in
+                invocationValue
+            }
+        let executableDirectory = executableURL
+            .deletingLastPathComponent()
+            .path
+        let inheritedPath = environment["PATH"] ?? "/usr/bin:/bin"
+        if !inheritedPath.split(separator: ":").map(String.init)
+            .contains(executableDirectory) {
+            environment["PATH"] = executableDirectory + ":" + inheritedPath
         }
+        process.environment = environment
 
         let status: Int32
         do {
