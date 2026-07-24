@@ -64,6 +64,8 @@ Andrew Dictate is released under the [MIT license](LICENSE).
 - [FluidAudio](https://github.com/FluidInference/FluidAudio) — Apache-2.0.
 - [NVIDIA Parakeet TDT 0.6B v2/v3 model weights](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) — CC-BY-4.0.
 
+made by [jass](https://jass.gg).
+
 ---
 
 <p align="center">
