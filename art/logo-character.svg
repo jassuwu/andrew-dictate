@@ -1,22 +1,29 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <!-- andrew dictate — character mark. brand-play surfaces only (ADR 0013). -->
+  <!-- andrew dictate — THE logo. bald, shades, beard, cigar; the smoke is the waveform. -->
   <rect width="512" height="512" rx="116" fill="#1B1B1F"/>
-  <!-- bald head, long jaw -->
-  <rect x="170" y="136" width="164" height="230" rx="64" fill="#EFEAE0"/>
-  <!-- wraparound shades, slight overhang -->
-  <rect x="150" y="212" width="204" height="52" rx="26" fill="#0E0E11"/>
-  <rect x="150" y="212" width="204" height="52" rx="26" fill="none" stroke="#EFEAE0" stroke-opacity="0.22" stroke-width="3"/>
-  <!-- cigar from the mouth corner, tilted up -->
-  <g transform="rotate(-14 300 330)">
-    <rect x="296" y="318" width="112" height="25" rx="12" fill="#6E4226"/>
-    <rect x="330" y="318" width="13" height="25" fill="#E4593B" opacity="0.85"/>
-    <rect x="396" y="320" width="12" height="21" rx="6" fill="#E4593B"/>
+  <!-- head: wide, square jaw -->
+  <rect x="160" y="126" width="188" height="228" rx="56" fill="#EFEAE0"/>
+  <!-- beard: lower third, dark -->
+  <path d="M160 268 h188 v30 a56 56 0 0 1 -56 56 h-76 a56 56 0 0 1 -56 -56 z" fill="#2B2521"/>
+  <!-- two-lens shades + bridge + temples -->
+  <g>
+    <rect x="172" y="206" width="78" height="56" rx="20" fill="#0E0E11"/>
+    <rect x="258" y="206" width="78" height="56" rx="20" fill="#0E0E11"/>
+    <rect x="246" y="216" width="16" height="10" fill="#0E0E11"/>
+    <rect x="152" y="216" width="24" height="10" fill="#0E0E11"/>
+    <rect x="332" y="216" width="24" height="10" fill="#0E0E11"/>
   </g>
-  <!-- the smoke is the waveform -->
+  <!-- cigar from the beard line, tilted up -->
+  <g transform="rotate(-12 306 316)">
+    <rect x="302" y="304" width="112" height="24" rx="12" fill="#6E4226"/>
+    <rect x="336" y="304" width="13" height="24" fill="#E4593B" opacity="0.85"/>
+    <rect x="402" y="306" width="12" height="20" rx="6" fill="#E4593B"/>
+  </g>
+  <!-- the smoke is the waveform (brand bars) -->
   <g fill="#EFEAE0">
-    <rect x="394" y="224" width="14" height="44"  rx="7"/>
-    <rect x="418" y="188" width="14" height="80"  rx="7" fill="#E4593B"/>
-    <rect x="442" y="152" width="14" height="116" rx="7"/>
-    <rect x="466" y="206" width="14" height="62"  rx="7"/>
+    <rect x="392" y="226" width="13" height="40"  rx="6.5"/>
+    <rect x="414" y="192" width="13" height="74"  rx="6.5" fill="#E4593B"/>
+    <rect x="436" y="158" width="13" height="108" rx="6.5"/>
+    <rect x="458" y="208" width="13" height="58"  rx="6.5"/>
   </g>
 </svg>

@@ -67,6 +67,6 @@ Andrew Dictate is released under the [MIT license](LICENSE).
 ---
 
 <p align="center">
-  <img src="art/mark-shades.png" width="72" alt="" /><br/>
+  <img src="art/logo-character.svg" width="72" alt="" /><br/>
   <sub>the matrix wants you typing.</sub>
 </p>

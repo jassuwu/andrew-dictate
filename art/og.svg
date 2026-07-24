@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 300" width="960" height="300">
-  <!-- andrew dictate — wordmark lockup: the character + name + tagline. -->
-  <rect width="960" height="300" rx="28" fill="#1B1B1F"/>
-  <g transform="translate(38 22) scale(0.5)">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <!-- andrew dictate — og image -->
+  <rect width="1200" height="630" fill="#1B1B1F"/>
+  <g transform="translate(80 60) scale(1.0)">
     <rect x="160" y="126" width="188" height="228" rx="56" fill="#EFEAE0"/>
     <path d="M160 268 h188 v30 a56 56 0 0 1 -56 56 h-76 a56 56 0 0 1 -56 -56 z" fill="#2B2521"/>
     <rect x="172" y="206" width="78" height="56" rx="20" fill="#0E0E11"/>
@@ -21,6 +21,7 @@
       <rect x="458" y="208" width="13" height="58"  rx="6.5"/>
     </g>
   </g>
-  <text x="308" y="158" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="76" font-weight="600" letter-spacing="-1.5" fill="#EFEAE0">andrew dictate</text>
-  <text x="311" y="214" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="30" fill="#E4593B">escape the keyboard.</text>
+  <text x="620" y="300" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="88" font-weight="600" letter-spacing="-2" fill="#EFEAE0">andrew dictate</text>
+  <text x="624" y="368" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="38" fill="#E4593B">escape the keyboard.</text>
+  <text x="624" y="540" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="26" fill="#EFEAE0" fill-opacity="0.55">free · open source · fully local</text>
 </svg>
