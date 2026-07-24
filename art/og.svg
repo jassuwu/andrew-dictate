@@ -105,13 +105,13 @@
   </g>
   <circle cx="392" cy="262" r="36" fill="url(#emberGlow)"/>
 
-  <!-- the smoke is the soundwave -->
+  <!-- the smoke is the soundwave — prominent, rising -->
   <g fill="#EFEAE0">
-    <rect x="386" y="212" width="13" height="48"  rx="6.5" opacity="0.95"/>
-    <rect x="408" y="156" width="13" height="92"  rx="6.5" fill="#E4593B"/>
-    <rect x="430" y="106" width="13" height="128" rx="6.5" opacity="0.85"/>
-    <rect x="452" y="156" width="13" height="72"  rx="6.5" opacity="0.68"/>
-    <rect x="474" y="186" width="13" height="40"  rx="6.5" opacity="0.5"/>
+    <rect x="384" y="196" width="17" height="70"  rx="8.5" opacity="0.98"/>
+    <rect x="408" y="126" width="17" height="126" rx="8.5" fill="#E4593B"/>
+    <rect x="432" y="54"  width="17" height="184" rx="8.5" opacity="0.94"/>
+    <rect x="456" y="122" width="17" height="104" rx="8.5" opacity="0.82"/>
+    <rect x="478" y="158" width="16" height="58"  rx="8"   opacity="0.66"/>
   </g>
   </g>
   <text x="560" y="300" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="88" font-weight="600" letter-spacing="-2" fill="#EFEAE0">andrew dictate</text>
