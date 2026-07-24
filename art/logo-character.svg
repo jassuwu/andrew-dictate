@@ -1,22 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <!-- andrew dictate — THE logo. the cigar; the smoke is the waveform. -->
+  <!-- andrew dictate — THE logo. one line: the cigar becomes the rise. -->
   <rect width="512" height="512" rx="116" fill="#1B1B1F"/>
-
-  <!-- cigar: fat body → band → ash → ember, rising at a confident angle -->
-  <g transform="rotate(-20 215 326)">
-    <rect x="100" y="302" width="200" height="46" rx="23" fill="#6E4226"/>
-    <rect x="156" y="302" width="20" height="46" fill="#E4593B"/>
-    <rect x="300" y="302" width="26" height="46" fill="#D8D2C4"/>
-    <rect x="326" y="302" width="18" height="46" rx="9" fill="#E4593B"/>
-    <rect x="337" y="311" width="6" height="28" rx="3" fill="#F0805F"/>
+  <g fill="none" stroke="#EFEAE0" stroke-width="40" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 96 320 L 148 320"/>
+    <path d="M 172 320 L 234 320"/>
+    <path d="M 300 320 L 346 274 L 370 296 L 428 202"/>
   </g>
-
-  <!-- the smoke is the waveform, drifting up from the ember -->
-  <g fill="#EFEAE0">
-    <rect x="332" y="210" width="15" height="64"  rx="7.5"/>
-    <rect x="357" y="142" width="15" height="116" rx="7.5" fill="#E4593B"/>
-    <rect x="382" y="82"  width="15" height="160" rx="7.5"/>
-    <rect x="407" y="134" width="15" height="94"  rx="7.5"/>
-    <rect x="432" y="164" width="15" height="52"  rx="7.5"/>
-  </g>
+  <circle cx="268" cy="320" r="21" fill="#E4593B"/>
 </svg>
