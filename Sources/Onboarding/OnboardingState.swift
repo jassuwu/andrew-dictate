@@ -3,8 +3,8 @@ import Foundation
 enum OnboardingStep: Int, CaseIterable, Sendable {
     case welcome
     case permissions
-    case model
     case keysAndAgent
+    case model
 }
 
 struct OnboardingFlowState: Equatable, Sendable {

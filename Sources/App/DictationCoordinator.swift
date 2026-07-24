@@ -4,6 +4,7 @@ import AppKit
 import AVFoundation
 
 enum EnginePreparationState: Equatable, Sendable {
+    case notStarted
     case downloading(progress: Double)
     case warmingUp
     case ready
@@ -64,7 +65,7 @@ final class DictationCoordinator: ObservableObject {
 
     @Published private(set) var state: State = .prewarming
     @Published private(set) var enginePreparationState:
-        EnginePreparationState = .downloading(progress: 0)
+        EnginePreparationState = .notStarted
     @Published private(set) var hotkeyDetection: HotkeyDetection?
     @Published private(set) var lastTranscript: String?
 
@@ -303,9 +304,13 @@ final class DictationCoordinator: ObservableObject {
         }
 
         hotkeyMonitor.setDetectionOnly(step == .keysAndAgent)
-        if step == .model {
-            requestEnginePreparation()
+    }
+
+    func beginOnboardingEnginePreparation() {
+        guard isOnboardingPresented else {
+            return
         }
+        requestEnginePreparation()
     }
 
     func onboardingWindowDidClose(
@@ -401,7 +406,9 @@ final class DictationCoordinator: ObservableObject {
         engineGeneration += 1
         let generation = engineGeneration
         isPrewarmed = false
-        enginePreparationState = .downloading(progress: 0)
+        enginePreparationState = enginePreparationRequested
+            ? .downloading(progress: 0)
+            : .notStarted
         setState(.prewarming)
 
         let previousEngine = transcriptionEngine

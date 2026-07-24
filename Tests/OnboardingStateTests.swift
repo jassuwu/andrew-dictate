@@ -20,10 +20,10 @@ final class OnboardingStateTests: XCTestCase {
         )
         XCTAssertTrue(state.canContinue)
         XCTAssertTrue(state.advance())
-        XCTAssertEqual(state.step, .model)
+        XCTAssertEqual(state.step, .keysAndAgent)
     }
 
-    func testPermissionSkipAllowsModelStep() {
+    func testPermissionSkipAllowsSetupStep() {
         var state = OnboardingFlowState()
         XCTAssertTrue(state.advance())
 
@@ -31,14 +31,19 @@ final class OnboardingStateTests: XCTestCase {
 
         XCTAssertTrue(state.canContinue)
         XCTAssertTrue(state.advance())
-        XCTAssertEqual(state.step, .model)
+        XCTAssertEqual(state.step, .keysAndAgent)
     }
 
-    func testModelRequiresReadyState() {
+    func testSetupNeverWaitsForModelAndFinalRequiresReadyState() {
         var state = OnboardingFlowState()
         XCTAssertTrue(state.advance())
         state.skipPermissions()
         XCTAssertTrue(state.advance())
+
+        XCTAssertEqual(state.step, .keysAndAgent)
+        XCTAssertTrue(state.canContinue)
+        XCTAssertTrue(state.advance())
+        XCTAssertEqual(state.step, .model)
 
         XCTAssertFalse(state.canContinue)
         XCTAssertFalse(state.advance())
@@ -47,8 +52,8 @@ final class OnboardingStateTests: XCTestCase {
         state.updateEngineReady(true)
 
         XCTAssertTrue(state.canContinue)
-        XCTAssertTrue(state.advance())
-        XCTAssertEqual(state.step, .keysAndAgent)
+        XCTAssertFalse(state.advance())
+        XCTAssertEqual(state.step, .model)
     }
 
     func testBackNavigationPreservesSatisfiedGates() {
@@ -56,11 +61,11 @@ final class OnboardingStateTests: XCTestCase {
         XCTAssertTrue(state.advance())
         state.skipPermissions()
         XCTAssertTrue(state.advance())
-        state.updateEngineReady(true)
         XCTAssertTrue(state.advance())
+        state.updateEngineReady(true)
 
         state.goBack()
-        XCTAssertEqual(state.step, .model)
+        XCTAssertEqual(state.step, .keysAndAgent)
         XCTAssertTrue(state.canContinue)
 
         state.goBack()

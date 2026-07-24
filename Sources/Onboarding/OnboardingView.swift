@@ -164,6 +164,8 @@ struct OnboardingView: View {
                 .padding(.horizontal, 54)
                 .padding(.vertical, 34)
 
+            persistentModelStatus
+
             Divider()
 
             navigation
@@ -228,10 +230,10 @@ struct OnboardingView: View {
             welcomeStep
         case .permissions:
             permissionsStep
-        case .model:
-            modelStep
         case .keysAndAgent:
             keysAndAgentStep
+        case .model:
+            modelStep
         }
     }
 
@@ -248,6 +250,14 @@ struct OnboardingView: View {
             .font(.title3)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
+
+            Text(
+                "first, we'll start downloading the speech model (~450mb) "
+                    + "— it installs while you set things up."
+            )
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 480)
 
             Spacer()
         }
@@ -343,15 +353,25 @@ struct OnboardingView: View {
     private var modelStep: some View {
         VStack(alignment: .leading, spacing: 26) {
             stepTitle(
-                "local model",
-                detail: "speech recognition downloads once and stays on this mac."
+                "almost there",
+                detail: "finishing the local speech model."
             )
 
             VStack(alignment: .leading, spacing: 13) {
                 switch coordinator.enginePreparationState {
+                case .notStarted:
+                    Text("the model download hasn’t started.")
+                        .font(.headline)
+                    Button("start download") {
+                        coordinator.beginOnboardingEnginePreparation()
+                    }
+
                 case let .downloading(progress):
-                    Text("downloading \(modelDescription)")
-                    .font(.headline)
+                    Text("finishing the model download…")
+                        .font(.headline)
+
+                    Text(modelDescription)
+                        .foregroundStyle(.secondary)
 
                     ProgressView(value: progress)
 
@@ -363,9 +383,11 @@ struct OnboardingView: View {
                     HStack(spacing: 10) {
                         ProgressView()
                             .controlSize(.small)
-                        Text("warming up")
+                        Text("warming up the model…")
                             .font(.headline)
                     }
+                    Text("the download is complete. this takes a moment.")
+                        .foregroundStyle(.secondary)
 
                 case .ready:
                     Text("ready")
@@ -377,11 +399,11 @@ struct OnboardingView: View {
                         .foregroundStyle(.secondary)
 
                 case .failed:
-                    Text("couldn’t prepare the model")
+                    Text("model download failed")
                         .font(.headline)
                     Text("check your connection and try again.")
                         .foregroundStyle(.secondary)
-                    Button("try again") {
+                    Button("retry") {
                         coordinator.retryEnginePrewarm()
                     }
                 }
@@ -394,6 +416,61 @@ struct OnboardingView: View {
             )
 
             Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private var persistentModelStatus: some View {
+        switch coordinator.enginePreparationState {
+        case let .downloading(progress):
+            Divider()
+            HStack(spacing: 12) {
+                ProgressView(value: progress)
+                    .frame(width: 150)
+
+                Text("downloading model…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text("\(Int(progress * 100))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+            }
+            .padding(.horizontal, 24)
+            .frame(height: 44)
+
+        case .warmingUp:
+            Divider()
+            HStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("warming up model…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 24)
+            .frame(height: 44)
+
+        case .failed:
+            Divider()
+            HStack(spacing: 8) {
+                Text("model download failed")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("retry") {
+                    coordinator.retryEnginePrewarm()
+                }
+                .controlSize(.small)
+                Spacer()
+            }
+            .padding(.horizontal, 24)
+            .frame(height: 44)
+
+        case .notStarted, .ready:
+            EmptyView()
         }
     }
 
@@ -597,7 +674,10 @@ struct OnboardingView: View {
             Spacer()
 
             Button(continueButtonTitle) {
-                if flow.step == .keysAndAgent {
+                if flow.step == .welcome {
+                    coordinator.beginOnboardingEnginePreparation()
+                    _ = flow.advance()
+                } else if flow.step == .model {
                     coordinator.finishOnboarding()
                 } else {
                     _ = flow.advance()
@@ -614,9 +694,9 @@ struct OnboardingView: View {
         switch flow.step {
         case .welcome:
             "get started"
-        case .permissions, .model:
+        case .permissions, .keysAndAgent:
             "continue"
-        case .keysAndAgent:
+        case .model:
             "finish"
         }
     }
