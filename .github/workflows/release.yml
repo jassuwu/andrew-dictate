@@ -56,6 +56,10 @@ jobs:
           STAGE="$(mktemp -d)"
           cp -R "$APP" "$STAGE/"
           ln -s /Applications "$STAGE/Applications"
+          if [ -f art/AndrewDictate.icns ]; then
+            cp art/AndrewDictate.icns "$STAGE/.VolumeIcon.icns"
+            SetFile -a C "$STAGE" 2>/dev/null || true
+          fi
           hdiutil create -volname "Andrew Dictate" -srcfolder "$STAGE" -ov -format UDZO "AndrewDictate-$VERSION.dmg"
           shasum -a 256 "AndrewDictate-$VERSION.dmg" | awk '{print $1}' > dmg.sha256
           echo "dmg sha256: $(cat dmg.sha256)"
