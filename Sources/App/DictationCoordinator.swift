@@ -47,20 +47,6 @@ final class DictationCoordinator: ObservableObject {
             }
         }
 
-        var systemImage: String {
-            switch self {
-            case .idle:
-                "waveform"
-            case .prewarming:
-                "waveform.badge.exclamationmark"
-            case .recording:
-                "waveform.badge.mic"
-            case .transcribing:
-                "hourglass"
-            case .gatePending:
-                "terminal"
-            }
-        }
     }
 
     @Published private(set) var state: State = .prewarming

@@ -45,6 +45,7 @@ targets:
       - Tests
       - Sources/Cleanup
       - Sources/Audio/RingSplicer.swift
+      - Sources/HUD/BrandLineMath.swift
       - Sources/Settings/AppSettings.swift
       - Sources/Settings/AgentCLIDetector.swift
       - Sources/Onboarding/OnboardingState.swift

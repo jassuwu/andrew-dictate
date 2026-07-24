@@ -3,7 +3,6 @@ import SwiftUI
 
 @MainActor
 final class HUDPanel: NSPanel {
-    private static let contentSize = NSSize(width: 360, height: 76)
     private static let bottomOffset: CGFloat = 80
 
     override var canBecomeKey: Bool {
@@ -16,7 +15,7 @@ final class HUDPanel: NSPanel {
 
     init(viewModel: HUDViewModel) {
         super.init(
-            contentRect: NSRect(origin: .zero, size: Self.contentSize),
+            contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -32,8 +31,13 @@ final class HUDPanel: NSPanel {
         isReleasedWhenClosed = false
 
         let hostingView = NSHostingView(rootView: HUDView(viewModel: viewModel))
-        hostingView.frame = NSRect(origin: .zero, size: Self.contentSize)
+        hostingView.sizingOptions = [.intrinsicContentSize]
         contentView = hostingView
+        hostingView.layoutSubtreeIfNeeded()
+
+        let fittedSize = hostingView.fittingSize
+        setContentSize(fittedSize)
+        hostingView.frame = NSRect(origin: .zero, size: fittedSize)
     }
 
     func present() {

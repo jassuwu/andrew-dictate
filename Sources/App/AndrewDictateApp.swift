@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @main
@@ -6,10 +7,7 @@ struct AndrewDictateApp: App {
     @StateObject private var coordinator = DictationCoordinator()
 
     var body: some Scene {
-        MenuBarExtra(
-            "Andrew Dictate",
-            systemImage: coordinator.state.systemImage
-        ) {
+        MenuBarExtra {
             Text(coordinator.state.displayName)
                 .foregroundStyle(.secondary)
                 .disabled(true)
@@ -45,6 +43,13 @@ struct AndrewDictateApp: App {
                 NSApp.terminate(nil)
             }
             .keyboardShortcut("q")
+        } label: {
+            Image(
+                nsImage: MenuBarBrandIcon.image(
+                    for: coordinator.state
+                )
+            )
+            .accessibilityLabel("Andrew Dictate")
         }
     }
 }
