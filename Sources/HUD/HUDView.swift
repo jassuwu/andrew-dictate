@@ -93,7 +93,7 @@ final class HUDViewModel: ObservableObject {
 }
 
 struct HUDView: View {
-    static let panelSize = CGSize(width: 196, height: 60)
+    static let panelSize = CGSize(width: 180, height: 44)
 
     private static let capsuleSize = CGSize(width: 180, height: 44)
 
@@ -223,11 +223,6 @@ struct HUDView: View {
                         lineWidth: 1
                     )
             }
-            .shadow(
-                color: .black.opacity(0.30),
-                radius: 7,
-                y: 3
-            )
     }
 }
 

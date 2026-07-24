@@ -39,6 +39,13 @@ final class HUDPanel: NSPanel {
             width: HUDView.panelSize.width,
             height: HUDView.panelSize.height
         )
+        // the window IS the capsule: behind-window blur composites over the whole
+        // window rect regardless of SwiftUI clipping, so the only reliable shape
+        // is the window itself — exact capsule size, layer-rounded and masked.
+        hostingView.wantsLayer = true
+        hostingView.layer?.cornerRadius = size.height / 2
+        hostingView.layer?.cornerCurve = .continuous
+        hostingView.layer?.masksToBounds = true
         contentView = hostingView
         setContentSize(size)
         hostingView.frame = NSRect(origin: .zero, size: size)
