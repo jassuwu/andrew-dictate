@@ -293,17 +293,25 @@ final class DictationCoordinator: ObservableObject {
     }
 
     func finishOnboarding() {
-        hotkeyMonitor.setDetectionOnly(false)
-        settings.onboardingCompleted = true
-        onboardingWindowController?.close()
+        completeOnboarding()
     }
 
-    func onboardingStepDidChange(_ step: OnboardingStep) {
+    func skipOnboarding() {
+        completeOnboarding()
+    }
+
+    func onboardingSectionsDidChange(enabled: Bool) {
         guard isOnboardingPresented else {
             return
         }
 
-        hotkeyMonitor.setDetectionOnly(step == .keysAndAgent)
+        hotkeyMonitor.setDetectionOnly(enabled)
+    }
+
+    private func completeOnboarding() {
+        hotkeyMonitor.setDetectionOnly(false)
+        settings.onboardingCompleted = true
+        onboardingWindowController?.close()
     }
 
     func beginOnboardingEnginePreparation() {

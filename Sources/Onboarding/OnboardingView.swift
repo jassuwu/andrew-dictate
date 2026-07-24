@@ -18,7 +18,7 @@ final class OnboardingWindowController:
         let window = NSWindow(contentViewController: hostingController)
         window.title = "Andrew Dictate"
         window.styleMask = [.titled, .closable]
-        window.setContentSize(NSSize(width: 680, height: 640))
+        window.setContentSize(NSSize(width: 520, height: 640))
         window.isReleasedWhenClosed = false
         window.isMovableByWindowBackground = true
         window.center()
@@ -125,7 +125,7 @@ struct OnboardingView: View {
     @ObservedObject private var settings: AppSettings
     @StateObject private var permissions: OnboardingPermissionModel
 
-    @State private var flow = OnboardingFlowState()
+    @State private var onboarding = OnboardingState()
     @State private var detectedAgents: [DetectedAgentCLI]
     @State private var selectedAgent: String
     @State private var customAgentTemplate: String
@@ -135,12 +135,24 @@ struct OnboardingView: View {
     init(coordinator: DictationCoordinator) {
         let detectedAgents = AgentCLIDetector.detect()
         let settings = coordinator.settings
+        let permissions = OnboardingPermissionModel()
+        var onboarding = OnboardingState()
+        onboarding.updatePermissions(
+            microphoneGranted: permissions.microphoneGranted,
+            accessibilityGranted: permissions.accessibilityGranted
+        )
+        onboarding.updateEngine(
+            preparationStarted:
+                coordinator.enginePreparationState != .notStarted,
+            ready: coordinator.enginePreparationState.isReady
+        )
 
         _coordinator = ObservedObject(wrappedValue: coordinator)
         _settings = ObservedObject(wrappedValue: settings)
         _permissions = StateObject(
-            wrappedValue: OnboardingPermissionModel()
+            wrappedValue: permissions
         )
+        _onboarding = State(initialValue: onboarding)
         _detectedAgents = State(initialValue: detectedAgents)
         _selectedAgent = State(
             initialValue: Self.initialAgentSelection(
@@ -155,29 +167,46 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            progressHeader
+            header
 
             Divider()
 
-            stepContent
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.horizontal, 54)
-                .padding(.vertical, 34)
+            VStack(alignment: .leading, spacing: 12) {
+                permissionsSection
+
+                Divider()
+
+                keysAndOptionsSection
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 10)
+            .disabled(!onboarding.sectionsEnabled)
+            .opacity(onboarding.sectionsEnabled ? 1 : 0.42)
+
+            Spacer(minLength: 4)
+
+            Divider()
 
             persistentModelStatus
+                .disabled(!onboarding.sectionsEnabled)
+                .opacity(onboarding.sectionsEnabled ? 1 : 0.42)
 
             Divider()
 
-            navigation
+            completionBar
         }
-        .frame(width: 680, height: 640)
+        .frame(width: 520, height: 640)
         .onAppear {
             permissions.refresh()
-            synchronizeFlow()
-            coordinator.onboardingStepDidChange(flow.step)
+            synchronizeOnboarding()
+            coordinator.onboardingSectionsDidChange(
+                enabled: onboarding.sectionsEnabled
+            )
         }
-        .onChange(of: flow.step) {
-            coordinator.onboardingStepDidChange(flow.step)
+        .onChange(of: onboarding.sectionsEnabled) {
+            coordinator.onboardingSectionsDidChange(
+                enabled: onboarding.sectionsEnabled
+            )
         }
         .onChange(of: permissions.microphoneGranted) {
             synchronizePermissions()
@@ -186,91 +215,58 @@ struct OnboardingView: View {
             synchronizePermissions()
         }
         .onChange(of: coordinator.enginePreparationState) {
-            flow.updateEngineReady(
-                coordinator.enginePreparationState.isReady
-            )
+            synchronizeEngine()
         }
         .onChange(of: coordinator.hotkeyDetection) {
             flash(coordinator.hotkeyDetection)
         }
-    }
-
-    private var progressHeader: some View {
-        HStack(spacing: 14) {
-            Text("Andrew Dictate")
-                .font(.system(size: 13, weight: .semibold))
-
-            Spacer()
-
-            Text("step \(flow.step.rawValue + 1) of 4")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 5) {
-                ForEach(OnboardingStep.allCases, id: \.rawValue) { step in
-                    Capsule()
-                        .fill(
-                            step.rawValue <= flow.step.rawValue
-                                ? Color.primary.opacity(0.65)
-                                : Color.primary.opacity(0.12)
-                        )
-                        .frame(width: 22, height: 3)
+        .task {
+            permissions.refresh()
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(1))
+                } catch {
+                    break
                 }
+                permissions.refresh()
             }
-            .accessibilityHidden(true)
-        }
-        .padding(.horizontal, 24)
-        .frame(height: 54)
-    }
-
-    @ViewBuilder
-    private var stepContent: some View {
-        switch flow.step {
-        case .welcome:
-            welcomeStep
-        case .permissions:
-            permissionsStep
-        case .keysAndAgent:
-            keysAndAgentStep
-        case .model:
-            modelStep
         }
     }
 
-    private var welcomeStep: some View {
-        VStack(spacing: 18) {
-            Spacer()
+    private var header: some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Andrew Dictate")
+                    .font(.system(size: 27, weight: .semibold))
 
-            Text("Andrew Dictate")
-                .font(.system(size: 38, weight: .semibold))
+                Text(
+                    "hold a key, talk, get text — dictation stays on this mac."
+                )
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
 
-            Text(
-                "hold a key, talk, get text — dictation stays on this mac."
-            )
-            .font(.title3)
-            .foregroundStyle(.secondary)
-            .multilineTextAlignment(.center)
+            Spacer(minLength: 0)
 
-            Text(
-                "first, we'll start downloading the speech model (~450mb) "
-                    + "— it installs while you set things up."
-            )
-            .foregroundStyle(.secondary)
-            .multilineTextAlignment(.center)
-            .frame(maxWidth: 480)
-
-            Spacer()
+            if shouldShowStartSetup {
+                Button("start setup") {
+                    onboarding.consentToSetup()
+                    coordinator.onboardingSectionsDidChange(enabled: true)
+                    coordinator.beginOnboardingEnginePreparation()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
         }
+        .padding(.horizontal, 22)
+        .frame(height: 88)
     }
 
-    private var permissionsStep: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            stepTitle(
-                "permissions",
-                detail: "two permissions make hold-to-talk work anywhere."
-            )
+    private var permissionsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("permissions")
 
-            VStack(spacing: 14) {
+            HStack(spacing: 10) {
                 permissionRow(
                     title: "microphone",
                     reason: "to hear you while you hold the key",
@@ -290,26 +286,6 @@ struct OnboardingView: View {
                     action: permissions.requestAccessibility
                 )
             }
-
-            Button("skip for now") {
-                flow.skipPermissions()
-                _ = flow.advance()
-            }
-            .buttonStyle(.link)
-            .controlSize(.small)
-
-            Spacer()
-        }
-        .task {
-            permissions.refresh()
-            while !Task.isCancelled {
-                do {
-                    try await Task.sleep(for: .seconds(1))
-                } catch {
-                    break
-                }
-                permissions.refresh()
-            }
         }
     }
 
@@ -320,243 +296,133 @@ struct OnboardingView: View {
         actionTitle: String = "grant",
         action: @escaping () -> Void
     ) -> some View {
-        HStack(spacing: 18) {
-            VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
                 Text(title)
                     .font(.headline)
-                Text(reason)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Text(granted ? "granted" : "not yet")
+                    .font(.caption)
+                    .foregroundStyle(granted ? .green : .secondary)
             }
 
-            Spacer()
-
-            Text(granted ? "granted" : "not yet")
+            Text(reason)
                 .font(.caption)
-                .foregroundStyle(granted ? .green : .secondary)
-                .frame(width: 58, alignment: .trailing)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+
+            Spacer(minLength: 0)
 
             Button(
                 granted ? "granted" : actionTitle,
                 action: action
             )
             .disabled(granted)
-            .frame(width: 96)
+            .controlSize(.small)
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .padding(16)
+        .padding(10)
+        .frame(maxWidth: .infinity, minHeight: 86, maxHeight: 86)
         .background(
             Color.primary.opacity(0.045),
-            in: RoundedRectangle(cornerRadius: 12)
+            in: RoundedRectangle(cornerRadius: 10)
         )
     }
 
-    private var modelStep: some View {
-        VStack(alignment: .leading, spacing: 26) {
-            stepTitle(
-                "almost there",
-                detail: "finishing the local speech model."
-            )
+    private var keysAndOptionsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("keys & options")
 
-            VStack(alignment: .leading, spacing: 13) {
-                switch coordinator.enginePreparationState {
-                case .notStarted:
-                    Text("the model download hasn’t started.")
-                        .font(.headline)
-                    Button("start download") {
-                        coordinator.beginOnboardingEnginePreparation()
-                    }
+            HStack(alignment: .top, spacing: 12) {
+                keyBindings
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
 
-                case let .downloading(progress):
-                    Text("finishing the model download…")
-                        .font(.headline)
-
-                    Text(modelDescription)
-                        .foregroundStyle(.secondary)
-
-                    ProgressView(value: progress)
-
-                    Text("\(Int(progress * 100))%")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-
-                case .warmingUp:
-                    HStack(spacing: 10) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("warming up the model…")
-                            .font(.headline)
-                    }
-                    Text("the download is complete. this takes a moment.")
-                        .foregroundStyle(.secondary)
-
-                case .ready:
-                    Text("ready")
-                        .font(.headline)
-                        .foregroundStyle(.green)
-                    Text(
-                        "\(modelName) is warm and ready for dictation."
-                    )
-                        .foregroundStyle(.secondary)
-
-                case .failed:
-                    Text("model download failed")
-                        .font(.headline)
-                    Text("check your connection and try again.")
-                        .foregroundStyle(.secondary)
-                    Button("retry") {
-                        coordinator.retryEnginePrewarm()
-                    }
-                }
+                preRollOptions
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                Color.primary.opacity(0.045),
-                in: RoundedRectangle(cornerRadius: 12)
-            )
 
-            Spacer()
+            agentOptions
         }
     }
 
-    @ViewBuilder
-    private var persistentModelStatus: some View {
-        switch coordinator.enginePreparationState {
-        case let .downloading(progress):
-            Divider()
-            HStack(spacing: 12) {
-                ProgressView(value: progress)
-                    .frame(width: 150)
+    private var keyBindings: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            optionTitle("keys")
 
-                Text("downloading model…")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            hotkeyRow(for: .dictation)
+            hotkeyRow(for: .command)
 
-                Text("\(Int(progress * 100))%")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-
-                Spacer()
-            }
-            .padding(.horizontal, 24)
-            .frame(height: 44)
-
-        case .warmingUp:
-            Divider()
-            HStack(spacing: 10) {
-                ProgressView()
-                    .controlSize(.small)
-                Text("warming up model…")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-            .padding(.horizontal, 24)
-            .frame(height: 44)
-
-        case .failed:
-            Divider()
-            HStack(spacing: 8) {
-                Text("model download failed")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button("retry") {
-                    coordinator.retryEnginePrewarm()
-                }
-                .controlSize(.small)
-                Spacer()
-            }
-            .padding(.horizontal, 24)
-            .frame(height: 44)
-
-        case .notStarted, .ready:
-            EmptyView()
-        }
-    }
-
-    private var keysAndAgentStep: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                stepTitle(
-                    "keys & agent",
-                    detail: "try the keys, then choose how command prompts run."
+            if let keyboardSettingsURL = URL(
+                string:
+                    "x-apple.systempreferences:"
+                        + "com.apple.Keyboard-Settings.extension"
+            ) {
+                Link(
+                    "set fn to “do nothing” in keyboard settings",
+                    destination: keyboardSettingsURL
                 )
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("keys")
-                        .font(.headline)
-
-                    hotkeyRow(for: .dictation)
-                    hotkeyRow(for: .command)
-
-                    if let keyboardSettingsURL = URL(
-                        string:
-                            "x-apple.systempreferences:"
-                                + "com.apple.Keyboard-Settings.extension"
-                    ) {
-                        Link(
-                            "set fn to “do nothing” in keyboard settings",
-                            destination: keyboardSettingsURL
-                        )
-                        .font(.caption)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("pre-roll")
-                        .font(.headline)
-
-                    preRollRow(
-                        enabled: false,
-                        title: "off",
-                        detail: "mic only while holding a key"
-                    )
-                    preRollRow(
-                        enabled: true,
-                        title: "on",
-                        detail:
-                            "never lose your first word — keeps the mic warm "
-                                + "while the app runs"
-                    )
-                }
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("agent cli")
-                        .font(.headline)
-                    agentEditor
-                }
+                .font(.caption)
+                .lineLimit(2)
             }
         }
-        .scrollIndicators(.never)
+    }
+
+    private var preRollOptions: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            optionTitle("pre-roll")
+
+            preRollRow(
+                enabled: false,
+                title: "off",
+                detail: "mic only while holding a key"
+            )
+            preRollRow(
+                enabled: true,
+                title: "on",
+                detail:
+                    "never lose your first word — keeps the mic warm "
+                        + "while the app runs"
+            )
+        }
+    }
+
+    private var agentOptions: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            optionTitle("agent cli")
+            agentEditor
+        }
     }
 
     private func hotkeyRow(for mode: DictationMode) -> some View {
         let isDetected = flashedHotkey?.mode == mode
 
-        return HStack(spacing: 14) {
+        return HStack(spacing: 8) {
             Text("\(mode.rawValue) key")
+                .lineLimit(1)
 
-            Spacer()
+            Spacer(minLength: 2)
 
             Text(settings.hotkeyBinding(for: mode).displayName)
-                .font(.system(.body, design: .monospaced, weight: .medium))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
+                .font(.system(.callout, design: .monospaced, weight: .medium))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
                 .background(
                     Color.primary.opacity(0.07),
-                    in: RoundedRectangle(cornerRadius: 6)
+                    in: RoundedRectangle(cornerRadius: 5)
                 )
 
             Text(isDetected ? "detected" : "press to test")
-                .font(.caption)
+                .font(.caption2)
                 .foregroundStyle(isDetected ? .green : .secondary)
-                .frame(width: 78, alignment: .trailing)
+                .frame(width: 62, alignment: .trailing)
         }
-        .padding(.horizontal, 14)
-        .frame(height: 48)
+        .padding(.horizontal, 10)
+        .frame(height: 40)
         .background(
             Color.primary.opacity(0.045),
-            in: RoundedRectangle(cornerRadius: 10)
+            in: RoundedRectangle(cornerRadius: 9)
         )
     }
 
@@ -568,28 +434,29 @@ struct OnboardingView: View {
         Button {
             settings.preRollEnabled = enabled
         } label: {
-            HStack(alignment: .top, spacing: 11) {
+            HStack(alignment: .top, spacing: 9) {
                 radioIndicator(isSelected: settings.preRollEnabled == enabled)
                     .padding(.top, 2)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 1) {
                     Text(title)
                         .foregroundStyle(.primary)
                     Text(detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Spacer()
+                Spacer(minLength: 0)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
         .background(
             Color.primary.opacity(0.045),
-            in: RoundedRectangle(cornerRadius: 10)
+            in: RoundedRectangle(cornerRadius: 9)
         )
     }
 
@@ -607,7 +474,7 @@ struct OnboardingView: View {
     }
 
     private var agentEditor: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 5) {
             Picker("agent cli", selection: $selectedAgent) {
                 ForEach(detectedAgents) { detected in
                     Text(
@@ -626,6 +493,7 @@ struct OnboardingView: View {
                     .tag(Self.noAgentSelection)
             }
             .labelsHidden()
+            .controlSize(.small)
             .onChange(of: selectedAgent) {
                 applyAgentSelection(selectedAgent)
             }
@@ -635,6 +503,7 @@ struct OnboardingView: View {
                     "command containing {prompt}",
                     text: $customAgentTemplate
                 )
+                .controlSize(.small)
                 .onChange(of: customAgentTemplate) {
                     let isValid = AgentCommandTemplate.isValid(
                         customAgentTemplate
@@ -654,87 +523,135 @@ struct OnboardingView: View {
         }
     }
 
-    private func stepTitle(_ title: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(title)
-                .font(.system(size: 28, weight: .semibold))
-            Text(detail)
-                .foregroundStyle(.secondary)
-        }
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 17, weight: .semibold))
     }
 
-    private var navigation: some View {
-        HStack {
-            if flow.step != .welcome {
-                Button("back") {
-                    flow.goBack()
+    private func optionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.callout.weight(.semibold))
+    }
+
+    @ViewBuilder
+    private var persistentModelStatus: some View {
+        HStack(spacing: 10) {
+            switch coordinator.enginePreparationState {
+            case .notStarted:
+                Text("model waiting for setup")
+                    .foregroundStyle(.secondary)
+
+            case let .downloading(progress):
+                ProgressView(value: progress)
+                    .frame(width: 150)
+
+                Text("downloading model…")
+                    .foregroundStyle(.secondary)
+
+                Text("\(Int(progress * 100))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+
+            case .warmingUp:
+                ProgressView()
+                    .controlSize(.small)
+
+                Text("warming up model…")
+                    .foregroundStyle(.secondary)
+
+            case .ready:
+                Text("model ready ✓")
+                    .foregroundStyle(.green)
+
+            case .failed:
+                Text("model download failed")
+                    .foregroundStyle(.secondary)
+
+                Button("retry") {
+                    coordinator.retryEnginePrewarm()
                 }
+                .controlSize(.small)
             }
 
             Spacer()
+        }
+        .font(.caption)
+        .padding(.horizontal, 22)
+        .frame(height: 48)
+    }
 
-            Button(continueButtonTitle) {
-                if flow.step == .welcome {
-                    coordinator.beginOnboardingEnginePreparation()
-                    _ = flow.advance()
-                } else if flow.step == .model {
-                    coordinator.finishOnboarding()
-                } else {
-                    _ = flow.advance()
+    private var completionBar: some View {
+        HStack(spacing: 10) {
+            Button("skip for now") {
+                guard onboarding.skipForNow() else {
+                    return
                 }
+                coordinator.skipOnboarding()
+            }
+            .buttonStyle(.link)
+            .controlSize(.small)
+            .disabled(!onboarding.sectionsEnabled)
+
+            Spacer(minLength: 0)
+
+            if !onboarding.finishEnabled {
+                Text(finishDisabledHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+
+            Button("finish") {
+                guard onboarding.finish() else {
+                    return
+                }
+                coordinator.finishOnboarding()
             }
             .keyboardShortcut(.defaultAction)
-            .disabled(!flow.canContinue)
+            .disabled(!onboarding.finishEnabled)
+            .help(
+                onboarding.finishEnabled
+                    ? "finish setup"
+                    : finishDisabledHint
+            )
         }
-        .padding(.horizontal, 24)
-        .frame(height: 66)
+        .padding(.horizontal, 22)
+        .frame(height: 58)
     }
 
-    private var continueButtonTitle: String {
-        switch flow.step {
-        case .welcome:
-            "get started"
-        case .permissions, .keysAndAgent:
-            "continue"
-        case .model:
-            "finish"
-        }
+    private var shouldShowStartSetup: Bool {
+        coordinator.enginePreparationState == .notStarted
+            && !onboarding.setupConsented
     }
 
-    private var modelName: String {
-        switch settings.engineVersion {
-        case .v2:
-            "parakeet v2"
-        case .v3:
-            "parakeet v3"
-        }
+    private var finishDisabledHint: String {
+        let items = onboarding.missingItems.map(\.rawValue)
+        return "waiting on: \(items.joined(separator: ", "))"
     }
 
-    private var modelDescription: String {
-        switch settings.engineVersion {
-        case .v2:
-            "parakeet v2 (~450mb, one time)"
-        case .v3:
-            "parakeet v3 (one time)"
-        }
-    }
-
-    private func synchronizeFlow() {
+    private func synchronizeOnboarding() {
         synchronizePermissions()
-        flow.updateEngineReady(
-            coordinator.enginePreparationState.isReady
-        )
+        synchronizeEngine()
     }
 
     private func synchronizePermissions() {
-        flow.updatePermissions(
+        onboarding.updatePermissions(
             microphoneGranted: permissions.microphoneGranted,
             accessibilityGranted: permissions.accessibilityGranted
         )
     }
 
+    private func synchronizeEngine() {
+        onboarding.updateEngine(
+            preparationStarted:
+                coordinator.enginePreparationState != .notStarted,
+            ready: coordinator.enginePreparationState.isReady
+        )
+    }
+
     private func flash(_ detection: HotkeyDetection?) {
-        guard flow.step == .keysAndAgent,
+        guard onboarding.sectionsEnabled,
               let detection else {
             return
         }

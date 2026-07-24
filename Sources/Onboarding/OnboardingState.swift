@@ -1,29 +1,48 @@
 import Foundation
 
-enum OnboardingStep: Int, CaseIterable, Sendable {
-    case welcome
-    case permissions
-    case keysAndAgent
+enum OnboardingMissingItem: String, CaseIterable, Equatable, Sendable {
+    case microphone
+    case accessibility
     case model
 }
 
-struct OnboardingFlowState: Equatable, Sendable {
-    private(set) var step: OnboardingStep = .welcome
+enum OnboardingCompletion: Equatable, Sendable {
+    case pending
+    case finished
+    case skipped
+}
+
+struct OnboardingState: Equatable, Sendable {
+    private(set) var setupConsented = false
+    private(set) var modelPreparationStarted = false
     private(set) var microphoneGranted = false
     private(set) var accessibilityGranted = false
-    private(set) var permissionsSkipped = false
     private(set) var engineReady = false
+    private(set) var completion: OnboardingCompletion = .pending
 
-    var canContinue: Bool {
-        switch step {
-        case .welcome, .keysAndAgent:
-            true
-        case .permissions:
-            permissionsSkipped
-                || (microphoneGranted && accessibilityGranted)
-        case .model:
-            engineReady
+    var sectionsEnabled: Bool {
+        setupConsented || modelPreparationStarted
+    }
+
+    var finishEnabled: Bool {
+        missingItems.isEmpty
+    }
+
+    var missingItems: [OnboardingMissingItem] {
+        OnboardingMissingItem.allCases.filter { item in
+            switch item {
+            case .microphone:
+                !microphoneGranted
+            case .accessibility:
+                !accessibilityGranted
+            case .model:
+                !engineReady
+            }
         }
+    }
+
+    mutating func consentToSetup() {
+        setupConsented = true
     }
 
     mutating func updatePermissions(
@@ -34,30 +53,29 @@ struct OnboardingFlowState: Equatable, Sendable {
         self.accessibilityGranted = accessibilityGranted
     }
 
-    mutating func skipPermissions() {
-        permissionsSkipped = true
-    }
-
-    mutating func updateEngineReady(_ isReady: Bool) {
-        engineReady = isReady
+    mutating func updateEngine(
+        preparationStarted: Bool,
+        ready: Bool
+    ) {
+        modelPreparationStarted = preparationStarted || ready
+        engineReady = ready
     }
 
     @discardableResult
-    mutating func advance() -> Bool {
-        guard canContinue,
-              let nextStep = OnboardingStep(rawValue: step.rawValue + 1) else {
+    mutating func finish() -> Bool {
+        guard finishEnabled else {
             return false
         }
-        step = nextStep
+        completion = .finished
         return true
     }
 
-    mutating func goBack() {
-        guard let previousStep = OnboardingStep(
-            rawValue: step.rawValue - 1
-        ) else {
-            return
+    @discardableResult
+    mutating func skipForNow() -> Bool {
+        guard sectionsEnabled else {
+            return false
         }
-        step = previousStep
+        completion = .skipped
+        return true
     }
 }
