@@ -1,0 +1,151 @@
+---
+import "../styles/global.css";
+
+const install = "brew install --cask jassuwu/tap/andrew-dictate";
+
+const commands = [
+  ["“open arc” · “switch to slack” · “quit music”", "instant app control"],
+  ["“chatgpt search swift actors” · “youtube lofi”", "opens the site with your query"],
+  ["“what’s the tallest building in the world?”", "answers inline on the floating panel"],
+  ["“what’s this error?”", "screenshots the window, asks your agent cli, answers inline. press again for follow-ups"],
+  ["“brew install ripgrep”", "shows the exact command, runs in your terminal after one confirming tap"],
+  ["“standup” · “deploy staging” · any phrase you define", "your urls, scripts, macos shortcuts, snippets"],
+];
+
+const privacy = [
+  "transcription is fully on-device. audio never leaves the mac.",
+  "no accounts, no telemetry, no network code except the model download.",
+  "questions go to the agent cli you configure, read-only enforced. no history stored — your agent keeps its own sessions.",
+  "shell commands always show before they run.",
+  "small swift codebase. read it.",
+];
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>andrew dictate — escape the keyboard.</title>
+    <meta
+      name="description"
+      content="local speech-to-text and voice commands for macOS. free, open source, runs entirely on your mac."
+    />
+    <link rel="icon" href="/favicon.png" />
+    <meta property="og:title" content="andrew dictate" />
+    <meta property="og:description" content="escape the keyboard. free · open source · fully local" />
+    <meta property="og:image" content="/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+  <body class="bg-[#0c0c0e] text-[#f2ede0] antialiased">
+    <main class="mx-auto max-w-2xl px-6 pb-24 pt-20">
+      <!-- hero -->
+      <header class="flex flex-col items-center text-center">
+        <img src="/badge.png" alt="" width="120" height="120" class="rounded-[27px]" />
+        <h1 class="mt-6 text-4xl font-semibold tracking-tight text-[#f9e9a8]">
+          andrew dictate
+        </h1>
+        <p class="mt-2 text-lg font-medium text-[#e5be62]">escape the keyboard.</p>
+        <p class="mt-4 max-w-md text-sm leading-relaxed text-[#f2ede0]/70">
+          local speech-to-text and voice commands for macOS.
+          free, open source, runs entirely on your mac.
+        </p>
+
+        <div class="mt-8 w-full max-w-lg">
+          <button
+            id="install"
+            class="group flex w-full items-center justify-between gap-3 rounded-xl border border-[#e5be62]/25 bg-[#1f1f24] px-5 py-3.5 text-left font-mono text-[13px] text-[#f9e9a8] transition hover:border-[#e5be62]/50"
+            data-cmd={install}
+          >
+            <span>{install}</span>
+            <span class="shrink-0 text-[11px] text-[#e5be62]/70 group-hover:text-[#e5be62]" id="copyhint">copy</span>
+          </button>
+          <p class="mt-2 text-center text-xs text-[#f2ede0]/40">
+            unsigned build — first launch needs right-click → open, or
+            <code class="text-[#f2ede0]/60">xattr -dr com.apple.quarantine</code>.
+            apple silicon, macOS 14+.
+          </p>
+        </div>
+      </header>
+
+      <!-- dictation -->
+      <section class="mt-20">
+        <h2 class="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#e5be62]/80">dictation</h2>
+        <p class="mt-3 text-[15px] leading-relaxed text-[#f2ede0]/85">
+          hold <kbd class="rounded border border-[#e5be62]/30 bg-[#1f1f24] px-1.5 py-0.5 font-mono text-xs">fn</kbd>,
+          speak, release — text pastes wherever your cursor is, a few hundred
+          milliseconds later. spoken punctuation, emails ("jass at jass dot gg" →
+          <code class="text-[#e5be62]">jass@jass.gg</code>), numbers, self-corrections
+          and stumbles handled on-device. optional ai polish with apple's local model —
+          judged in a built-in lab on your own speech before you trust it.
+        </p>
+      </section>
+
+      <!-- command mode -->
+      <section class="mt-14">
+        <h2 class="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#e5be62]/80">command mode</h2>
+        <p class="mt-3 text-[15px] text-[#f2ede0]/85">
+          hold right <kbd class="rounded border border-[#e5be62]/30 bg-[#1f1f24] px-1.5 py-0.5 font-mono text-xs">⌥</kbd> and say it:
+        </p>
+        <div class="mt-4 divide-y divide-[#e5be62]/10 rounded-xl border border-[#e5be62]/15 bg-[#161619]">
+          {commands.map(([say, does]) => (
+            <div class="flex flex-col gap-1 px-5 py-3.5 sm:flex-row sm:items-baseline sm:gap-4">
+              <span class="font-mono text-[13px] text-[#f9e9a8] sm:w-1/2">{say}</span>
+              <span class="text-[13px] text-[#f2ede0]/60 sm:w-1/2">{does}</span>
+            </div>
+          ))}
+        </div>
+        <p class="mt-3 text-[13px] text-[#f2ede0]/50">
+          answers can talk back — and you can interrupt them by just starting to talk.
+          conversations you start by voice continue later in your terminal:
+          they were your agent's sessions all along.
+        </p>
+      </section>
+
+      <!-- privacy -->
+      <section class="mt-14">
+        <h2 class="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#e5be62]/80">privacy</h2>
+        <ul class="mt-4 space-y-2.5">
+          {privacy.map((line) => (
+            <li class="flex gap-3 text-[14px] leading-relaxed text-[#f2ede0]/75">
+              <span class="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-[#e5be62]/70"></span>
+              <span>{line}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <!-- the line -->
+      <section class="mt-20 text-center">
+        <p class="text-2xl font-semibold tracking-tight text-[#f9e9a8]">
+          typing is for brokies.
+        </p>
+      </section>
+
+      <!-- links -->
+      <nav class="mt-14 flex items-center justify-center gap-6 text-[13px]">
+        <a class="text-[#e5be62] transition hover:text-[#f9e9a8]" href="https://github.com/jassuwu/andrew-dictate">github</a>
+        <a class="text-[#e5be62] transition hover:text-[#f9e9a8]" href="https://github.com/jassuwu/andrew-dictate/releases">releases</a>
+        <a class="text-[#e5be62] transition hover:text-[#f9e9a8]" href="https://jass.gg">made by jass</a>
+      </nav>
+
+      <footer class="mt-20 flex flex-col items-center gap-3">
+        <img src="/badge.png" alt="" width="44" height="44" class="rounded-[10px] opacity-80" />
+        <p class="text-xs text-[#f2ede0]/35">the matrix wants you typing.</p>
+      </footer>
+    </main>
+
+    <script>
+      const button = document.getElementById("install");
+      const hint = document.getElementById("copyhint");
+      button?.addEventListener("click", async () => {
+        const cmd = button.getAttribute("data-cmd");
+        if (!cmd) return;
+        await navigator.clipboard.writeText(cmd);
+        if (hint) {
+          hint.textContent = "copied";
+          setTimeout(() => (hint.textContent = "copy"), 1600);
+        }
+      });
+    </script>
+  </body>
+</html>
