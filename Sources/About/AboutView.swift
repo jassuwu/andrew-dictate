@@ -12,7 +12,7 @@ final class AboutWindowController: NSWindowController {
         let window = NSWindow(contentViewController: hostingController)
         window.title = "about Andrew Dictate"
         window.styleMask = [.titled, .closable]
-        window.setContentSize(NSSize(width: 480, height: 475))
+        window.setContentSize(NSSize(width: 480, height: 520))
         window.isReleasedWhenClosed = false
         window.center()
 
@@ -57,8 +57,11 @@ struct AboutView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            StaticBrandMark()
-                .frame(width: 180, height: 48)
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 96, height: 96)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 5) {
                 Text("Andrew Dictate")
@@ -128,7 +131,7 @@ struct AboutView: View {
             Spacer(minLength: 0)
         }
         .padding(28)
-        .frame(width: 480, height: 475)
+        .frame(width: 480, height: 520)
     }
 
     private var lifetimeWordsText: String {

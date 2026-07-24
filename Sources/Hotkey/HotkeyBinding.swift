@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-enum DictationMode: String, Codable, CaseIterable, Sendable {
+enum DictationMode: String, Codable, CaseIterable, Hashable, Sendable {
     case dictation
     case command
 

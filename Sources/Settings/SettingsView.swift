@@ -88,6 +88,10 @@ struct SettingsView: View {
             hotkeyRow(for: .command)
 
             Toggle("pre-roll", isOn: $settings.preRollEnabled)
+            Toggle(
+                "sound feedback",
+                isOn: $settings.soundFeedbackEnabled
+            )
 
             LabeledContent("engine") {
                 engineEditor

@@ -15,7 +15,17 @@ targets:
     type: application
     platform: macOS
     sources:
-      - Sources
+      - path: Sources
+        excludes:
+          - Resources
+      - path: Sources/Resources/Sounds/dictation-start.wav
+        buildPhase: resources
+      - path: Sources/Resources/Sounds/dictation-end.wav
+        buildPhase: resources
+      - path: Sources/Resources/Sounds/command-start.wav
+        buildPhase: resources
+      - path: Sources/Resources/Sounds/command-end.wav
+        buildPhase: resources
     dependencies:
       - package: FluidAudio
     settings:

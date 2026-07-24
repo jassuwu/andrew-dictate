@@ -65,6 +65,7 @@ final class DictationCoordinator: ObservableObject {
     private let commandExecutor: CommandExecutor
     private let agentDelegator: AgentDelegator
     private let audioRecorder: AudioRecorder?
+    private let feedbackSounds: FeedbackSounds
     private let hudViewModel: HUDViewModel
     private var hudPanelStorage: HUDPanel?
 
@@ -136,6 +137,7 @@ final class DictationCoordinator: ObservableObject {
             print("audio recorder initialization failed: \(error.localizedDescription)")
         }
         audioRecorder = recorder
+        feedbackSounds = FeedbackSounds(settings: settings)
 
         let viewModel = HUDViewModel(
             state: .prewarming,
@@ -702,6 +704,9 @@ final class DictationCoordinator: ObservableObject {
             }
             activeMode = mode
             activeFocusAnchor = focusAnchor
+            if !isOnboardingPresented {
+                feedbackSounds.play(.start, for: mode)
+            }
             setState(.recording, mode: mode)
         } catch {
             print("audio recording failed to start: \(error.localizedDescription)")
@@ -743,6 +748,9 @@ final class DictationCoordinator: ObservableObject {
             let focusAnchor = activeFocusAnchor
             activeMode = nil
             activeFocusAnchor = nil
+            if !isOnboardingPresented {
+                feedbackSounds.play(.end, for: mode)
+            }
             setState(.transcribing, mode: mode)
             startPipeline(
                 samples,
