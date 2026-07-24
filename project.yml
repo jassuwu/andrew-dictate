@@ -32,7 +32,7 @@ targets:
       base:
         PRODUCT_NAME: Andrew Dictate
         PRODUCT_MODULE_NAME: AndrewDictate
-        PRODUCT_BUNDLE_IDENTIFIER: gg.jass.andrew-dictate
+        PRODUCT_BUNDLE_IDENTIFIER: gg.jass.dictate
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGN_STYLE: Manual
         ENABLE_HARDENED_RUNTIME: false
