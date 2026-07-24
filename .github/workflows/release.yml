@@ -1,0 +1,91 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: # dry run: test + build + dmg, no release, no tap bump
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: resolve version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+            echo "PUBLISH=true" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=0.0.0-dry" >> "$GITHUB_ENV"
+            echo "PUBLISH=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: tools
+        run: brew install xcodegen
+
+      - name: stamp version and generate project
+        run: |
+          sed -i '' "s/CFBundleShortVersionString: \".*\"/CFBundleShortVersionString: \"$VERSION\"/" project.yml
+          sed -i '' "s/CFBundleVersion: \".*\"/CFBundleVersion: \"$GITHUB_RUN_NUMBER\"/" project.yml
+          xcodegen generate
+
+      - name: test
+        run: |
+          xcodebuild -project AndrewDictate.xcodeproj -scheme AndrewDictate \
+            -configuration Debug test -destination 'platform=macOS' \
+            -derivedDataPath .build
+
+      - name: build release
+        run: |
+          xcodebuild -project AndrewDictate.xcodeproj -scheme AndrewDictate \
+            -configuration Release build -derivedDataPath .build
+
+      - name: dmg
+        run: |
+          APP=".build/Build/Products/Release/Andrew Dictate.app"
+          codesign --force --deep -s - "$APP"
+          STAGE="$(mktemp -d)"
+          cp -R "$APP" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "Andrew Dictate" -srcfolder "$STAGE" -ov -format UDZO "AndrewDictate-$VERSION.dmg"
+          shasum -a 256 "AndrewDictate-$VERSION.dmg" | awk '{print $1}' > dmg.sha256
+          echo "dmg sha256: $(cat dmg.sha256)"
+
+      - name: github release
+        if: env.PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "AndrewDictate-$VERSION.dmg" \
+            --title "Andrew Dictate $VERSION" \
+            --generate-notes --verify-tag \
+            --notes "install: \`brew install --cask jassuwu/tap/andrew-dictate\` then \`xattr -dr com.apple.quarantine \"/Applications/Andrew Dictate.app\"\` (unsigned build). sha256: $(cat dmg.sha256)"
+
+      - name: bump tap cask
+        if: env.PUBLISH == 'true'
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+        run: |
+          if [ -z "$TAP_DEPLOY_KEY" ]; then
+            echo "TAP_DEPLOY_KEY secret missing — skipping tap bump"
+            exit 0
+          fi
+          SHA="$(cat dmg.sha256)"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$TAP_DEPLOY_KEY" > ~/.ssh/tap_key
+          chmod 600 ~/.ssh/tap_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/tap_key -o IdentitiesOnly=yes"
+          git clone git@github.com:jassuwu/homebrew-tap.git tap
+          cd tap
+          sed -i '' "s/version \".*\"/version \"$VERSION\"/" Casks/andrew-dictate.rb
+          sed -i '' "s/sha256 \".*\"/sha256 \"$SHA\"/" Casks/andrew-dictate.rb
+          git config user.name "andrew-dictate release bot"
+          git config user.email "release@jass.gg"
+          git add Casks/andrew-dictate.rb
+          git commit -m "andrew-dictate $VERSION"
+          git push origin HEAD
