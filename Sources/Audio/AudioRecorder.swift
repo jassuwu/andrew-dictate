@@ -122,6 +122,10 @@ final class AudioRecorder {
         return granted
     }
 
+    func prepareGraph() {
+        engine.prepare()
+    }
+
     func applyPreRoll(_ enabled: Bool) throws {
         guard enabled != isPreRollEnabled else {
             try startContinuousCaptureIfNeeded()

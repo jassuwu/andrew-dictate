@@ -27,6 +27,10 @@ final class DictationCoordinator: ObservableObject {
         subsystem: "gg.jass.dictate",
         category: "ask"
     )
+    private let engineLogger = Logger(
+        subsystem: "gg.jass.dictate",
+        category: "engine"
+    )
     enum State: Equatable, Sendable {
         case idle
         case prewarming
@@ -72,6 +76,8 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var state: State = .prewarming
     @Published private(set) var enginePreparationState:
         EnginePreparationState = .notStarted
+    @Published private(set) var activeEngineVersion: EngineVersion
+    @Published private(set) var engineSwitchMessage: String?
     @Published private(set) var hotkeyDetection: HotkeyDetection?
     @Published private(set) var lastTranscript: String?
     @Published private(set) var lastAnswer: String?
@@ -81,7 +87,7 @@ final class DictationCoordinator: ObservableObject {
     let settings: AppSettings
 
     private let hotkeyMonitor: HotkeyMonitor
-    private var transcriptionEngine: ParakeetEngine
+    private let transcriptionEngine: ParakeetEngine
     private let paster: Paster
     private let commandRouter = CommandRouter()
     private let commandExecutor: CommandExecutor
@@ -121,9 +127,11 @@ final class DictationCoordinator: ObservableObject {
     private var engineSwapTask: Task<Void, Never>?
     private var engineHealthTask: Task<Void, Never>?
     private var engineGeneration = 0
+    private var engineSwitchState: EngineSwitchState
     private var enginePreparationRequested: Bool
     private var settingsCancellables: Set<AnyCancellable> = []
     private var isApplyingPreRollSetting = false
+    private var isApplyingEngineVersionSetting = false
     private var settingsWindowController: SettingsWindowController?
     private var onboardingWindowController: OnboardingWindowController?
     private var isOnboardingPresented: Bool
@@ -149,6 +157,10 @@ final class DictationCoordinator: ObservableObject {
 
     init(settings: AppSettings = .shared) {
         self.settings = settings
+        activeEngineVersion = settings.engineVersion
+        engineSwitchState = EngineSwitchState(
+            activeVersion: settings.engineVersion
+        )
         isOnboardingPresented = !settings.onboardingCompleted
         enginePreparationRequested = settings.onboardingCompleted
         dictionaryStore = DictionaryStore()
@@ -268,7 +280,11 @@ final class DictationCoordinator: ObservableObject {
             .dropFirst()
             .removeDuplicates()
             .sink { [weak self] version in
-                self?.replaceEngine(with: version)
+                guard let self,
+                      !self.isApplyingEngineVersionSetting else {
+                    return
+                }
+                self.replaceEngine(with: version)
             }
             .store(in: &settingsCancellables)
 
@@ -279,7 +295,7 @@ final class DictationCoordinator: ObservableObject {
         }
 
         if enginePreparationRequested {
-            startPrewarming(transcriptionEngine)
+            startPrewarming()
             Task { @MainActor [weak self] in
                 _ = await self?.requestMicrophoneAccess()
             }
@@ -385,6 +401,7 @@ final class DictationCoordinator: ObservableObject {
         guard isOnboardingPresented else {
             return
         }
+        prepareProductiveWaitWork()
         requestEnginePreparation()
     }
 
@@ -418,7 +435,7 @@ final class DictationCoordinator: ObservableObject {
     func prepareForActiveModelRemoval(
         _ version: EngineVersion
     ) async {
-        guard version == settings.engineVersion else {
+        guard version == activeEngineVersion else {
             return
         }
 
@@ -439,6 +456,9 @@ final class DictationCoordinator: ObservableObject {
         engineGeneration += 1
         isPrewarmed = false
         enginePreparationState = .notStarted
+        engineSwitchMessage = nil
+        _ = engineSwitchState.cancelPreparation()
+        applyEngineVersionSetting(activeEngineVersion)
         setState(.idle)
 
         await transcriptionEngine.unloadModels()
@@ -494,44 +514,45 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
-    private func replaceEngine(with version: EngineVersion) {
-        invalidatePipeline()
-        if state == .recording {
-            audioRecorder?.cancel()
-            activeMode = nil
-            activeFocusAnchor = nil
-            activeTimeline = nil
-        }
+    private func prepareProductiveWaitWork() {
+        audioRecorder?.prepareGraph()
+        agentDelegator.prepareSupportDirectory()
 
-        enginePrewarmTask?.cancel()
-        enginePrewarmTask = nil
+        do {
+            try customActionStore.ensureFileExists()
+        } catch {
+            print(
+                "application support preparation failed: "
+                    + error.localizedDescription
+            )
+        }
+    }
+
+    private func replaceEngine(with version: EngineVersion) {
         engineHealthTask?.cancel()
         engineHealthTask = nil
-        engineGeneration += 1
-        let generation = engineGeneration
-        isPrewarmed = false
-        enginePreparationState = enginePreparationRequested
-            ? .downloading(progress: 0)
-            : .notStarted
-        setState(.prewarming)
+        engineSwitchMessage = nil
 
-        let previousEngine = transcriptionEngine
-        let replacement = ParakeetEngine(version: version)
-        transcriptionEngine = replacement
-        engineSwapTask = Task { @MainActor [weak self] in
-            await previousEngine.cancelPreparation()
+        guard isPrewarmed else {
+            enginePrewarmTask?.cancel()
+            enginePrewarmTask = nil
+            engineSwapTask?.cancel()
+            engineSwapTask = nil
+            activeEngineVersion = version
+            engineSwitchState = EngineSwitchState(
+                activeVersion: version
+            )
+            enginePreparationState = enginePreparationRequested
+                ? .downloading(progress: 0)
+                : .notStarted
 
-            guard !Task.isCancelled,
-                  let self,
-                  generation == self.engineGeneration else {
-                return
+            if enginePreparationRequested {
+                startPrewarming()
             }
-
-            self.engineSwapTask = nil
-            if self.enginePreparationRequested {
-                self.startPrewarming(replacement)
-            }
+            return
         }
+
+        startEngineSwap(to: version)
     }
 
     private func requestEnginePreparation() {
@@ -542,19 +563,36 @@ final class DictationCoordinator: ObservableObject {
             return
         }
 
-        startPrewarming(transcriptionEngine)
+        startPrewarming()
     }
 
-    private func startPrewarming(_ engine: ParakeetEngine) {
+    private func startPrewarming() {
+        engineSwapTask?.cancel()
+        engineSwapTask = nil
+        enginePrewarmTask?.cancel()
         engineGeneration += 1
         let generation = engineGeneration
+        let version = activeEngineVersion
         isPrewarmed = false
+        engineSwitchMessage = nil
         enginePreparationState = .downloading(progress: 0)
         setState(.prewarming)
 
         enginePrewarmTask = Task { [weak self] in
+            guard let self else {
+                return
+            }
+            await self.transcriptionEngine.cancelPreparation()
+            await self.transcriptionEngine
+                .selectVersionForBlockingPreparation(version)
+            guard !Task.isCancelled,
+                  generation == self.engineGeneration else {
+                return
+            }
+
             do {
-                try await engine.prewarm { [weak self] update in
+                try await self.transcriptionEngine.prewarm {
+                    [weak self] update in
                     Task { @MainActor [weak self] in
                         self?.applyPreparationUpdate(
                             update,
@@ -563,8 +601,7 @@ final class DictationCoordinator: ObservableObject {
                     }
                 }
                 try Task.checkCancellation()
-                guard let self,
-                      generation == self.engineGeneration else {
+                guard generation == self.engineGeneration else {
                     return
                 }
                 self.isPrewarmed = true
@@ -574,8 +611,7 @@ final class DictationCoordinator: ObservableObject {
             } catch is CancellationError {
                 return
             } catch {
-                guard let self,
-                      generation == self.engineGeneration else {
+                guard generation == self.engineGeneration else {
                     return
                 }
                 self.enginePrewarmTask = nil
@@ -589,13 +625,126 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
+    private func startEngineSwap(to version: EngineVersion) {
+        engineSwapTask?.cancel()
+        enginePrewarmTask?.cancel()
+        enginePrewarmTask = nil
+        engineGeneration += 1
+        let generation = engineGeneration
+
+        guard engineSwitchState.beginPreparing(version) else {
+            enginePreparationState = .ready
+            engineSwitchMessage = nil
+            engineSwapTask = Task { [weak self] in
+                guard let self else {
+                    return
+                }
+                await self.transcriptionEngine.cancelPreparation()
+                guard generation == self.engineGeneration else {
+                    return
+                }
+                self.engineSwapTask = nil
+            }
+            return
+        }
+
+        let currentVersion = engineSwitchState.activeVersion
+        enginePreparationState = .downloading(progress: 0)
+        engineSwitchMessage = nil
+        engineLogger.notice(
+            "engine swap start from=\(currentVersion.rawValue) to=\(version.rawValue)"
+        )
+
+        engineSwapTask = Task { [weak self] in
+            guard let self else {
+                return
+            }
+            await self.transcriptionEngine.cancelPreparation()
+            guard !Task.isCancelled,
+                  generation == self.engineGeneration else {
+                return
+            }
+
+            do {
+                try await self.transcriptionEngine.prepareAndSwap(
+                    to: version
+                ) { [weak self] update in
+                    Task { @MainActor [weak self] in
+                        self?.applyPreparationUpdate(
+                            update,
+                            generation: generation
+                        )
+                    }
+                }
+                try Task.checkCancellation()
+                guard generation == self.engineGeneration else {
+                    return
+                }
+
+                let resolution = self.engineSwitchState
+                    .resolvePreparation(
+                        for: version,
+                        outcome: .ready
+                    )
+                guard case let .swapped(_, activeVersion) = resolution
+                else {
+                    return
+                }
+
+                self.activeEngineVersion = activeVersion
+                self.enginePreparationState = .ready
+                self.engineSwitchMessage = nil
+                self.engineSwapTask = nil
+                self.engineLogger.notice(
+                    "engine swap ready active=\(activeVersion.rawValue)"
+                )
+            } catch is CancellationError {
+                return
+            } catch {
+                guard generation == self.engineGeneration else {
+                    return
+                }
+
+                let resolution = self.engineSwitchState
+                    .resolvePreparation(
+                        for: version,
+                        outcome: .failed
+                    )
+                guard case let .reverted(
+                    settingVersion,
+                    message
+                ) = resolution else {
+                    return
+                }
+
+                self.enginePreparationState = .ready
+                self.engineSwitchMessage = message
+                self.engineSwapTask = nil
+                self.applyEngineVersionSetting(settingVersion)
+                self.engineLogger.error(
+                    "engine swap failed target=\(version.rawValue): \(error.localizedDescription)"
+                )
+                await self.flashFeedback(message, duration: 2)
+            }
+        }
+    }
+
+    private func applyEngineVersionSetting(_ version: EngineVersion) {
+        guard settings.engineVersion != version else {
+            return
+        }
+
+        isApplyingEngineVersionSetting = true
+        settings.engineVersion = version
+        isApplyingEngineVersionSetting = false
+    }
+
     private func applyPreparationUpdate(
         _ update: TranscriptionPreparationUpdate,
         generation: Int
     ) {
         guard generation == engineGeneration,
-              enginePrewarmTask != nil,
-              !isPrewarmed else {
+              enginePrewarmTask != nil || engineSwapTask != nil else {
             return
         }
 

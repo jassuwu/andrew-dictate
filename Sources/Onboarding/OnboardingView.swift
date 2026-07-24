@@ -4,6 +4,47 @@ import AVFoundation
 import SwiftUI
 
 @MainActor
+private final class OnboardingWindowResizer {
+    weak var window: NSWindow?
+
+    func resize(to contentHeight: CGFloat, animated: Bool) {
+        // Window mutations are deferred past the SwiftUI graph update that
+        // requested them, matching the HUD/AttributeGraph safety rule.
+        DispatchQueue.main.async { [weak self] in
+            guard let window = self?.window else {
+                return
+            }
+
+            let currentFrame = window.frame
+            let targetFrameSize = window.frameRect(
+                forContentRect: NSRect(
+                    origin: .zero,
+                    size: NSSize(width: 460, height: contentHeight)
+                )
+            ).size
+            guard abs(currentFrame.height - targetFrameSize.height) > 0.5
+            else {
+                return
+            }
+
+            let targetFrame = NSRect(
+                x: currentFrame.minX,
+                y: currentFrame.maxY - targetFrameSize.height,
+                width: targetFrameSize.width,
+                height: targetFrameSize.height
+            )
+            window.setFrame(
+                targetFrame,
+                display: true,
+                animate: animated
+                    && !NSWorkspace.shared
+                        .accessibilityDisplayShouldReduceMotion
+            )
+        }
+    }
+}
+
+@MainActor
 final class OnboardingWindowController:
     NSWindowController,
     NSWindowDelegate
@@ -13,9 +54,14 @@ final class OnboardingWindowController:
     init(coordinator: DictationCoordinator) {
         self.coordinator = coordinator
 
-        let rootView = OnboardingView(coordinator: coordinator)
+        let resizer = OnboardingWindowResizer()
+        let rootView = OnboardingView(
+            coordinator: coordinator,
+            windowResizer: resizer
+        )
         let hostingController = NSHostingController(rootView: rootView)
         let window = NSWindow(contentViewController: hostingController)
+        resizer.window = window
         window.title = "Andrew Dictate"
         window.styleMask = [.titled, .closable]
         window.setContentSize(NSSize(width: 460, height: 430))
@@ -108,11 +154,22 @@ private final class OnboardingPermissionModel: ObservableObject {
 }
 
 struct OnboardingView: View {
+    private static let collapsedHeight: CGFloat = 430
+    private static let expandedHeight: CGFloat = 735
+
     @ObservedObject private var coordinator: DictationCoordinator
+    @ObservedObject private var settings: AppSettings
     @StateObject private var permissions: OnboardingPermissionModel
     @State private var onboarding: OnboardingState
+    @State private var testedHotkey: DictationMode?
 
-    init(coordinator: DictationCoordinator) {
+    private let detectedAgents: [DetectedAgentCLI]
+    private let windowResizer: OnboardingWindowResizer
+
+    fileprivate init(
+        coordinator: DictationCoordinator,
+        windowResizer: OnboardingWindowResizer
+    ) {
         let permissions = OnboardingPermissionModel()
         var onboarding = OnboardingState()
         onboarding.updateMicrophoneStatus(
@@ -126,45 +183,43 @@ struct OnboardingView: View {
         )
 
         _coordinator = ObservedObject(wrappedValue: coordinator)
+        _settings = ObservedObject(wrappedValue: coordinator.settings)
         _permissions = StateObject(wrappedValue: permissions)
         _onboarding = State(initialValue: onboarding)
+        detectedAgents = AgentCLIDetector.detect()
+        self.windowResizer = windowResizer
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            primarySetup
+                .frame(height: 390)
 
-            setupButtonSlot
-                .padding(.top, 14)
-
-            checklist
-                .padding(.top, 14)
-                .opacity(checklistIsActive ? 1 : 0.42)
-
-            Text("keys and options live in settings.")
-                .font(.caption)
-                .foregroundStyle(BrandUI.textSecondary)
-                .padding(.top, 10)
-
-            Spacer(minLength: 6)
-
-            Button("skip for now") {
-                guard onboarding.skipForNow() else {
-                    return
-                }
-                coordinator.skipOnboarding()
+            if onboarding.whileYouWaitVisible {
+                whileYouWaitSection
+                    .padding(.top, 14)
             }
-            .buttonStyle(.link)
-            .controlSize(.small)
         }
         .padding(.horizontal, 28)
         .padding(.vertical, 20)
-        .frame(width: 460, height: 430)
+        .frame(
+            width: 460,
+            height: contentHeight,
+            alignment: .top
+        )
         .background(BrandUI.windowBg)
+        .foregroundStyle(BrandUI.textPrimary)
+        .font(BrandUI.bodyFont)
+        .brandTinted()
+        .controlSize(.small)
         .preferredColorScheme(.dark)
         .onAppear {
             permissions.refresh()
             synchronizeOnboarding()
+            windowResizer.resize(
+                to: contentHeight,
+                animated: false
+            )
         }
         .onChange(of: permissions.microphoneStatus) { _, _ in
             synchronizePermissions()
@@ -174,6 +229,12 @@ struct OnboardingView: View {
         }
         .onChange(of: coordinator.enginePreparationState) { _, _ in
             synchronizeEngine()
+        }
+        .onChange(of: onboarding.whileYouWaitVisible) { _, _ in
+            windowResizer.resize(
+                to: contentHeight,
+                animated: true
+            )
         }
         .task {
             permissions.refresh()
@@ -186,8 +247,26 @@ struct OnboardingView: View {
                 permissions.refresh()
             }
         }
-        .task(id: onboarding.autoFinishArmed) {
-            guard onboarding.autoFinishArmed else {
+        .task(id: coordinator.hotkeyDetection?.sequence) {
+            guard onboarding.whileYouWaitVisible,
+                  let detection = coordinator.hotkeyDetection else {
+                return
+            }
+
+            testedHotkey = detection.mode
+            do {
+                try await Task.sleep(for: .milliseconds(420))
+            } catch {
+                return
+            }
+            guard coordinator.hotkeyDetection?.sequence
+                    == detection.sequence else {
+                return
+            }
+            testedHotkey = nil
+        }
+        .task(id: onboarding.autoFinishReady) {
+            guard onboarding.autoFinishReady else {
                 return
             }
 
@@ -202,6 +281,145 @@ struct OnboardingView: View {
             }
             coordinator.finishOnboarding()
         }
+    }
+
+    private var contentHeight: CGFloat {
+        onboarding.whileYouWaitVisible
+            ? Self.expandedHeight
+            : Self.collapsedHeight
+    }
+
+    private var primarySetup: some View {
+        VStack(spacing: 0) {
+            header
+
+            setupButtonSlot
+                .padding(.top, 14)
+
+            checklist
+                .padding(.top, 14)
+                .opacity(checklistIsActive ? 1 : 0.42)
+
+            if !onboarding.whileYouWaitVisible {
+                Text("keys and options live in settings.")
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.textSecondary)
+                    .padding(.top, 10)
+            }
+
+            Spacer(minLength: 6)
+
+            Button("skip for now") {
+                guard onboarding.skipForNow() else {
+                    return
+                }
+                coordinator.skipOnboarding()
+            }
+            .buttonStyle(.link)
+            .controlSize(.small)
+        }
+    }
+
+    private var whileYouWaitSection: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                BrandSectionHeader("while you wait")
+
+                Spacer()
+
+                Text("optional")
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.textSecondary)
+            }
+            .padding(.horizontal, 2)
+
+            BrandCard {
+                VStack(alignment: .leading, spacing: 11) {
+                    hotkeyTestRow
+                    cardDivider
+
+                    SettingsToggleRow(
+                        "pre-roll",
+                        explanation:
+                            "keeps a short microphone buffer warm "
+                            + "to protect the first word.",
+                        isOn: $settings.preRollEnabled
+                    )
+                    cardDivider
+
+                    HStack(alignment: .firstTextBaseline, spacing: 14) {
+                        Text("agent cli")
+                            .font(BrandUI.bodyFont.weight(.medium))
+                            .frame(width: 70, alignment: .leading)
+
+                        AgentCLIEditor(
+                            settings: settings,
+                            detectedAgents: detectedAgents,
+                            onEditingChanged: {
+                                onboarding
+                                    .setOptionalConfigurationEditing($0)
+                            }
+                        )
+                        .frame(
+                            maxWidth: .infinity,
+                            alignment: .leading
+                        )
+                    }
+                    cardDivider
+
+                    SettingsToggleRow(
+                        "spoken answers",
+                        explanation:
+                            "reads ask answers aloud in two short "
+                            + "spoken sentences.",
+                        isOn: $settings.voiceAnswersEnabled
+                    )
+                }
+            }
+        }
+    }
+
+    private var hotkeyTestRow: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("press to test")
+                    .font(BrandUI.bodyFont.weight(.medium))
+
+                Text(
+                    testedHotkey == nil
+                        ? "try either hold key"
+                        : "\(testedHotkey!.rawValue) detected"
+                )
+                .font(.caption)
+                .foregroundStyle(
+                    testedHotkey == nil
+                        ? BrandUI.textSecondary
+                        : BrandUI.gold
+                )
+            }
+
+            Spacer(minLength: 8)
+
+            ForEach(DictationMode.allCases, id: \.self) { mode in
+                VStack(spacing: 3) {
+                    KeyChip(
+                        settings.hotkeyBinding(for: mode).displayName,
+                        isActive: testedHotkey == mode
+                    )
+
+                    Text(mode.rawValue)
+                        .font(.caption2)
+                        .foregroundStyle(BrandUI.textSecondary)
+                }
+            }
+        }
+    }
+
+    private var cardDivider: some View {
+        Rectangle()
+            .fill(BrandUI.hairline)
+            .frame(height: 1)
+            .accessibilityHidden(true)
     }
 
     private var header: some View {

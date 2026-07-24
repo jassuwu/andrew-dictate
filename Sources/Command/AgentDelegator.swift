@@ -74,7 +74,7 @@ final class AgentDelegator {
                     isDirectory: true
                 )
 
-        prepareRunDirectoryForCleanup()
+        prepareSupportDirectory()
         cleanupExpiredScripts()
     }
 
@@ -135,7 +135,7 @@ final class AgentDelegator {
         )
     }
 
-    private func prepareRunDirectoryForCleanup() {
+    func prepareSupportDirectory() {
         do {
             try prepareRunDirectory()
         } catch {

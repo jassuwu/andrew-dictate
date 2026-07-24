@@ -110,4 +110,51 @@ final class OnboardingStateTests: XCTestCase {
         XCTAssertEqual(state.modelStatus, .actionRequired)
         XCTAssertEqual(state.completion, .pending)
     }
+
+    func testWhileYouWaitAppearsAfterConsentAndStaysThroughReadiness() {
+        var state = OnboardingState()
+        state.updateMicrophoneStatus(.ready)
+        state.updateAccessibility(granted: true)
+        state.updateModelStatus(.pending)
+
+        XCTAssertFalse(state.whileYouWaitVisible)
+        XCTAssertTrue(state.consentToSetup())
+        XCTAssertTrue(state.whileYouWaitVisible)
+
+        state.updateModelStatus(.ready)
+
+        XCTAssertTrue(state.whileYouWaitVisible)
+        XCTAssertTrue(state.autoFinishArmed)
+    }
+
+    func testWhileYouWaitNeverAppearsWhenModelWasReadyAtConsent() {
+        var state = OnboardingState()
+        state.updateMicrophoneStatus(.ready)
+        state.updateAccessibility(granted: true)
+        state.updateModelStatus(.ready)
+
+        XCTAssertTrue(state.consentToSetup())
+        XCTAssertFalse(state.whileYouWaitVisible)
+        XCTAssertTrue(state.autoFinishReady)
+    }
+
+    func testEditingOptionalConfigurationDelaysAutomaticFinish() {
+        var state = OnboardingState()
+        state.updateMicrophoneStatus(.ready)
+        state.updateAccessibility(granted: true)
+        state.updateModelStatus(.pending)
+        XCTAssertTrue(state.consentToSetup())
+        state.setOptionalConfigurationEditing(true)
+        state.updateModelStatus(.ready)
+
+        XCTAssertTrue(state.autoFinishArmed)
+        XCTAssertFalse(state.autoFinishReady)
+        XCTAssertFalse(state.finishAutomatically())
+
+        state.setOptionalConfigurationEditing(false)
+
+        XCTAssertTrue(state.autoFinishReady)
+        XCTAssertTrue(state.finishAutomatically())
+        XCTAssertEqual(state.completion, .finished)
+    }
 }

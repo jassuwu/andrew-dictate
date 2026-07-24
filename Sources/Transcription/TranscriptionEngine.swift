@@ -13,28 +13,92 @@ protocol TranscriptionEngine {
 }
 
 actor ParakeetEngine: TranscriptionEngine {
+    private struct ActiveManager {
+        let version: EngineVersion
+        let manager: AsrManager
+    }
+
     private struct Preparation {
         let identifier: Int
+        let version: EngineVersion
         let task: Task<AsrManager, Error>
     }
 
-    private var manager: AsrManager?
+    private var activeManager: ActiveManager?
     private var preparation: Preparation?
     private var nextPreparationIdentifier = 0
-    private let version: EngineVersion
+    private var fallbackVersion: EngineVersion
 
     init(version: EngineVersion) {
-        self.version = version
+        fallbackVersion = version
+    }
+
+    func selectVersionForBlockingPreparation(
+        _ version: EngineVersion
+    ) {
+        fallbackVersion = version
     }
 
     func prewarm(
         progressHandler: (@Sendable (TranscriptionPreparationUpdate) -> Void)?
     ) async throws {
-        _ = try await preparedManager(progressHandler: progressHandler)
+        let version = fallbackVersion
+        guard activeManager?.version != version else {
+            return
+        }
+
+        let manager = try await preparedManager(
+            for: version,
+            progressHandler: progressHandler
+        )
+        try Task.checkCancellation()
+        activeManager = ActiveManager(
+            version: version,
+            manager: manager
+        )
+    }
+
+    func prepareAndSwap(
+        to version: EngineVersion,
+        progressHandler: (
+            @Sendable (TranscriptionPreparationUpdate) -> Void
+        )?
+    ) async throws {
+        guard activeManager?.version != version else {
+            return
+        }
+
+        let manager = try await preparedManager(
+            for: version,
+            progressHandler: progressHandler
+        )
+        try Task.checkCancellation()
+
+        // The current manager remains readable across every suspension above.
+        // Replacing this actor-isolated value is the atomic commit point.
+        activeManager = ActiveManager(
+            version: version,
+            manager: manager
+        )
+        fallbackVersion = version
     }
 
     func transcribe(_ samples: [Float]) async throws -> String {
-        let manager = try await preparedManager(progressHandler: nil)
+        let manager: AsrManager
+        if let activeManager {
+            manager = activeManager.manager
+        } else {
+            let version = fallbackVersion
+            manager = try await preparedManager(
+                for: version,
+                progressHandler: nil
+            )
+            try Task.checkCancellation()
+            activeManager = ActiveManager(
+                version: version,
+                manager: manager
+            )
+        }
         let decoderLayerCount = await manager.decoderLayerCount
         var decoderState = TdtDecoderState.make(decoderLayers: decoderLayerCount)
 
@@ -55,25 +119,30 @@ actor ParakeetEngine: TranscriptionEngine {
 
     func unloadModels() {
         cancelPreparation()
-        manager = nil
+        activeManager = nil
     }
 
     private func preparedManager(
+        for version: EngineVersion,
         progressHandler: (
             @Sendable (TranscriptionPreparationUpdate) -> Void
         )?
     ) async throws -> AsrManager {
-        if let manager {
-            return manager
+        if let activeManager,
+           activeManager.version == version {
+            return activeManager.manager
         }
 
         let pendingPreparation: Preparation
-        if let preparation {
+        if let preparation,
+           preparation.version == version {
             pendingPreparation = preparation
         } else {
+            preparation?.task.cancel()
             nextPreparationIdentifier += 1
             let newPreparation = Preparation(
                 identifier: nextPreparationIdentifier,
+                version: version,
                 task: Task {
                     try await Self.makePrewarmedManager(
                         version: version,
@@ -89,7 +158,6 @@ actor ParakeetEngine: TranscriptionEngine {
             let preparedManager = try await pendingPreparation.task.value
 
             if preparation?.identifier == pendingPreparation.identifier {
-                manager = preparedManager
                 preparation = nil
             }
 

@@ -37,9 +37,6 @@ final class SettingsWindowController: NSWindowController {
 }
 
 struct SettingsView: View {
-    private static let customAgentSelection = "custom"
-    private static let noAgentSelection = "none"
-
     @ObservedObject private var coordinator: DictationCoordinator
     @ObservedObject private var settings: AppSettings
     @ObservedObject private var dictionaryStore: DictionaryStore
@@ -50,9 +47,6 @@ struct SettingsView: View {
 
     @State private var detectedAgents: [DetectedAgentCLI]
     @State private var installedTerminals: [TerminalOption]
-    @State private var selectedAgent: String
-    @State private var customAgentTemplate: String
-    @State private var customTemplateIsInvalid = false
     @State private var installedModels: [InstalledModel] = []
     @State private var pendingModelRemoval: EngineVersion?
     @State private var modelStoreMessage: String?
@@ -71,19 +65,10 @@ struct SettingsView: View {
             wrappedValue: coordinator.customActionStore
         )
         modelStore = ModelStore(
-            activeVersion: { settings.engineVersion }
+            activeVersion: { coordinator.activeEngineVersion }
         )
         _detectedAgents = State(initialValue: detectedAgents)
         _installedTerminals = State(initialValue: installedTerminals)
-        _selectedAgent = State(
-            initialValue: Self.initialAgentSelection(
-                template: settings.agentCommandTemplate,
-                detectedAgents: detectedAgents
-            )
-        )
-        _customAgentTemplate = State(
-            initialValue: settings.agentCommandTemplate
-        )
     }
 
     var body: some View {
@@ -101,7 +86,7 @@ struct SettingsView: View {
 
                 settingsSection("dictation & ask") {
                     VStack(alignment: .leading, spacing: 13) {
-                        settingToggle(
+                        SettingsToggleRow(
                             "pre-roll",
                             explanation:
                                 "keeps a short microphone buffer warm "
@@ -109,7 +94,7 @@ struct SettingsView: View {
                             isOn: $settings.preRollEnabled
                         )
                         cardDivider
-                        settingToggle(
+                        SettingsToggleRow(
                             "sound feedback",
                             explanation:
                                 "plays a subtle cue when listening starts "
@@ -117,7 +102,7 @@ struct SettingsView: View {
                             isOn: $settings.soundFeedbackEnabled
                         )
                         cardDivider
-                        settingToggle(
+                        SettingsToggleRow(
                             "spoken answers",
                             explanation:
                                 "reads ask answers aloud in two short "
@@ -144,7 +129,7 @@ struct SettingsView: View {
                 }
 
                 settingsSection("general") {
-                    settingToggle(
+                    SettingsToggleRow(
                         "launch at login",
                         explanation:
                             "starts Andrew Dictate when you sign in.",
@@ -184,7 +169,7 @@ struct SettingsView: View {
             }
         }
         .alert(item: $pendingModelRemoval) { version in
-            let isActive = version == settings.engineVersion
+            let isActive = version == coordinator.activeEngineVersion
             return Alert(
                 title: Text(
                     isActive
@@ -255,31 +240,6 @@ struct SettingsView: View {
             .accessibilityHidden(true)
     }
 
-    private func settingToggle(
-        _ title: String,
-        explanation: String,
-        isOn: Binding<Bool>
-    ) -> some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(BrandUI.bodyFont.weight(.medium))
-                    .foregroundStyle(BrandUI.textPrimary)
-
-                Text(explanation)
-                    .font(BrandUI.bodyFont)
-                    .foregroundStyle(BrandUI.textSecondary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 8)
-
-            Toggle("", isOn: isOn)
-                .labelsHidden()
-                .brandToggleStyle()
-        }
-    }
-
     private var engineEditor: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
@@ -313,7 +273,7 @@ struct SettingsView: View {
 
                     Spacer(minLength: 8)
 
-                    if model.version == settings.engineVersion {
+                    if model.version == coordinator.activeEngineVersion {
                         Text("active")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(BrandUI.goldPale)
@@ -336,6 +296,12 @@ struct SettingsView: View {
 
             if let modelStoreMessage {
                 Text(modelStoreMessage)
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.gold)
+            }
+
+            if let message = coordinator.engineSwitchMessage {
+                Text(message)
                     .font(.caption)
                     .foregroundStyle(BrandUI.gold)
             }
@@ -465,7 +431,10 @@ struct SettingsView: View {
                     .font(BrandUI.bodyFont.weight(.medium))
                     .frame(width: 86, alignment: .leading)
 
-                agentEditor
+                AgentCLIEditor(
+                    settings: settings,
+                    detectedAgents: detectedAgents
+                )
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
@@ -492,100 +461,6 @@ struct SettingsView: View {
         }
     }
 
-    private var agentEditor: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Picker("", selection: $selectedAgent) {
-                ForEach(detectedAgents) { detected in
-                    Text(
-                        detected.cli == .codex
-                            ? "codex (recommended)"
-                            : detected.cli.rawValue
-                    )
-                    .tag(agentSelection(for: detected.cli))
-                    .help(detected.executableURL.path)
-                }
-
-                Text("custom")
-                    .tag(Self.customAgentSelection)
-
-                Text("none")
-                    .tag(Self.noAgentSelection)
-            }
-            .labelsHidden()
-            .brandMenuStyle()
-            .onChange(of: selectedAgent) { _, newSelection in
-                applyAgentSelection(newSelection)
-            }
-
-            if selectedAgent == Self.customAgentSelection {
-                TextField(
-                    "command containing {prompt}",
-                    text: $customAgentTemplate
-                )
-                .font(BrandUI.valueFont)
-                .textFieldStyle(.plain)
-                .padding(.horizontal, 8)
-                .frame(height: 28)
-                .background {
-                    RoundedRectangle(
-                        cornerRadius: 6,
-                        style: .continuous
-                    )
-                    .fill(BrandUI.windowBg)
-                }
-                .overlay {
-                    RoundedRectangle(
-                        cornerRadius: 6,
-                        style: .continuous
-                    )
-                    .stroke(
-                        customTemplateIsInvalid
-                            ? BrandUI.gold
-                            : BrandUI.hairline,
-                        lineWidth: 1
-                    )
-                }
-                .onChange(of: customAgentTemplate) { _, template in
-                    let isValid = AgentCommandTemplate.isValid(template)
-                    customTemplateIsInvalid = !isValid
-                    if isValid {
-                        settings.agentCommandTemplate = template
-                    }
-                }
-
-                if customTemplateIsInvalid {
-                    Text("{prompt} must be a standalone word")
-                        .font(.caption)
-                        .foregroundStyle(BrandUI.gold)
-                }
-            }
-        }
-    }
-
-    private func applyAgentSelection(_ selection: String) {
-        if selection == Self.noAgentSelection {
-            customTemplateIsInvalid = false
-            settings.agentCommandTemplate = ""
-            return
-        }
-
-        guard selection != Self.customAgentSelection else {
-            if AgentCommandTemplate.isValid(customAgentTemplate) {
-                settings.agentCommandTemplate = customAgentTemplate
-            }
-            return
-        }
-
-        guard let detected = detectedAgents.first(where: {
-            agentSelection(for: $0.cli) == selection
-        }) else {
-            return
-        }
-
-        customTemplateIsInvalid = false
-        settings.agentCommandTemplate = detected.cli.commandTemplate
-    }
-
     private func selectAvailableTerminalIfNeeded() {
         guard !installedTerminals.contains(where: {
             $0.bundleIdentifier == settings.terminalBundleID
@@ -595,24 +470,6 @@ struct SettingsView: View {
         settings.terminalBundleID = fallback.bundleIdentifier
     }
 
-    private func agentSelection(for cli: AgentCLI) -> String {
-        "cli.\(cli.rawValue)"
-    }
-
-    private static func initialAgentSelection(
-        template: String,
-        detectedAgents: [DetectedAgentCLI]
-    ) -> String {
-        guard !template.isEmpty else {
-            return noAgentSelection
-        }
-        guard let cli = AgentCLI.allCases.first(where: {
-            $0.commandTemplate == template
-        }), detectedAgents.contains(where: { $0.cli == cli }) else {
-            return customAgentSelection
-        }
-        return "cli.\(cli.rawValue)"
-    }
 }
 
 private struct CustomActionEditor: View {

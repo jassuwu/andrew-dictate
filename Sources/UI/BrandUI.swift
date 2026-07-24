@@ -82,24 +82,37 @@ struct BrandSectionHeader: View {
 
 struct KeyChip: View {
     private let key: String
+    private let isActive: Bool
 
-    init(_ key: String) {
+    init(_ key: String, isActive: Bool = false) {
         self.key = key
+        self.isActive = isActive
     }
 
     var body: some View {
         Text(key)
             .font(BrandUI.valueFont)
-            .foregroundStyle(BrandUI.goldPale)
+            .foregroundStyle(
+                isActive ? BrandUI.windowBg : BrandUI.goldPale
+            )
             .padding(4)
             .background {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(BrandUI.windowBg.opacity(0.72))
+                    .fill(
+                        isActive
+                            ? BrandUI.gold
+                            : BrandUI.windowBg.opacity(0.72)
+                    )
             }
             .overlay {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(BrandUI.hairline, lineWidth: 1)
+                    .stroke(
+                        isActive ? BrandUI.goldPale : BrandUI.hairline,
+                        lineWidth: 1
+                    )
             }
+            .scaleEffect(isActive ? 1.08 : 1)
+            .animation(.easeOut(duration: 0.14), value: isActive)
     }
 }
 

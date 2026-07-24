@@ -60,6 +60,7 @@ targets:
       - Sources/HUD/HUDLayoutEngine.swift
       - Sources/Settings/AppSettings.swift
       - Sources/Settings/AgentCLIDetector.swift
+      - Sources/Settings/EngineSwitchState.swift
       - Sources/Onboarding/OnboardingState.swift
       - Sources/Hotkey/HotkeyBinding.swift
       - Sources/Hotkey/TapLockDetector.swift
