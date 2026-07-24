@@ -158,10 +158,17 @@ final class HotkeyLogicTests: XCTestCase {
 }
 
 final class WaveLevelTests: XCTestCase {
-    func testShaperGatesRoomTone() {
+    func testShaperGatesResidualHum() {
         XCTAssertEqual(WaveLevelShaper.shape(0), 0)
-        XCTAssertEqual(WaveLevelShaper.shape(0.10), 0)
-        XCTAssertEqual(WaveLevelShaper.shape(0.12), 0)
+        XCTAssertEqual(WaveLevelShaper.shape(0.03), 0)
+        XCTAssertEqual(WaveLevelShaper.shape(0.05), 0)
+    }
+
+    func testMidSpeechFillsMeaningfulHeight() {
+        // conversational speech (~mid-window) should render clearly visible
+        let mid = WaveLevelShaper.shape(0.5)
+        XCTAssertGreaterThan(mid, 0.38)
+        XCTAssertLessThan(mid, 0.62)
     }
 
     func testShaperIsMonotonicAndReachesOne() {

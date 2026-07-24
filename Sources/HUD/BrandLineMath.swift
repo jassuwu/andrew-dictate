@@ -100,12 +100,13 @@ enum BrandLineJointMapper {
 }
 
 
-/// perceptual level shaping: a noise gate collapses room tone to silence and a
-/// gamma curve expands the dynamics where speech actually lives — without this,
-/// sqrt-style response curves pin the meter near the top for any speech at all.
+/// the level arrives already mapped linearly across the speech dB window
+/// (-50…-12 dBFS), which IS the perceptual scale — so shaping here is nearly
+/// identity: a small gate absorbs residual hum, and a gentle 1.15 exponent
+/// keeps the low end tidy without crushing dynamics.
 enum WaveLevelShaper {
-    static let gate: Float = 0.12
-    static let gamma: Float = 2.0
+    static let gate: Float = 0.05
+    static let gamma: Float = 1.15
 
     static func shape(_ raw: Float) -> Float {
         let bounded = min(max(raw, 0), 1)

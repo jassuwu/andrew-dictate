@@ -443,7 +443,10 @@ private final class AudioFirstBufferNotifier: @unchecked Sendable {
 }
 
 private final class AudioLevelStorage: @unchecked Sendable {
-    private static let minimumDecibels: Float = -42
+    // standard speech-meter window: silence below the floor reads zero and a
+    // raised voice reaches the top. dB is already perceptual — map it linearly.
+    private static let minimumDecibels: Float = -50
+    private static let maximumDecibels: Float = -12
 
     private let level = OSAllocatedUnfairLock(initialState: Float.zero)
 
@@ -472,7 +475,11 @@ private final class AudioLevelStorage: @unchecked Sendable {
 
         let decibels = 20 * log10f(max(rms, Float.leastNonzeroMagnitude))
         let normalized = min(
-            max((decibels - Self.minimumDecibels) / -Self.minimumDecibels, 0),
+            max(
+                (decibels - Self.minimumDecibels)
+                    / (Self.maximumDecibels - Self.minimumDecibels),
+                0
+            ),
             1
         )
         level.withLock { $0 = normalized }
