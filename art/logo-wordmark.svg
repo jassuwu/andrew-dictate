@@ -1,13 +1,62 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 300" width="960" height="300">
+  <defs>
+    <radialGradient id="bgGlow" cx="52%" cy="42%" r="75%">
+      <stop offset="0%" stop-color="#232329"/>
+      <stop offset="100%" stop-color="#161619"/>
+    </radialGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#835231"/>
+      <stop offset="55%" stop-color="#6E4226"/>
+      <stop offset="100%" stop-color="#54321C"/>
+    </linearGradient>
+    <linearGradient id="band" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F06B4C"/>
+      <stop offset="100%" stop-color="#C7472E"/>
+    </linearGradient>
+    <linearGradient id="ash" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#E4DED1"/>
+      <stop offset="100%" stop-color="#AFA99C"/>
+    </linearGradient>
+    <linearGradient id="ember" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#E4593B"/>
+      <stop offset="100%" stop-color="#FF9468"/>
+    </linearGradient>
+    <radialGradient id="emberGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#F0805F" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#F0805F" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
   <!-- andrew dictate — wordmark lockup: the character + name + tagline. -->
   <rect width="960" height="300" rx="28" fill="#1B1B1F"/>
   <g transform="translate(38 22) scale(0.5)">
-<g fill="none" stroke="#EFEAE0" stroke-width="40" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M 96 320 L 148 320"/>
-    <path d="M 172 320 L 234 320"/>
-    <path d="M 300 320 L 346 274 L 370 296 L 428 202"/>
+<!-- ember glow halo -->
+  <circle cx="328" cy="282" r="44" fill="url(#emberGlow)"/>
+
+  <!-- cigar -->
+  <g transform="rotate(-20 215 326)">
+    <rect x="100" y="302" width="200" height="46" rx="23" fill="url(#body)"/>
+    <!-- cap seam -->
+    <rect x="134" y="303" width="3" height="44" fill="#3E2413" opacity="0.35"/>
+    <!-- band with foil edges -->
+    <rect x="154" y="302" width="24" height="46" fill="url(#band)"/>
+    <rect x="154" y="302" width="3" height="46" fill="#8F3320" opacity="0.6"/>
+    <rect x="175" y="302" width="3" height="46" fill="#8F3320" opacity="0.6"/>
+    <!-- ash -->
+    <rect x="300" y="302" width="26" height="46" fill="url(#ash)"/>
+    <!-- ember -->
+    <rect x="326" y="302" width="18" height="46" rx="9" fill="url(#ember)"/>
+    <!-- body top highlight -->
+    <rect x="112" y="306" width="180" height="7" rx="3.5" fill="#FFFFFF" opacity="0.10"/>
   </g>
-  <circle cx="268" cy="320" r="21" fill="#E4593B"/>
+
+  <!-- the smoke is the soundwave: brand bars, dissipating as they rise -->
+  <g fill="#EFEAE0">
+    <rect x="332" y="210" width="15" height="64"  rx="7.5" opacity="0.95"/>
+    <rect x="357" y="142" width="15" height="116" rx="7.5" fill="#E4593B"/>
+    <rect x="382" y="82"  width="15" height="160" rx="7.5" opacity="0.88"/>
+    <rect x="407" y="134" width="15" height="94"  rx="7.5" opacity="0.72"/>
+    <rect x="432" y="164" width="15" height="52"  rx="7.5" opacity="0.55"/>
+  </g>
   </g>
   <text x="308" y="158" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="76" font-weight="600" letter-spacing="-1.5" fill="#EFEAE0">andrew dictate</text>
   <text x="311" y="214" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="30" fill="#E4593B">escape the keyboard.</text>
