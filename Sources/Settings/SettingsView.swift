@@ -16,8 +16,8 @@ final class SettingsWindowController: NSWindowController {
             .miniaturizable,
             .resizable,
         ]
-        window.setContentSize(NSSize(width: 700, height: 640))
-        window.minSize = NSSize(width: 620, height: 540)
+        window.setContentSize(NSSize(width: 560, height: 720))
+        window.minSize = NSSize(width: 540, height: 560)
         window.isReleasedWhenClosed = false
         window.center()
 
@@ -39,11 +39,6 @@ final class SettingsWindowController: NSWindowController {
 struct SettingsView: View {
     private static let customAgentSelection = "custom"
     private static let noAgentSelection = "none"
-    private static let modelProgressGold = Color(
-        red: 0xE5 / 255,
-        green: 0xBE / 255,
-        blue: 0x62 / 255
-    )
 
     @ObservedObject private var coordinator: DictationCoordinator
     @ObservedObject private var settings: AppSettings
@@ -88,78 +83,80 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        Form {
-            Section {
-                HStack(spacing: 10) {
-                    Image(nsImage: NSApp.applicationIconImage)
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(width: 30, height: 30)
-                        .accessibilityHidden(true)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                identityStrip
 
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Andrew Dictate")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text(
-                            "v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?") · escape the keyboard."
-                        )
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                settingsSection("keys") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        hotkeyRow(for: .dictation)
+                        cardDivider
+                        hotkeyRow(for: .command)
                     }
                 }
-            }
 
-            hotkeyRow(for: .dictation)
-            hotkeyRow(for: .command)
-
-            Toggle("pre-roll", isOn: $settings.preRollEnabled)
-            Toggle(
-                "sound feedback",
-                isOn: $settings.soundFeedbackEnabled
-            )
-
-            LabeledContent("engine") {
-                engineEditor
-            }
-
-            LabeledContent("dictionary") {
-                DictionaryEditor(store: dictionaryStore)
-            }
-
-            LabeledContent("agent cli") {
-                agentEditor
-            }
-
-            Picker("terminal", selection: $settings.terminalBundleID) {
-                ForEach(installedTerminals) { terminal in
-                    Text(terminal.displayName)
-                        .tag(terminal.bundleIdentifier)
+                settingsSection("dictation") {
+                    VStack(alignment: .leading, spacing: 13) {
+                        settingToggle(
+                            "pre-roll",
+                            explanation:
+                                "keeps a short microphone buffer warm "
+                                + "to protect the first word.",
+                            isOn: $settings.preRollEnabled
+                        )
+                        cardDivider
+                        settingToggle(
+                            "sound feedback",
+                            explanation:
+                                "plays a subtle cue when listening starts "
+                                + "and stops.",
+                            isOn: $settings.soundFeedbackEnabled
+                        )
+                    }
                 }
-            }
 
-            LabeledContent("launch at login") {
-                VStack(alignment: .leading, spacing: 4) {
-                    Toggle(
-                        "",
+                settingsSection("engine") {
+                    engineEditor
+                }
+
+                settingsSection("dictionary") {
+                    DictionaryEditor(store: dictionaryStore)
+                }
+
+                settingsSection("command mode") {
+                    commandModeEditor
+                }
+
+                settingsSection("general") {
+                    settingToggle(
+                        "launch at login",
+                        explanation:
+                            "starts Andrew Dictate when you sign in.",
                         isOn: Binding(
                             get: { loginItem.isEnabled },
                             set: { loginItem.setEnabled($0) }
                         )
                     )
-                    .labelsHidden()
 
                     if let message = loginItem.message {
                         Text(message)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(BrandUI.textSecondary)
+                            .padding(.top, 6)
                     }
                 }
             }
+            .frame(maxWidth: 540)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 22)
         }
-        .formStyle(.columns)
+        .background(BrandUI.windowBg)
+        .foregroundStyle(BrandUI.textPrimary)
+        .font(BrandUI.bodyFont)
+        .brandTinted()
         .controlSize(.small)
-        .padding(20)
-        .frame(minWidth: 620, minHeight: 540)
+        .frame(minWidth: 540, minHeight: 560)
+        .preferredColorScheme(.dark)
         .onAppear {
             loginItem.refresh()
             selectAvailableTerminalIfNeeded()
@@ -197,45 +194,134 @@ struct SettingsView: View {
         }
     }
 
-    private var engineEditor: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Picker("", selection: $settings.engineVersion) {
-                ForEach(EngineVersion.allCases) { version in
-                    Text(version.displayName)
-                        .tag(version)
-                }
+    private var identityStrip: some View {
+        HStack(spacing: 12) {
+            Image("Badge")
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 36, height: 36)
+                .accessibilityHidden(true)
+
+            Text("Andrew Dictate")
+                .font(BrandUI.titleFont)
+                .foregroundStyle(BrandUI.textPrimary)
+
+            Spacer(minLength: 12)
+
+            Text("v\(shortVersion)")
+                .font(BrandUI.valueFont)
+                .foregroundStyle(BrandUI.textSecondary)
+        }
+        .padding(.horizontal, 2)
+    }
+
+    private var shortVersion: String {
+        Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString"
+        ) as? String ?? "development"
+    }
+
+    private func settingsSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            BrandSectionHeader(title)
+                .padding(.leading, 2)
+            BrandCard(content: content)
+        }
+    }
+
+    private var cardDivider: some View {
+        Rectangle()
+            .fill(BrandUI.hairline)
+            .frame(height: 1)
+            .accessibilityHidden(true)
+    }
+
+    private func settingToggle(
+        _ title: String,
+        explanation: String,
+        isOn: Binding<Bool>
+    ) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(BrandUI.bodyFont.weight(.medium))
+                    .foregroundStyle(BrandUI.textPrimary)
+
+                Text(explanation)
+                    .font(BrandUI.bodyFont)
+                    .foregroundStyle(BrandUI.textSecondary)
+                    .lineLimit(1)
             }
-            .labelsHidden()
+
+            Spacer(minLength: 8)
+
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .brandToggleStyle()
+        }
+    }
+
+    private var engineEditor: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Text("speech model")
+                    .font(BrandUI.bodyFont.weight(.medium))
+
+                Spacer(minLength: 12)
+
+                Picker("", selection: $settings.engineVersion) {
+                    ForEach(EngineVersion.allCases) { version in
+                        Text(version.displayName)
+                            .tag(version)
+                    }
+                }
+                .labelsHidden()
+                .brandMenuStyle()
+            }
 
             enginePreparationStatus
 
             ForEach(installedModels.filter(\.isDownloaded)) { model in
-                HStack(spacing: 8) {
-                    Text(
-                        "parakeet \(model.version.rawValue) "
-                            + "· \(model.onDiskSize)"
-                    )
-                    .foregroundStyle(.secondary)
+                cardDivider
+
+                HStack(spacing: 10) {
+                    Text("parakeet \(model.version.rawValue)")
+                    .foregroundStyle(BrandUI.textPrimary)
+
+                    Text(model.onDiskSize)
+                        .font(BrandUI.valueFont)
+                        .foregroundStyle(BrandUI.textSecondary)
 
                     Spacer(minLength: 8)
 
                     if model.version == settings.engineVersion {
                         Text("active")
-                            .foregroundStyle(.secondary)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(BrandUI.goldPale)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background {
+                                Capsule()
+                                    .fill(BrandUI.goldDeep.opacity(0.22))
+                            }
                     }
 
                     Button("remove download") {
                         pendingModelRemoval = model.version
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.textSecondary)
                 }
-                .font(.caption)
             }
 
             if let modelStoreMessage {
                 Text(modelStoreMessage)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BrandUI.gold)
             }
         }
     }
@@ -247,34 +333,35 @@ struct SettingsView: View {
             HStack(spacing: 8) {
                 ProgressView(value: bounded(progress))
                     .progressViewStyle(.linear)
-                    .tint(Self.modelProgressGold)
-                    .frame(width: 140)
+                    .tint(BrandUI.gold)
+                    .frame(maxWidth: .infinity)
 
                 Text("\(Int(bounded(progress) * 100))%")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(Self.modelProgressGold)
+                    .font(BrandUI.valueFont.monospacedDigit())
+                    .foregroundStyle(BrandUI.gold)
                     .frame(width: 34, alignment: .trailing)
 
                 Text("downloading")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BrandUI.textSecondary)
             }
 
         case .warmingUp:
             Text("warming up")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(BrandUI.textSecondary)
 
         case .failed:
             HStack(spacing: 8) {
                 Text("download failed")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BrandUI.textSecondary)
 
                 Button("retry") {
                     coordinator.retryEnginePrewarm()
                 }
                 .buttonStyle(.link)
+                .foregroundStyle(BrandUI.gold)
             }
 
         case .notStarted, .ready:
@@ -309,8 +396,15 @@ struct SettingsView: View {
 
     @ViewBuilder
     private func hotkeyRow(for mode: DictationMode) -> some View {
-        LabeledContent("\(mode.rawValue) key") {
-            VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 10) {
+                Text(mode.rawValue)
+                    .font(BrandUI.bodyFont.weight(.medium))
+
+                Spacer(minLength: 10)
+
+                KeyChip(settings.hotkeyBinding(for: mode).displayName)
+
                 Picker(
                     "",
                     selection: Binding(
@@ -333,21 +427,57 @@ struct SettingsView: View {
                     }
                 }
                 .labelsHidden()
+                .brandMenuStyle()
+                .frame(width: 146)
+            }
 
-                Text(
-                    settings.hotkeyBinding(for: mode.other).displayName
-                        + " is already used by the "
-                        + mode.other.rawValue
-                        + " key"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text(
+                settings.hotkeyBinding(for: mode.other).displayName
+                    + " is already used by the "
+                    + mode.other.rawValue
+                    + " key"
+            )
+            .font(.caption)
+            .foregroundStyle(BrandUI.gold.opacity(0.76))
+        }
+    }
+
+    private var commandModeEditor: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(alignment: .firstTextBaseline, spacing: 14) {
+                Text("agent cli")
+                    .font(BrandUI.bodyFont.weight(.medium))
+                    .frame(width: 86, alignment: .leading)
+
+                agentEditor
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            cardDivider
+
+            HStack(spacing: 14) {
+                Text("terminal")
+                    .font(BrandUI.bodyFont.weight(.medium))
+                    .frame(width: 86, alignment: .leading)
+
+                Picker(
+                    "",
+                    selection: $settings.terminalBundleID
+                ) {
+                    ForEach(installedTerminals) { terminal in
+                        Text(terminal.displayName)
+                            .tag(terminal.bundleIdentifier)
+                    }
+                }
+                .labelsHidden()
+                .brandMenuStyle()
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
 
     private var agentEditor: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 7) {
             Picker("", selection: $selectedAgent) {
                 ForEach(detectedAgents) { detected in
                     Text(
@@ -366,6 +496,7 @@ struct SettingsView: View {
                     .tag(Self.noAgentSelection)
             }
             .labelsHidden()
+            .brandMenuStyle()
             .onChange(of: selectedAgent) { _, newSelection in
                 applyAgentSelection(newSelection)
             }
@@ -375,6 +506,29 @@ struct SettingsView: View {
                     "command containing {prompt}",
                     text: $customAgentTemplate
                 )
+                .font(BrandUI.valueFont)
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 8)
+                .frame(height: 28)
+                .background {
+                    RoundedRectangle(
+                        cornerRadius: 6,
+                        style: .continuous
+                    )
+                    .fill(BrandUI.windowBg)
+                }
+                .overlay {
+                    RoundedRectangle(
+                        cornerRadius: 6,
+                        style: .continuous
+                    )
+                    .stroke(
+                        customTemplateIsInvalid
+                            ? BrandUI.gold
+                            : BrandUI.hairline,
+                        lineWidth: 1
+                    )
+                }
                 .onChange(of: customAgentTemplate) { _, template in
                     let isValid = AgentCommandTemplate.isValid(template)
                     customTemplateIsInvalid = !isValid
@@ -386,7 +540,7 @@ struct SettingsView: View {
                 if customTemplateIsInvalid {
                     Text("{prompt} must be a standalone word")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BrandUI.gold)
                 }
             }
         }
@@ -472,22 +626,27 @@ private struct DictionaryEditor: View {
                     }
                 }
             }
-            .frame(minWidth: 420, minHeight: 180)
+            .tableStyle(.inset(alternatesRowBackgrounds: false))
+            .scrollContentBackground(.hidden)
+            .background(BrandUI.windowBg.opacity(0.55))
+            .frame(minWidth: 420, minHeight: 190)
             .overlay {
                 if store.entries.isEmpty {
                     Text("teach andrew a word.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BrandUI.textSecondary)
                 }
             }
 
-            HStack(spacing: 4) {
+            HStack(spacing: 8) {
                 Button {
                     let entry = store.add(wrong: "", right: "")
                     selection = [entry.id]
                 } label: {
                     Image(systemName: "plus")
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(BrandUI.gold)
                 .help("add row")
 
                 Button {
@@ -498,19 +657,27 @@ private struct DictionaryEditor: View {
                 } label: {
                     Image(systemName: "minus")
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(BrandUI.textSecondary)
                 .disabled(selection.isEmpty)
                 .help("delete selected row")
 
                 Spacer()
 
                 Button("import", action: importDictionary)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(BrandUI.textSecondary)
                 Button("export", action: exportDictionary)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(BrandUI.textSecondary)
             }
+            .padding(.horizontal, 2)
+            .padding(.top, 2)
 
             if let message {
                 Text(message)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BrandUI.gold)
             }
         }
     }
@@ -580,6 +747,15 @@ private struct DictionaryCellEditor: View {
     var body: some View {
         TextField("", text: $draft, prompt: Text(prompt))
             .labelsHidden()
+            .font(BrandUI.bodyFont)
+            .textFieldStyle(.plain)
+            .padding(.vertical, 5)
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(BrandUI.hairline)
+                    .frame(height: 1)
+                    .accessibilityHidden(true)
+            }
             .focused($isFocused)
             .onSubmit(commit)
             .onChange(of: isFocused) { wasFocused, isFocused in

@@ -10,10 +10,14 @@ final class AboutWindowController: NSWindowController {
         let rootView = AboutView(bundle: bundle, settings: settings)
         let hostingController = NSHostingController(rootView: rootView)
         let window = NSWindow(contentViewController: hostingController)
-        window.title = "about Andrew Dictate"
+        window.title = "about"
         window.styleMask = [.titled, .closable]
-        window.setContentSize(NSSize(width: 480, height: 520))
+        let size = NSSize(width: 380, height: 460)
+        window.setContentSize(size)
+        window.minSize = size
+        window.maxSize = size
         window.isReleasedWhenClosed = false
+        window.isMovableByWindowBackground = true
         window.center()
 
         super.init(window: window)
@@ -34,6 +38,7 @@ final class AboutWindowController: NSWindowController {
 struct AboutView: View {
     @ObservedObject private var settings: AppSettings
     private let version: String
+    private let build: String
 
     init(
         bundle: Bundle = .main,
@@ -48,100 +53,95 @@ struct AboutView: View {
             forInfoDictionaryKey: "CFBundleVersion"
         ) as? String
 
-        if let shortVersion, let build {
-            version = "\(shortVersion) (\(build))"
-        } else {
-            version = shortVersion ?? build ?? "development"
-        }
+        version = shortVersion ?? "development"
+        self.build = build ?? "development"
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Image(nsImage: NSApp.applicationIconImage)
-                .resizable()
-                .interpolation(.high)
-                .frame(width: 96, height: 96)
-                .accessibilityHidden(true)
+        BrandCard {
+            VStack(spacing: 0) {
+                Image("Badge")
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 120, height: 120)
+                    .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 5) {
                 Text("Andrew Dictate")
-                    .font(.title2)
-                    .fontWeight(.semibold)
+                    .font(BrandUI.titleFont)
+                    .foregroundStyle(BrandUI.textPrimary)
+                    .padding(.top, 5)
 
-                Text("version \(version)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text("escape the keyboard.")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(BrandUI.gold)
+                    .padding(.top, 3)
+
+                Text("version \(version) · build \(build)")
+                    .font(BrandUI.valueFont)
+                    .foregroundStyle(BrandUI.textSecondary)
+                    .padding(.top, 6)
 
                 Text(lifetimeWordsText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11))
+                    .foregroundStyle(BrandUI.goldPale)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .padding(.top, 11)
 
-                Text("free, open source, fully local dictation.")
-                    .padding(.top, 4)
-            }
+                Rectangle()
+                    .fill(BrandUI.hairline)
+                    .frame(height: 1)
+                    .padding(.vertical, 14)
+                    .accessibilityHidden(true)
 
-            Divider()
+                VStack(spacing: 10) {
+                    attribution(
+                        "FluidAudio",
+                        license: "Apache-2.0",
+                        url:
+                            "https://github.com/FluidInference/"
+                            + "FluidAudio"
+                    )
 
-            VStack(alignment: .leading, spacing: 12) {
-                Text("attributions")
-                    .font(.headline)
+                    attribution(
+                        "NVIDIA Parakeet weights",
+                        license: "CC-BY-4.0",
+                        url:
+                            "https://huggingface.co/nvidia/"
+                            + "parakeet-tdt-0.6b-v2"
+                    )
 
-                attribution(
-                    "FluidAudio",
-                    license: "Apache-2.0",
-                    url: "https://github.com/FluidInference/FluidAudio"
-                )
-
-                attribution(
-                    "NVIDIA Parakeet TDT 0.6B v2/v3 model weights",
-                    license: "CC-BY-4.0",
-                    url:
-                        "https://huggingface.co/nvidia/"
-                        + "parakeet-tdt-0.6b-v2"
-                )
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Andrew Dictate is available under the MIT license.")
-
-                Link(
-                    "github.com/jassuwu/andrew-dictate",
-                    destination: URL(
-                        string:
+                    attribution(
+                        "MIT license",
+                        license: "open source",
+                        url:
                             "https://github.com/jassuwu/"
-                            + "andrew-dictate"
-                        )!
-                )
-
-                HStack(spacing: 0) {
-                    Text("made by ")
-                    Link(
-                        "jass",
-                        destination: URL(string: "https://jass.gg")!
+                            + "andrew-dictate/blob/main/LICENSE"
                     )
                 }
-                .foregroundStyle(.secondary)
-                .font(.caption)
-                .padding(.top, 7)
-            }
-            .font(.callout)
 
-            Spacer(minLength: 0)
+                Spacer(minLength: 8)
+
+                Link(
+                    "made by jass",
+                    destination: URL(string: "https://jass.gg")!
+                )
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(BrandUI.gold)
+            }
         }
-        .padding(28)
-        .frame(width: 480, height: 520)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(16)
+        .frame(width: 380, height: 460)
+        .background(BrandUI.windowBg)
+        .preferredColorScheme(.dark)
     }
 
     private var lifetimeWordsText: String {
         let count = settings.totalWordsDictated.formatted(
             .number.grouping(.automatic)
         )
-        let ending = settings.totalWordsDictated == 0
-            ? "still undefeated."
-            : "undefeated."
-        return "andrew has typed \(count) words. \(ending)"
+        return "andrew has typed \(count) words. undefeated."
     }
 
     private func attribution(
@@ -149,14 +149,18 @@ struct AboutView: View {
         license: String,
         url: String
     ) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 14) {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
             Link(name, destination: URL(string: url)!)
+                .foregroundStyle(BrandUI.gold)
+                .lineLimit(1)
 
-            Spacer()
+            Spacer(minLength: 8)
 
             Text(license)
-                .foregroundStyle(.secondary)
+                .font(BrandUI.valueFont)
+                .foregroundStyle(BrandUI.textSecondary)
+                .lineLimit(1)
         }
-        .font(.callout)
+        .font(BrandUI.bodyFont)
     }
 }

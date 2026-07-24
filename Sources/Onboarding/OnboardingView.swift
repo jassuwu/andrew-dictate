@@ -108,22 +108,6 @@ private final class OnboardingPermissionModel: ObservableObject {
 }
 
 struct OnboardingView: View {
-    private static let background = Color(
-        red: 0x1B / 255,
-        green: 0x1B / 255,
-        blue: 0x1F / 255
-    )
-    private static let cream = Color(
-        red: 0xF9 / 255,
-        green: 0xE9 / 255,
-        blue: 0xA8 / 255
-    )
-    private static let gold = Color(
-        red: 0xE5 / 255,
-        green: 0xBE / 255,
-        blue: 0x62 / 255
-    )
-
     @ObservedObject private var coordinator: DictationCoordinator
     @StateObject private var permissions: OnboardingPermissionModel
     @State private var onboarding: OnboardingState
@@ -159,7 +143,7 @@ struct OnboardingView: View {
 
             Text("keys and options live in settings.")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(BrandUI.textSecondary)
                 .padding(.top, 10)
 
             Spacer(minLength: 6)
@@ -176,7 +160,7 @@ struct OnboardingView: View {
         .padding(.horizontal, 28)
         .padding(.vertical, 20)
         .frame(width: 460, height: 430)
-        .background(Self.background)
+        .background(BrandUI.windowBg)
         .preferredColorScheme(.dark)
         .onAppear {
             permissions.refresh()
@@ -222,7 +206,7 @@ struct OnboardingView: View {
 
     private var header: some View {
         VStack(spacing: 5) {
-            Image(nsImage: NSApp.applicationIconImage)
+            Image("Badge")
                 .resizable()
                 .interpolation(.high)
                 .frame(width: 80, height: 80)
@@ -230,11 +214,11 @@ struct OnboardingView: View {
 
             Text("Andrew Dictate")
                 .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(Self.cream)
+                .foregroundStyle(BrandUI.textPrimary)
 
             Text("escape the keyboard.")
                 .font(.subheadline.weight(.medium))
-                .foregroundStyle(Self.gold)
+                .foregroundStyle(BrandUI.gold)
 
             Text(
                 onboarding.autoFinishArmed
@@ -244,8 +228,8 @@ struct OnboardingView: View {
             .font(.caption)
             .foregroundStyle(
                 onboarding.autoFinishArmed
-                    ? Self.cream
-                    : Color.secondary
+                    ? BrandUI.textPrimary
+                    : BrandUI.textSecondary
             )
             .multilineTextAlignment(.center)
         }
@@ -258,11 +242,11 @@ struct OnboardingView: View {
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.plain)
                 .font(.callout.weight(.semibold))
-                .foregroundStyle(Self.background)
+                .foregroundStyle(BrandUI.windowBg)
                 .padding(.horizontal, 22)
                 .frame(height: 34)
                 .background(
-                    Self.gold,
+                    BrandUI.gold,
                     in: RoundedRectangle(cornerRadius: 8)
                 )
         }
@@ -272,17 +256,21 @@ struct OnboardingView: View {
         VStack(spacing: 0) {
             microphoneRow
             Divider()
-                .overlay(Self.cream.opacity(0.12))
+                .overlay(BrandUI.hairline)
             accessibilityRow
             Divider()
-                .overlay(Self.cream.opacity(0.12))
+                .overlay(BrandUI.hairline)
             modelRow
         }
         .padding(.horizontal, 12)
         .background(
-            Self.cream.opacity(0.055),
+            BrandUI.cardBg,
             in: RoundedRectangle(cornerRadius: 12)
         )
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(BrandUI.hairline, lineWidth: 1)
+        }
         .allowsHitTesting(checklistIsActive)
     }
 
@@ -326,12 +314,12 @@ struct OnboardingView: View {
                 HStack(spacing: 8) {
                     ProgressView(value: bounded(progress))
                         .progressViewStyle(.linear)
-                        .tint(Self.gold)
+                        .tint(BrandUI.gold)
                         .frame(width: 92)
 
                     Text("\(Int(bounded(progress) * 100))%")
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(Self.gold)
+                        .foregroundStyle(BrandUI.gold)
                         .frame(width: 34, alignment: .trailing)
                 }
 
@@ -369,13 +357,13 @@ struct OnboardingView: View {
     private func pendingText(_ text: String) -> some View {
         Text(text)
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(BrandUI.textSecondary)
     }
 
     private func readyText(_ text: String) -> some View {
         Text(text)
             .font(.caption.weight(.semibold))
-            .foregroundStyle(Self.cream)
+            .foregroundStyle(BrandUI.textPrimary)
     }
 
     private func actionStatus<ActionTitle: View>(
@@ -386,11 +374,12 @@ struct OnboardingView: View {
         HStack(spacing: 8) {
             Text(text)
                 .font(.caption)
-                .foregroundStyle(Self.gold)
+                .foregroundStyle(BrandUI.gold)
 
             Button(action: action, label: actionTitle)
                 .buttonStyle(.link)
                 .controlSize(.small)
+                .tint(BrandUI.gold)
         }
     }
 
