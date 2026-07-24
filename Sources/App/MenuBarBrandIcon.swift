@@ -2,7 +2,7 @@ import AppKit
 
 @MainActor
 enum MenuBarBrandIcon {
-    private static let iconSize = NSSize(width: 18, height: 18)
+    private static let iconSize = NSSize(width: 30, height: 18)
 
     static func image(
         for state: DictationCoordinator.State
@@ -32,31 +32,56 @@ enum MenuBarBrandIcon {
             NSColor.black.setStroke()
             NSColor.black.setFill()
 
-            let lineWidth: CGFloat = isRecording ? 1.9 : 1.15
-            let line = NSBezierPath()
-            line.lineWidth = lineWidth
-            line.lineCapStyle = .round
-            line.lineJoinStyle = .round
+            let horizontalInset: CGFloat = 2
+            let scale = (
+                iconSize.width - horizontalInset * 2
+            ) / BrandMarkGeometry.centerlineSize.width
+            let renderedHeight =
+                BrandMarkGeometry.centerlineSize.height * scale
+            let origin = CGPoint(
+                x: horizontalInset,
+                y: (iconSize.height - renderedHeight) / 2
+            )
+            func rendered(_ point: CGPoint) -> CGPoint {
+                CGPoint(
+                    x: origin.x + point.x * scale,
+                    y: origin.y
+                        + (
+                            BrandMarkGeometry.centerlineSize.height
+                                - point.y
+                        ) * scale
+                )
+            }
 
-            line.move(to: NSPoint(x: 1.5, y: 5.5))
-            line.line(to: NSPoint(x: 5, y: 5.5))
-            line.stroke()
+            let lineWidth: CGFloat = isRecording ? 1.7 : 1.2
 
-            let rise = NSBezierPath()
-            rise.lineWidth = lineWidth
-            rise.lineCapStyle = .round
-            rise.lineJoinStyle = .round
-            rise.move(to: NSPoint(x: 10.5, y: 5.5))
-            rise.line(to: NSPoint(x: 12.6, y: 9.2))
-            rise.line(to: NSPoint(x: 14.1, y: 7.8))
-            rise.line(to: NSPoint(x: 17, y: 13.7))
-            rise.stroke()
+            for points in [
+                BrandMarkGeometry.firstDash,
+                BrandMarkGeometry.secondDash,
+                BrandMarkGeometry.rise,
+            ] {
+                let path = NSBezierPath()
+                path.lineWidth = lineWidth
+                path.lineCapStyle = .round
+                path.lineJoinStyle = .round
 
+                guard let first = points.first else {
+                    continue
+                }
+                path.move(to: rendered(first))
+                for point in points.dropFirst() {
+                    path.line(to: rendered(point))
+                }
+                path.stroke()
+            }
+
+            let dotCenter = rendered(BrandMarkGeometry.dotCenter)
+            let dotRadius = BrandMarkGeometry.dotRadius * scale
             let dotRect = NSRect(
-                x: 6.7,
-                y: 4.7,
-                width: 1.8,
-                height: 1.8
+                x: dotCenter.x - dotRadius,
+                y: dotCenter.y - dotRadius,
+                width: dotRadius * 2,
+                height: dotRadius * 2
             )
             let dot = NSBezierPath(ovalIn: dotRect)
             if isRecording {

@@ -148,19 +148,20 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.agentCommandTemplate, "")
     }
 
-    func testActiveEngineVersionCannotBeRemoved() {
-        XCTAssertFalse(
-            ModelRemovalPolicy.allowsRemoval(
-                of: .v2,
-                activeVersion: .v2
-            )
+    func testActiveEngineVersionCanBeRemovedAndRequiresRepreparation() {
+        let activeDecision = ModelRemovalPolicy.decision(
+            of: .v2,
+            activeVersion: .v2
         )
-        XCTAssertTrue(
-            ModelRemovalPolicy.allowsRemoval(
-                of: .v3,
-                activeVersion: .v2
-            )
+        XCTAssertTrue(activeDecision.isAllowed)
+        XCTAssertTrue(activeDecision.requiresRepreparation)
+
+        let inactiveDecision = ModelRemovalPolicy.decision(
+            of: .v3,
+            activeVersion: .v2
         )
+        XCTAssertTrue(inactiveDecision.isAllowed)
+        XCTAssertFalse(inactiveDecision.requiresRepreparation)
     }
 
     func testDictatedWordCountSplitsWhitespaceAndNewlines() {

@@ -18,6 +18,94 @@ enum BrandPalette {
     )
 }
 
+enum BrandMarkGeometry {
+    static let centerlineSize = CGSize(width: 332, height: 118)
+    static let drawingBounds = CGRect(
+        x: -12,
+        y: -12,
+        width: 356,
+        height: 154
+    )
+    static let firstDash = [
+        CGPoint(x: 0, y: 118),
+        CGPoint(x: 52, y: 118),
+    ]
+    static let secondDash = [
+        CGPoint(x: 76, y: 118),
+        CGPoint(x: 138, y: 118),
+    ]
+    static let rise = [
+        CGPoint(x: 204, y: 118),
+        CGPoint(x: 250, y: 72),
+        CGPoint(x: 274, y: 94),
+        CGPoint(x: 332, y: 0),
+    ]
+    static let dotCenter = CGPoint(x: 172, y: 118)
+    static let dotRadius: CGFloat = 21
+}
+
+struct StaticBrandMark: View {
+    var lineColor: Color = .primary
+    var dotColor: Color = BrandPalette.persimmon
+
+    var body: some View {
+        Canvas { context, size in
+            let bounds = BrandMarkGeometry.drawingBounds
+            let scaleX = size.width / bounds.width
+            let scaleY = size.height / bounds.height
+            let strokeScale = min(scaleX, scaleY)
+            let strokeStyle = StrokeStyle(
+                lineWidth: 18 * strokeScale,
+                lineCap: .round,
+                lineJoin: .round
+            )
+
+            for points in [
+                BrandMarkGeometry.firstDash,
+                BrandMarkGeometry.secondDash,
+                BrandMarkGeometry.rise,
+            ] {
+                let path = Path { path in
+                    guard let first = points.first else {
+                        return
+                    }
+                    path.move(to: scaled(first))
+                    for point in points.dropFirst() {
+                        path.addLine(to: scaled(point))
+                    }
+                }
+                context.stroke(
+                    path,
+                    with: .color(lineColor),
+                    style: strokeStyle
+                )
+            }
+
+            let center = scaled(BrandMarkGeometry.dotCenter)
+            let radius = BrandMarkGeometry.dotRadius * strokeScale
+            context.fill(
+                Path(
+                    ellipseIn: CGRect(
+                        x: center.x - radius,
+                        y: center.y - radius,
+                        width: radius * 2,
+                        height: radius * 2
+                    )
+                ),
+                with: .color(dotColor)
+            )
+
+            func scaled(_ point: CGPoint) -> CGPoint {
+                CGPoint(
+                    x: (point.x - bounds.minX) * scaleX,
+                    y: (point.y - bounds.minY) * scaleY
+                )
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 enum BrandLinePhase: Equatable {
     case recording
     case transcribing

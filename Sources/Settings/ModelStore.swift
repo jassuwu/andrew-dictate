@@ -12,13 +12,10 @@ struct InstalledModel: Identifiable, Equatable {
 }
 
 enum ModelStoreError: LocalizedError {
-    case activeVersion
     case unsafeModelDirectory
 
     var errorDescription: String? {
         switch self {
-        case .activeVersion:
-            "the active model can’t be removed"
         case .unsafeModelDirectory:
             "the model download location is invalid"
         }
@@ -54,13 +51,20 @@ final class ModelStore {
         }
     }
 
-    func remove(_ version: EngineVersion) throws {
-        guard ModelRemovalPolicy.allowsRemoval(
+    func removalDecision(
+        for version: EngineVersion
+    ) -> ModelRemovalDecision {
+        ModelRemovalPolicy.decision(
             of: version,
             activeVersion: activeVersion()
-        ) else {
-            throw ModelStoreError.activeVersion
-        }
+        )
+    }
+
+    @discardableResult
+    func remove(
+        _ version: EngineVersion
+    ) throws -> ModelRemovalDecision {
+        let decision = removalDecision(for: version)
 
         let modelsRoot = MLModelConfigurationUtils
             .defaultModelsDirectory()
@@ -74,6 +78,8 @@ final class ModelStore {
         if fileManager.fileExists(atPath: directory.path) {
             try fileManager.removeItem(at: directory)
         }
+
+        return decision
     }
 
     private func modelDirectory(for version: EngineVersion) -> URL {

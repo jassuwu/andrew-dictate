@@ -142,14 +142,23 @@ struct SettingsView: View {
             }
         }
         .alert(item: $pendingModelRemoval) { version in
-            Alert(
+            let isActive = version == settings.engineVersion
+            return Alert(
                 title: Text(
-                    "remove parakeet \(version.rawValue) download?"
+                    isActive
+                        ? "remove the active model?"
+                        : "remove parakeet \(version.rawValue) download?"
                 ),
                 message: Text(
-                    "it will re-download if selected again. "
-                        + "other apps using FluidAudio models (like Hex) "
-                        + "share this storage and may re-download it too."
+                    isActive
+                        ? "Andrew Dictate can't dictate until it "
+                            + "re-downloads. it will re-download the next "
+                            + "time you dictate or when you select it in "
+                            + "settings. other apps using FluidAudio models "
+                            + "(like Hex) share this storage."
+                        : "it will re-download if selected again. "
+                            + "other apps using FluidAudio models (like Hex) "
+                            + "share this storage and may re-download it too."
                 ),
                 primaryButton: .destructive(Text("remove download")) {
                     removeDownload(version)
@@ -182,12 +191,12 @@ struct SettingsView: View {
                     if model.version == settings.engineVersion {
                         Text("active")
                             .foregroundStyle(.secondary)
-                    } else {
-                        Button("remove download") {
-                            pendingModelRemoval = model.version
-                        }
-                        .buttonStyle(.borderless)
                     }
+
+                    Button("remove download") {
+                        pendingModelRemoval = model.version
+                    }
+                    .buttonStyle(.borderless)
                 }
                 .font(.caption)
             }
@@ -205,13 +214,20 @@ struct SettingsView: View {
     }
 
     private func removeDownload(_ version: EngineVersion) {
-        do {
-            try modelStore.remove(version)
-            modelStoreMessage = nil
-        } catch {
-            modelStoreMessage = "couldn’t remove download"
+        let decision = modelStore.removalDecision(for: version)
+        Task { @MainActor in
+            if decision.requiresRepreparation {
+                await coordinator.prepareForActiveModelRemoval(version)
+            }
+
+            do {
+                try modelStore.remove(version)
+                modelStoreMessage = nil
+            } catch {
+                modelStoreMessage = "couldn’t remove download"
+            }
+            refreshInstalledModels()
         }
-        refreshInstalledModels()
     }
 
     @ViewBuilder

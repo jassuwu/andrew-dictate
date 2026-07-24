@@ -23,12 +23,20 @@ enum EngineVersion: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+struct ModelRemovalDecision: Equatable, Sendable {
+    let isAllowed: Bool
+    let requiresRepreparation: Bool
+}
+
 enum ModelRemovalPolicy {
-    static func allowsRemoval(
+    static func decision(
         of version: EngineVersion,
         activeVersion: EngineVersion
-    ) -> Bool {
-        version != activeVersion
+    ) -> ModelRemovalDecision {
+        ModelRemovalDecision(
+            isAllowed: true,
+            requiresRepreparation: version == activeVersion
+        )
     }
 }
 

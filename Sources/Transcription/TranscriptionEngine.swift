@@ -53,6 +53,11 @@ actor ParakeetEngine: TranscriptionEngine {
         preparation = nil
     }
 
+    func unloadModels() {
+        cancelPreparation()
+        manager = nil
+    }
+
     private func preparedManager(
         progressHandler: (
             @Sendable (TranscriptionPreparationUpdate) -> Void

@@ -351,6 +351,35 @@ final class DictationCoordinator: ObservableObject {
         requestEnginePreparation()
     }
 
+    func prepareForActiveModelRemoval(
+        _ version: EngineVersion
+    ) async {
+        guard version == settings.engineVersion else {
+            return
+        }
+
+        invalidatePipeline()
+        if state == .recording {
+            audioRecorder?.cancel()
+            activeMode = nil
+            activeFocusAnchor = nil
+            activeTimeline = nil
+        }
+
+        enginePrewarmTask?.cancel()
+        enginePrewarmTask = nil
+        engineSwapTask?.cancel()
+        engineSwapTask = nil
+        engineHealthTask?.cancel()
+        engineHealthTask = nil
+        engineGeneration += 1
+        isPrewarmed = false
+        enginePreparationState = .notStarted
+        setState(.idle)
+
+        await transcriptionEngine.unloadModels()
+    }
+
     private func presentOnboarding() {
         isOnboardingPresented = true
         hotkeyMonitor.setDetectionOnly(false)
@@ -637,7 +666,12 @@ final class DictationCoordinator: ObservableObject {
         }
 
         guard isPrewarmed else {
-            setState(.prewarming)
+            if enginePreparationState == .notStarted {
+                requestEnginePreparation()
+            }
+            if state != .prewarming {
+                setState(.prewarming)
+            }
             return
         }
         guard state == .idle else {
