@@ -15,6 +15,18 @@ Andrew Dictate is a native macOS menu-bar app for fast, local speech-to-text. ho
 - dictation — hold `fn`, speak, then release to paste the cleaned transcript into the current app.
 - command — hold right `⌥`, speak, then release to route a command. try “open Arc” or “ChatGPT search swift actors”; catch-all commands such as “brew install ripgrep” require a second right-`⌥` confirmation before the configured agent CLI runs.
 
+## install
+
+requirements: macOS 14 or newer on Apple Silicon.
+
+```sh
+brew install --cask jassuwu/tap/andrew-dictate --no-quarantine
+```
+
+or grab the dmg from [releases](https://github.com/jassuwu/andrew-dictate/releases) and drag Andrew Dictate to Applications.
+
+builds are currently unsigned (no Apple Developer membership yet). without `--no-quarantine`, Gatekeeper blocks the first launch — right-click the app in Finder, choose **Open**, then confirm **Open**. the app is open source; read the code, build it yourself if you'd rather.
+
 ## install from source
 
 requirements: macOS 14 or newer on Apple Silicon, Xcode, and [XcodeGen](https://github.com/yonaskolb/XcodeGen).

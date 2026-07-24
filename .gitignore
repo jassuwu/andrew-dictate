@@ -15,3 +15,4 @@ docs/adr/
 # secrets & local config
 *.local
 .env
+AndrewDictate-*.dmg
