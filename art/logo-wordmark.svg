@@ -2,55 +2,22 @@
   <!-- andrew dictate — wordmark lockup: the character + name + tagline. -->
   <rect width="960" height="300" rx="28" fill="#1B1B1F"/>
   <g transform="translate(38 22) scale(0.5)">
-<!-- head: faceted skull, chiseled jaw, flat chin -->
-  <path d="M 196 128
-           L 256 120
-           L 316 128
-           L 338 148
-           L 346 198
-           L 338 272
-           L 302 344
-           L 280 356
-           L 232 356
-           L 210 344
-           L 174 272
-           L 166 198
-           L 174 148
-           Z" fill="#EFEAE0"/>
-
-  <!-- beard: angular block, high cheek points, mustache line -->
-  <path d="M 178 256
-           L 224 284
-           L 256 292
-           L 288 284
-           L 334 256
-           L 338 272
-           L 302 344
-           L 280 356
-           L 232 356
-           L 210 344
-           L 174 272
-           Z" fill="#2B2521"/>
-
-  <!-- shades: wraparound browline (overhangs the skull) + outward-slanted lenses -->
-  <path d="M 156 186 L 356 186 L 356 202 L 156 202 Z" fill="#0B0B0E"/>
-  <path d="M 178 202 L 244 202 L 238 246 L 188 242 Z" fill="#0B0B0E"/>
-  <path d="M 268 202 L 334 202 L 324 242 L 274 246 Z" fill="#0B0B0E"/>
-
-  <!-- cigar: from the beard line, tilted up -->
-  <g transform="rotate(-12 306 306)">
-    <rect x="298" y="296" width="126" height="20" rx="4" fill="#6E4226"/>
-    <rect x="334" y="296" width="12" height="20" fill="#E4593B" opacity="0.9"/>
-    <rect x="412" y="297" width="12" height="18" rx="3" fill="#E4593B"/>
-    <rect x="421" y="299" width="4" height="14" rx="2" fill="#F0805F"/>
+<!-- cigar: fat body → band → ash → ember, rising at a confident angle -->
+  <g transform="rotate(-20 215 326)">
+    <rect x="100" y="302" width="200" height="46" rx="23" fill="#6E4226"/>
+    <rect x="156" y="302" width="20" height="46" fill="#E4593B"/>
+    <rect x="300" y="302" width="26" height="46" fill="#D8D2C4"/>
+    <rect x="326" y="302" width="18" height="46" rx="9" fill="#E4593B"/>
+    <rect x="337" y="311" width="6" height="28" rx="3" fill="#F0805F"/>
   </g>
 
-  <!-- the smoke is the waveform -->
+  <!-- the smoke is the waveform, drifting up from the ember -->
   <g fill="#EFEAE0">
-    <rect x="390" y="216" width="13" height="42"  rx="4"/>
-    <rect x="413" y="170" width="13" height="76"  rx="4" fill="#E4593B"/>
-    <rect x="436" y="122" width="13" height="112" rx="4"/>
-    <rect x="459" y="164" width="13" height="60"  rx="4"/>
+    <rect x="332" y="210" width="15" height="64"  rx="7.5"/>
+    <rect x="357" y="142" width="15" height="116" rx="7.5" fill="#E4593B"/>
+    <rect x="382" y="82"  width="15" height="160" rx="7.5"/>
+    <rect x="407" y="134" width="15" height="94"  rx="7.5"/>
+    <rect x="432" y="164" width="15" height="52"  rx="7.5"/>
   </g>
   </g>
   <text x="308" y="158" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="76" font-weight="600" letter-spacing="-1.5" fill="#EFEAE0">andrew dictate</text>
