@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="art/logo-character.svg" width="140" alt="Andrew Dictate" />
+  <img src="art/icon_1024.png" width="140" alt="Andrew Dictate" />
 </p>
 
 <h1 align="center">andrew dictate</h1>
@@ -69,6 +69,6 @@ made by [jass](https://jass.gg).
 ---
 
 <p align="center">
-  <img src="art/logo-character.svg" width="72" alt="" /><br/>
+  <img src="art/icon_1024.png" width="72" alt="" /><br/>
   <sub>the matrix wants you typing.</sub>
 </p>
