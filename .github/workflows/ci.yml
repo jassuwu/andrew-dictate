@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: tools
+        run: brew install xcodegen
+
+      - name: generate project
+        run: xcodegen generate
+
+      - name: build
+        run: |
+          xcodebuild -project AndrewDictate.xcodeproj -scheme AndrewDictate \
+            -configuration Debug build -derivedDataPath .build -quiet
+
+      - name: test
+        run: |
+          xcodebuild -project AndrewDictate.xcodeproj -scheme AndrewDictate \
+            -configuration Debug test -destination 'platform=macOS' \
+            -derivedDataPath .build

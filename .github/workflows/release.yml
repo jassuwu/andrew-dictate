@@ -11,12 +11,17 @@ permissions:
 jobs:
   release:
     runs-on: macos-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
       - name: resolve version
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "invalid release tag: $GITHUB_REF_NAME (expected vMAJOR.MINOR.PATCH)" >&2
+              exit 1
+            fi
             echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
             echo "PUBLISH=true" >> "$GITHUB_ENV"
           else
@@ -54,6 +59,17 @@ jobs:
           hdiutil create -volname "Andrew Dictate" -srcfolder "$STAGE" -ov -format UDZO "AndrewDictate-$VERSION.dmg"
           shasum -a 256 "AndrewDictate-$VERSION.dmg" | awk '{print $1}' > dmg.sha256
           echo "dmg sha256: $(cat dmg.sha256)"
+
+      - name: version smoke
+        run: |
+          MOUNT="$(hdiutil attach "AndrewDictate-$VERSION.dmg" -nobrowse -readonly | tail -1 | awk '{print $NF}')"
+          ACTUAL="$(defaults read "$MOUNT/Andrew Dictate.app/Contents/Info.plist" CFBundleShortVersionString)"
+          hdiutil detach "$MOUNT" -quiet
+          if [ "$ACTUAL" != "$VERSION" ]; then
+            echo "version smoke failed: dmg app reports $ACTUAL, tag says $VERSION" >&2
+            exit 1
+          fi
+          echo "version smoke ok: $ACTUAL"
 
       - name: github release
         if: env.PUBLISH == 'true'
