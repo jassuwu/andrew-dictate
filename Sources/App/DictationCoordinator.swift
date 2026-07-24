@@ -252,7 +252,7 @@ final class DictationCoordinator: ObservableObject {
         if let aboutWindowController {
             controller = aboutWindowController
         } else {
-            controller = AboutWindowController()
+            controller = AboutWindowController(settings: settings)
             aboutWindowController = controller
         }
         controller.present()
@@ -810,6 +810,11 @@ final class DictationCoordinator: ObservableObject {
                         }
                     }
                 )
+                if pasteResult != .leftOnPasteboard(
+                    .pasteboardUnavailable
+                ) {
+                    settings.recordDictatedTranscript(cleanedTranscript)
+                }
                 guard generation == pipelineGeneration else {
                     return
                 }

@@ -380,6 +380,13 @@ private struct DictionaryEditor: View {
                 }
             }
             .frame(minWidth: 420, minHeight: 180)
+            .overlay {
+                if store.entries.isEmpty {
+                    Text("teach andrew a word.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
             HStack(spacing: 4) {
                 Button {

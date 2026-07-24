@@ -1,6 +1,10 @@
 import Combine
 import Foundation
 
+func dictatedWordCount(in transcript: String) -> Int {
+    transcript.split(whereSeparator: { $0.isWhitespace }).count
+}
+
 enum EngineVersion: String, CaseIterable, Identifiable, Sendable {
     case v2
     case v3
@@ -112,6 +116,18 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published private(set) var totalWordsDictated: Int {
+        didSet {
+            guard totalWordsDictated != oldValue else {
+                return
+            }
+            userDefaults.set(
+                totalWordsDictated,
+                forKey: Self.totalWordsDictatedKey
+            )
+        }
+    }
+
     private static let onboardingCompletedKey =
         "AndrewDictate.onboardingCompleted"
     private static let preRollKey = "AndrewDictate.preRollEnabled"
@@ -119,6 +135,8 @@ final class AppSettings: ObservableObject {
     private static let agentCommandTemplateKey =
         "AndrewDictate.agentCommandTemplate"
     private static let terminalBundleIDKey = "AndrewDictate.terminalBundleID"
+    private static let totalWordsDictatedKey =
+        "AndrewDictate.totalWordsDictated"
 
     static let defaultTerminalBundleID = "com.apple.Terminal"
 
@@ -175,6 +193,10 @@ final class AppSettings: ObservableObject {
         terminalBundleID = userDefaults.string(
             forKey: Self.terminalBundleIDKey
         ) ?? Self.defaultTerminalBundleID
+        totalWordsDictated = max(
+            0,
+            userDefaults.integer(forKey: Self.totalWordsDictatedKey)
+        )
 
         if shouldPersistInitialAgentCommandTemplate {
             userDefaults.set(
@@ -228,5 +250,13 @@ final class AppSettings: ObservableObject {
         }
 
         return true
+    }
+
+    func recordDictatedTranscript(_ transcript: String) {
+        let wordCount = dictatedWordCount(in: transcript)
+        guard wordCount > 0 else {
+            return
+        }
+        totalWordsDictated += wordCount
     }
 }

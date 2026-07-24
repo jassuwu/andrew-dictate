@@ -3,8 +3,11 @@ import SwiftUI
 
 @MainActor
 final class AboutWindowController: NSWindowController {
-    init(bundle: Bundle = .main) {
-        let rootView = AboutView(bundle: bundle)
+    init(
+        bundle: Bundle = .main,
+        settings: AppSettings = .shared
+    ) {
+        let rootView = AboutView(bundle: bundle, settings: settings)
         let hostingController = NSHostingController(rootView: rootView)
         let window = NSWindow(contentViewController: hostingController)
         window.title = "about Andrew Dictate"
@@ -29,9 +32,15 @@ final class AboutWindowController: NSWindowController {
 }
 
 struct AboutView: View {
+    @ObservedObject private var settings: AppSettings
     private let version: String
 
-    init(bundle: Bundle = .main) {
+    init(
+        bundle: Bundle = .main,
+        settings: AppSettings = .shared
+    ) {
+        _settings = ObservedObject(wrappedValue: settings)
+
         let shortVersion = bundle.object(
             forInfoDictionaryKey: "CFBundleShortVersionString"
         ) as? String
@@ -54,6 +63,10 @@ struct AboutView: View {
                     .fontWeight(.semibold)
 
                 Text("version \(version)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(lifetimeWordsText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -102,6 +115,16 @@ struct AboutView: View {
         }
         .padding(28)
         .frame(width: 480, height: 390)
+    }
+
+    private var lifetimeWordsText: String {
+        let count = settings.totalWordsDictated.formatted(
+            .number.grouping(.automatic)
+        )
+        let ending = settings.totalWordsDictated == 0
+            ? "still undefeated."
+            : "undefeated."
+        return "andrew has typed \(count) words. \(ending)"
     }
 
     private func attribution(

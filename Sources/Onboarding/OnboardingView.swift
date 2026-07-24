@@ -239,6 +239,10 @@ struct OnboardingView: View {
                 Text("Andrew Dictate")
                     .font(.system(size: 27, weight: .semibold))
 
+                Text("escape the keyboard.")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color(red: 0xE4 / 255, green: 0x59 / 255, blue: 0x3B / 255))
+
                 Text(
                     "hold a key, talk, get text — dictation stays on this mac."
                 )

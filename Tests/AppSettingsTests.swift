@@ -21,6 +21,7 @@ final class AppSettingsTests: XCTestCase {
             "codex exec {prompt}"
         )
         XCTAssertEqual(settings.terminalBundleID, "com.apple.Terminal")
+        XCTAssertEqual(settings.totalWordsDictated, 0)
     }
 
     func testChangesPersistAcrossSettingsInstances() {
@@ -38,6 +39,7 @@ final class AppSettingsTests: XCTestCase {
         settings.engineVersion = .v3
         settings.agentCommandTemplate = "claude -p {prompt}"
         settings.terminalBundleID = "com.mitchellh.ghostty"
+        settings.recordDictatedTranscript("two dictated words")
 
         let reloaded = AppSettings(userDefaults: userDefaults)
 
@@ -54,6 +56,7 @@ final class AppSettingsTests: XCTestCase {
             reloaded.terminalBundleID,
             "com.mitchellh.ghostty"
         )
+        XCTAssertEqual(reloaded.totalWordsDictated, 3)
     }
 
     func testRejectsDuplicateHotkeyAndInvalidAgentTemplate() {
@@ -158,6 +161,22 @@ final class AppSettingsTests: XCTestCase {
                 activeVersion: .v2
             )
         )
+    }
+
+    func testDictatedWordCountSplitsWhitespaceAndNewlines() {
+        XCTAssertEqual(
+            dictatedWordCount(in: "one  two\nthree\tfour"),
+            4
+        )
+    }
+
+    func testDictatedWordCountReturnsZeroForEmptyText() {
+        XCTAssertEqual(dictatedWordCount(in: ""), 0)
+        XCTAssertEqual(dictatedWordCount(in: " \n\t"), 0)
+    }
+
+    func testDictatedWordCountTreatsPunctuationAsAWord() {
+        XCTAssertEqual(dictatedWordCount(in: "...?!"), 1)
     }
 
     private func makeUserDefaults() -> (UserDefaults, String) {
