@@ -20,3 +20,9 @@ the domain model. one term, one meaning. if a word isn't here, it doesn't get us
 | **onboarding** | first run: two permission grants + model download. ends with a working hotkey. |
 | **pre-roll** | optional ~300ms rolling in-memory mic buffer (user toggle) so the first word is never clipped. discarded continuously; never written anywhere. |
 | **locked recording** | double-tap a mode key to record hands-free; a single tap ends it and runs that mode's sink. |
+| **weaver** | the product philosophy: stitch tools that already exist on the mac (agent clis, screencapture, tts, shortcuts) instead of building capabilities; own only the voice layer and a session handle. |
+| **ask** | inline question-answering: headless read-only agent-cli call, answer in the hud (+ optional voice). the command-mode catch-all. |
+| **screen-ask** | an ask with an ephemeral screen capture attached; "this" → frontmost window, "my screen" → active display. |
+| **follow-up window** | the multi-turn ux: pressing the command key while an answer is visible (+~12s) continues the same agent session. thread state = one in-memory session id; history lives in the agent's own storage. |
+| **barge-in** | pressing to talk while the answer is being spoken cuts the speech instantly. |
+| **custom action** | user-defined trigger phrase → { open, url, shortcut, shell, type, ask } payload with optional {arg} capture; matched first, exact-after-normalization. |
