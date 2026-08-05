@@ -7,8 +7,6 @@ struct UtteranceTimeline: Sendable {
     enum CompletionStage: String, Sendable {
         case pasteVerified
         case leftOnPasteboard
-        case commandRouted
-        case askAnswered
         case cancelled
     }
 
@@ -54,7 +52,6 @@ struct UtteranceTimeline: Sendable {
         }
     }
 
-    let mode: DictationMode
     let keyDown: Instant
     let micFirstBuffer: Instant
     let keyUp: Instant
@@ -67,7 +64,6 @@ struct UtteranceTimeline: Sendable {
     let cancellationStages: CancellationStages?
 
     init(
-        mode: DictationMode,
         keyDown: Instant,
         micFirstBuffer: Instant,
         keyUp: Instant,
@@ -79,7 +75,6 @@ struct UtteranceTimeline: Sendable {
         completed: Instant,
         cancellationStages: CancellationStages? = nil
     ) {
-        self.mode = mode
         self.keyDown = keyDown
         self.micFirstBuffer = micFirstBuffer
         self.keyUp = keyUp
@@ -114,7 +109,6 @@ struct UtteranceTimelineBuilder {
     typealias Instant = ContinuousClock.Instant
 
     let id: UInt64
-    let mode: DictationMode
     let keyDown: Instant
     var micFirstBuffer: Instant?
     var keyUp: Instant?
@@ -136,7 +130,6 @@ struct UtteranceTimelineBuilder {
         }
 
         return UtteranceTimeline(
-            mode: mode,
             keyDown: keyDown,
             micFirstBuffer: micFirstBuffer,
             keyUp: keyUp,
@@ -160,7 +153,6 @@ struct UtteranceTimelineBuilder {
         let effectivePolished = polished ?? effectiveCleaned
 
         return UtteranceTimeline(
-            mode: mode,
             keyDown: keyDown,
             micFirstBuffer: effectiveMicFirstBuffer,
             keyUp: effectiveKeyUp,
@@ -202,7 +194,6 @@ final class UtteranceTimelineStore {
 
         let durations = timeline.durations
         let line = [
-            "mode=\(timeline.mode.rawValue)",
             "complete=\(timeline.completionStage.rawValue)",
             "mic_ms=\(Self.milliseconds(durations.microphoneStartup))",
             "held_ms=\(Self.milliseconds(durations.held))",
@@ -222,7 +213,6 @@ final class UtteranceTimelineStore {
     func formattedTable() -> String {
         let header = [
             "#",
-            "mode",
             "complete",
             "mic ms",
             "held ms",
@@ -241,7 +231,6 @@ final class UtteranceTimelineStore {
             let durations = timeline.durations
             return [
                 String(offset + 1),
-                timeline.mode.rawValue,
                 timeline.completionStage.rawValue,
                 Self.milliseconds(durations.microphoneStartup),
                 Self.milliseconds(durations.held),

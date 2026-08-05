@@ -3,20 +3,9 @@ import "../styles/global.css";
 
 const install = "brew install --cask jassuwu/tap/andrew-dictate";
 
-const commands = [
-  ["“open arc” · “switch to slack” · “quit music”", "instant app control"],
-  ["“chatgpt search swift actors” · “youtube lofi”", "opens the site with your query"],
-  ["“what’s the tallest building in the world?”", "answers inline on the floating panel"],
-  ["“what’s this error?”", "screenshots the window, asks your agent cli, answers inline. press again for follow-ups"],
-  ["“brew install ripgrep”", "shows the exact command, runs in your terminal after one confirming tap"],
-  ["“standup” · “deploy staging” · any phrase you define", "your urls, scripts, macos shortcuts, snippets"],
-];
-
 const privacy = [
   "transcription is fully on-device. audio never leaves the mac.",
   "no accounts, no telemetry, no network code except the model download.",
-  "questions go to the agent cli you configure, read-only enforced. no history stored — your agent keeps its own sessions.",
-  "shell commands always show before they run.",
   "small swift codebase. read it.",
 ];
 ---
@@ -28,7 +17,7 @@ const privacy = [
     <title>andrew dictate — escape the keyboard.</title>
     <meta
       name="description"
-      content="local speech-to-text and voice commands for macOS. free, open source, runs entirely on your mac."
+      content="local speech-to-text for macOS. free, open source, runs entirely on your mac."
     />
     <link rel="icon" href="/favicon.png" />
     <meta property="og:title" content="andrew dictate" />
@@ -46,7 +35,7 @@ const privacy = [
         </h1>
         <p class="mt-2 text-lg font-medium text-[#e5be62]">escape the keyboard.</p>
         <p class="mt-4 max-w-md text-sm leading-relaxed text-[#f2ede0]/70">
-          local speech-to-text and voice commands for macOS.
+          local speech-to-text for macOS.
           free, open source, runs entirely on your mac.
         </p>
 
@@ -77,27 +66,6 @@ const privacy = [
           <code class="text-[#e5be62]">jass@jass.gg</code>), numbers, self-corrections
           and stumbles handled on-device. optional ai polish with apple's local model —
           judged in a built-in lab on your own speech before you trust it.
-        </p>
-      </section>
-
-      <!-- command mode -->
-      <section class="mt-14">
-        <h2 class="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#e5be62]/80">command mode</h2>
-        <p class="mt-3 text-[15px] text-[#f2ede0]/85">
-          hold right <kbd class="rounded border border-[#e5be62]/30 bg-[#1f1f24] px-1.5 py-0.5 font-mono text-xs">⌥</kbd> and say it:
-        </p>
-        <div class="mt-4 divide-y divide-[#e5be62]/10 rounded-xl border border-[#e5be62]/15 bg-[#161619]">
-          {commands.map(([say, does]) => (
-            <div class="flex flex-col gap-1 px-5 py-3.5 sm:flex-row sm:items-baseline sm:gap-4">
-              <span class="font-mono text-[13px] text-[#f9e9a8] sm:w-1/2">{say}</span>
-              <span class="text-[13px] text-[#f2ede0]/60 sm:w-1/2">{does}</span>
-            </div>
-          ))}
-        </div>
-        <p class="mt-3 text-[13px] text-[#f2ede0]/50">
-          answers can talk back — and you can interrupt them by just starting to talk.
-          conversations you start by voice continue later in your terminal:
-          they were your agent's sessions all along.
         </p>
       </section>
 

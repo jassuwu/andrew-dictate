@@ -4,7 +4,7 @@ import Foundation
 enum HUDContent: Equatable, Sendable {
     case wave
     case prewarming
-    case text(primary: String, secondary: String?)
+    case text(String)
 }
 
 struct HUDLayout: Equatable, Sendable {
@@ -23,10 +23,6 @@ enum HUDLayoutEngine {
         .systemFont(ofSize: 12, weight: .medium)
     }
 
-    static var secondaryFont: NSFont {
-        .systemFont(ofSize: 9.5, weight: .regular)
-    }
-
     static var primaryLineHeight: CGFloat {
         ceil(
             primaryFont.ascender
@@ -42,23 +38,19 @@ enum HUDLayoutEngine {
         switch content {
         case .wave, .prewarming:
             return HUDLayout(size: minimumSize, lineCount: 1)
-        case let .text(primary, secondary):
+        case let .text(text):
             let maximumWidth = max(
                 minimumSize.width,
                 screenWidth * maximumScreenWidthFraction
             )
             let primaryWidth = measuredWidth(
-                of: primary,
+                of: text,
                 font: primaryFont
             )
-            let secondaryWidth = secondary.map {
-                measuredWidth(of: $0, font: secondaryFont)
-            } ?? 0
-            let textWidth = max(primaryWidth, secondaryWidth)
             let fixedHorizontalSpace =
                 horizontalPadding * 2 + measurementSafety
             let width = min(
-                max(textWidth + fixedHorizontalSpace, minimumSize.width),
+                max(primaryWidth + fixedHorizontalSpace, minimumSize.width),
                 maximumWidth
             )
             let availablePrimaryWidth = max(
@@ -94,27 +86,5 @@ enum HUDLayoutEngine {
             options: [.usesLineFragmentOrigin, .usesFontLeading]
         )
         return ceil(bounds.width)
-    }
-}
-
-enum HUDAnswerFormatter {
-    static let maximumPreviewCharacters = 280
-
-    static func preview(_ answer: String) -> String {
-        let trimmed = answer.trimmingCharacters(
-            in: .whitespacesAndNewlines
-        )
-        guard trimmed.count > maximumPreviewCharacters else {
-            return trimmed
-        }
-
-        let endIndex = trimmed.index(
-            trimmed.startIndex,
-            offsetBy: maximumPreviewCharacters
-        )
-        let prefix = trimmed[..<endIndex].trimmingCharacters(
-            in: .whitespacesAndNewlines
-        )
-        return prefix + " ⋯"
     }
 }

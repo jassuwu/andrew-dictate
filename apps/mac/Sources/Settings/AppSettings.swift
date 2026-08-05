@@ -98,33 +98,12 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    @Published var voiceAnswersEnabled: Bool {
-        didSet {
-            guard voiceAnswersEnabled != oldValue else {
-                return
-            }
-            userDefaults.set(
-                voiceAnswersEnabled,
-                forKey: Self.voiceAnswersKey
-            )
-        }
-    }
-
     @Published private(set) var dictationHotkey: HotkeyBinding {
         didSet {
             guard dictationHotkey != oldValue else {
                 return
             }
-            userDefaults.setHotkeyBinding(dictationHotkey, for: .dictation)
-        }
-    }
-
-    @Published private(set) var commandHotkey: HotkeyBinding {
-        didSet {
-            guard commandHotkey != oldValue else {
-                return
-            }
-            userDefaults.setHotkeyBinding(commandHotkey, for: .command)
+            userDefaults.setHotkeyBinding(dictationHotkey)
         }
     }
 
@@ -152,35 +131,6 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    @Published var agentCommandTemplate: String {
-        didSet {
-            guard agentCommandTemplate != oldValue else {
-                return
-            }
-            guard agentCommandTemplate.isEmpty
-                    || AgentCommandTemplate.isValid(agentCommandTemplate) else {
-                agentCommandTemplate = oldValue
-                return
-            }
-            userDefaults.set(
-                agentCommandTemplate,
-                forKey: Self.agentCommandTemplateKey
-            )
-        }
-    }
-
-    @Published var terminalBundleID: String {
-        didSet {
-            guard terminalBundleID != oldValue else {
-                return
-            }
-            userDefaults.set(
-                terminalBundleID,
-                forKey: Self.terminalBundleIDKey
-            )
-        }
-    }
-
     @Published private(set) var totalWordsDictated: Int {
         didSet {
             guard totalWordsDictated != oldValue else {
@@ -198,24 +148,14 @@ final class AppSettings: ObservableObject {
     private static let preRollKey = "AndrewDictate.preRollEnabled"
     private static let soundFeedbackKey =
         "AndrewDictate.soundFeedbackEnabled"
-    private static let voiceAnswersKey =
-        "AndrewDictate.voiceAnswersEnabled"
     private static let engineVersionKey = "AndrewDictate.engineVersion"
     private static let cleanupModeKey = "AndrewDictate.cleanupMode"
-    private static let agentCommandTemplateKey =
-        "AndrewDictate.agentCommandTemplate"
-    private static let terminalBundleIDKey = "AndrewDictate.terminalBundleID"
     private static let totalWordsDictatedKey =
         "AndrewDictate.totalWordsDictated"
 
-    static let defaultTerminalBundleID = "com.apple.Terminal"
-
     private let userDefaults: UserDefaults
 
-    init(
-        userDefaults: UserDefaults = .standard,
-        detectedAgents: [DetectedAgentCLI]? = nil
-    ) {
+    init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
         onboardingCompleted = userDefaults.bool(
             forKey: Self.onboardingCompletedKey
@@ -226,24 +166,7 @@ final class AppSettings: ObservableObject {
         ) == nil
             ? true
             : userDefaults.bool(forKey: Self.soundFeedbackKey)
-        voiceAnswersEnabled = userDefaults.bool(
-            forKey: Self.voiceAnswersKey
-        )
-
-        let loadedDictationHotkey = userDefaults.hotkeyBinding(for: .dictation)
-        let loadedCommandHotkey = userDefaults.hotkeyBinding(for: .command)
-        let correctedCommandHotkey: HotkeyBinding?
-        dictationHotkey = loadedDictationHotkey
-        if loadedCommandHotkey == loadedDictationHotkey {
-            let replacement = HotkeyBinding.supported.first {
-                $0 != loadedDictationHotkey
-            } ?? .command
-            commandHotkey = replacement
-            correctedCommandHotkey = replacement
-        } else {
-            commandHotkey = loadedCommandHotkey
-            correctedCommandHotkey = nil
-        }
+        dictationHotkey = userDefaults.hotkeyBinding()
 
         engineVersion = userDefaults
             .string(forKey: Self.engineVersionKey)
@@ -256,90 +179,19 @@ final class AppSettings: ObservableObject {
             : storedCleanupMode
                 .flatMap(CleanupMode.init(rawValue:)) ?? .off
 
-        var initialAgentCommandTemplate: String
-        var shouldPersistInitialAgentCommandTemplate: Bool
-        if userDefaults.object(forKey: Self.agentCommandTemplateKey) != nil {
-            let storedAgentTemplate = userDefaults.string(
-                forKey: Self.agentCommandTemplateKey
-            )
-            initialAgentCommandTemplate = storedAgentTemplate.flatMap {
-                $0.isEmpty || AgentCommandTemplate.isValid($0) ? $0 : nil
-            } ?? ""
-            shouldPersistInitialAgentCommandTemplate =
-                storedAgentTemplate != initialAgentCommandTemplate
-        } else {
-            initialAgentCommandTemplate = Self.initialAgentCommandTemplate(
-                detectedAgents: detectedAgents ?? AgentCLIDetector.detect()
-            )
-            shouldPersistInitialAgentCommandTemplate = true
-        }
-        // migrate the pre-0.1.3 codex default: without --skip-git-repo-check,
-        // codex refuses to run from the (non-repo) delegation script directory
-        if initialAgentCommandTemplate == "codex exec {prompt}" {
-            initialAgentCommandTemplate = "codex exec --skip-git-repo-check {prompt}"
-            shouldPersistInitialAgentCommandTemplate = true
-        }
-        agentCommandTemplate = initialAgentCommandTemplate
-
-        terminalBundleID = userDefaults.string(
-            forKey: Self.terminalBundleIDKey
-        ) ?? Self.defaultTerminalBundleID
         totalWordsDictated = max(
             0,
             userDefaults.integer(forKey: Self.totalWordsDictatedKey)
         )
-
-        if shouldPersistInitialAgentCommandTemplate {
-            userDefaults.set(
-                initialAgentCommandTemplate,
-                forKey: Self.agentCommandTemplateKey
-            )
-        }
-
-        if let correctedCommandHotkey {
-            userDefaults.setHotkeyBinding(
-                correctedCommandHotkey,
-                for: .command
-            )
-        }
-    }
-
-    private static func initialAgentCommandTemplate(
-        detectedAgents: [DetectedAgentCLI]
-    ) -> String {
-        for cli in AgentCLI.allCases
-        where detectedAgents.contains(where: { $0.cli == cli }) {
-            return cli.commandTemplate
-        }
-        return ""
-    }
-
-    func hotkeyBinding(for mode: DictationMode) -> HotkeyBinding {
-        switch mode {
-        case .dictation:
-            dictationHotkey
-        case .command:
-            commandHotkey
-        }
     }
 
     @discardableResult
-    func setHotkeyBinding(
-        _ binding: HotkeyBinding,
-        for mode: DictationMode
-    ) -> Bool {
-        guard HotkeyBinding.supported.contains(binding),
-              binding != hotkeyBinding(for: mode.other) else {
+    func setHotkeyBinding(_ binding: HotkeyBinding) -> Bool {
+        guard HotkeyBinding.supported.contains(binding) else {
             return false
         }
 
-        switch mode {
-        case .dictation:
-            dictationHotkey = binding
-        case .command:
-            commandHotkey = binding
-        }
-
+        dictationHotkey = binding
         return true
     }
 

@@ -5,12 +5,12 @@ final class HotkeyLogicTests: XCTestCase {
         var detector = TapLockDetector()
 
         XCTAssertEqual(
-            detector.modifierPressed(.dictation, at: 1.0),
-            [.begin(.dictation)]
+            detector.modifierPressed(at: 1.0),
+            [.begin]
         )
         XCTAssertEqual(
-            detector.modifierReleased(.dictation, at: 1.5),
-            [.end(.dictation)]
+            detector.modifierReleased(at: 1.5),
+            [.end]
         )
     }
 
@@ -18,15 +18,15 @@ final class HotkeyLogicTests: XCTestCase {
         var detector = TapLockDetector()
 
         XCTAssertEqual(
-            detector.modifierPressed(.command, at: 1.0),
-            [.begin(.command)]
+            detector.modifierPressed(at: 1.0),
+            [.begin]
         )
         XCTAssertEqual(
             detector.keyDown(isEscape: false),
-            [.cancel(.command)]
+            [.cancel]
         )
         XCTAssertEqual(
-            detector.modifierReleased(.command, at: 1.2),
+            detector.modifierReleased(at: 1.2),
             []
         )
     }
@@ -35,34 +35,34 @@ final class HotkeyLogicTests: XCTestCase {
         var detector = TapLockDetector()
 
         XCTAssertEqual(
-            detector.modifierPressed(.dictation, at: 1.0),
-            [.begin(.dictation)]
+            detector.modifierPressed(at: 1.0),
+            [.begin]
         )
         XCTAssertEqual(
-            detector.modifierReleased(.dictation, at: 1.1),
-            [.provisionalEnd(.dictation)]
+            detector.modifierReleased(at: 1.1),
+            [.provisionalEnd]
         )
         XCTAssertEqual(
-            detector.modifierPressed(.dictation, at: 1.3),
+            detector.modifierPressed(at: 1.3),
             []
         )
         XCTAssertEqual(
-            detector.modifierReleased(.dictation, at: 1.4),
-            [.cancel(.dictation), .lockBegin(.dictation)]
+            detector.modifierReleased(at: 1.4),
+            [.cancel, .lockBegin]
         )
         XCTAssertEqual(detector.provisionalEndWindowExpired(), [])
     }
 
     func testSameKeyTapWhileLockedEndsLockedCapture() {
-        var detector = lockedDetector(mode: .command)
+        var detector = lockedDetector()
 
         XCTAssertEqual(
-            detector.modifierPressed(.command, at: 1.6),
+            detector.modifierPressed(at: 1.6),
             []
         )
         XCTAssertEqual(
-            detector.modifierReleased(.command, at: 1.7),
-            [.lockEnd(.command)]
+            detector.modifierReleased(at: 1.7),
+            [.lockEnd]
         )
     }
 
@@ -70,89 +70,81 @@ final class HotkeyLogicTests: XCTestCase {
         var detector = TapLockDetector()
 
         XCTAssertEqual(
-            detector.modifierPressed(.dictation, at: 1.0),
-            [.begin(.dictation)]
+            detector.modifierPressed(at: 1.0),
+            [.begin]
         )
         XCTAssertEqual(
-            detector.modifierReleased(.dictation, at: 1.1),
-            [.provisionalEnd(.dictation)]
+            detector.modifierReleased(at: 1.1),
+            [.provisionalEnd]
         )
         XCTAssertEqual(
             detector.provisionalEndWindowExpired(),
-            [.end(.dictation)]
+            [.end]
         )
 
         XCTAssertEqual(
-            detector.modifierPressed(.dictation, at: 1.5),
-            [.begin(.dictation)]
+            detector.modifierPressed(at: 1.5),
+            [.begin]
         )
         XCTAssertEqual(
-            detector.modifierReleased(.dictation, at: 1.6),
-            [.provisionalEnd(.dictation)]
+            detector.modifierReleased(at: 1.6),
+            [.provisionalEnd]
         )
         XCTAssertEqual(
             detector.provisionalEndWindowExpired(),
-            [.end(.dictation)]
+            [.end]
         )
     }
 
     func testEscapeCancelsLockedCapture() {
-        var detector = lockedDetector(mode: .dictation)
+        var detector = lockedDetector()
 
         XCTAssertEqual(
             detector.keyDown(isEscape: true),
-            [.lockCancel(.dictation)]
+            [.lockCancel]
         )
     }
 
-    func testOtherModeAndOrdinaryKeysAreIgnoredWhileLocked() {
-        var detector = lockedDetector(mode: .dictation)
+    func testOrdinaryKeysAreIgnoredWhileLocked() {
+        var detector = lockedDetector()
 
-        XCTAssertEqual(
-            detector.modifierPressed(.command, at: 1.6),
-            []
-        )
-        XCTAssertEqual(
-            detector.modifierReleased(.command, at: 1.7),
-            []
-        )
         XCTAssertEqual(detector.keyDown(isEscape: false), [])
 
         XCTAssertEqual(
-            detector.modifierPressed(.dictation, at: 1.8),
+            detector.modifierPressed(at: 1.8),
             []
         )
         XCTAssertEqual(
-            detector.modifierReleased(.dictation, at: 1.9),
-            [.lockEnd(.dictation)]
+            detector.modifierReleased(at: 1.9),
+            [.lockEnd]
         )
     }
 
     func testResetCancelsHeldAndLockedCaptures() {
         var heldDetector = TapLockDetector()
-        _ = heldDetector.modifierPressed(.dictation, at: 1.0)
+        _ = heldDetector.modifierPressed(at: 1.0)
 
-        XCTAssertEqual(heldDetector.reset(), [.cancel(.dictation)])
+        XCTAssertEqual(heldDetector.reset(), [.cancel])
         XCTAssertEqual(
-            heldDetector.modifierPressed(.dictation, at: 1.1),
-            [.begin(.dictation)]
+            heldDetector.modifierPressed(at: 1.1),
+            [.begin]
         )
 
-        var locked = lockedDetector(mode: .command)
+        var locked = lockedDetector()
 
-        XCTAssertEqual(locked.reset(), [.lockCancel(.command)])
+        XCTAssertEqual(locked.reset(), [.lockCancel])
         XCTAssertEqual(
-            locked.modifierPressed(.command, at: 1.5),
-            [.begin(.command)]
+            locked.modifierPressed(at: 1.5),
+            [.begin]
         )
     }
 
-    private func lockedDetector(mode: DictationMode) -> TapLockDetector {
+    private func lockedDetector() -> TapLockDetector {
         var detector = TapLockDetector()
-        _ = detector.modifierPressed(mode, at: 1.0)
-        _ = detector.modifierReleased(mode, at: 1.1)
-        _ = detector.modifierPressed(mode, at: 1.3)
-        _ = detector.modifierReleased(mode, at: 1.4)
+        _ = detector.modifierPressed(at: 1.0)
+        _ = detector.modifierReleased(at: 1.1)
+        _ = detector.modifierPressed(at: 1.3)
+        _ = detector.modifierReleased(at: 1.4)
         return detector
     }
 }

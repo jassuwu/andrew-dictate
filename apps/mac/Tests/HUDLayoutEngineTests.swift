@@ -3,7 +3,7 @@ import XCTest
 final class HUDLayoutEngineTests: XCTestCase {
     func testShortTextAndFixedStatesUseMinimumSize() {
         let shortText = HUDLayoutEngine.layout(
-            for: .text(primary: "done", secondary: nil),
+            for: .text("done"),
             screenWidth: 1_440
         )
 
@@ -28,10 +28,7 @@ final class HUDLayoutEngineTests: XCTestCase {
     func testGrowingTextGrowsWidthMonotonically() {
         let widths = [20, 30, 40].map { characterCount in
             HUDLayoutEngine.layout(
-                for: .text(
-                    primary: String(repeating: "m", count: characterCount),
-                    secondary: nil
-                ),
+                for: .text(String(repeating: "m", count: characterCount)),
                 screenWidth: 2_000
             ).size.width
         }
@@ -43,10 +40,7 @@ final class HUDLayoutEngineTests: XCTestCase {
     func testWidthNeverExceedsScreenCap() {
         let screenWidth: CGFloat = 800
         let layout = HUDLayoutEngine.layout(
-            for: .text(
-                primary: String(repeating: "wide ", count: 100),
-                secondary: nil
-            ),
+            for: .text(String(repeating: "wide ", count: 100)),
             screenWidth: screenWidth
         )
 
@@ -58,10 +52,7 @@ final class HUDLayoutEngineTests: XCTestCase {
 
     func testPrimaryOverflowAtCapTriggersTwoLineHeight() {
         let layout = HUDLayoutEngine.layout(
-            for: .text(
-                primary: String(repeating: "overflow ", count: 40),
-                secondary: nil
-            ),
+            for: .text(String(repeating: "overflow ", count: 40)),
             screenWidth: 800
         )
 
@@ -74,41 +65,8 @@ final class HUDLayoutEngineTests: XCTestCase {
         )
     }
 
-    func testSecondaryRowPreservesGateHeightMath() {
-        let singleLineGate = HUDLayoutEngine.layout(
-            for: .text(
-                primary: "codex fix tests",
-                secondary: "tap ⌥ to run · esc to cancel"
-            ),
-            screenWidth: 1_440
-        )
-        let wrappedGate = HUDLayoutEngine.layout(
-            for: .text(
-                primary: String(repeating: "command ", count: 50),
-                secondary: "tap ⌥ to run · esc to cancel"
-            ),
-            screenWidth: 800
-        )
-
-        XCTAssertEqual(
-            singleLineGate.size.height,
-            HUDLayoutEngine.minimumSize.height
-        )
-        XCTAssertEqual(singleLineGate.lineCount, 1)
-        XCTAssertEqual(
-            wrappedGate.size.height,
-            HUDLayoutEngine.minimumSize.height
-                + HUDLayoutEngine.primaryLineHeight
-                + HUDLayoutEngine.wrappedLineSpacing
-        )
-        XCTAssertEqual(wrappedGate.lineCount, 2)
-    }
-
     func testScreenWidthChangesCapAndWrapping() {
-        let content = HUDContent.text(
-            primary: String(repeating: "m", count: 65),
-            secondary: nil
-        )
+        let content = HUDContent.text(String(repeating: "m", count: 65))
         let narrow = HUDLayoutEngine.layout(
             for: content,
             screenWidth: 800
@@ -126,20 +84,5 @@ final class HUDLayoutEngineTests: XCTestCase {
             wide.size.height,
             HUDLayoutEngine.minimumSize.height
         )
-    }
-
-    func testAnswerPreviewKeepsShortTextAndEllipsizesLongText() {
-        XCTAssertEqual(HUDAnswerFormatter.preview(" short answer \n"), "short answer")
-
-        let longAnswer = String(
-            repeating: "a",
-            count: HUDAnswerFormatter.maximumPreviewCharacters + 1
-        )
-        let preview = HUDAnswerFormatter.preview(longAnswer)
-        XCTAssertEqual(
-            preview.count,
-            HUDAnswerFormatter.maximumPreviewCharacters + 2
-        )
-        XCTAssertTrue(preview.hasSuffix(" ⋯"))
     }
 }

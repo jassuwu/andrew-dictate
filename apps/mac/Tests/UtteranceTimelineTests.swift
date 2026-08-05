@@ -4,7 +4,6 @@ final class UtteranceTimelineTests: XCTestCase {
     func testDerivedDurationsUseTheExpectedStageBoundaries() {
         let keyDown = ContinuousClock.now
         let timeline = UtteranceTimeline(
-            mode: .dictation,
             keyDown: keyDown,
             micFirstBuffer: keyDown.advanced(by: .milliseconds(12)),
             keyUp: keyDown.advanced(by: .milliseconds(1_012)),
@@ -35,7 +34,6 @@ final class UtteranceTimelineTests: XCTestCase {
         let keyDown = ContinuousClock.now
         var builder = UtteranceTimelineBuilder(
             id: 1,
-            mode: .command,
             keyDown: keyDown
         )
         builder.micFirstBuffer = keyDown.advanced(
@@ -63,7 +61,6 @@ final class UtteranceTimelineTests: XCTestCase {
         let keyDown = ContinuousClock.now
         var builder = UtteranceTimelineBuilder(
             id: 1,
-            mode: .dictation,
             keyDown: keyDown
         )
         builder.micFirstBuffer = keyDown

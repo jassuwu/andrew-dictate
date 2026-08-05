@@ -40,13 +40,10 @@ struct SettingsView: View {
     @ObservedObject private var coordinator: DictationCoordinator
     @ObservedObject private var settings: AppSettings
     @ObservedObject private var dictionaryStore: DictionaryStore
-    @ObservedObject private var customActionStore: CustomActionStore
     @StateObject private var loginItem = LoginItemController()
 
     private let modelStore: ModelStore
 
-    @State private var detectedAgents: [DetectedAgentCLI]
-    @State private var installedTerminals: [TerminalOption]
     @State private var installedModels: [InstalledModel] = []
     @State private var pendingModelRemoval: EngineVersion?
     @State private var modelStoreMessage: String?
@@ -54,22 +51,15 @@ struct SettingsView: View {
 
     init(coordinator: DictationCoordinator) {
         let settings = coordinator.settings
-        let detectedAgents = AgentCLIDetector.detect()
-        let installedTerminals = TerminalDetector.detectInstalled()
 
         _coordinator = ObservedObject(wrappedValue: coordinator)
         _settings = ObservedObject(wrappedValue: settings)
         _dictionaryStore = ObservedObject(
             wrappedValue: coordinator.dictionaryStore
         )
-        _customActionStore = ObservedObject(
-            wrappedValue: coordinator.customActionStore
-        )
         modelStore = ModelStore(
             activeVersion: { coordinator.activeEngineVersion }
         )
-        _detectedAgents = State(initialValue: detectedAgents)
-        _installedTerminals = State(initialValue: installedTerminals)
         _isCleanupAvailable = State(
             initialValue: coordinator.isCleanupAvailable
         )
@@ -81,14 +71,10 @@ struct SettingsView: View {
                 identityStrip
 
                 settingsSection("keys") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        hotkeyRow(for: .dictation)
-                        cardDivider
-                        hotkeyRow(for: .command)
-                    }
+                    hotkeyRow
                 }
 
-                settingsSection("dictation & ask") {
+                settingsSection("dictation") {
                     VStack(alignment: .leading, spacing: 13) {
                         SettingsToggleRow(
                             "pre-roll",
@@ -111,14 +97,6 @@ struct SettingsView: View {
                         }
                         cardDivider
                         cleanupLabControls
-                        cardDivider
-                        SettingsToggleRow(
-                            "spoken answers",
-                            explanation:
-                                "reads ask answers aloud in two short "
-                                + "spoken sentences.",
-                            isOn: $settings.voiceAnswersEnabled
-                        )
                     }
                 }
 
@@ -128,14 +106,6 @@ struct SettingsView: View {
 
                 settingsSection("dictionary") {
                     DictionaryEditor(store: dictionaryStore)
-                }
-
-                settingsSection("actions") {
-                    CustomActionEditor(store: customActionStore)
-                }
-
-                settingsSection("command mode") {
-                    commandModeEditor
                 }
 
                 settingsSection("general") {
@@ -170,7 +140,6 @@ struct SettingsView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             loginItem.refresh()
-            selectAvailableTerminalIfNeeded()
             refreshInstalledModels()
             isCleanupAvailable = coordinator.isCleanupAvailable
         }
@@ -441,400 +410,35 @@ struct SettingsView: View {
         }
     }
 
-    @ViewBuilder
-    private func hotkeyRow(for mode: DictationMode) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 10) {
-                Text(mode.rawValue)
-                    .font(BrandUI.bodyFont.weight(.medium))
+    private var hotkeyRow: some View {
+        HStack(spacing: 10) {
+            Text("dictation")
+                .font(BrandUI.bodyFont.weight(.medium))
 
-                Spacer(minLength: 10)
+            Spacer(minLength: 10)
 
-                KeyChip(settings.hotkeyBinding(for: mode).displayName)
+            KeyChip(settings.dictationHotkey.displayName)
 
-                Picker(
-                    "",
-                    selection: Binding(
-                        get: { settings.hotkeyBinding(for: mode) },
-                        set: { binding in
-                            _ = coordinator.rebindHotkey(
-                                mode,
-                                to: binding
-                            )
-                        }
-                    )
-                ) {
-                    ForEach(HotkeyBinding.supported) { binding in
-                        Text(binding.displayName)
-                            .tag(binding)
-                            .disabled(
-                                binding
-                                    == settings.hotkeyBinding(for: mode.other)
-                            )
+            Picker(
+                "",
+                selection: Binding(
+                    get: { settings.dictationHotkey },
+                    set: { binding in
+                        _ = coordinator.rebindHotkey(to: binding)
                     }
-                }
-                .labelsHidden()
-                .brandMenuStyle()
-                .frame(width: 146)
-            }
-
-            Text(
-                settings.hotkeyBinding(for: mode.other).displayName
-                    + " is already used by the "
-                    + mode.other.rawValue
-                    + " key"
-            )
-            .font(.caption)
-            .foregroundStyle(BrandUI.gold.opacity(0.76))
-        }
-    }
-
-    private var commandModeEditor: some View {
-        VStack(alignment: .leading, spacing: 13) {
-            HStack(alignment: .firstTextBaseline, spacing: 14) {
-                Text("agent cli")
-                    .font(BrandUI.bodyFont.weight(.medium))
-                    .frame(width: 86, alignment: .leading)
-
-                AgentCLIEditor(
-                    settings: settings,
-                    detectedAgents: detectedAgents
                 )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            cardDivider
-
-            HStack(spacing: 14) {
-                Text("terminal")
-                    .font(BrandUI.bodyFont.weight(.medium))
-                    .frame(width: 86, alignment: .leading)
-
-                Picker(
-                    "",
-                    selection: $settings.terminalBundleID
-                ) {
-                    ForEach(installedTerminals) { terminal in
-                        Text(terminal.displayName)
-                            .tag(terminal.bundleIdentifier)
-                    }
-                }
-                .labelsHidden()
-                .brandMenuStyle()
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
-    private func selectAvailableTerminalIfNeeded() {
-        guard !installedTerminals.contains(where: {
-            $0.bundleIdentifier == settings.terminalBundleID
-        }), let fallback = installedTerminals.first else {
-            return
-        }
-        settings.terminalBundleID = fallback.bundleIdentifier
-    }
-
-}
-
-private struct CustomActionEditor: View {
-    @ObservedObject var store: CustomActionStore
-
-    @State private var message: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            actionHeader
-
-            if store.actions.isEmpty {
-                Text("add a phrase to run something.")
-                    .font(.caption)
-                    .foregroundStyle(BrandUI.textSecondary)
-                    .frame(maxWidth: .infinity, minHeight: 64)
-            } else {
-                ForEach(store.actions) { action in
-                    CustomActionRow(
-                        action: action,
-                        store: store,
-                        onRemove: {
-                            store.remove(action)
-                        }
-                    )
-
-                    if action.id != store.actions.last?.id {
-                        Rectangle()
-                            .fill(BrandUI.hairline)
-                            .frame(height: 1)
-                            .accessibilityHidden(true)
-                    }
+            ) {
+                ForEach(HotkeyBinding.supported) { binding in
+                    Text(binding.displayName)
+                        .tag(binding)
                 }
             }
-
-            HStack(spacing: 9) {
-                Button(action: addAction) {
-                    Image(systemName: "plus")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(BrandUI.gold)
-                .help("add action")
-
-                Spacer()
-
-                Button("import", action: importActions)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(BrandUI.textSecondary)
-
-                Button("export", action: exportActions)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(BrandUI.textSecondary)
-
-                Button("open actions file", action: revealActionsFile)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(BrandUI.textSecondary)
-            }
-            .padding(.horizontal, 2)
-            .padding(.top, 2)
-
-            if let message {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(BrandUI.gold)
-            }
-        }
-    }
-
-    private var actionHeader: some View {
-        HStack(spacing: 8) {
-            Text("trigger")
-                .frame(width: 106, alignment: .leading)
-            Text("type")
-                .frame(width: 76, alignment: .leading)
-            Text("payload")
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text("allow")
-                .frame(width: 38, alignment: .center)
-            Color.clear
-                .frame(width: 14)
-        }
-        .font(.caption2.weight(.semibold))
-        .foregroundStyle(BrandUI.textSecondary)
-        .padding(.horizontal, 2)
-    }
-
-    private func addAction() {
-        var suffix = 1
-        var trigger = "new action"
-        let normalizedKeys = Set(store.actions.compactMap {
-            try? CustomActionMatcher.triggerPattern(
-                for: $0.trigger
-            ).normalizedKey
-        })
-
-        while normalizedKeys.contains(
-            CustomActionMatcher.normalize(trigger)
-        ) {
-            suffix += 1
-            trigger = "new action \(suffix)"
-        }
-
-        do {
-            _ = try store.add(
-                trigger: trigger,
-                type: .open,
-                payload: "finder"
-            )
-            message = nil
-        } catch {
-            message = error.localizedDescription.lowercased()
-        }
-    }
-
-    private func importActions() {
-        let panel = NSOpenPanel()
-        panel.title = "import actions"
-        panel.prompt = "import"
-        panel.allowedContentTypes = [.json]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-
-        guard panel.runModal() == .OK,
-              let sourceURL = panel.url else {
-            return
-        }
-
-        do {
-            try store.importJSON(from: sourceURL)
-            message = nil
-        } catch let error as CustomActionValidationError {
-            message = error.localizedDescription
-        } catch {
-            message = "couldn't import actions"
-        }
-    }
-
-    private func exportActions() {
-        let panel = NSSavePanel()
-        panel.title = "export actions"
-        panel.prompt = "export"
-        panel.allowedContentTypes = [.json]
-        panel.nameFieldStringValue = "actions.json"
-
-        guard panel.runModal() == .OK,
-              let destinationURL = panel.url else {
-            return
-        }
-
-        do {
-            try store.exportJSON(to: destinationURL)
-            message = nil
-        } catch {
-            message = "couldn't export actions"
-        }
-    }
-
-    private func revealActionsFile() {
-        do {
-            try store.ensureFileExists()
-            NSWorkspace.shared.activateFileViewerSelecting(
-                [store.fileURL]
-            )
-            message = nil
-        } catch {
-            message = "couldn't open actions file"
-        }
-    }
-}
-
-private struct CustomActionRow: View {
-    private enum Field: Hashable {
-        case trigger
-        case payload
-    }
-
-    let action: CustomAction
-    @ObservedObject var store: CustomActionStore
-    let onRemove: () -> Void
-
-    @State private var draft: CustomAction
-    @FocusState private var focusedField: Field?
-
-    init(
-        action: CustomAction,
-        store: CustomActionStore,
-        onRemove: @escaping () -> Void
-    ) {
-        self.action = action
-        self.store = store
-        self.onRemove = onRemove
-        _draft = State(initialValue: action)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .center, spacing: 8) {
-                field(
-                    prompt: "phrase",
-                    text: $draft.trigger
-                )
-                .frame(width: 106)
-                .focused($focusedField, equals: .trigger)
-
-                Picker("", selection: $draft.type) {
-                    ForEach(ActionType.allCases) { type in
-                        Text(type.rawValue)
-                            .tag(type)
-                    }
-                }
-                .labelsHidden()
-                .brandMenuStyle()
-                .frame(width: 76)
-                .onChange(of: draft.type) {
-                    commitIfValid()
-                }
-
-                field(
-                    prompt: "value",
-                    text: $draft.payload
-                )
-                .frame(maxWidth: .infinity)
-                .focused($focusedField, equals: .payload)
-
-                Group {
-                    if draft.type == .shell || draft.type == .ask {
-                        Toggle("", isOn: $draft.alwaysAllow)
-                            .labelsHidden()
-                            .brandToggleStyle()
-                            .scaleEffect(0.78)
-                            .onChange(of: draft.alwaysAllow) {
-                                commitIfValid()
-                            }
-                            .help("always allow")
-                    } else {
-                        Color.clear
-                    }
-                }
-                .frame(width: 38)
-
-                Button(action: onRemove) {
-                    Image(systemName: "minus")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(BrandUI.textSecondary)
-                .frame(width: 14)
-                .help("remove action")
-            }
-
-            if let validationError {
-                Text(validationError.localizedDescription)
-                    .font(.caption2)
-                    .foregroundStyle(BrandUI.gold)
-                    .padding(.leading, 2)
-            }
-        }
-        .padding(.vertical, 3)
-        .onSubmit(commitIfValid)
-        .onChange(of: focusedField) { oldField, newField in
-            if oldField != nil, newField == nil {
-                commitIfValid()
-            }
-        }
-        .onChange(of: action) { _, newAction in
-            if focusedField == nil {
-                draft = newAction
-            }
-        }
-    }
-
-    private var validationError: CustomActionValidationError? {
-        store.validationError(for: draft)
-    }
-
-    private func field(
-        prompt: String,
-        text: Binding<String>
-    ) -> some View {
-        TextField("", text: text, prompt: Text(prompt))
             .labelsHidden()
-            .font(BrandUI.valueFont)
-            .textFieldStyle(.plain)
-            .padding(.horizontal, 6)
-            .frame(height: 27)
-            .background {
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(BrandUI.windowBg)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .stroke(BrandUI.hairline, lineWidth: 1)
-            }
+            .brandMenuStyle()
+            .frame(width: 146)
+        }
     }
 
-    private func commitIfValid() {
-        guard validationError == nil, draft != action else {
-            return
-        }
-        try? store.update(draft)
-    }
 }
 
 private struct DictionaryEditor: View {
@@ -1013,45 +617,6 @@ private struct DictionaryCellEditor: View {
             return
         }
         onCommit(draft)
-    }
-}
-
-private struct TerminalOption: Identifiable {
-    let bundleIdentifier: String
-    let displayName: String
-
-    var id: String {
-        bundleIdentifier
-    }
-}
-
-@MainActor
-private enum TerminalDetector {
-    static func detectInstalled(
-        workspace: NSWorkspace = .shared
-    ) -> [TerminalOption] {
-        [
-            TerminalOption(
-                bundleIdentifier: "com.apple.Terminal",
-                displayName: "terminal"
-            ),
-            TerminalOption(
-                bundleIdentifier: "com.googlecode.iterm2",
-                displayName: "iterm2"
-            ),
-            TerminalOption(
-                bundleIdentifier: "com.mitchellh.ghostty",
-                displayName: "ghostty"
-            ),
-            TerminalOption(
-                bundleIdentifier: "dev.warp.Warp-Stable",
-                displayName: "warp"
-            ),
-        ].filter {
-            workspace.urlForApplication(
-                withBundleIdentifier: $0.bundleIdentifier
-            ) != nil
-        }
     }
 }
 

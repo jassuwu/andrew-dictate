@@ -6,24 +6,14 @@ final class AppSettingsTests: XCTestCase {
         let (userDefaults, suiteName) = makeUserDefaults()
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
 
-        let settings = AppSettings(
-            userDefaults: userDefaults,
-            detectedAgents: [detectedAgent(.codex)]
-        )
+        let settings = AppSettings(userDefaults: userDefaults)
 
         XCTAssertFalse(settings.onboardingCompleted)
         XCTAssertFalse(settings.preRollEnabled)
         XCTAssertTrue(settings.soundFeedbackEnabled)
-        XCTAssertFalse(settings.voiceAnswersEnabled)
         XCTAssertEqual(settings.dictationHotkey, .dictation)
-        XCTAssertEqual(settings.commandHotkey, .command)
         XCTAssertEqual(settings.engineVersion, .v2)
         XCTAssertEqual(settings.cleanupMode, .off)
-        XCTAssertEqual(
-            settings.agentCommandTemplate,
-            AgentCLI.codex.commandTemplate
-        )
-        XCTAssertEqual(settings.terminalBundleID, "com.apple.Terminal")
         XCTAssertEqual(settings.totalWordsDictated, 0)
     }
 
@@ -31,20 +21,13 @@ final class AppSettingsTests: XCTestCase {
         let (userDefaults, suiteName) = makeUserDefaults()
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
 
-        let settings = AppSettings(
-            userDefaults: userDefaults,
-            detectedAgents: [detectedAgent(.codex)]
-        )
+        let settings = AppSettings(userDefaults: userDefaults)
         settings.onboardingCompleted = true
         settings.preRollEnabled = true
         settings.soundFeedbackEnabled = false
-        settings.voiceAnswersEnabled = true
-        settings.setHotkeyBinding(.leftCommand, for: .dictation)
-        settings.setHotkeyBinding(.rightControl, for: .command)
+        XCTAssertTrue(settings.setHotkeyBinding(.leftCommand))
         settings.engineVersion = .v3
         settings.cleanupMode = .always
-        settings.agentCommandTemplate = "claude -p {prompt}"
-        settings.terminalBundleID = "com.mitchellh.ghostty"
         settings.recordDictatedTranscript("two dictated words")
 
         let reloaded = AppSettings(userDefaults: userDefaults)
@@ -52,40 +35,46 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(reloaded.onboardingCompleted)
         XCTAssertTrue(reloaded.preRollEnabled)
         XCTAssertFalse(reloaded.soundFeedbackEnabled)
-        XCTAssertTrue(reloaded.voiceAnswersEnabled)
         XCTAssertEqual(reloaded.dictationHotkey, .leftCommand)
-        XCTAssertEqual(reloaded.commandHotkey, .rightControl)
         XCTAssertEqual(reloaded.engineVersion, .v3)
         XCTAssertEqual(reloaded.cleanupMode, .always)
-        XCTAssertEqual(
-            reloaded.agentCommandTemplate,
-            "claude -p {prompt}"
-        )
-        XCTAssertEqual(
-            reloaded.terminalBundleID,
-            "com.mitchellh.ghostty"
-        )
         XCTAssertEqual(reloaded.totalWordsDictated, 3)
     }
 
-    func testRejectsDuplicateHotkeyAndInvalidAgentTemplate() {
+    func testRejectsUnsupportedHotkey() {
         let (userDefaults, suiteName) = makeUserDefaults()
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
 
-        let settings = AppSettings(
-            userDefaults: userDefaults,
-            detectedAgents: [detectedAgent(.codex)]
-        )
+        let settings = AppSettings(userDefaults: userDefaults)
 
         XCTAssertFalse(
-            settings.setHotkeyBinding(.command, for: .dictation)
+            settings.setHotkeyBinding(
+                HotkeyBinding(keyCode: 0, displayName: "unsupported")
+            )
         )
         XCTAssertEqual(settings.dictationHotkey, .dictation)
+    }
 
-        settings.agentCommandTemplate = "codex exec without a placeholder"
+    func testHotkeyRebindKeepsExistingDictationPersistenceKey() throws {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let key = "AndrewDictate.hotkey.dictation"
+        userDefaults.set(
+            try JSONEncoder().encode(HotkeyBinding.leftOption),
+            forKey: key
+        )
+
+        let settings = AppSettings(userDefaults: userDefaults)
+        XCTAssertEqual(settings.dictationHotkey, .leftOption)
+
+        XCTAssertTrue(settings.setHotkeyBinding(.rightControl))
+        let persistedData = try XCTUnwrap(userDefaults.data(forKey: key))
         XCTAssertEqual(
-            settings.agentCommandTemplate,
-            AgentCLI.codex.commandTemplate
+            try JSONDecoder().decode(
+                HotkeyBinding.self,
+                from: persistedData
+            ),
+            .rightControl
         )
     }
 
@@ -93,17 +82,11 @@ final class AppSettingsTests: XCTestCase {
         let (userDefaults, suiteName) = makeUserDefaults()
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
 
-        let settings = AppSettings(
-            userDefaults: userDefaults,
-            detectedAgents: []
-        )
+        let settings = AppSettings(userDefaults: userDefaults)
         settings.cleanupMode = .on
 
         XCTAssertEqual(
-            AppSettings(
-                userDefaults: userDefaults,
-                detectedAgents: []
-            ).cleanupMode,
+            AppSettings(userDefaults: userDefaults).cleanupMode,
             .on
         )
 
@@ -112,80 +95,9 @@ final class AppSettingsTests: XCTestCase {
             forKey: "AndrewDictate.cleanupMode"
         )
         XCTAssertEqual(
-            AppSettings(
-                userDefaults: userDefaults,
-                detectedAgents: []
-            ).cleanupMode,
+            AppSettings(userDefaults: userDefaults).cleanupMode,
             .off
         )
-    }
-
-    func testEmptyAgentTemplatePersistsAsNoConfiguration() {
-        let (userDefaults, suiteName) = makeUserDefaults()
-        defer { userDefaults.removePersistentDomain(forName: suiteName) }
-
-        let settings = AppSettings(
-            userDefaults: userDefaults,
-            detectedAgents: [detectedAgent(.codex)]
-        )
-        settings.agentCommandTemplate = ""
-
-        let reloaded = AppSettings(
-            userDefaults: userDefaults,
-            detectedAgents: [detectedAgent(.codex)]
-        )
-        XCTAssertEqual(reloaded.agentCommandTemplate, "")
-    }
-
-    func testNoDetectedAgentDefaultsToNoneOnlyOnFirstRun() {
-        let (userDefaults, suiteName) = makeUserDefaults()
-        defer { userDefaults.removePersistentDomain(forName: suiteName) }
-
-        let settings = AppSettings(
-            userDefaults: userDefaults,
-            detectedAgents: []
-        )
-        XCTAssertEqual(settings.agentCommandTemplate, "")
-
-        let reloaded = AppSettings(
-            userDefaults: userDefaults,
-            detectedAgents: [detectedAgent(.codex)]
-        )
-        XCTAssertEqual(reloaded.agentCommandTemplate, "")
-    }
-
-    func testCodexRemainsRecommendedAmongDetectedAgents() {
-        let (userDefaults, suiteName) = makeUserDefaults()
-        defer { userDefaults.removePersistentDomain(forName: suiteName) }
-
-        let settings = AppSettings(
-            userDefaults: userDefaults,
-            detectedAgents: [
-                detectedAgent(.claude),
-                detectedAgent(.codex),
-            ]
-        )
-
-        XCTAssertEqual(
-            settings.agentCommandTemplate,
-            AgentCLI.codex.commandTemplate
-        )
-    }
-
-    func testInvalidStoredTemplateMigratesToNone() {
-        let (userDefaults, suiteName) = makeUserDefaults()
-        defer { userDefaults.removePersistentDomain(forName: suiteName) }
-        userDefaults.set(
-            #"codex exec "{prompt}""#,
-            forKey: "AndrewDictate.agentCommandTemplate"
-        )
-
-        let settings = AppSettings(
-            userDefaults: userDefaults,
-            detectedAgents: [detectedAgent(.codex)]
-        )
-
-        XCTAssertEqual(settings.agentCommandTemplate, "")
     }
 
     func testActiveEngineVersionCanBeRemovedAndRequiresRepreparation() {
@@ -226,15 +138,7 @@ final class AppSettingsTests: XCTestCase {
         userDefaults.removePersistentDomain(forName: suiteName)
         return (userDefaults, suiteName)
     }
-
-    private func detectedAgent(_ cli: AgentCLI) -> DetectedAgentCLI {
-        DetectedAgentCLI(
-            cli: cli,
-            executableURL: URL(fileURLWithPath: "/usr/local/bin/\(cli.rawValue)")
-        )
-    }
 }
-
 
 extension AppSettingsTests {
     @MainActor

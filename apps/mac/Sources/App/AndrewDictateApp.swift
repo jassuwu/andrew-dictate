@@ -17,11 +17,6 @@ struct AndrewDictateApp: App {
             }
             .disabled(coordinator.lastTranscript == nil)
 
-            Button("copy last answer") {
-                coordinator.copyLastAnswer()
-            }
-            .disabled(coordinator.lastAnswer == nil)
-
             Divider()
 
             Button("settings…") {

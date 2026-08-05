@@ -7,13 +7,8 @@ final class FeedbackSounds {
         case end
     }
 
-    private struct SoundKey: Hashable {
-        let cue: Cue
-        let mode: DictationMode
-    }
-
     private let settings: AppSettings
-    private var players: [SoundKey: AVAudioPlayer] = [:]
+    private var players: [Cue: AVAudioPlayer] = [:]
 
     init(
         settings: AppSettings = .shared,
@@ -21,42 +16,39 @@ final class FeedbackSounds {
     ) {
         self.settings = settings
 
-        for mode in DictationMode.allCases {
-            for cue in [Cue.start, .end] {
-                let key = SoundKey(cue: cue, mode: mode)
-                let resourceName = "\(mode.rawValue)-\(cue.resourceSuffix)"
+        for cue in [Cue.start, .end] {
+            let resourceName = "dictation-\(cue.resourceSuffix)"
 
-                guard let url = Self.soundURL(
-                    named: resourceName,
-                    in: bundle
-                ) else {
-                    print(
-                        "feedback sound unavailable: "
-                            + resourceName
-                            + ".wav"
-                    )
-                    continue
-                }
+            guard let url = Self.soundURL(
+                named: resourceName,
+                in: bundle
+            ) else {
+                print(
+                    "feedback sound unavailable: "
+                        + resourceName
+                        + ".wav"
+                )
+                continue
+            }
 
-                do {
-                    let player = try AVAudioPlayer(contentsOf: url)
-                    player.volume = 0.55
-                    player.prepareToPlay()
-                    players[key] = player
-                } catch {
-                    print(
-                        "feedback sound unavailable: "
-                            + resourceName
-                            + ".wav"
-                    )
-                }
+            do {
+                let player = try AVAudioPlayer(contentsOf: url)
+                player.volume = 0.55
+                player.prepareToPlay()
+                players[cue] = player
+            } catch {
+                print(
+                    "feedback sound unavailable: "
+                        + resourceName
+                        + ".wav"
+                )
             }
         }
     }
 
-    func play(_ cue: Cue, for mode: DictationMode) {
+    func play(_ cue: Cue) {
         guard settings.soundFeedbackEnabled,
-              let player = players[SoundKey(cue: cue, mode: mode)] else {
+              let player = players[cue] else {
             return
         }
 

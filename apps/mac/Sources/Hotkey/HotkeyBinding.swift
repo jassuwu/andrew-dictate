@@ -1,20 +1,6 @@
 import CoreGraphics
 import Foundation
 
-enum DictationMode: String, Codable, CaseIterable, Hashable, Sendable {
-    case dictation
-    case command
-
-    var other: Self {
-        switch self {
-        case .dictation:
-            .command
-        case .command:
-            .dictation
-        }
-    }
-}
-
 struct HotkeyBinding: Codable, Hashable, Identifiable, Sendable {
     let keyCode: CGKeyCode
     let displayName: String
@@ -50,7 +36,6 @@ struct HotkeyBinding: Codable, Hashable, Identifiable, Sendable {
     )
 
     static let dictation = fn
-    static let command = rightOption
 
     static let supported: [HotkeyBinding] = [
         .fn,
@@ -61,42 +46,28 @@ struct HotkeyBinding: Codable, Hashable, Identifiable, Sendable {
         .rightControl,
         .leftControl,
     ]
-
-    static func defaultBinding(for mode: DictationMode) -> HotkeyBinding {
-        switch mode {
-        case .dictation:
-            .dictation
-        case .command:
-            .command
-        }
-    }
 }
 
 extension UserDefaults {
-    func hotkeyBinding(for mode: DictationMode) -> HotkeyBinding {
-        guard let data = data(forKey: hotkeyKey(for: mode)),
+    func hotkeyBinding() -> HotkeyBinding {
+        guard let data = data(
+            forKey: "AndrewDictate.hotkey.dictation"
+        ),
               let binding = try? JSONDecoder().decode(
                   HotkeyBinding.self,
                   from: data
               ) else {
-            return .defaultBinding(for: mode)
+            return .dictation
         }
 
         return binding
     }
 
-    func setHotkeyBinding(
-        _ binding: HotkeyBinding,
-        for mode: DictationMode
-    ) {
+    func setHotkeyBinding(_ binding: HotkeyBinding) {
         guard let data = try? JSONEncoder().encode(binding) else {
             return
         }
 
-        set(data, forKey: hotkeyKey(for: mode))
-    }
-
-    private func hotkeyKey(for mode: DictationMode) -> String {
-        "AndrewDictate.hotkey.\(mode.rawValue)"
+        set(data, forKey: "AndrewDictate.hotkey.dictation")
     }
 }

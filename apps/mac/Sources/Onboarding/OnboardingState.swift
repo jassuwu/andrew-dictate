@@ -18,7 +18,6 @@ struct OnboardingState: Equatable, Sendable {
     private(set) var accessibilityStatus: OnboardingRowStatus = .pending
     private(set) var modelStatus: OnboardingRowStatus = .pending
     private(set) var whileYouWaitVisible = false
-    private(set) var optionalConfigurationIsEditing = false
     private(set) var completion: OnboardingCompletion = .pending
 
     var autoFinishArmed: Bool {
@@ -26,10 +25,6 @@ struct OnboardingState: Equatable, Sendable {
             && microphoneStatus == .ready
             && accessibilityStatus == .ready
             && modelStatus == .ready
-    }
-
-    var autoFinishReady: Bool {
-        autoFinishArmed && !optionalConfigurationIsEditing
     }
 
     @discardableResult
@@ -64,14 +59,9 @@ struct OnboardingState: Equatable, Sendable {
         modelStatus = status
     }
 
-    mutating func setOptionalConfigurationEditing(_ isEditing: Bool) {
-        optionalConfigurationIsEditing =
-            whileYouWaitVisible && isEditing
-    }
-
     @discardableResult
     mutating func finishAutomatically() -> Bool {
-        guard autoFinishReady else {
+        guard autoFinishArmed else {
             return false
         }
         completion = .finished

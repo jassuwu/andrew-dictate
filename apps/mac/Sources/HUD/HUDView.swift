@@ -3,8 +3,7 @@ import SwiftUI
 @MainActor
 final class HUDViewModel: ObservableObject {
     @Published private(set) var state: DictationCoordinator.State
-    @Published private(set) var commandFeedback: String?
-    @Published private(set) var mode: DictationMode?
+    @Published private(set) var feedbackMessage: String?
     @Published private(set) var layout: HUDLayout
     @Published private(set) var presentationGeneration = 0
     @Published private(set) var levelRing = BrandLineLevelRing()
@@ -34,11 +33,8 @@ final class HUDViewModel: ObservableObject {
     }
 
     var content: HUDContent {
-        if let commandFeedback {
-            return .text(
-                primary: commandFeedback,
-                secondary: nil
-            )
+        if let feedbackMessage {
+            return .text(feedbackMessage)
         }
 
         switch state {
@@ -46,72 +42,16 @@ final class HUDViewModel: ObservableObject {
             return .wave
         case .prewarming:
             return .prewarming
-        case .asking:
-            return .text(primary: "asking…", secondary: nil)
-        case .screenAsking:
-            return .text(
-                primary: "looking at your screen…",
-                secondary: nil
-            )
-        case let .askStreaming(answer, _):
-            return .text(
-                primary: HUDAnswerFormatter.preview(answer),
-                secondary: nil
-            )
-        case let .askAnswer(answer, _):
-            return .text(
-                primary: HUDAnswerFormatter.preview(answer),
-                secondary: nil
-            )
-        case .askThreadOpen:
-            return .text(primary: "follow up…", secondary: nil)
-        case let .gatePending(
-            commandPreview,
-            confirmationKeyName
-        ):
-            return .text(
-                primary: commandPreview,
-                secondary:
-                    "tap \(confirmationKeyName) to run · esc to cancel"
-            )
         case let .transcriptFlash(transcript):
-            return .text(primary: transcript, secondary: nil)
+            return .text(transcript)
         }
     }
 
-    var isThreadOpen: Bool {
-        switch state {
-        case let .asking(threadOpen),
-             let .screenAsking(threadOpen),
-             let .askStreaming(_, threadOpen),
-             let .askAnswer(_, threadOpen):
-            threadOpen
-        case .askThreadOpen:
-            true
-        case .idle,
-             .prewarming,
-             .recording,
-             .transcribing,
-             .gatePending,
-             .transcriptFlash:
-            false
-        }
-    }
-
-    func update(
-        state: DictationCoordinator.State,
-        mode: DictationMode? = nil
-    ) {
+    func update(state: DictationCoordinator.State) {
         let previousState = self.state
 
         if state != previousState {
             waveTransitionStartedAt = Date()
-        }
-
-        if let mode {
-            self.mode = mode
-        } else if state == .idle || state == .prewarming {
-            self.mode = nil
         }
 
         configureLevelSampling(
@@ -119,27 +59,17 @@ final class HUDViewModel: ObservableObject {
             previousState: previousState
         )
         self.state = state
-        commandFeedback = nil
+        feedbackMessage = nil
         presentationGeneration += 1
     }
 
-    func showCommandFeedback(_ message: String) {
-        commandFeedback = message
+    func showFeedback(_ message: String) {
+        feedbackMessage = message
         presentationGeneration += 1
     }
 
-    func updateStreamingAnswer(
-        _ answer: String,
-        threadOpen: Bool
-    ) {
-        state = .askStreaming(
-            answer,
-            threadOpen: threadOpen
-        )
-    }
-
-    func clearCommandFeedback() {
-        commandFeedback = nil
+    func clearFeedback() {
+        feedbackMessage = nil
         presentationGeneration += 1
     }
 
@@ -210,8 +140,8 @@ struct HUDView: View {
     var body: some View {
         ZStack {
             Group {
-                if let commandFeedback = viewModel.commandFeedback {
-                    textPill(commandFeedback)
+                if let feedbackMessage = viewModel.feedbackMessage {
+                    textPill(feedbackMessage)
                 } else {
                     switch viewModel.state {
                     case .idle:
@@ -222,24 +152,6 @@ struct HUDView: View {
                         livePill(phase: .recording)
                     case .transcribing:
                         livePill(phase: .transcribing)
-                    case .asking:
-                        textPill("asking…")
-                    case .screenAsking:
-                        textPill("looking at your screen…")
-                    case let .askStreaming(answer, _):
-                        textPill(HUDAnswerFormatter.preview(answer))
-                    case let .askAnswer(answer, _):
-                        textPill(HUDAnswerFormatter.preview(answer))
-                    case .askThreadOpen:
-                        textPill("follow up…")
-                    case let .gatePending(
-                        commandPreview,
-                        confirmationKeyName
-                    ):
-                        gatePill(
-                            commandPreview: commandPreview,
-                            confirmationKeyName: confirmationKeyName
-                        )
                     case let .transcriptFlash(transcript):
                         textPill(transcript)
                     }
@@ -262,10 +174,6 @@ struct HUDView: View {
         )
     }
 
-    private var isCommandMode: Bool {
-        viewModel.mode == .command
-    }
-
     private var prewarmingPill: some View {
         capsule {
             ProgressView()
@@ -286,8 +194,7 @@ struct HUDView: View {
                 phase: phase,
                 levels: viewModel.displayLevels,
                 transitionStartedAt:
-                    viewModel.waveTransitionStartedAt,
-                isCommandMode: isCommandMode
+                    viewModel.waveTransitionStartedAt
             )
         }
         .accessibilityElement(children: .ignore)
@@ -308,34 +215,6 @@ struct HUDView: View {
                     .horizontal,
                     HUDLayoutEngine.horizontalPadding
                 )
-        }
-    }
-
-    private func gatePill(
-        commandPreview: String,
-        confirmationKeyName: String
-    ) -> some View {
-        capsule {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(commandPreview)
-                    .font(Font(HUDLayoutEngine.primaryFont))
-                    .foregroundStyle(HUDGold.pale)
-                    .lineLimit(viewModel.layout.lineCount)
-                    .lineSpacing(HUDLayoutEngine.wrappedLineSpacing)
-                    .truncationMode(.tail)
-
-                Text(
-                    "tap \(confirmationKeyName) to run · esc to cancel"
-                )
-                .font(Font(HUDLayoutEngine.secondaryFont))
-                .foregroundStyle(HUDGold.pale.opacity(0.68))
-                .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(
-                .horizontal,
-                HUDLayoutEngine.horizontalPadding
-            )
         }
     }
 
@@ -366,27 +245,9 @@ struct HUDView: View {
                         style: .continuous
                     )
                     .stroke(
-                        HUDGold.mid.opacity(
-                            isCommandMode ? 0.70 : 0.35
-                        ),
+                        HUDGold.mid.opacity(0.35),
                         lineWidth: 1
                     )
-
-                    if viewModel.isThreadOpen {
-                        Circle()
-                            .fill(HUDGold.mid)
-                            .frame(width: 7, height: 7)
-                            .overlay {
-                                Circle()
-                                    .stroke(
-                                        HUDGold.black.opacity(0.82),
-                                        lineWidth: 1
-                                    )
-                            }
-                            .padding(.top, 1)
-                            .padding(.trailing, 12)
-                            .accessibilityHidden(true)
-                    }
                 }
             }
     }
@@ -407,11 +268,6 @@ private enum HUDGold {
         red: 158.0 / 255.0,
         green: 117.0 / 255.0,
         blue: 39.0 / 255.0
-    )
-    static let commandPale = Color(
-        red: 255.0 / 255.0,
-        green: 246.0 / 255.0,
-        blue: 201.0 / 255.0
     )
     static let black = Color(
         red: 11.0 / 255.0,
@@ -440,7 +296,6 @@ struct GoldSoundWave: View {
     let phase: GoldWavePhase
     let levels: [Float]
     let transitionStartedAt: Date
-    let isCommandMode: Bool
 
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
@@ -471,9 +326,7 @@ struct GoldSoundWave: View {
 
     private var barGradient: LinearGradient {
         LinearGradient(
-            colors: isCommandMode
-                ? [HUDGold.commandPale, HUDGold.mid]
-                : [HUDGold.pale, HUDGold.deep],
+            colors: [HUDGold.pale, HUDGold.deep],
             startPoint: .top,
             endPoint: .bottom
         )

@@ -2,54 +2,41 @@ import AppKit
 
 @MainActor
 final class HotkeyMonitor {
-    var onBegin: ((DictationMode) -> Void)?
-    var onEnd: ((DictationMode) -> Void)?
-    var onCancel: ((DictationMode) -> Void)?
-    var onLockBegin: ((DictationMode) -> Void)?
-    var onLockEnd: ((DictationMode) -> Void)?
-    var onLockCancel: ((DictationMode) -> Void)?
-    var onKeyDetected: ((DictationMode) -> Void)?
-    var onModeKeyPressed: ((DictationMode, TimeInterval) -> Bool)?
-    var onModeKeyReleased: ((DictationMode, TimeInterval) -> Void)?
+    var onBegin: (() -> Void)?
+    var onEnd: (() -> Void)?
+    var onCancel: (() -> Void)?
+    var onLockBegin: (() -> Void)?
+    var onLockEnd: (() -> Void)?
+    var onLockCancel: (() -> Void)?
+    var onKeyDetected: (() -> Void)?
     var onEscape: (() -> Bool)?
 
     private var monitors: [Any] = []
     private let settings: AppSettings
-    private var bindings: [DictationMode: HotkeyBinding]
+    private var binding: HotkeyBinding
     private var pressedKeyCodes: Set<CGKeyCode> = []
-    private var consumedKeyModes: [CGKeyCode: DictationMode] = [:]
     private var detector = TapLockDetector()
     private var provisionalEndTask: Task<Void, Never>?
     private var isDetectionOnly = false
 
     init(settings: AppSettings = .shared) {
         self.settings = settings
-        bindings = Dictionary(
-            uniqueKeysWithValues: DictationMode.allCases.map {
-                ($0, settings.hotkeyBinding(for: $0))
-            }
-        )
+        binding = settings.dictationHotkey
         installMonitors()
     }
 
     @discardableResult
-    func rebind(
-        _ mode: DictationMode,
-        to binding: HotkeyBinding
-    ) -> Bool {
-        guard bindings[mode] != binding else {
+    func rebind(to newBinding: HotkeyBinding) -> Bool {
+        guard binding != newBinding else {
             return true
         }
-        guard settings.setHotkeyBinding(binding, for: mode) else {
+        guard settings.setHotkeyBinding(newBinding) else {
             return false
         }
 
-        perform(detector.cancelForRebind(mode))
-        if let oldKeyCode = bindings[mode]?.keyCode {
-            pressedKeyCodes.remove(oldKeyCode)
-            consumedKeyModes.removeValue(forKey: oldKeyCode)
-        }
-        bindings[mode] = binding
+        perform(detector.cancelForRebind())
+        pressedKeyCodes.remove(binding.keyCode)
+        binding = newBinding
         return true
     }
 
@@ -66,7 +53,6 @@ final class HotkeyMonitor {
         provisionalEndTask?.cancel()
         provisionalEndTask = nil
         pressedKeyCodes.removeAll()
-        consumedKeyModes.removeAll()
         perform(detector.reset())
     }
 
@@ -116,54 +102,30 @@ final class HotkeyMonitor {
         if pressedKeyCodes.contains(keyCode) {
             pressedKeyCodes.remove(keyCode)
             if isDetectionOnly {
-                consumedKeyModes.removeValue(forKey: keyCode)
-                return
-            }
-            if let consumedMode = consumedKeyModes.removeValue(
-                forKey: keyCode
-            ) {
-                onModeKeyReleased?(consumedMode, event.timestamp)
                 return
             }
 
-            guard let mode = mode(boundTo: keyCode) else {
+            guard keyCode == binding.keyCode else {
                 return
             }
-            perform(
-                detector.modifierReleased(
-                    mode,
-                    at: event.timestamp
-                )
-            )
+            perform(detector.modifierReleased(at: event.timestamp))
             return
         }
 
-        guard let mode = mode(boundTo: keyCode),
-              let binding = bindings[mode],
+        guard keyCode == binding.keyCode,
               let modifierFlag = modifierFlag(for: binding),
               event.modifierFlags.contains(modifierFlag) else {
             return
         }
 
         pressedKeyCodes.insert(keyCode)
-        onKeyDetected?(mode)
+        onKeyDetected?()
 
         guard !isDetectionOnly else {
             return
         }
 
-        if onModeKeyPressed?(mode, event.timestamp) == true {
-            consumedKeyModes[keyCode] = mode
-            _ = detector.keyDown(isEscape: false)
-            return
-        }
-
-        perform(
-            detector.modifierPressed(
-                mode,
-                at: event.timestamp
-            )
-        )
+        perform(detector.modifierPressed(at: event.timestamp))
     }
 
     private func handleKeyDown(_ event: NSEvent) {
@@ -177,12 +139,6 @@ final class HotkeyMonitor {
             return
         }
         perform(detector.keyDown(isEscape: isEscape))
-    }
-
-    private func mode(boundTo keyCode: CGKeyCode) -> DictationMode? {
-        DictationMode.allCases.first {
-            bindings[$0]?.keyCode == keyCode
-        }
     }
 
     private func modifierFlag(
@@ -208,26 +164,26 @@ final class HotkeyMonitor {
     private func perform(_ actions: [TapLockDetector.Action]) {
         for action in actions {
             switch action {
-            case let .begin(mode):
-                onBegin?(mode)
+            case .begin:
+                onBegin?()
             case .provisionalEnd:
                 scheduleProvisionalEnd()
-            case let .end(mode):
+            case .end:
                 provisionalEndTask?.cancel()
                 provisionalEndTask = nil
-                onEnd?(mode)
-            case let .cancel(mode):
+                onEnd?()
+            case .cancel:
                 provisionalEndTask?.cancel()
                 provisionalEndTask = nil
-                onCancel?(mode)
-            case let .lockBegin(mode):
+                onCancel?()
+            case .lockBegin:
                 provisionalEndTask?.cancel()
                 provisionalEndTask = nil
-                onLockBegin?(mode)
-            case let .lockEnd(mode):
-                onLockEnd?(mode)
-            case let .lockCancel(mode):
-                onLockCancel?(mode)
+                onLockBegin?()
+            case .lockEnd:
+                onLockEnd?()
+            case .lockCancel:
+                onLockCancel?()
             }
         }
     }

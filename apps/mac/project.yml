@@ -22,10 +22,6 @@ targets:
         buildPhase: resources
       - path: Sources/Resources/Sounds/dictation-end.wav
         buildPhase: resources
-      - path: Sources/Resources/Sounds/command-start.wav
-        buildPhase: resources
-      - path: Sources/Resources/Sounds/command-end.wav
-        buildPhase: resources
     dependencies:
       - package: FluidAudio
     settings:
@@ -53,7 +49,6 @@ targets:
     platform: macOS
     sources:
       - Tests
-      - Sources/Actions
       - path: Sources/Cleanup
         excludes:
           - CleanupLabView.swift
@@ -61,17 +56,10 @@ targets:
       - Sources/HUD/BrandLineMath.swift
       - Sources/HUD/HUDLayoutEngine.swift
       - Sources/Settings/AppSettings.swift
-      - Sources/Settings/AgentCLIDetector.swift
       - Sources/Settings/EngineSwitchState.swift
       - Sources/Onboarding/OnboardingState.swift
       - Sources/Hotkey/HotkeyBinding.swift
       - Sources/Hotkey/TapLockDetector.swift
-      - Sources/Command/CommandRouter.swift
-      - Sources/Command/AppMatcher.swift
-      - Sources/Command/AgentDelegator.swift
-      - Sources/Command/AskEngine.swift
-      - Sources/Command/ScreenCapture.swift
-      - Sources/Command/DelegationGate.swift
       - Sources/Insertion/FocusAnchor.swift
       - Sources/Instrumentation/UtteranceTimeline.swift
     settings:

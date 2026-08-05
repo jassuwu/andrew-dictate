@@ -2,13 +2,13 @@ import Foundation
 
 struct TapLockDetector {
     enum Action: Equatable {
-        case begin(DictationMode)
-        case provisionalEnd(DictationMode)
-        case end(DictationMode)
-        case cancel(DictationMode)
-        case lockBegin(DictationMode)
-        case lockEnd(DictationMode)
-        case lockCancel(DictationMode)
+        case begin
+        case provisionalEnd
+        case end
+        case cancel
+        case lockBegin
+        case lockEnd
+        case lockCancel
     }
 
     static let maximumTapDuration: TimeInterval = 0.300
@@ -17,41 +17,31 @@ struct TapLockDetector {
     private enum State {
         case idle
         case holding(
-            mode: DictationMode,
             pressedAt: TimeInterval,
             isSecondTap: Bool
         )
-        case awaitingSecondTap(
-            mode: DictationMode,
-            releasedAt: TimeInterval
-        )
-        case cancelledHold(mode: DictationMode)
-        case locked(mode: DictationMode)
-        case endingLock(mode: DictationMode)
+        case awaitingSecondTap(releasedAt: TimeInterval)
+        case cancelledHold
+        case locked
+        case endingLock
     }
 
     private var state: State = .idle
 
-    mutating func modifierPressed(
-        _ mode: DictationMode,
-        at timestamp: TimeInterval
-    ) -> [Action] {
+    mutating func modifierPressed(at timestamp: TimeInterval) -> [Action] {
         switch state {
         case .idle:
             state = .holding(
-                mode: mode,
                 pressedAt: timestamp,
                 isSecondTap: false
             )
-            return [.begin(mode)]
+            return [.begin]
 
-        case let .awaitingSecondTap(pendingMode, releasedAt):
+        case let .awaitingSecondTap(releasedAt):
             let gap = timestamp - releasedAt
-            if mode == pendingMode,
-               gap >= 0,
+            if gap >= 0,
                gap < Self.maximumTapGap {
                 state = .holding(
-                    mode: mode,
                     pressedAt: timestamp,
                     isSecondTap: true
                 )
@@ -59,17 +49,13 @@ struct TapLockDetector {
             }
 
             state = .holding(
-                mode: mode,
                 pressedAt: timestamp,
                 isSecondTap: false
             )
-            return [.end(pendingMode), .begin(mode)]
+            return [.end, .begin]
 
-        case let .locked(lockedMode):
-            guard mode == lockedMode else {
-                return []
-            }
-            state = .endingLock(mode: mode)
+        case .locked:
+            state = .endingLock
             return []
 
         case .holding, .cancelledHold, .endingLock:
@@ -77,51 +63,37 @@ struct TapLockDetector {
         }
     }
 
-    mutating func modifierReleased(
-        _ mode: DictationMode,
-        at timestamp: TimeInterval
-    ) -> [Action] {
+    mutating func modifierReleased(at timestamp: TimeInterval) -> [Action] {
         switch state {
-        case let .holding(heldMode, pressedAt, isSecondTap):
-            guard mode == heldMode else {
-                return []
-            }
-
+        case let .holding(pressedAt, isSecondTap):
             let duration = timestamp - pressedAt
             let isQuickTap = duration >= 0
                 && duration < Self.maximumTapDuration
 
             if isSecondTap && isQuickTap {
-                state = .locked(mode: mode)
-                return [.cancel(mode), .lockBegin(mode)]
+                state = .locked
+                return [.cancel, .lockBegin]
             }
 
             if isQuickTap {
                 state = .awaitingSecondTap(
-                    mode: mode,
                     releasedAt: timestamp
                 )
                 // Only sub-300 ms taps wait for the 350 ms double-tap
                 // window; real utterances are held longer and end immediately.
-                return [.provisionalEnd(mode)]
+                return [.provisionalEnd]
             }
 
             state = .idle
-            return [.end(mode)]
+            return [.end]
 
-        case let .cancelledHold(heldMode):
-            guard mode == heldMode else {
-                return []
-            }
+        case .cancelledHold:
             state = .idle
             return []
 
-        case let .endingLock(lockedMode):
-            guard mode == lockedMode else {
-                return []
-            }
+        case .endingLock:
             state = .idle
-            return [.lockEnd(mode)]
+            return [.lockEnd]
 
         case .idle, .awaitingSecondTap, .locked:
             return []
@@ -129,25 +101,25 @@ struct TapLockDetector {
     }
 
     mutating func provisionalEndWindowExpired() -> [Action] {
-        guard case let .awaitingSecondTap(mode, _) = state else {
+        guard case .awaitingSecondTap = state else {
             return []
         }
         state = .idle
-        return [.end(mode)]
+        return [.end]
     }
 
     mutating func keyDown(isEscape: Bool) -> [Action] {
         switch state {
-        case let .holding(mode, _, _):
-            state = .cancelledHold(mode: mode)
-            return [.cancel(mode)]
+        case .holding:
+            state = .cancelledHold
+            return [.cancel]
 
-        case let .locked(mode), let .endingLock(mode):
+        case .locked, .endingLock:
             guard isEscape else {
                 return []
             }
             state = .idle
-            return [.lockCancel(mode)]
+            return [.lockCancel]
 
         case .idle, .awaitingSecondTap:
             return []
@@ -157,27 +129,25 @@ struct TapLockDetector {
         }
     }
 
-    mutating func cancelForRebind(_ mode: DictationMode) -> [Action] {
+    mutating func cancelForRebind() -> [Action] {
         switch state {
-        case let .holding(heldMode, _, _) where heldMode == mode:
+        case .holding:
             state = .idle
-            return [.cancel(mode)]
+            return [.cancel]
 
-        case let .awaitingSecondTap(pendingMode, _)
-            where pendingMode == mode:
+        case .awaitingSecondTap:
             state = .idle
-            return [.cancel(mode)]
+            return [.cancel]
 
-        case let .cancelledHold(heldMode) where heldMode == mode:
+        case .cancelledHold:
             state = .idle
             return []
 
-        case let .locked(lockedMode) where lockedMode == mode,
-             let .endingLock(lockedMode) where lockedMode == mode:
+        case .locked, .endingLock:
             state = .idle
-            return [.lockCancel(mode)]
+            return [.lockCancel]
 
-        default:
+        case .idle:
             return []
         }
     }
@@ -186,12 +156,10 @@ struct TapLockDetector {
         defer { state = .idle }
 
         switch state {
-        case let .holding(mode, _, _),
-             let .awaitingSecondTap(mode, _):
-            return [.cancel(mode)]
-        case let .locked(mode),
-             let .endingLock(mode):
-            return [.lockCancel(mode)]
+        case .holding, .awaitingSecondTap:
+            return [.cancel]
+        case .locked, .endingLock:
+            return [.lockCancel]
         case .idle, .cancelledHold:
             return []
         }

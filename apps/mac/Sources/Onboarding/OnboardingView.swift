@@ -155,15 +155,14 @@ private final class OnboardingPermissionModel: ObservableObject {
 
 struct OnboardingView: View {
     private static let collapsedHeight: CGFloat = 430
-    private static let expandedHeight: CGFloat = 735
+    private static let expandedHeight: CGFloat = 590
 
     @ObservedObject private var coordinator: DictationCoordinator
     @ObservedObject private var settings: AppSettings
     @StateObject private var permissions: OnboardingPermissionModel
     @State private var onboarding: OnboardingState
-    @State private var testedHotkey: DictationMode?
+    @State private var hotkeyWasDetected = false
 
-    private let detectedAgents: [DetectedAgentCLI]
     private let windowResizer: OnboardingWindowResizer
 
     fileprivate init(
@@ -186,7 +185,6 @@ struct OnboardingView: View {
         _settings = ObservedObject(wrappedValue: coordinator.settings)
         _permissions = StateObject(wrappedValue: permissions)
         _onboarding = State(initialValue: onboarding)
-        detectedAgents = AgentCLIDetector.detect()
         self.windowResizer = windowResizer
     }
 
@@ -253,7 +251,7 @@ struct OnboardingView: View {
                 return
             }
 
-            testedHotkey = detection.mode
+            hotkeyWasDetected = true
             do {
                 try await Task.sleep(for: .milliseconds(420))
             } catch {
@@ -263,10 +261,10 @@ struct OnboardingView: View {
                     == detection.sequence else {
                 return
             }
-            testedHotkey = nil
+            hotkeyWasDetected = false
         }
-        .task(id: onboarding.autoFinishReady) {
-            guard onboarding.autoFinishReady else {
+        .task(id: onboarding.autoFinishArmed) {
+            guard onboarding.autoFinishArmed else {
                 return
             }
 
@@ -345,35 +343,6 @@ struct OnboardingView: View {
                             + "to protect the first word.",
                         isOn: $settings.preRollEnabled
                     )
-                    cardDivider
-
-                    HStack(alignment: .firstTextBaseline, spacing: 14) {
-                        Text("agent cli")
-                            .font(BrandUI.bodyFont.weight(.medium))
-                            .frame(width: 70, alignment: .leading)
-
-                        AgentCLIEditor(
-                            settings: settings,
-                            detectedAgents: detectedAgents,
-                            onEditingChanged: {
-                                onboarding
-                                    .setOptionalConfigurationEditing($0)
-                            }
-                        )
-                        .frame(
-                            maxWidth: .infinity,
-                            alignment: .leading
-                        )
-                    }
-                    cardDivider
-
-                    SettingsToggleRow(
-                        "spoken answers",
-                        explanation:
-                            "reads ask answers aloud in two short "
-                            + "spoken sentences.",
-                        isOn: $settings.voiceAnswersEnabled
-                    )
                 }
             }
         }
@@ -386,31 +355,29 @@ struct OnboardingView: View {
                     .font(BrandUI.bodyFont.weight(.medium))
 
                 Text(
-                    testedHotkey == nil
-                        ? "try either hold key"
-                        : "\(testedHotkey!.rawValue) detected"
+                    hotkeyWasDetected
+                        ? "dictation detected"
+                        : "try holding the dictation key"
                 )
                 .font(.caption)
                 .foregroundStyle(
-                    testedHotkey == nil
-                        ? BrandUI.textSecondary
-                        : BrandUI.gold
+                    hotkeyWasDetected
+                        ? BrandUI.gold
+                        : BrandUI.textSecondary
                 )
             }
 
             Spacer(minLength: 8)
 
-            ForEach(DictationMode.allCases, id: \.self) { mode in
-                VStack(spacing: 3) {
-                    KeyChip(
-                        settings.hotkeyBinding(for: mode).displayName,
-                        isActive: testedHotkey == mode
-                    )
+            VStack(spacing: 3) {
+                KeyChip(
+                    settings.dictationHotkey.displayName,
+                    isActive: hotkeyWasDetected
+                )
 
-                    Text(mode.rawValue)
-                        .font(.caption2)
-                        .foregroundStyle(BrandUI.textSecondary)
-                }
+                Text("dictation")
+                    .font(.caption2)
+                    .foregroundStyle(BrandUI.textSecondary)
             }
         }
     }

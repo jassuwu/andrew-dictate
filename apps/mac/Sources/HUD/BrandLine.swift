@@ -135,7 +135,6 @@ struct BrandLine: View {
     }
 
     let phase: BrandLinePhase
-    let mode: DictationMode?
     let levels: BrandLineLevelRing
     let transitionStartedAt: Date
 
@@ -174,11 +173,7 @@ struct BrandLine: View {
             lineCap: .round,
             lineJoin: .round
         )
-        let isCommandRecording =
-            phase == .recording && mode == .command
-        let lineColor = isCommandRecording
-            ? BrandPalette.persimmon
-            : BrandPalette.cream
+        let lineColor = BrandPalette.cream
 
         let prefix = scaledPath(
             points: [

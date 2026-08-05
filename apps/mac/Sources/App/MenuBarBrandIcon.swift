@@ -21,12 +21,6 @@ enum MenuBarBrandIcon {
             return badge(recording: true)
         case .idle,
              .prewarming,
-             .asking,
-             .screenAsking,
-             .askStreaming,
-             .askAnswer,
-             .askThreadOpen,
-             .gatePending,
              .transcriptFlash:
             return badge(recording: false)
         }
