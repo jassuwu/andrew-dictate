@@ -58,6 +58,7 @@ targets:
       - Sources/Settings/AppSettings.swift
       - Sources/Settings/EngineSwitchState.swift
       - Sources/Onboarding/OnboardingState.swift
+      - Sources/Permissions/SetupGate.swift
       - Sources/Hotkey/HotkeyBinding.swift
       - Sources/Hotkey/TapLockDetector.swift
       - Sources/Insertion/FocusAnchor.swift

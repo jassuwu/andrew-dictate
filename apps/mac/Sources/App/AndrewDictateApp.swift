@@ -1,10 +1,28 @@
 import AppKit
 import SwiftUI
 
+/// a menu-bar app is never "opened" twice — double-clicking it in
+/// /Applications sends a reopen to the instance already running. that is the
+/// user coming back to us, and the moment to re-verify what we're allowed to do.
+@MainActor
+final class AppLifecycleDelegate: NSObject, NSApplicationDelegate {
+    var onReopen: (() -> Void)?
+
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication,
+        hasVisibleWindows flag: Bool
+    ) -> Bool {
+        onReopen?()
+        return true
+    }
+}
+
 @main
 @MainActor
 struct AndrewDictateApp: App {
     @StateObject private var coordinator = DictationCoordinator()
+    @NSApplicationDelegateAdaptor(AppLifecycleDelegate.self)
+    private var lifecycleDelegate
 
     var body: some Scene {
         MenuBarExtra {
@@ -46,10 +64,20 @@ struct AndrewDictateApp: App {
         } label: {
             Image(
                 nsImage: MenuBarBrandIcon.image(
-                    for: coordinator.state
+                    for: coordinator.state,
+                    needsAttention: coordinator.needsPermissionAttention
                 )
             )
-            .accessibilityLabel("Andrew Dictate")
+            .accessibilityLabel(
+                coordinator.needsPermissionAttention
+                    ? "Andrew Dictate — permission needed"
+                    : "Andrew Dictate"
+            )
+            .task {
+                lifecycleDelegate.onReopen = { [weak coordinator] in
+                    coordinator?.handleReopen()
+                }
+            }
         }
     }
 }

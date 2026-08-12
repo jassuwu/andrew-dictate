@@ -5,8 +5,15 @@ enum MenuBarBrandIcon {
     private static let iconSize = NSSize(width: 18, height: 18)
 
     static func image(
-        for state: DictationCoordinator.State
+        for state: DictationCoordinator.State,
+        needsAttention: Bool = false
     ) -> NSImage {
+        // a permission gap outranks every other state: without it the other
+        // states can never be reached anyway.
+        if needsAttention {
+            return attentionBadge()
+        }
+
         switch state {
         case .transcribing:
             if let hourglass = NSImage(
@@ -23,6 +30,51 @@ enum MenuBarBrandIcon {
              .prewarming:
             return badge(recording: false)
         }
+    }
+
+    /// the badge wearing a warning dot. deliberately not gold — gold means
+    /// recording, and "we're listening" is the one thing this state isn't.
+    private static func attentionBadge() -> NSImage {
+        guard let base = NSImage(named: "MenuBarBadge") else {
+            let fallback = NSImage(
+                systemSymbolName: "exclamationmark.triangle.fill",
+                accessibilityDescription:
+                    "Andrew Dictate needs permission"
+            ) ?? NSImage()
+            fallback.isTemplate = true
+            return fallback
+        }
+
+        let composed = NSImage(size: iconSize, flipped: false) { rect in
+            base.draw(in: rect)
+            let dot = NSRect(
+                x: rect.maxX - 6.5,
+                y: rect.minY,
+                width: 6,
+                height: 6
+            )
+            NSColor(
+                srgbRed: 0xE0 / 255,
+                green: 0x55 / 255,
+                blue: 0x3C / 255,
+                alpha: 1
+            ).setFill()
+            NSBezierPath(ovalIn: dot).fill()
+            NSColor(
+                srgbRed: 0x0B / 255,
+                green: 0x0B / 255,
+                blue: 0x0D / 255,
+                alpha: 1
+            ).setStroke()
+            let ring = NSBezierPath(ovalIn: dot)
+            ring.lineWidth = 1
+            ring.stroke()
+            return true
+        }
+        composed.isTemplate = false
+        composed.accessibilityDescription =
+            "Andrew Dictate needs permission"
+        return composed
     }
 
     /// the actual brand badge, full color. non-template by design: the logo

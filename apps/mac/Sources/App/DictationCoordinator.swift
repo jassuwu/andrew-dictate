@@ -34,6 +34,10 @@ final class DictationCoordinator: ObservableObject {
         subsystem: "gg.jass.dictate",
         category: "pipeline"
     )
+    private let permissionLogger = Logger(
+        subsystem: "gg.jass.dictate",
+        category: "permissions"
+    )
     enum State: Equatable, Sendable {
         case idle
         case prewarming
@@ -62,6 +66,16 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var engineSwitchMessage: String?
     @Published private(set) var hotkeyDetection: HotkeyDetection?
     @Published private(set) var lastTranscript: String?
+    /// re-read at launch, reopen, wake, unlock, and whenever the system says
+    /// the trust table moved. a grant is a fact about now, not a fact we own.
+    @Published private(set) var permissions = PermissionSnapshot(
+        microphoneGranted: false,
+        accessibilityGranted: false
+    )
+
+    var needsPermissionAttention: Bool {
+        settings.onboardingCompleted && !permissions.isDictationReady
+    }
 
     let dictionaryStore: DictionaryStore
     let settings: AppSettings
@@ -215,6 +229,7 @@ final class DictationCoordinator: ObservableObject {
             .store(in: &settingsCancellables)
 
         installSystemLifecycleObservers()
+        permissions = SystemPermissions.snapshot()
 
         if isOnboardingPresented {
             hotkeyMonitor.setDetectionOnly(true)
@@ -741,6 +756,62 @@ final class DictationCoordinator: ObservableObject {
             }
             distributedNotificationObservers.append(observer)
         }
+
+        let trustObserver = distributedCenter.addObserver(
+            forName: SystemPermissions.accessibilityChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshPermissions(moment: .midSession)
+            }
+        }
+        distributedNotificationObservers.append(trustObserver)
+    }
+
+    /// the only way to know. asks the system, publishes the answer, and lets
+    /// the gate decide whether that answer is worth interrupting anyone over.
+    @discardableResult
+    func refreshPermissions(
+        moment: SetupCheckMoment
+    ) -> SetupPresentation {
+        let snapshot = SystemPermissions.snapshot()
+        if snapshot != permissions {
+            permissions = snapshot
+            if !snapshot.isDictationReady {
+                permissionLogger.notice(
+                    """
+                    permission missing — mic: \
+                    \(snapshot.microphoneGranted, privacy: .public), \
+                    accessibility: \
+                    \(snapshot.accessibilityGranted, privacy: .public)
+                    """
+                )
+            }
+        }
+
+        return SetupGate.presentation(
+            onboardingDismissed: settings.onboardingCompleted,
+            permissions: snapshot,
+            moment: moment
+        )
+    }
+
+    /// the user double-clicked the app while it was already living in the
+    /// menu bar — for a window-less app, that is what "reopening" means.
+    func handleReopen() {
+        refreshPermissions(moment: .launchOrReopen)
+    }
+
+    /// says it where the user is already looking, without taking the screen.
+    private func announcePermissionGap(_ message: String) {
+        guard state == .idle else {
+            return
+        }
+
+        Task { @MainActor [weak self] in
+            await self?.flashFeedback(message, duration: 1.8)
+        }
     }
 
     private func handleCaptureInterruption() {
@@ -760,6 +831,9 @@ final class DictationCoordinator: ObservableObject {
     private func handleSystemResume() {
         hotkeyMonitor.reset()
         verifyEngineHealth()
+        // waking or unlocking is not the user coming to *us* — check, but
+        // never take the screen back from whatever they returned to.
+        refreshPermissions(moment: .midSession)
     }
 
     private func verifyEngineHealth() {
@@ -816,6 +890,13 @@ final class DictationCoordinator: ObservableObject {
             return
         }
         guard state == .idle else {
+            return
+        }
+        // the one grant we can verify at the point of use: if the hotkey
+        // reached us at all, accessibility is alive. the mic may not be.
+        guard SystemPermissions.snapshot().microphoneGranted else {
+            refreshPermissions(moment: .midSession)
+            announcePermissionGap("microphone access is off")
             return
         }
         guard let audioRecorder else {
