@@ -1,7 +1,7 @@
 import XCTest
 
 final class HUDLayoutEngineTests: XCTestCase {
-    func testShortTextAndFixedStatesUseMinimumSize() {
+    func testShortTextUsesMinimumSizeAndGlass() {
         let shortText = HUDLayoutEngine.layout(
             for: .text("done"),
             screenWidth: 1_440
@@ -9,20 +9,23 @@ final class HUDLayoutEngineTests: XCTestCase {
 
         XCTAssertEqual(shortText.size, HUDLayoutEngine.minimumSize)
         XCTAssertEqual(shortText.lineCount, 1)
-        XCTAssertEqual(
-            HUDLayoutEngine.layout(
-                for: .wave,
-                screenWidth: 1_440
-            ).size,
-            HUDLayoutEngine.minimumSize
+        XCTAssertEqual(shortText.style, .glass)
+    }
+
+    func testWaveStatesAreBareAtWaveSize() {
+        let wave = HUDLayoutEngine.layout(
+            for: .wave,
+            screenWidth: 1_440
         )
-        XCTAssertEqual(
-            HUDLayoutEngine.layout(
-                for: .prewarming,
-                screenWidth: 1_440
-            ).size,
-            HUDLayoutEngine.minimumSize
+        let prewarming = HUDLayoutEngine.layout(
+            for: .prewarming,
+            screenWidth: 1_440
         )
+
+        XCTAssertEqual(wave.size, HUDLayoutEngine.waveSize)
+        XCTAssertEqual(wave.style, .bare)
+        XCTAssertEqual(prewarming.size, HUDLayoutEngine.waveSize)
+        XCTAssertEqual(prewarming.style, .bare)
     }
 
     func testGrowingTextGrowsWidthMonotonically() {

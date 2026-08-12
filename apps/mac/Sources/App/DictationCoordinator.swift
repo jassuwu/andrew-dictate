@@ -35,7 +35,6 @@ final class DictationCoordinator: ObservableObject {
         case prewarming
         case recording
         case transcribing
-        case transcriptFlash(String)
 
         var displayName: String {
             switch self {
@@ -47,8 +46,6 @@ final class DictationCoordinator: ObservableObject {
                 "recording"
             case .transcribing:
                 "transcribing"
-            case .transcriptFlash:
-                "transcript flash"
             }
         }
 
@@ -111,6 +108,7 @@ final class DictationCoordinator: ObservableObject {
     private var isOnboardingPresented: Bool
     private var hotkeyDetectionSequence = 0
     private var stateGeneration: UInt64 = 0
+    private var transcribingBeganAt: Date?
     private var feedbackGeneration: UInt64 = 0
     private var activeFeedbackGeneration: UInt64?
     private let timelineClock = ContinuousClock()
@@ -748,8 +746,6 @@ final class DictationCoordinator: ObservableObject {
             activeFocusAnchor = nil
             activeTimeline = nil
             setState(.idle)
-        case .transcriptFlash:
-            setState(.idle)
         case .idle, .prewarming, .transcribing:
             break
         }
@@ -801,7 +797,7 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func beginRecording() {
-        if state == .transcribing || state.isTranscriptFlash {
+        if state == .transcribing {
             invalidatePipeline()
             setState(.idle)
         }
@@ -1020,7 +1016,6 @@ final class DictationCoordinator: ObservableObject {
             }
 
             lastTranscript = rawTranscript
-            showTranscriptFlash(pasteTranscript)
             let pasteResult = await paster.paste(
                 pasteTranscript,
                 reasonForLeavingOnPasteboard: {
@@ -1151,23 +1146,30 @@ final class DictationCoordinator: ObservableObject {
         }
 
         pipelineTask = nil
-        if state == .transcribing {
-            setState(.idle)
+        guard state == .transcribing else {
+            return
         }
-    }
 
-    private func showTranscriptFlash(_ transcript: String) {
-        setState(.transcriptFlash(transcript))
-        let generation = stateGeneration
-
+        // success is silent: the lamp's afterglow is the whole goodbye.
+        // hold the panel just long enough for the cool-out to finish.
+        let elapsed = Date().timeIntervalSince(
+            transcribingBeganAt ?? .distantPast
+        )
+        let remaining = max(
+            0,
+            HUDWaveMotion.coolDuration + 0.05 - elapsed
+        )
+        let stateToken = stateGeneration
         Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(1.2))
+            if remaining > 0 {
+                try? await Task.sleep(for: .seconds(remaining))
+            }
             guard let self,
-                  generation == self.stateGeneration,
-                  case .transcriptFlash = self.state else {
+                  stateToken == self.stateGeneration,
+                  self.state == .transcribing else {
                 return
             }
-            self.setState(.idle)
+            self.setState(.idle, fastHUDDismiss: true)
         }
     }
 
@@ -1233,6 +1235,9 @@ final class DictationCoordinator: ObservableObject {
         stateGeneration += 1
         feedbackGeneration += 1
         activeFeedbackGeneration = nil
+        if newState == .transcribing {
+            transcribingBeganAt = Date()
+        }
         state = newState
         hudViewModel.update(state: newState)
 
@@ -1264,19 +1269,10 @@ final class DictationCoordinator: ObservableObject {
             panel.present()
             self.hudViewModel.updateLayout(layout)
             panel.morph(
-                to: layout.size,
+                to: layout,
                 animated: !NSWorkspace.shared
                     .accessibilityDisplayShouldReduceMotion
             )
         }
-    }
-}
-
-private extension DictationCoordinator.State {
-    var isTranscriptFlash: Bool {
-        if case .transcriptFlash = self {
-            return true
-        }
-        return false
     }
 }

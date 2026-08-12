@@ -7,13 +7,23 @@ enum HUDContent: Equatable, Sendable {
     case text(String)
 }
 
+enum HUDStyle: Equatable, Sendable {
+    /// no chrome: a transparent window holding only the lamp line and its glow
+    case bare
+    /// the glass capsule — reserved for exceptional text (errors, copied-instead)
+    case glass
+}
+
 struct HUDLayout: Equatable, Sendable {
     let size: CGSize
     let lineCount: Int
+    let style: HUDStyle
 }
 
 enum HUDLayoutEngine {
     static let minimumSize = CGSize(width: 180, height: 44)
+    /// the lamp line plus room for its glow bleed on every side
+    static let waveSize = CGSize(width: 166, height: 64)
     static let horizontalPadding: CGFloat = 14
     static let measurementSafety: CGFloat = 2
     static let maximumScreenWidthFraction: CGFloat = 0.55
@@ -37,7 +47,11 @@ enum HUDLayoutEngine {
     ) -> HUDLayout {
         switch content {
         case .wave, .prewarming:
-            return HUDLayout(size: minimumSize, lineCount: 1)
+            return HUDLayout(
+                size: waveSize,
+                lineCount: 1,
+                style: .bare
+            )
         case let .text(text):
             let maximumWidth = max(
                 minimumSize.width,
@@ -65,7 +79,8 @@ enum HUDLayoutEngine {
 
             return HUDLayout(
                 size: CGSize(width: width, height: height),
-                lineCount: lineCount
+                lineCount: lineCount,
+                style: .glass
             )
         }
     }

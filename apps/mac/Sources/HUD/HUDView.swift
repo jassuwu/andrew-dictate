@@ -1,20 +1,25 @@
 import SwiftUI
 
+/// motion constants for the lamp line. one source of truth — the coordinator
+/// reads coolDuration so the panel outlives the afterglow by exactly enough.
+enum HUDWaveMotion {
+    static let igniteDuration: TimeInterval = 0.14
+    static let coolDuration: TimeInterval = 0.30
+    static let lineWidth: CGFloat = 86
+    static let amplitude: CGFloat = 7.5
+    static let strokeWidth: CGFloat = 2.6
+    static let coreStrokeWidth: CGFloat = 1.1
+}
+
 @MainActor
 final class HUDViewModel: ObservableObject {
     @Published private(set) var state: DictationCoordinator.State
     @Published private(set) var feedbackMessage: String?
     @Published private(set) var layout: HUDLayout
     @Published private(set) var presentationGeneration = 0
-    @Published private(set) var levelRing = BrandLineLevelRing()
-    @Published private(set) var displayLevels: [Float] = Array(
-        repeating: 0,
-        count: GoldSoundWave.barCount
-    )
-
-    private var waveSmoother = WaveDisplaySmoother(
-        barCount: GoldSoundWave.barCount
-    )
+    /// shaped + thermally smoothed loudness: fast attack, slow release —
+    /// a filament can't cool instantly.
+    @Published private(set) var loudness: Float = 0
     @Published private(set) var waveTransitionStartedAt = Date()
 
     private let audioRecorder: AudioRecorder?
@@ -42,8 +47,6 @@ final class HUDViewModel: ObservableObject {
             return .wave
         case .prewarming:
             return .prewarming
-        case let .transcriptFlash(transcript):
-            return .text(transcript)
         }
     }
 
@@ -89,9 +92,7 @@ final class HUDViewModel: ObservableObject {
             levelSamplingTask = nil
 
             if state != .transcribing {
-                levelRing.reset()
-                waveSmoother.reset()
-                displayLevels = waveSmoother.display
+                loudness = 0
             }
             return
         }
@@ -100,8 +101,8 @@ final class HUDViewModel: ObservableObject {
             return
         }
 
-        levelRing.reset()
-        sampleCurrentLevel()
+        loudness = 0
+        sampleCurrentLevel(interval: 0.033)
         levelSamplingTask?.cancel()
         levelSamplingTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
@@ -111,23 +112,19 @@ final class HUDViewModel: ObservableObject {
                     return
                 }
 
-                self?.sampleCurrentLevel()
+                self?.sampleCurrentLevel(interval: 0.033)
             }
         }
     }
 
-    private func sampleCurrentLevel() {
-        var updatedRing = levelRing
-        updatedRing.push(audioRecorder?.currentLevel ?? 0)
-        levelRing = updatedRing
-
-        let delayed = BrandLineJointMapper.delayedLevels(
-            in: updatedRing,
-            jointCount: GoldSoundWave.barCount
+    private func sampleCurrentLevel(interval: Double) {
+        let shaped = WaveLevelShaper.shape(
+            audioRecorder?.currentLevel ?? 0
         )
-        displayLevels = waveSmoother.update(
-            with: delayed.map(WaveLevelShaper.shape)
-        )
+        let attack = 1 - exp(-interval / 0.040)
+        let release = 1 - exp(-interval / 0.200)
+        let gain = shaped > loudness ? attack : release
+        loudness += (shaped - loudness) * Float(gain)
     }
 }
 
@@ -139,31 +136,33 @@ struct HUDView: View {
 
     var body: some View {
         ZStack {
-            Group {
-                if let feedbackMessage = viewModel.feedbackMessage {
-                    textPill(feedbackMessage)
-                } else {
-                    switch viewModel.state {
-                    case .idle:
-                        EmptyView()
-                    case .prewarming:
-                        prewarmingPill
-                    case .recording:
-                        livePill(phase: .recording)
-                    case .transcribing:
-                        livePill(phase: .transcribing)
-                    case let .transcriptFlash(transcript):
-                        textPill(transcript)
-                    }
+            if let feedbackMessage = viewModel.feedbackMessage {
+                textPill(feedbackMessage)
+                    .id(viewModel.presentationGeneration)
+                    .transition(
+                        .opacity.combined(with: .scale(scale: 0.94))
+                    )
+            } else {
+                switch viewModel.state {
+                case .idle:
+                    EmptyView()
+                case .prewarming:
+                    lampLine(phase: .ember)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Warming up")
+                case .recording:
+                    lampLine(phase: .burn)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Listening")
+                case .transcribing:
+                    lampLine(phase: .cool)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Transcribing")
                 }
             }
-            .id(viewModel.presentationGeneration)
-            .transition(
-                .opacity.combined(with: .scale(scale: 0.94))
-            )
         }
         .animation(
-            reduceMotion
+            reduceMotion || viewModel.feedbackMessage == nil
                 ? nil
                 : .snappy(duration: 0.32, extraBounce: 0.12),
             value: viewModel.presentationGeneration
@@ -174,54 +173,25 @@ struct HUDView: View {
         )
     }
 
-    private var prewarmingPill: some View {
-        capsule {
-            ProgressView()
-                .controlSize(.small)
-                .tint(HUDGold.mid)
-                .scaleEffect(0.72)
-                .frame(width: 14, height: 14)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Warming up")
-    }
-
-    private func livePill(
-        phase: GoldWavePhase
-    ) -> some View {
-        capsule {
-            GoldSoundWave(
-                phase: phase,
-                levels: viewModel.displayLevels,
-                transitionStartedAt:
-                    viewModel.waveTransitionStartedAt
-            )
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(
-            phase == .recording ? "Listening" : "Transcribing"
+    private func lampLine(phase: GoldRippleLine.Phase) -> some View {
+        GoldRippleLine(
+            phase: phase,
+            loudness: viewModel.loudness,
+            startedAt: viewModel.waveTransitionStartedAt
         )
     }
 
     private func textPill(_ message: String) -> some View {
-        capsule {
-            Text(message)
-                .font(Font(HUDLayoutEngine.primaryFont))
-                .foregroundStyle(HUDGold.pale)
-                .lineLimit(viewModel.layout.lineCount)
-                .lineSpacing(HUDLayoutEngine.wrappedLineSpacing)
-                .truncationMode(.tail)
-                .padding(
-                    .horizontal,
-                    HUDLayoutEngine.horizontalPadding
-                )
-        }
-    }
-
-    private func capsule<Content: View>(
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        content()
+        Text(message)
+            .font(Font(HUDLayoutEngine.primaryFont))
+            .foregroundStyle(HUDGold.pale)
+            .lineLimit(viewModel.layout.lineCount)
+            .lineSpacing(HUDLayoutEngine.wrappedLineSpacing)
+            .truncationMode(.tail)
+            .padding(
+                .horizontal,
+                HUDLayoutEngine.horizontalPadding
+            )
             .frame(
                 width: viewModel.layout.size.width,
                 height: viewModel.layout.size.height
@@ -239,21 +209,19 @@ struct HUDView: View {
                 )
             }
             .overlay {
-                ZStack(alignment: .topTrailing) {
-                    RoundedRectangle(
-                        cornerRadius: 22,
-                        style: .continuous
-                    )
-                    .stroke(
-                        HUDGold.mid.opacity(0.35),
-                        lineWidth: 1
-                    )
-                }
+                RoundedRectangle(
+                    cornerRadius: 22,
+                    style: .continuous
+                )
+                .stroke(
+                    HUDGold.mid.opacity(0.35),
+                    lineWidth: 1
+                )
             }
     }
 }
 
-private enum HUDGold {
+enum HUDGold {
     static let pale = Color(
         red: 249.0 / 255.0,
         green: 233.0 / 255.0,
@@ -276,108 +244,297 @@ private enum HUDGold {
     )
 }
 
-enum GoldWavePhase: Equatable {
-    case recording
-    case transcribing
-}
-
-struct GoldSoundWave: View {
-    static let barCount = 11
-    private static let barWidth: CGFloat = 2.5
-    private static let barSpacing: CGFloat = 3
-    private static let minimumHeight: CGFloat = 3
-    private static let maximumHeight: CGFloat = 26
-    /// smooth cosine bell, center-weighted like the badge's flanking waves
-    private static let envelope: [CGFloat] = (0..<barCount).map { index in
-        let position = (CGFloat(index) + 0.5) / CGFloat(barCount)
-        return 0.30 + 0.70 * sin(.pi * position)
+/// the lamp: a bare gold line, bolted in place. flat ember when silent,
+/// waving when voice hits it, tungsten color shift riding the loudness.
+/// entrance and exit are CRT gestures — expands from a point on ignite,
+/// collapses back into a hot dot on release. it never translates.
+struct GoldRippleLine: View {
+    enum Phase: Equatable {
+        /// prewarming: dim line breathing slowly, no wave
+        case ember
+        /// recording: live wave, amplitude and heat ride the voice
+        case burn
+        /// transcribing: collapse to a dot, flash, afterglow — the goodbye
+        case cool
     }
 
-    let phase: GoldWavePhase
-    let levels: [Float]
-    let transitionStartedAt: Date
+    let phase: Phase
+    let loudness: Float
+    let startedAt: Date
 
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
 
+    private static let paleRGB: [Double] = [249, 233, 168]
+    private static let midRGB: [Double] = [229, 190, 98]
+    private static let deepRGB: [Double] = [158, 117, 39]
+
     var body: some View {
         TimelineView(
             .animation(
-                minimumInterval: 1.0 / 30.0,
-                paused: reduceMotion || phase != .transcribing
+                minimumInterval: 1.0 / 60.0,
+                paused: reduceMotion
             )
         ) { timeline in
-            let heights = barHeights(at: timeline.date)
-
-            HStack(spacing: Self.barSpacing) {
-                ForEach(0..<Self.barCount, id: \.self) { index in
-                    Capsule()
-                        .fill(barGradient)
-                        .frame(
-                            width: Self.barWidth,
-                            height: heights[index]
-                        )
-                }
+            Canvas { context, size in
+                draw(
+                    in: &context,
+                    size: size,
+                    date: timeline.date
+                )
             }
-            .frame(height: Self.maximumHeight)
         }
         .accessibilityHidden(true)
     }
 
-    private var barGradient: LinearGradient {
-        LinearGradient(
-            colors: [HUDGold.pale, HUDGold.deep],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-    }
+    private func draw(
+        in context: inout GraphicsContext,
+        size: CGSize,
+        date: Date
+    ) {
+        let cx = size.width / 2
+        let cy = size.height / 2
+        let elapsed = max(0, date.timeIntervalSince(startedAt))
 
-    private func barHeights(at date: Date) -> [CGFloat] {
-        let liveHeights = levelScaledHeights()
-        guard phase == .transcribing, !reduceMotion else {
-            return liveHeights
+        if reduceMotion {
+            drawStatic(in: &context, cx: cx, cy: cy)
+            return
         }
 
-        let elapsed = max(
-            0,
-            date.timeIntervalSince(transitionStartedAt)
-        )
-        let linearProgress = min(CGFloat(elapsed / 0.42), 1)
-        let easedProgress = linearProgress * linearProgress
-            * (3 - 2 * linearProgress)
+        var heat = 0.0
+        var presence = 0.0
+        var extent = 1.0
+        var dotFlash = 0.0
+        var damp = 1.0
 
-        return liveHeights.enumerated().map { index, liveHeight in
-            let rippleHeight = autonomousHeight(
-                for: index,
-                elapsed: elapsed
+        switch phase {
+        case .ember:
+            let breathe = sin(
+                date.timeIntervalSinceReferenceDate
+                    * .pi * 2 / 2.8
             )
-            return liveHeight
-                + (rippleHeight - liveHeight) * easedProgress
+            heat = 0.20 + 0.08 * breathe
+            presence = 1
+            damp = 0
+        case .burn:
+            let t = min(
+                elapsed / HUDWaveMotion.igniteDuration,
+                1
+            )
+            presence = min(t / 0.6, 1)
+            extent = 1 - pow(1 - t, 3)
+            heat = t < 0.75
+                ? smoothstep(t / 0.75) * 1.12
+                : lerp(1.12, 1, (t - 0.75) / 0.25)
+        case .cool:
+            let t = min(
+                elapsed / HUDWaveMotion.coolDuration,
+                1
+            )
+            presence = 1 - smoothstep(t)
+            heat = pow(1 - t, 1.6)
+            extent = pow(1 - min(t / 0.6, 1), 2)
+            dotFlash = max(0, (t - 0.35) / 0.65)
+            damp = exp(-elapsed / 0.12)
+        }
+
+        let level = Double(loudness) * damp
+        let b = heat * (0.24 + 0.76 * level)
+        let alpha = max(presence, heat)
+        let half = (HUDWaveMotion.lineWidth / 2) * extent
+
+        if half > 1.2 {
+            let path = wavePath(
+                cx: cx,
+                cy: cy,
+                half: half,
+                amplitude: HUDWaveMotion.amplitude
+                    * level * heat,
+                time: date.timeIntervalSinceReferenceDate
+            )
+
+            // glow pass — the bloom
+            context.drawLayer { layer in
+                layer.addFilter(
+                    .shadow(
+                        color: color(
+                            Self.midRGB,
+                            0.65 * max(b, 0.35 * heat) * alpha
+                        ),
+                        radius: (8 + 22 * b) * 0.5
+                    )
+                )
+                layer.stroke(
+                    path,
+                    with: .color(color(
+                        goldMix(b),
+                        (0.5 + 0.5 * min(b, 1)) * alpha
+                    )),
+                    style: StrokeStyle(
+                        lineWidth: HUDWaveMotion.strokeWidth,
+                        lineCap: .round,
+                        lineJoin: .round
+                    )
+                )
+            }
+
+            // hot core pass
+            context.stroke(
+                path,
+                with: .color(color(
+                    Self.paleRGB,
+                    min(b, 1) * 0.85 * alpha
+                )),
+                style: StrokeStyle(
+                    lineWidth: HUDWaveMotion.coreStrokeWidth,
+                    lineCap: .round,
+                    lineJoin: .round
+                )
+            )
+        }
+
+        if dotFlash > 0 {
+            drawOffDot(
+                in: &context,
+                cx: cx,
+                cy: cy,
+                strength: sin(.pi * min(dotFlash, 1)) * heat
+            )
         }
     }
 
-    private func levelScaledHeights() -> [CGFloat] {
-        (0..<Self.barCount).map { index in
-            let level = index < levels.count ? CGFloat(levels[index]) : 0
-            return Self.minimumHeight
-                + (Self.maximumHeight - Self.minimumHeight)
-                * Self.envelope[index]
-                * level
+    private func drawStatic(
+        in context: inout GraphicsContext,
+        cx: CGFloat,
+        cy: CGFloat
+    ) {
+        guard phase != .cool else {
+            return
         }
-    }
-
-    private func autonomousHeight(
-        for index: Int,
-        elapsed: TimeInterval
-    ) -> CGFloat {
-        let distanceFromCenter = abs(index - Self.barCount / 2)
-        let ripple = 0.50 + 0.16 * sin(
-            elapsed * .pi * 2 / 1.35
-                - Double(distanceFromCenter) * 0.72
+        let level = phase == .burn ? Double(loudness) : 0
+        let b = (phase == .ember ? 0.24 : 1.0)
+            * (0.24 + 0.76 * level)
+        var path = Path()
+        path.move(
+            to: CGPoint(x: cx - HUDWaveMotion.lineWidth / 2, y: cy)
         )
-        return Self.minimumHeight
-            + (Self.maximumHeight - Self.minimumHeight)
-            * Self.envelope[index]
-            * CGFloat(ripple)
+        path.addLine(
+            to: CGPoint(x: cx + HUDWaveMotion.lineWidth / 2, y: cy)
+        )
+        context.stroke(
+            path,
+            with: .color(color(goldMix(b), 0.6 + 0.4 * min(b, 1))),
+            style: StrokeStyle(
+                lineWidth: HUDWaveMotion.strokeWidth,
+                lineCap: .round
+            )
+        )
+    }
+
+    private func wavePath(
+        cx: CGFloat,
+        cy: CGFloat,
+        half: CGFloat,
+        amplitude: CGFloat,
+        time: TimeInterval
+    ) -> Path {
+        let segments = 48
+        var path = Path()
+        for i in 0...segments {
+            let u = Double(i) / Double(segments)
+            let x = cx - half + CGFloat(u) * half * 2
+            let envelope = pow(sin(.pi * u), 1.4)
+            let y = amplitude * envelope * (
+                0.68 * sin(u * .pi * 4.4 - time * 8.2)
+                    + 0.32 * sin(u * .pi * 8.2 + time * 5.1 + 1.3)
+            )
+            let point = CGPoint(x: x, y: cy + y)
+            if i == 0 {
+                path.move(to: point)
+            } else {
+                path.addLine(to: point)
+            }
+        }
+        return path
+    }
+
+    private func drawOffDot(
+        in context: inout GraphicsContext,
+        cx: CGFloat,
+        cy: CGFloat,
+        strength: Double
+    ) {
+        let halo = 10 + 18 * strength
+        context.fill(
+            Path(
+                ellipseIn: CGRect(
+                    x: cx - halo,
+                    y: cy - halo,
+                    width: halo * 2,
+                    height: halo * 2
+                )
+            ),
+            with: .radialGradient(
+                Gradient(colors: [
+                    color(Self.midRGB, 0.35 * strength),
+                    color(Self.midRGB, 0),
+                ]),
+                center: CGPoint(x: cx, y: cy),
+                startRadius: 0,
+                endRadius: halo
+            )
+        )
+
+        let core = 1.8 + 0.8 * strength
+        context.drawLayer { layer in
+            layer.addFilter(
+                .shadow(
+                    color: color(Self.paleRGB, 0.9 * strength),
+                    radius: 5
+                )
+            )
+            layer.fill(
+                Path(
+                    ellipseIn: CGRect(
+                        x: cx - core,
+                        y: cy - core,
+                        width: core * 2,
+                        height: core * 2
+                    )
+                ),
+                with: .color(color(Self.paleRGB, 0.95 * strength))
+            )
+        }
+    }
+
+    private func goldMix(_ b: Double) -> [Double] {
+        let t = min(max(b, 0), 1)
+        return [
+            lerp(Self.deepRGB[0], Self.paleRGB[0], t),
+            lerp(Self.deepRGB[1], Self.paleRGB[1], t),
+            lerp(Self.deepRGB[2], Self.paleRGB[2], t),
+        ]
+    }
+
+    private func color(_ rgb: [Double], _ alpha: Double) -> Color {
+        Color(
+            red: rgb[0] / 255,
+            green: rgb[1] / 255,
+            blue: rgb[2] / 255,
+            opacity: min(max(alpha, 0), 1)
+        )
+    }
+
+    private func lerp(
+        _ a: Double,
+        _ b: Double,
+        _ t: Double
+    ) -> Double {
+        a + (b - a) * t
+    }
+
+    private func smoothstep(_ t: Double) -> Double {
+        let clamped = min(max(t, 0), 1)
+        return clamped * clamped * (3 - 2 * clamped)
     }
 }

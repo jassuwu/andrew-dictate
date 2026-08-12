@@ -20,8 +20,7 @@ enum MenuBarBrandIcon {
         case .recording:
             return badge(recording: true)
         case .idle,
-             .prewarming,
-             .transcriptFlash:
+             .prewarming:
             return badge(recording: false)
         }
     }

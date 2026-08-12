@@ -95,7 +95,8 @@ final class HUDPanel: NSPanel {
             ?? 1_440
     }
 
-    func morph(to size: CGSize, animated: Bool) {
+    func morph(to layout: HUDLayout, animated: Bool) {
+        let size = layout.size
         let targetFrame = NSRect(
             x: frame.midX - size.width / 2,
             y: frame.minY,
@@ -103,7 +104,12 @@ final class HUDPanel: NSPanel {
             height: size.height
         )
         let hostingFrame = NSRect(origin: .zero, size: size)
-        let cornerRadius = min(size.height, 44) / 2
+        let isGlass = layout.style == .glass
+        let cornerRadius = isGlass ? min(size.height, 44) / 2 : 0
+        // bare style: the window is an invisible stage for the lamp and its
+        // glow — no capsule mask (it would clip the bloom), no window shadow.
+        hasShadow = isGlass
+        hudHostingView?.layer?.masksToBounds = isGlass
 
         guard animated else {
             setFrame(targetFrame, display: true)
