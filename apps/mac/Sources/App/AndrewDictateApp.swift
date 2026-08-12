@@ -45,11 +45,18 @@ struct AndrewDictateApp: App {
             Button("copy timings") {
                 coordinator.copyTimings()
             }
+            #endif
 
-            Button("run onboarding again") {
+            // the way back. ships in release: a user who skipped setup, or
+            // whose permissions were withdrawn, had no route but deleting
+            // their defaults.
+            Button(
+                coordinator.needsPermissionAttention
+                    ? "finish setup"
+                    : "run onboarding again"
+            ) {
                 coordinator.runOnboardingAgain()
             }
-            #endif
 
             Button("about Andrew Dictate") {
                 coordinator.openAbout()

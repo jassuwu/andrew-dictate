@@ -74,7 +74,7 @@ final class DictationCoordinator: ObservableObject {
     )
 
     var needsPermissionAttention: Bool {
-        settings.onboardingCompleted && !permissions.isDictationReady
+        settings.onboardingDismissed && !permissions.isDictationReady
     }
 
     let dictionaryStore: DictionaryStore
@@ -144,8 +144,8 @@ final class DictationCoordinator: ObservableObject {
         engineSwitchState = EngineSwitchState(
             activeVersion: settings.engineVersion
         )
-        isOnboardingPresented = !settings.onboardingCompleted
-        enginePreparationRequested = settings.onboardingCompleted
+        isOnboardingPresented = !settings.onboardingDismissed
+        enginePreparationRequested = settings.onboardingDismissed
         dictionaryStore = DictionaryStore()
         transcriptionEngine = ParakeetEngine(
             version: settings.engineVersion
@@ -230,6 +230,11 @@ final class DictationCoordinator: ObservableObject {
 
         installSystemLifecycleObservers()
         permissions = SystemPermissions.snapshot()
+        // the stored flag only knows the window was closed once. whether this
+        // app can actually dictate is a question for the permissions.
+        if setupPresentation(moment: .launchOrReopen) == .present {
+            isOnboardingPresented = true
+        }
 
         if isOnboardingPresented {
             hotkeyMonitor.setDetectionOnly(true)
@@ -329,7 +334,7 @@ final class DictationCoordinator: ObservableObject {
     #endif
 
     func presentOnboardingIfNeeded() {
-        guard !settings.onboardingCompleted else {
+        guard setupPresentation(moment: .launchOrReopen) == .present else {
             isOnboardingPresented = false
             return
         }
@@ -337,22 +342,34 @@ final class DictationCoordinator: ObservableObject {
     }
 
     func runOnboardingAgain() {
-        settings.onboardingCompleted = false
         presentOnboarding()
     }
 
     func finishOnboarding() {
-        completeOnboarding()
+        dismissOnboarding()
     }
 
     func skipOnboarding() {
-        completeOnboarding()
+        dismissOnboarding()
     }
 
-    private func completeOnboarding() {
+    /// "skip for now" and "we're done" both close the window. what neither
+    /// does any more is claim the setup succeeded — that claim belongs to the
+    /// permissions, and they are asked again every time it matters.
+    private func dismissOnboarding() {
         hotkeyMonitor.setDetectionOnly(false)
-        settings.onboardingCompleted = true
+        settings.onboardingDismissed = true
         onboardingWindowController?.close()
+    }
+
+    private func setupPresentation(
+        moment: SetupCheckMoment
+    ) -> SetupPresentation {
+        SetupGate.presentation(
+            onboardingDismissed: settings.onboardingDismissed,
+            permissions: permissions,
+            moment: moment
+        )
     }
 
     func beginOnboardingEnginePreparation() {
@@ -791,7 +808,7 @@ final class DictationCoordinator: ObservableObject {
         }
 
         return SetupGate.presentation(
-            onboardingDismissed: settings.onboardingCompleted,
+            onboardingDismissed: settings.onboardingDismissed,
             permissions: snapshot,
             moment: moment
         )
@@ -800,7 +817,10 @@ final class DictationCoordinator: ObservableObject {
     /// the user double-clicked the app while it was already living in the
     /// menu bar — for a window-less app, that is what "reopening" means.
     func handleReopen() {
-        refreshPermissions(moment: .launchOrReopen)
+        guard refreshPermissions(moment: .launchOrReopen) == .present else {
+            return
+        }
+        presentOnboarding()
     }
 
     /// says it where the user is already looking, without taking the screen.

@@ -65,14 +65,14 @@ enum ModelRemovalPolicy {
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
 
-    @Published var onboardingCompleted: Bool {
+    @Published var onboardingDismissed: Bool {
         didSet {
-            guard onboardingCompleted != oldValue else {
+            guard onboardingDismissed != oldValue else {
                 return
             }
             userDefaults.set(
-                onboardingCompleted,
-                forKey: Self.onboardingCompletedKey
+                onboardingDismissed,
+                forKey: Self.onboardingDismissedKey
             )
         }
     }
@@ -143,7 +143,9 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    private static let onboardingCompletedKey =
+    /// the stored key keeps its original spelling on purpose — renaming it
+    /// would hand every existing user a fresh onboarding window.
+    private static let onboardingDismissedKey =
         "AndrewDictate.onboardingCompleted"
     private static let preRollKey = "AndrewDictate.preRollEnabled"
     private static let soundFeedbackKey =
@@ -157,8 +159,8 @@ final class AppSettings: ObservableObject {
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
-        onboardingCompleted = userDefaults.bool(
-            forKey: Self.onboardingCompletedKey
+        onboardingDismissed = userDefaults.bool(
+            forKey: Self.onboardingDismissedKey
         )
         preRollEnabled = userDefaults.bool(forKey: Self.preRollKey)
         soundFeedbackEnabled = userDefaults.object(

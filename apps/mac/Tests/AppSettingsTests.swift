@@ -8,7 +8,7 @@ final class AppSettingsTests: XCTestCase {
 
         let settings = AppSettings(userDefaults: userDefaults)
 
-        XCTAssertFalse(settings.onboardingCompleted)
+        XCTAssertFalse(settings.onboardingDismissed)
         XCTAssertFalse(settings.preRollEnabled)
         XCTAssertTrue(settings.soundFeedbackEnabled)
         XCTAssertEqual(settings.dictationHotkey, .dictation)
@@ -22,7 +22,7 @@ final class AppSettingsTests: XCTestCase {
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
 
         let settings = AppSettings(userDefaults: userDefaults)
-        settings.onboardingCompleted = true
+        settings.onboardingDismissed = true
         settings.preRollEnabled = true
         settings.soundFeedbackEnabled = false
         XCTAssertTrue(settings.setHotkeyBinding(.leftCommand))
@@ -32,7 +32,7 @@ final class AppSettingsTests: XCTestCase {
 
         let reloaded = AppSettings(userDefaults: userDefaults)
 
-        XCTAssertTrue(reloaded.onboardingCompleted)
+        XCTAssertTrue(reloaded.onboardingDismissed)
         XCTAssertTrue(reloaded.preRollEnabled)
         XCTAssertFalse(reloaded.soundFeedbackEnabled)
         XCTAssertEqual(reloaded.dictationHotkey, .leftCommand)
