@@ -30,6 +30,10 @@ final class DictationCoordinator: ObservableObject {
         subsystem: "gg.jass.dictate",
         category: "cleanup"
     )
+    private let pipelineLogger = Logger(
+        subsystem: "gg.jass.dictate",
+        category: "pipeline"
+    )
     enum State: Equatable, Sendable {
         case idle
         case prewarming
@@ -957,6 +961,11 @@ final class DictationCoordinator: ObservableObject {
                 in: .whitespacesAndNewlines
             ).isEmpty else {
                 activeTimeline = nil
+                // silence must not wear the success afterglow.
+                await reportPipelineFailure(
+                    "heard nothing",
+                    generation: generation
+                )
                 return
             }
             let pasteTranscript: String
@@ -1058,8 +1067,31 @@ final class DictationCoordinator: ObservableObject {
         } catch is CancellationError {
             return
         } catch {
-            print("transcription failed: \(error.localizedDescription)")
+            pipelineLogger.error(
+                "transcription failed: \(error.localizedDescription, privacy: .public)"
+            )
+            activeTimeline = nil
+            await reportPipelineFailure(
+                "couldn't transcribe",
+                generation: generation
+            )
         }
+    }
+
+    /// a dictation that produced nothing must not end in the lamp's
+    /// afterglow — that glow is the success signal. cut it short and say
+    /// what went wrong in the same pill that carries "copied — …".
+    private func reportPipelineFailure(
+        _ message: String,
+        generation: Int
+    ) async {
+        guard generation == pipelineGeneration,
+              state == .transcribing else {
+            return
+        }
+
+        setState(.idle, fastHUDDismiss: true)
+        await flashFeedback(message)
     }
 
     private func cleanupProtectedTerms() -> [String] {
