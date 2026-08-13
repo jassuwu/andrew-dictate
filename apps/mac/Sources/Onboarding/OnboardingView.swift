@@ -299,10 +299,14 @@ struct OnboardingView: View {
                 .opacity(checklistIsActive ? 1 : 0.42)
 
             if !onboarding.whileYouWaitVisible {
-                Text("keys and options live in settings.")
-                    .font(.caption)
-                    .foregroundStyle(BrandUI.textSecondary)
-                    .padding(.top, 10)
+                // a signpost you can actually walk through. opening settings
+                // is not leaving setup — the checklist stays behind it.
+                Button("keys and options live in settings") {
+                    coordinator.openSettings()
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+                .padding(.top, 10)
             }
 
             Spacer(minLength: 6)
@@ -336,12 +340,9 @@ struct OnboardingView: View {
                     hotkeyTestRow
                     cardDivider
 
-                    SettingsToggleRow(
-                        "pre-roll",
-                        explanation:
-                            "keeps a short microphone buffer warm "
-                            + "to protect the first word.",
-                        isOn: $settings.preRollEnabled
+                    DictationOptionRow(
+                        option: .preRoll,
+                        settings: settings
                     )
                 }
             }

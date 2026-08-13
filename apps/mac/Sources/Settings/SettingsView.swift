@@ -70,26 +70,28 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 20) {
                 identityStrip
 
-                settingsSection("keys") {
+                // only when something is actually wrong: three permanent
+                // green ticks would teach you to stop reading this card.
+                if !setupIssues.isEmpty {
+                    settingsSection("setup") {
+                        setupHealthCard
+                    }
+                }
+
+                settingsSection("dictation key") {
                     hotkeyRow
                 }
 
                 settingsSection("dictation") {
                     VStack(alignment: .leading, spacing: 13) {
-                        SettingsToggleRow(
-                            "pre-roll",
-                            explanation:
-                                "keeps a short microphone buffer warm "
-                                + "to protect the first word.",
-                            isOn: $settings.preRollEnabled
+                        DictationOptionRow(
+                            option: .preRoll,
+                            settings: settings
                         )
                         cardDivider
-                        SettingsToggleRow(
-                            "sound feedback",
-                            explanation:
-                                "plays a subtle cue when listening starts "
-                                + "and stops.",
-                            isOn: $settings.soundFeedbackEnabled
+                        DictationOptionRow(
+                            option: .soundFeedback,
+                            settings: settings
                         )
                         if isCleanupAvailable {
                             cardDivider
@@ -100,7 +102,7 @@ struct SettingsView: View {
                     }
                 }
 
-                settingsSection("engine") {
+                settingsSection("speech model") {
                     engineEditor
                 }
 
@@ -172,6 +174,43 @@ struct SettingsView: View {
                 },
                 secondaryButton: .cancel(Text("cancel"))
             )
+        }
+    }
+
+    private var setupIssues: [SetupIssue] {
+        SetupHealth.issues(
+            permissions: coordinator.permissions,
+            speechModelFailed:
+                coordinator.enginePreparationState == .failed
+        )
+    }
+
+    /// names what's missing, then hands back to onboarding — the one place
+    /// that knows how to ask macOS for any of it.
+    private var setupHealthCard: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            ForEach(setupIssues) { issue in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(issue.title)
+                        .font(BrandUI.bodyFont.weight(.medium))
+                        .foregroundStyle(BrandUI.textPrimary)
+
+                    Text(issue.detail)
+                        .font(BrandUI.bodyFont)
+                        .foregroundStyle(BrandUI.textSecondary)
+                }
+                .accessibilityElement(children: .combine)
+
+                if issue.id != setupIssues.last?.id {
+                    cardDivider
+                }
+            }
+
+            Button("finish setup") {
+                coordinator.runOnboardingAgain()
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(BrandUI.gold)
         }
     }
 
@@ -277,7 +316,9 @@ struct SettingsView: View {
     private var engineEditor: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                Text("speech model")
+                // the section header already says "speech model" — this row
+                // picks which one, so it says that instead of repeating it.
+                Text("version")
                     .font(BrandUI.bodyFont.weight(.medium))
 
                 Spacer(minLength: 12)
