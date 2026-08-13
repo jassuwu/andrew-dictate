@@ -20,6 +20,13 @@ struct HotkeyDetection: Equatable, Sendable {
     let sequence: Int
 }
 
+/// file scope because the recorder is built during init, before there is a
+/// `self` to log through.
+private let audioLogger = Logger(
+    subsystem: "gg.jass.dictate",
+    category: "audio"
+)
+
 @MainActor
 final class DictationCoordinator: ObservableObject {
     private let engineLogger = Logger(
@@ -83,7 +90,9 @@ final class DictationCoordinator: ObservableObject {
     private let hotkeyMonitor: HotkeyMonitor
     private let transcriptionEngine: ParakeetEngine
     private let paster: Paster
-    private let audioRecorder: AudioRecorder?
+    /// var, not let: the input node can be missing at launch (headset off,
+    /// dock unplugged) and arrive later. one failed build must not be final.
+    private var audioRecorder: AudioRecorder?
     private let feedbackSounds: FeedbackSounds
     private let transcriptPolisher = FoundationModelPolisher()
     private let cleanupLabStore = LabStore()
@@ -160,7 +169,12 @@ final class DictationCoordinator: ObservableObject {
             )
         } catch {
             recorder = nil
-            print("audio recorder initialization failed: \(error.localizedDescription)")
+            audioLogger.error(
+                """
+                audio recorder init failed: \
+                \(error.localizedDescription, privacy: .public)
+                """
+            )
         }
         audioRecorder = recorder
         feedbackSounds = FeedbackSounds(settings: settings)
@@ -472,9 +486,11 @@ final class DictationCoordinator: ObservableObject {
         do {
             try audioRecorder.applyPreRoll(enabled)
         } catch {
-            print(
-                "pre-roll setting failed to apply: "
-                    + error.localizedDescription
+            audioLogger.error(
+                """
+                pre-roll setting failed to apply: \
+                \(error.localizedDescription, privacy: .public)
+                """
             )
             let appliedMode = audioRecorder.isPreRollEnabled
             Task { [weak self] in
@@ -579,9 +595,11 @@ final class DictationCoordinator: ObservableObject {
                 }
                 self.enginePrewarmTask = nil
                 self.enginePreparationState = .failed
-                print(
-                    "transcription engine prewarm failed: "
-                        + error.localizedDescription
+                self.engineLogger.error(
+                    """
+                    engine prewarm failed: \
+                    \(error.localizedDescription, privacy: .public)
+                    """
                 )
                 self.setState(.idle)
             }
@@ -829,8 +847,45 @@ final class DictationCoordinator: ObservableObject {
             return
         }
 
+        flashNotice(message, duration: 1.8)
+    }
+
+    private func flashNotice(
+        _ message: String,
+        duration: TimeInterval = 1.6
+    ) {
         Task { @MainActor [weak self] in
-            await self?.flashFeedback(message, duration: 1.8)
+            await self?.flashFeedback(message, duration: duration)
+        }
+    }
+
+    /// the recorder can fail to build at launch — no input device yet — and
+    /// that answer was kept forever. ask again when the user asks to record:
+    /// by then the headset may well be back on.
+    private func ensureAudioRecorder() -> AudioRecorder? {
+        if let audioRecorder {
+            return audioRecorder
+        }
+
+        do {
+            let recorder = try AudioRecorder(
+                preRollEnabled: settings.preRollEnabled
+            )
+            recorder.onInterruption = { [weak self] in
+                self?.handleCaptureInterruption()
+            }
+            audioRecorder = recorder
+            hudViewModel.useRecorder(recorder)
+            audioLogger.notice("audio recorder rebuilt on demand")
+            return recorder
+        } catch {
+            audioLogger.error(
+                """
+                audio recorder still unavailable: \
+                \(error.localizedDescription, privacy: .public)
+                """
+            )
+            return nil
         }
     }
 
@@ -883,9 +938,11 @@ final class DictationCoordinator: ObservableObject {
                 self.engineHealthTask = nil
                 self.isPrewarmed = false
                 self.enginePreparationState = .failed
-                print(
-                    "transcription engine health check failed: "
-                        + error.localizedDescription
+                self.engineLogger.error(
+                    """
+                    engine health check failed: \
+                    \(error.localizedDescription, privacy: .public)
+                    """
                 )
                 if self.state == .prewarming {
                     self.setState(.idle)
@@ -901,8 +958,18 @@ final class DictationCoordinator: ObservableObject {
         }
 
         guard isPrewarmed else {
-            if enginePreparationState == .notStarted {
+            switch enginePreparationState {
+            case .notStarted:
                 requestEnginePreparation()
+            case .failed:
+                // pressing the key is a statement of intent, and a failed
+                // model download is usually a blip. try again, out loud —
+                // the alternative is a lamp that breathes forever.
+                retryEnginePrewarm()
+                flashNotice("speech model failed — retrying")
+                return
+            case .downloading, .warmingUp, .ready:
+                break
             }
             if state != .prewarming {
                 setState(.prewarming)
@@ -919,8 +986,8 @@ final class DictationCoordinator: ObservableObject {
             announcePermissionGap("microphone access is off")
             return
         }
-        guard let audioRecorder else {
-            print("audio recorder unavailable")
+        guard let audioRecorder = ensureAudioRecorder() else {
+            flashNotice("no microphone available")
             return
         }
 
@@ -945,10 +1012,21 @@ final class DictationCoordinator: ObservableObject {
             }
             setState(.recording)
         } catch {
-            print("audio recording failed to start: \(error.localizedDescription)")
+            audioLogger.error(
+                """
+                audio recording failed to start: \
+                \(error.localizedDescription, privacy: .public)
+                """
+            )
             activeFocusAnchor = nil
             activeTimeline = nil
+            // the device may have been yanked between the check and the tap.
+            // drop it so the next press rebuilds instead of retrying a corpse.
+            audioRecorder.cancel()
+            self.audioRecorder = nil
+            hudViewModel.useRecorder(nil)
             setState(.idle)
+            flashNotice("couldn't start recording")
         }
     }
 
@@ -982,10 +1060,17 @@ final class DictationCoordinator: ObservableObject {
                 focusAnchor: focusAnchor
             )
         } catch {
-            print("audio recording failed to stop: \(error.localizedDescription)")
+            audioLogger.error(
+                """
+                audio recording failed to stop: \
+                \(error.localizedDescription, privacy: .public)
+                """
+            )
             activeFocusAnchor = nil
             activeTimeline = nil
-            setState(.idle)
+            setState(.idle, fastHUDDismiss: true)
+            // they spoke and there is nothing to show for it. say so.
+            flashNotice("recording was lost")
         }
     }
 

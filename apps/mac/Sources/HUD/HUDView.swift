@@ -22,7 +22,7 @@ final class HUDViewModel: ObservableObject {
     @Published private(set) var loudness: Float = 0
     @Published private(set) var waveTransitionStartedAt = Date()
 
-    private let audioRecorder: AudioRecorder?
+    private var audioRecorder: AudioRecorder?
     private var levelSamplingTask: Task<Void, Never>?
 
     init(
@@ -64,6 +64,12 @@ final class HUDViewModel: ObservableObject {
         self.state = state
         feedbackMessage = nil
         presentationGeneration += 1
+    }
+
+    /// the coordinator can rebuild the recorder mid-session, when an input
+    /// device finally turns up — the wave has to follow the new one.
+    func useRecorder(_ recorder: AudioRecorder?) {
+        audioRecorder = recorder
     }
 
     func showFeedback(_ message: String) {
