@@ -53,7 +53,7 @@ targets:
         excludes:
           - CleanupLabView.swift
       - Sources/Audio/RingSplicer.swift
-      - Sources/HUD/BrandLineMath.swift
+      - Sources/HUD/WaveLevelShaper.swift
       - Sources/HUD/HUDLayoutEngine.swift
       - Sources/Settings/AppSettings.swift
       - Sources/Settings/EngineSwitchState.swift

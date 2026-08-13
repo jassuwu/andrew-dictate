@@ -171,12 +171,4 @@ final class WaveLevelTests: XCTestCase {
         XCTAssertLessThan(b, c)
         XCTAssertEqual(c, 1.0, accuracy: 0.0001)
     }
-
-    func testSmootherAttacksInstantlyAndReleasesGradually() {
-        var smoother = WaveDisplaySmoother(barCount: 1, release: 0.5)
-        XCTAssertEqual(smoother.update(with: [0.8])[0], 0.8)
-        let afterSilence = smoother.update(with: [0])[0]
-        XCTAssertEqual(afterSilence, 0.4, accuracy: 0.0001)
-        XCTAssertEqual(smoother.update(with: [0.9])[0], 0.9)
-    }
 }

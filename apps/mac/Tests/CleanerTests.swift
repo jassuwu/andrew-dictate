@@ -66,7 +66,7 @@ final class CleanerTests: XCTestCase {
         XCTAssertEqual(DeterministicCleaner().clean(""), "")
     }
 
-    func testDictionaryOnlyPassPreservesRawCommandText() {
+    func testDictionaryOnlyPassPreservesSurroundingText() {
         let substituter = DictionarySubstituter(
             entries: [DictionaryEntry(wrong: "gpt", right: "GPT")]
         )
