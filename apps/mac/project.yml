@@ -38,7 +38,7 @@ targets:
       path: Sources/Info.plist
       properties:
         CFBundleDisplayName: Andrew Dictate
-        CFBundleShortVersionString: "0.5.0"
+        CFBundleShortVersionString: "0.6.0"
         CFBundleVersion: "2"
         LSUIElement: true
         LSMinimumSystemVersion: "14.0"
