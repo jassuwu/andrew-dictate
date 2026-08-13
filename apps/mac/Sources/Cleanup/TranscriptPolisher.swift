@@ -84,6 +84,34 @@ func cleanupPasteChoice(
     return .polished(polished)
 }
 
+/// why "always" could not keep its promise. a transcript the model read and
+/// left alone is not a shortfall — it had nothing to add, which is an answer.
+enum PolishShortfall: Equatable, Sendable {
+    case none
+    case timedOut
+    case failed
+}
+
+/// only "always" promises polish. "off" promises nothing and "on" promises
+/// speed — falling back to raw is that mode working, not failing, so it stays
+/// silent.
+func polishShortfall(
+    mode: CleanupMode,
+    polishResult: PolishResult,
+    deadline: PolishDeadline
+) -> PolishShortfall {
+    guard mode == .always else {
+        return .none
+    }
+    guard deadline == .met else {
+        return .timedOut
+    }
+    guard case .success = polishResult else {
+        return .failed
+    }
+    return .none
+}
+
 func polishWithinDeadline(
     _ text: String,
     protectedTerms: [String],

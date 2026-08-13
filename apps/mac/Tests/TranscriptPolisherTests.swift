@@ -104,6 +104,49 @@ final class TranscriptPolisherTests: XCTestCase {
         )
     }
 
+    func testOnlyAlwaysModeReportsAShortfall() {
+        for mode in [CleanupMode.off, .on] {
+            XCTAssertEqual(
+                polishShortfall(
+                    mode: mode,
+                    polishResult: .failure,
+                    deadline: .exceeded
+                ),
+                .none
+            )
+        }
+    }
+
+    func testAlwaysModeDistinguishesTimeoutFromFailure() {
+        XCTAssertEqual(
+            polishShortfall(
+                mode: .always,
+                polishResult: .success("polished"),
+                deadline: .exceeded
+            ),
+            .timedOut
+        )
+        XCTAssertEqual(
+            polishShortfall(
+                mode: .always,
+                polishResult: .failure,
+                deadline: .met
+            ),
+            .failed
+        )
+    }
+
+    func testPolishThatChangedNothingIsNotAShortfall() {
+        XCTAssertEqual(
+            polishShortfall(
+                mode: .always,
+                polishResult: .success("unchanged"),
+                deadline: .met
+            ),
+            .none
+        )
+    }
+
     func testPasteChoiceTreatsUnchangedPolishAsRawFallback() {
         XCTAssertEqual(
             cleanupPasteChoice(

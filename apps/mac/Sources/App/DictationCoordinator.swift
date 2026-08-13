@@ -1070,6 +1070,7 @@ final class DictationCoordinator: ObservableObject {
                 return
             }
             let pasteTranscript: String
+            var shortfall = PolishShortfall.none
             switch settings.cleanupMode {
             case .off:
                 activeTimeline?.polished = timelineClock.now
@@ -1119,6 +1120,11 @@ final class DictationCoordinator: ObservableObject {
                             "foreground polish fell back to raw"
                         )
                     }
+                    shortfall = polishShortfall(
+                        mode: settings.cleanupMode,
+                        polishResult: timedResult.result,
+                        deadline: timedResult.deadline
+                    )
                 } else {
                     activeTimeline?.polished = timelineClock.now
                     pasteTranscript = rawTranscript
@@ -1155,6 +1161,12 @@ final class DictationCoordinator: ObservableObject {
                     at: timelineClock.now,
                     stage: .pasteVerified
                 )
+                // "always" is the mode whose whole promise is that raw text
+                // never reaches the page unannounced. keep it.
+                if let notice = polishShortfallMessage(shortfall) {
+                    setState(.idle, fastHUDDismiss: true)
+                    await flashFeedback(notice, duration: 1.6)
+                }
             case let .leftOnPasteboard(reason):
                 completeTimeline(
                     at: timelineClock.now,
@@ -1243,6 +1255,19 @@ final class DictationCoordinator: ObservableObject {
         pipelineTask?.cancel()
         pipelineTask = nil
         activeTimeline = nil
+    }
+
+    private func polishShortfallMessage(
+        _ shortfall: PolishShortfall
+    ) -> String? {
+        switch shortfall {
+        case .none:
+            nil
+        case .timedOut:
+            "polish timed out — pasted raw"
+        case .failed:
+            "couldn't polish — pasted raw"
+        }
     }
 
     private func feedbackMessage(
