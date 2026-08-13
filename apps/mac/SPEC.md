@@ -3,14 +3,14 @@
 > hold a key, talk, get text.
 > free forever. fully local. small enough to read.
 
-decisions in this spec are backed by ADRs in `docs/adr/` and the verified research in `~/repos/personal/andrew-dictate-research/`. terms are defined in `GLOSSARY.md` and used exactly.
+decisions in this spec are backed by ADRs kept in `docs/adr/` and research in `~/repos/personal/andrew-dictate-research/` — **both are local-only and deliberately untracked** (see `.gitignore`), a private archive of how each decision was reached, including the ones later reversed. if you cloned this repo, you have the spec, not the archive; nothing here depends on reading it. terms are defined in `GLOSSARY.md` and used exactly.
 
 ## 1. product
 
 - **name:** Andrew Dictate. binary/app: `Andrew Dictate.app`, cask `andrew-dictate`, repo `jassuwu/andrew-dictate` (MIT, public day one — ADR 0010).
 - **platform:** macOS 14+, Apple Silicon only.
 - **thesis:** frontier-fast dictation, with the smallest possible surface: no account, no cloud, no settings maze, no subscription. trust is architectural — the app contains no networking code except the model downloader.
-- **non-goals (v1):** windows/linux, iOS, always-on listening (deferred — ADR 0003), LLM cleanup (v1.1 — ADR 0004), meeting transcription, history browser, App Store.
+- **non-goals (v1):** windows/linux, iOS, always-on listening (deferred — ADR 0003), meeting transcription, history browser, App Store.
 - **voice command mode: removed (2026-08-06).** shipped in early v1 (router tiers, agent delegation, ask/screen-ask), cut entirely to focus the product on dictation. this spec describes the app as it is; command-mode sections and terms are gone from here and the glossary.
 
 ## 2. the pipeline
@@ -20,13 +20,15 @@ one pipeline, one sink (ADR 0003):
 ```
 hold fn ──▶ mic capture ──▶ key-up ──▶ engine (parakeet v2, prewarmed)
                                               │ transcript
-                                              ▼ deterministic cleaner
+                                              ▼ deterministic cleaner (always)
+                                              ▼ ai polish (optional, on-device)
                                               ▼ inserter (paste into frontmost app)
 ```
 
 - **engine:** parakeet-tdt-0.6b-v2 int8 via FluidAudio, batch on key-up, prewarmed at launch with one dummy inference (ADR 0002, 0007). v3 optional in settings. engine sits behind an `Engine` protocol (streaming engines are additive later).
 - **capture:** AVAudioEngine, hardware-native format, graph prepared at launch. **pre-roll is a user toggle (ADR 0012), chosen at onboarding:** ON = a ~300ms rolling ring buffer runs while the app is active (mic stays open, indicator stays lit, buffer lives only in memory and is discarded continuously) so the first word is never clipped; OFF = mic starts at key-down, maximum privacy posture. changeable in settings.
-- **cleaner (v1, deterministic only — ADR 0004):** dictionary substitutions (wrong → right, dev vocabulary), filler removal rules (conservative list), spacing/casing normalization. microseconds, no model. behind a `Cleaner` protocol; qwen-based LLM cleanup is v1.1.
+- **cleaner (deterministic, always on — ADR 0004, 0019):** eleven staged transforms — dictionary substitutions, spoken punctuation, filler removal, self-corrections, repetition collapse, email/url/number parsing, capitalization, punctuation finishing, whitespace normalization. microseconds, no model, pure functions. not user-disableable: it is where the dictionary and spoken punctuation live, and without it you get raw asr.
+- **ai polish (optional, shipped 2026-08 — ADR 0018):** apple's on-device foundation model (`SystemLanguageModel`, macOS 26+), off by default, three modes: `off` · `on` (600ms budget, raw on timeout) · `always` (15s ceiling). a messy gate decides whether a transcript is worth sending at all. when `always` can't deliver — model unavailable, threw, or blew the deadline — it pastes raw and **says so** in the hud; `on` falling back to raw is that mode working and stays silent. below macOS 26 the whole layer is absent and the settings row must say so rather than vanish.
 - **hotkeys (ADR 0008):** fn = dictation, rebindable, chord-cancel semantics. NSEvent flagsChanged monitoring; no Input Monitoring permission. **locked recording:** double-tap the dictation key to lock its capture hands-free; a single tap ends it and inserts as normal.
 
 ## 3. dictation
@@ -39,11 +41,14 @@ hold fn ──▶ mic capture ──▶ key-up ──▶ engine (parakeet v2, pr
 
 ## 4. hud
 
-one nonactivating, click-through `NSPanel` (borderless, floating, all-spaces). states:
+one nonactivating, click-through `NSPanel` (borderless, floating, all-spaces), in two styles:
 
-`idle (hidden) → listening (level meter) → transcribing → inserted ✓ / copied-instead`
+- **bare — the lamp (2026-08-12).** a single gold line drawn in a canvas on a transparent panel: dim ember while prewarming, a wave whose amplitude and tungsten colour ride your voice while recording, then a cool-out that collapses it to a hot dot and fades. no capsule, no shadow — they would clip the bloom. **success is silent: the afterglow is the whole goodbye.** the earlier glass capsule with eleven bars, and the transcript flash that followed a paste, are both removed.
+- **glass — the pill.** the exceptional-message style, and the only thing that ever speaks: `copied — secure field` · `copied — focus changed` · `couldn't transcribe` · `heard nothing` · `recording was lost` · `polish timed out — pasted raw` · `couldn't polish — pasted raw` · `speech model failed — retrying` · `microphone access is off` · `no microphone available`.
 
-no dock icon. menu-bar item: tiny glyph → menu: copy last, settings, about, quit.
+the rule: **a failed dictation must never look like a successful one.** anything that goes wrong cuts the afterglow short and says why.
+
+no dock icon. menu-bar item: the brand badge → menu: copy last, settings, finish setup / run onboarding again, about, quit. a red dot on the badge means a permission is missing.
 
 ## 5. onboarding (once, one app click)
 
@@ -53,11 +58,15 @@ the click starts the parakeet v2 download and warmup, requests microphone access
 
 key, pre-roll, and dictionary configuration are omitted. defaults apply: fn for dictation, pre-roll off. settings owns every option.
 
-when all three rows are ready, the card says "ready — hold fn and speak." and closes automatically after a short confirmation. "skip for now" closes into a degraded but re-runnable app. no account, no tour, no newsletter.
+when all three rows are ready, the card says "ready — hold fn and speak." and closes automatically after a short confirmation. no account, no tour, no newsletter.
+
+**permissions are re-verified, never remembered (2026-08-13).** "skip for now" records only that the window was closed — it no longer claims setup succeeded. whether the app can dictate is asked of the system at launch, at reopen, on wake and unlock, and when macOS reports a trust change. a working setup is never nagged again; a broken one gets the window back at launch or reopen, and mid-session revocation only badges the menu bar — stealing focus while you type is the sin this app exists to prevent. settings shows what's missing and routes here, because this is the only place that knows how to ask.
 
 ## 6. settings (one sheet)
 
-dictation key · pre-roll on/off · engine (v2 default, v3 downloadable) · dictionary editor (the one power feature: wrong→right pairs, import/export json) · launch at login. that's the whole sheet.
+one scroll, in order: **setup** (only when something is missing — names it, hands back to onboarding) · **dictation key** · **dictation** (pre-roll · sound feedback · ai cleanup · cleanup lab) · **speech model** (v2 default, v3 downloadable, with preparation status and removal) · **dictionary** (the one power feature: wrong→right pairs, import/export json) · **general** (launch at login).
+
+two rules, both learned the hard way: options that appear on more than one screen are **defined once** (`DictationOption`) and rendered twice — the copy cannot drift because there is only one copy. and the user-facing word for the asr backend is **speech model** everywhere; `engine` survives only in code (`ParakeetEngine`, `EngineVersion`). "parakeet 0.3" is a value, not a category.
 
 ## 7. instrumentation (internal)
 
@@ -78,11 +87,13 @@ working targets, not commitments: key-up → transcript ≤ 250ms, key-up → in
 - **M1 — dictation shippable:** onboarding, HUD, cleaner+dictionary, settings sheet, menu bar, cask. success: WisprFlow uninstalled.
 - **M2 — release:** README, cask, about/attributions, polish pass. success: someone else could install it from scratch.
 - *(historical: M2/M3 were command-mode tiers and delegation — built, shipped, then removed 2026-08-06. see §1.)*
-- **post-v1 (ordered):** LLM cleanup (v1.1, ADR 0004) · signing (ADR 0009) · AX insertion · public bench harness + published p50/p95 · always-on ambient mode (ADR 0003) · v3/multilingual polish.
+- *(historical: LLM cleanup was post-v1 until it shipped as on-device ai polish, 2026-08. see §2.)*
+- **post-v1 (ordered):** signing (ADR 0009) · AX insertion · public bench harness + published p50/p95 · always-on ambient mode (ADR 0003) · v3/multilingual polish.
 
 ## 10. open questions (parked, non-blocking)
 
-- **branding — v1 identity decided (2026-07-24):** five-bar waveform mark, charcoal `#1B1B1F` / cream `#EFEAE0` / persimmon accent `#E4593B` (the "held key" bar); lowercase wordmark in the system font; taglines fixed: "hold a key, talk, get text." + "free · open source · fully local". source of truth: `art/render.swift` (regenerates icon + og deterministically). website: still none, deliberately.
-- HUD placement/personality (bottom-center pill vs near-cursor) — decide with a prototype at M1.
+- **branding — settled.** black + gold; the badge is the logo everywhere and is never a template image. art lives in `art/`: `logo-character.svg` rasterizes to the icon set via `build.sh`, which then runs `og-compose.swift` for the og image. *(the icons currently committed came from a different path than `build.sh` produces — unreconciled, 2026-08-13.)* taglines: "escape the keyboard." + "free · open source · fully local".
+- **website — shipped (2026-08-11):** dictate.jass.gg, astro, in `apps/site`.
+- **HUD placement/personality — decided (2026-08-12):** bottom-centre, the lamp. see §4.
 - dictation history beyond "copy last" — deliberately absent; revisit only if losing a transcript actually hurts.
 - pre-roll buffer depth (~300ms is a starting guess) — tune once real first-word-loss data exists.
