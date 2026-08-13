@@ -1,5 +1,6 @@
 #!/bin/zsh
-# rasterize brand SVGs: app icon set + og. source of truth: logo-character.svg / og.svg
+# rasterize the brand: app icon set from logo-character.svg, then the og image
+# from og-compose.swift (which composites the rasterized badge with type).
 set -euo pipefail
 cd "$(dirname "$0")"
 ICONSET=../Sources/Assets.xcassets/AppIcon.appiconset
@@ -17,6 +18,5 @@ cp icon_256.png  "$ICONSET/icon_256.png"
 cp icon_512.png  "$ICONSET/icon_256@2x.png"
 cp icon_512.png  "$ICONSET/icon_512.png"
 cp icon_1024.png "$ICONSET/icon_512@2x.png"
-qlmanage -t -s 1200 -o . og.svg >/dev/null 2>&1
-mv og.svg.png og.png
+swift og-compose.swift
 echo "built"
