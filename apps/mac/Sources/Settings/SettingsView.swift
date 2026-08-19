@@ -93,10 +93,8 @@ struct SettingsView: View {
                             option: .soundFeedback,
                             settings: settings
                         )
-                        if isCleanupAvailable {
-                            cardDivider
-                            aiCleanupEditor
-                        }
+                        cardDivider
+                        aiCleanupEditor
                         cardDivider
                         cleanupLabControls
                     }
@@ -259,11 +257,14 @@ struct SettingsView: View {
             .accessibilityHidden(true)
     }
 
+    /// shown on every mac, disabled where the os can’t run it: hiding
+    /// the row entirely taught older machines the feature doesn’t exist.
     private var aiCleanupEditor: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
                 Text("ai cleanup")
                     .font(BrandUI.bodyFont.weight(.medium))
+                    .opacity(isCleanupAvailable ? 1 : 0.55)
 
                 Spacer(minLength: 12)
 
@@ -278,11 +279,16 @@ struct SettingsView: View {
                 .frame(width: 210)
             }
 
-            Text(settings.cleanupMode.explanation)
-                .font(.caption)
-                .foregroundStyle(BrandUI.textSecondary)
-                .lineLimit(1)
+            Text(
+                isCleanupAvailable
+                    ? settings.cleanupMode.explanation
+                    : "needs macOS 26 — apple’s on-device model"
+            )
+            .font(.caption)
+            .foregroundStyle(BrandUI.textSecondary)
+            .lineLimit(1)
         }
+        .disabled(!isCleanupAvailable)
     }
 
     private var cleanupLabControls: some View {
