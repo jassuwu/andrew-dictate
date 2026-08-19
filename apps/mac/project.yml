@@ -8,7 +8,11 @@ options:
 packages:
   FluidAudio:
     url: https://github.com/FluidInference/FluidAudio
-    from: 0.15.5
+    # pinned, not ranged: the generated .xcodeproj is gitignored, so its
+    # Package.resolved never reaches CI and `from:` let every release
+    # resolve whatever was newest that morning. 0.15.6 arrived unable to
+    # compile for x86_64 and took a release build with it.
+    exactVersion: 0.15.5
 
 targets:
   AndrewDictate:
@@ -29,6 +33,9 @@ targets:
         PRODUCT_NAME: Andrew Dictate
         PRODUCT_MODULE_NAME: AndrewDictate
         PRODUCT_BUNDLE_IDENTIFIER: gg.jass.dictate
+        # apple silicon only, as the spec has always said. the intel slice
+        # could never run this app and was pure build cost.
+        ARCHS: arm64
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGN_STYLE: Manual
         ENABLE_HARDENED_RUNTIME: false
