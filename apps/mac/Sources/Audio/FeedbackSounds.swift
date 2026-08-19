@@ -1,4 +1,12 @@
 import AVFoundation
+import os
+
+/// file scope because the cues load during init, before there is a `self`
+/// to log through.
+private let soundsLogger = Logger(
+    subsystem: "gg.jass.dictate",
+    category: "audio"
+)
 
 @MainActor
 final class FeedbackSounds {
@@ -23,10 +31,11 @@ final class FeedbackSounds {
                 named: resourceName,
                 in: bundle
             ) else {
-                print(
-                    "feedback sound unavailable: "
-                        + resourceName
-                        + ".wav"
+                soundsLogger.error(
+                    """
+                    feedback sound missing: \
+                    \(resourceName, privacy: .public).wav
+                    """
                 )
                 continue
             }
@@ -37,10 +46,12 @@ final class FeedbackSounds {
                 player.prepareToPlay()
                 players[cue] = player
             } catch {
-                print(
-                    "feedback sound unavailable: "
-                        + resourceName
-                        + ".wav"
+                soundsLogger.error(
+                    """
+                    feedback sound unavailable: \
+                    \(resourceName, privacy: .public).wav: \
+                    \(error.localizedDescription, privacy: .public)
+                    """
                 )
             }
         }
