@@ -2,20 +2,25 @@ import Accelerate
 import AVFoundation
 import os
 
+/// file scope because the tap and its storage run off the main actor, where
+/// there is no `self` to log through.
+private let recorderLogger = Logger(
+    subsystem: "gg.jass.dictate",
+    category: "audio"
+)
+
 enum AudioRecorderError: LocalizedError {
     case alreadyRecording
-    case captureCapacityExceeded
     case conversionFailed(Error?)
     case invalidInputFormat
     case notRecording
+    case oversizedCaptureBuffer
     case unavailableBuffer
 
     var errorDescription: String? {
         switch self {
         case .alreadyRecording:
             "audio capture is already running"
-        case .captureCapacityExceeded:
-            "audio capture exceeded the five-minute buffer"
         case let .conversionFailed(error):
             if let error {
                 "audio conversion failed: \(error.localizedDescription)"
@@ -26,6 +31,8 @@ enum AudioRecorderError: LocalizedError {
             "the microphone input format is unavailable"
         case .notRecording:
             "audio capture is not running"
+        case .oversizedCaptureBuffer:
+            "an audio buffer arrived larger than the capture pool"
         case .unavailableBuffer:
             "an audio buffer could not be allocated"
         }
@@ -37,12 +44,16 @@ final class AudioRecorder {
     private static let targetSampleRate = 16_000.0
     private static let tapDuration = 0.1
     private static let preRollDuration = 0.3
+    // one utterance is capped at 5 minutes. the buffer pool is allocated up
+    // front from this number, so it is resident memory, not a soft limit.
+    // past it capture seals and keeps the take instead of dropping it.
     private static let maximumUtteranceDuration = 5.0 * 60.0
     private static let conversionBufferCapacity: AVAudioFrameCount = 16_384
 
     private let engine: AVAudioEngine
     private let levelStorage: AudioLevelStorage
     private let firstBufferNotifier: AudioFirstBufferNotifier
+    private let capNotifier: AudioCapNotifier
     private var inputFormat: AVAudioFormat
     private var captureStorage: AudioCaptureStorage
     private var hasInstalledTap = false
@@ -51,6 +62,7 @@ final class AudioRecorder {
 
     private(set) var isPreRollEnabled: Bool
     var onInterruption: (() -> Void)?
+    var onCapReached: (() -> Void)?
 
     var currentLevel: Float {
         levelStorage.currentLevel
@@ -67,9 +79,11 @@ final class AudioRecorder {
 
         let levelStorage = AudioLevelStorage()
         let firstBufferNotifier = AudioFirstBufferNotifier()
+        let capNotifier = AudioCapNotifier()
         let captureStorage = try Self.makeCaptureStorage(
             format: inputFormat,
-            preRollEnabled: preRollEnabled
+            preRollEnabled: preRollEnabled,
+            capNotifier: capNotifier
         )
 
         self.engine = engine
@@ -77,7 +91,14 @@ final class AudioRecorder {
         self.captureStorage = captureStorage
         self.levelStorage = levelStorage
         self.firstBufferNotifier = firstBufferNotifier
+        self.capNotifier = capNotifier
         isPreRollEnabled = preRollEnabled
+
+        // armed once and left armed: the notifier outlives every storage
+        // rebuild, so the hook keeps working after a device change.
+        capNotifier.setCallback { [weak self] in
+            self?.handleCapReached()
+        }
 
         installCaptureTap(
             storage: captureStorage,
@@ -216,7 +237,8 @@ final class AudioRecorder {
 
     private static func makeCaptureStorage(
         format: AVAudioFormat,
-        preRollEnabled: Bool
+        preRollEnabled: Bool,
+        capNotifier: AudioCapNotifier
     ) throws -> AudioCaptureStorage {
         let tapFrameCapacity = AVAudioFrameCount(
             max(1_024, ceil(format.sampleRate * tapDuration))
@@ -307,13 +329,28 @@ final class AudioRecorder {
         do {
             try rebuildCapturePath(preRollEnabled: isPreRollEnabled)
         } catch {
-            print(
-                "audio capture rebuild failed after configuration change: "
-                    + error.localizedDescription
+            recorderLogger.error(
+                """
+                audio capture rebuild failed after configuration change: \
+                \(error.localizedDescription, privacy: .public)
+                """
             )
         }
 
         onInterruption?()
+    }
+
+    private func handleCapReached() {
+        // a hop that lands after stop or cancel is about a take the user has
+        // already let go of, so say nothing.
+        guard isRecording else {
+            return
+        }
+
+        // capture is sealed; a live meter would claim otherwise. `isRecording`
+        // stays true so the eventual `stop` still returns the five minutes.
+        levelStorage.reset()
+        onCapReached?()
     }
 
     private func startContinuousCaptureIfNeeded() throws {
@@ -446,6 +483,35 @@ private final class AudioFirstBufferNotifier: @unchecked Sendable {
     }
 }
 
+/// stays armed across storage rebuilds, unlike the one-shot first-buffer
+/// notifier: the storage itself guarantees one trip per utterance.
+private final class AudioCapNotifier: @unchecked Sendable {
+    typealias Callback = @MainActor @Sendable () -> Void
+
+    private let lock = NSLock()
+    private var callback: Callback?
+
+    func setCallback(_ callback: Callback?) {
+        lock.lock()
+        self.callback = callback
+        lock.unlock()
+    }
+
+    func notify() {
+        lock.lock()
+        let callback = callback
+        lock.unlock()
+
+        guard let callback else {
+            return
+        }
+
+        Task { @MainActor in
+            callback()
+        }
+    }
+}
+
 private final class AudioLevelStorage: @unchecked Sendable {
     // standard speech-meter window: silence below the floor reads zero and a
     // raised voice reaches the top. dB is already perceptual — map it linearly.
@@ -501,12 +567,14 @@ private final class AudioCaptureStorage: @unchecked Sendable {
     private let bytesPerFrame: Int
     private let preRollBuffer: AVAudioPCMBuffer?
     private let preRollPrefixBuffer: AVAudioPCMBuffer?
+    private let capNotifier: AudioCapNotifier
 
     private var captured: [AVAudioPCMBuffer] = []
     private var nextPoolIndex = 0
     private var utteranceFrameCount = 0
     private var preRollPrefixFrameCount = 0
     private var isAcceptingAudio = false
+    private var didReachCap = false
     private var captureError: AudioRecorderError?
     private var ringSplicer: RingSplicer?
 
@@ -515,7 +583,8 @@ private final class AudioCaptureStorage: @unchecked Sendable {
         frameCapacity: AVAudioFrameCount,
         poolCount: Int,
         maximumFrameCount: Int,
-        preRollFrameCapacity: Int
+        preRollFrameCapacity: Int,
+        capNotifier: AudioCapNotifier
     ) throws {
         var pool: [AVAudioPCMBuffer] = []
         pool.reserveCapacity(poolCount)
@@ -582,6 +651,7 @@ private final class AudioCaptureStorage: @unchecked Sendable {
         nextPoolIndex = 0
         utteranceFrameCount = 0
         preRollPrefixFrameCount = 0
+        didReachCap = false
         captureError = nil
 
         if let ringSplicer,
@@ -644,17 +714,17 @@ private final class AudioCaptureStorage: @unchecked Sendable {
             return true
         }
         guard sourceFrameCount <= maximumFrameCount - utteranceFrameCount else {
-            failCapture(with: .captureCapacityExceeded)
+            sealAtCap()
             return false
         }
         guard nextPoolIndex < pool.count else {
-            failCapture(with: .captureCapacityExceeded)
+            sealAtCap()
             return false
         }
 
         let destination = pool[nextPoolIndex]
         guard source.frameLength <= destination.frameCapacity else {
-            failCapture(with: .captureCapacityExceeded)
+            failCapture(with: .oversizedCaptureBuffer)
             return false
         }
 
@@ -720,6 +790,22 @@ private final class AudioCaptureStorage: @unchecked Sendable {
         ringSplicer?.reset()
     }
 
+    /// the cap is a ceiling, not a failure: stop taking frames but keep what
+    /// was already spoken so `finish` can still hand it to transcription.
+    private func sealAtCap() {
+        guard !didReachCap else {
+            return
+        }
+
+        didReachCap = true
+        isAcceptingAudio = false
+        recorderLogger.notice(
+            "capture hit the utterance cap; keeping the take"
+        )
+        // notifier lock is a leaf, so firing under this one cannot deadlock.
+        capNotifier.notify()
+    }
+
     private func failCapture(with error: AudioRecorderError) {
         captureError = error
         isAcceptingAudio = false
@@ -730,6 +816,7 @@ private final class AudioCaptureStorage: @unchecked Sendable {
         nextPoolIndex = 0
         utteranceFrameCount = 0
         preRollPrefixFrameCount = 0
+        didReachCap = false
         captureError = nil
     }
 
