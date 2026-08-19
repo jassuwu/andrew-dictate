@@ -277,6 +277,7 @@ struct SettingsView: View {
                 .labelsHidden()
                 .pickerStyle(.segmented)
                 .frame(width: 210)
+                .accessibilityLabel("ai cleanup")
             }
 
             Text(
@@ -343,6 +344,7 @@ struct SettingsView: View {
                 }
                 .labelsHidden()
                 .brandMenuStyle()
+                .accessibilityLabel("speech model version")
             }
 
             enginePreparationStatus
@@ -377,6 +379,12 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.plain)
                     .font(.caption)
+                    // every row's button read "remove download" and
+                    // nothing else, so voiceover users heard the same
+                    // button repeated once per installed model.
+                    .accessibilityLabel(
+                        "remove parakeet \(model.version.rawValue) download"
+                    )
                     .foregroundStyle(BrandUI.textSecondary)
                 }
             }
@@ -496,6 +504,7 @@ struct SettingsView: View {
             }
             .labelsHidden()
             .brandMenuStyle()
+            .accessibilityLabel("dictation key")
             .frame(width: 146)
         }
     }
@@ -561,6 +570,7 @@ private struct DictionaryEditor: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(BrandUI.gold)
                 .help("add row")
+                .accessibilityLabel("add dictionary entry")
 
                 Button {
                     for id in selection {
@@ -573,6 +583,7 @@ private struct DictionaryEditor: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(BrandUI.textSecondary)
                 .disabled(selection.isEmpty)
+                .accessibilityLabel("remove selected dictionary entries")
                 .help("delete selected row")
 
                 Spacer()

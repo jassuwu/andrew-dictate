@@ -33,6 +33,10 @@ struct SettingsToggleRow: View {
             Toggle("", isOn: $isOn)
                 .labelsHidden()
                 .brandToggleStyle()
+                // the label is drawn beside it, not attached to it, so
+                // without this the switch announces as a bare toggle.
+                .accessibilityLabel(title)
+                .accessibilityHint(explanation)
         }
     }
 }
