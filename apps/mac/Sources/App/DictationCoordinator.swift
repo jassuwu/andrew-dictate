@@ -224,6 +224,9 @@ final class DictationCoordinator: ObservableObject {
         recorder?.onInterruption = { [weak self] in
             self?.handleCaptureInterruption()
         }
+        recorder?.onCapReached = { [weak self] in
+            self?.handleCaptureCapReached()
+        }
 
         settings.$preRollEnabled
             .dropFirst()
@@ -878,6 +881,9 @@ final class DictationCoordinator: ObservableObject {
             )
             recorder.onInterruption = { [weak self] in
                 self?.handleCaptureInterruption()
+            }
+            recorder.onCapReached = { [weak self] in
+                self?.handleCaptureCapReached()
             }
             audioRecorder = recorder
             hudViewModel.useRecorder(recorder)
