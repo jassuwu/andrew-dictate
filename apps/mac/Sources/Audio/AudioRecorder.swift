@@ -127,17 +127,19 @@ final class AudioRecorder {
         let granted = await AVCaptureDevice.requestAccess(for: .audio)
 
         if granted {
-            print("microphone permission granted")
+            recorderLogger.notice("microphone permission granted")
             do {
                 try startContinuousCaptureIfNeeded()
             } catch {
-                print(
-                    "pre-roll audio capture failed to start: "
-                        + error.localizedDescription
+                recorderLogger.error(
+                    """
+                    pre-roll audio capture failed to start: \
+                    \(error.localizedDescription, privacy: .public)
+                    """
                 )
             }
         } else {
-            print("microphone permission denied")
+            recorderLogger.notice("microphone permission denied")
         }
 
         return granted
@@ -167,9 +169,11 @@ final class AudioRecorder {
             do {
                 try rebuildCapturePath(preRollEnabled: previousMode)
             } catch {
-                print(
-                    "audio capture rollback failed: "
-                        + error.localizedDescription
+                recorderLogger.error(
+                    """
+                    audio capture rollback failed: \
+                    \(error.localizedDescription, privacy: .public)
+                    """
                 )
             }
             throw error
@@ -258,7 +262,8 @@ final class AudioRecorder {
             frameCapacity: tapFrameCapacity,
             poolCount: poolCount,
             maximumFrameCount: maximumFrameCount,
-            preRollFrameCapacity: preRollFrameCapacity
+            preRollFrameCapacity: preRollFrameCapacity,
+            capNotifier: capNotifier
         )
     }
 
@@ -297,7 +302,8 @@ final class AudioRecorder {
 
         let newStorage = try Self.makeCaptureStorage(
             format: newInputFormat,
-            preRollEnabled: preRollEnabled
+            preRollEnabled: preRollEnabled,
+            capNotifier: capNotifier
         )
 
         engine.stop()
@@ -639,6 +645,7 @@ private final class AudioCaptureStorage: @unchecked Sendable {
         self.bytesPerFrame = bytesPerFrame
         self.preRollBuffer = preRollBuffer
         self.preRollPrefixBuffer = preRollPrefixBuffer
+        self.capNotifier = capNotifier
         self.ringSplicer = ringSplicer
         captured.reserveCapacity(poolCount)
     }
