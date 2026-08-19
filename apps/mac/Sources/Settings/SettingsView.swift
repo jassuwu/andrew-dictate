@@ -434,20 +434,28 @@ struct SettingsView: View {
         installedModels = modelStore.installedModels()
     }
 
+    /// the filesystem goes first. unloading the engine up front meant a
+    /// failed delete left you with nothing loaded, the model still on
+    /// disk, and no idea why — so a failure here must cost nothing.
     private func removeDownload(_ version: EngineVersion) {
-        let decision = modelStore.removalDecision(for: version)
-        Task { @MainActor in
-            if decision.requiresRepreparation {
-                await coordinator.prepareForActiveModelRemoval(version)
-            }
-
-            do {
-                try modelStore.remove(version)
-                modelStoreMessage = nil
-            } catch {
-                modelStoreMessage = "couldn’t remove download"
-            }
+        let decision: ModelRemovalDecision
+        do {
+            decision = try modelStore.remove(version)
+            modelStoreMessage = nil
+        } catch {
+            modelStoreMessage = error.localizedDescription
             refreshInstalledModels()
+            return
+        }
+
+        refreshInstalledModels()
+
+        guard decision.requiresRepreparation else {
+            return
+        }
+
+        Task { @MainActor in
+            await coordinator.prepareForActiveModelRemoval(version)
         }
     }
 
