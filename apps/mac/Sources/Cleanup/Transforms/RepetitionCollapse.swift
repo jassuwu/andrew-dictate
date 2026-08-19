@@ -6,8 +6,8 @@ struct RepetitionCollapse: TranscriptTransform {
         let range: Range<String.Index>
     }
 
-    private let wordExpression = try! NSRegularExpression(
-        pattern: "[\\p{L}\\p{N}_]+(?:['’-][\\p{L}\\p{N}_]+)*"
+    private let wordExpression = CleanupRegex.compile(
+        "[\\p{L}\\p{N}_]+(?:['’-][\\p{L}\\p{N}_]+)*"
     )
     private let maximumPhraseWords = 6
 
@@ -26,6 +26,11 @@ struct RepetitionCollapse: TranscriptTransform {
     private func duplicateRemovalRange(
         in transcript: String
     ) -> Range<String.Index>? {
+        // without the word pattern there are no words to compare, so the
+        // transform finds nothing and the transcript passes through.
+        guard let wordExpression = wordExpression else {
+            return nil
+        }
         let words = wordExpression.matches(
             in: transcript,
             range: transcript.fullNSRange
