@@ -59,6 +59,7 @@ targets:
       - path: Sources/Cleanup
         excludes:
           - CleanupLabView.swift
+          - PipelinePlaygroundView.swift
       - Sources/Audio/RingSplicer.swift
       - Sources/HUD/WaveLevelShaper.swift
       - Sources/HUD/HUDLayoutEngine.swift

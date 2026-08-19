@@ -147,6 +147,8 @@ final class DictationCoordinator: ObservableObject {
     private var activeTimeline: UtteranceTimelineBuilder?
     private var aboutWindowController: AboutWindowController?
     private var cleanupLabWindowController: CleanupLabWindowController?
+    private var pipelinePlaygroundWindowController:
+        PipelinePlaygroundWindowController?
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
     private var distributedNotificationObservers: [NSObjectProtocol] = []
 
@@ -304,6 +306,22 @@ final class DictationCoordinator: ObservableObject {
 
     var isCleanupAvailable: Bool {
         transcriptPolisher.isAvailable
+    }
+
+    /// the pipeline, in a window you can come back to. onboarding shows it
+    /// once while the model downloads; this is the door for every time after.
+    func openPipelinePlayground() {
+        let controller: PipelinePlaygroundWindowController
+        if let pipelinePlaygroundWindowController {
+            controller = pipelinePlaygroundWindowController
+        } else {
+            controller = PipelinePlaygroundWindowController(
+                entries: { [dictionaryStore] in dictionaryStore.entries },
+                settings: settings
+            )
+            pipelinePlaygroundWindowController = controller
+        }
+        controller.present()
     }
 
     func openCleanupLab() {

@@ -155,7 +155,7 @@ private final class OnboardingPermissionModel: ObservableObject {
 
 struct OnboardingView: View {
     private static let collapsedHeight: CGFloat = 430
-    private static let expandedHeight: CGFloat = 590
+    private static let expandedHeight: CGFloat = 648
 
     @ObservedObject private var coordinator: DictationCoordinator
     @ObservedObject private var settings: AppSettings
@@ -344,8 +344,37 @@ struct OnboardingView: View {
                         option: .preRoll,
                         settings: settings
                     )
+                    cardDivider
+
+                    pipelineRow
                 }
             }
+        }
+    }
+
+    /// the download is dead time, and this is the only thing that explains
+    /// what the app does after the words arrive. it opens the same window the
+    /// menu bar does — one playground, three doors.
+    private var pipelineRow: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("see the pipeline")
+                    .font(BrandUI.bodyFont.weight(.medium))
+
+                Text(
+                    "what happens between your voice and the page."
+                )
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
+            }
+
+            Spacer(minLength: 8)
+
+            Button("open") {
+                coordinator.openPipelinePlayground()
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(BrandUI.gold)
         }
     }
 

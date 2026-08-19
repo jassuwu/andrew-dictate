@@ -41,6 +41,10 @@ struct AndrewDictateApp: App {
                 coordinator.openSettings()
             }
 
+            Button("the pipeline…") {
+                coordinator.openPipelinePlayground()
+            }
+
             #if DEBUG
             Button("copy timings") {
                 coordinator.copyTimings()

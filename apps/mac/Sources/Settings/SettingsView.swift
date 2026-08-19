@@ -299,6 +299,12 @@ struct SettingsView: View {
 
                 Spacer(minLength: 12)
 
+                Button("view the pipeline") {
+                    coordinator.openPipelinePlayground()
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(BrandUI.gold)
+
                 Button("view cleanup lab") {
                     coordinator.openCleanupLab()
                 }
