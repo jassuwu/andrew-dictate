@@ -21,6 +21,9 @@ final class HUDViewModel: ObservableObject {
     /// a filament can't cool instantly.
     @Published private(set) var loudness: Float = 0
     @Published private(set) var waveTransitionStartedAt = Date()
+    /// hands-free capture looks exactly like a held key unless the lamp
+    /// says otherwise. the coordinator owns the fact; the line wears it.
+    @Published private(set) var isRecordingLocked = false
 
     private var audioRecorder: AudioRecorder?
     private var levelSamplingTask: Task<Void, Never>?
@@ -64,6 +67,15 @@ final class HUDViewModel: ObservableObject {
         self.state = state
         feedbackMessage = nil
         presentationGeneration += 1
+    }
+
+    /// not folded into `update(state:)`: the lock is set a beat after the
+    /// recording starts, and must not restart the ignite animation.
+    func setRecordingLocked(_ locked: Bool) {
+        guard locked != isRecordingLocked else {
+            return
+        }
+        isRecordingLocked = locked
     }
 
     /// the coordinator can rebuild the recorder mid-session, when an input
@@ -159,7 +171,11 @@ struct HUDView: View {
                 case .recording:
                     lampLine(phase: .burn)
                         .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Listening")
+                        .accessibilityLabel(
+                            viewModel.isRecordingLocked
+                                ? "Listening, locked"
+                                : "Listening"
+                        )
                 case .transcribing:
                     lampLine(phase: .cool)
                         .accessibilityElement(children: .ignore)
@@ -183,7 +199,8 @@ struct HUDView: View {
         GoldRippleLine(
             phase: phase,
             loudness: viewModel.loudness,
-            startedAt: viewModel.waveTransitionStartedAt
+            startedAt: viewModel.waveTransitionStartedAt,
+            isLocked: viewModel.isRecordingLocked
         )
     }
 
@@ -267,9 +284,18 @@ struct GoldRippleLine: View {
     let phase: Phase
     let loudness: Float
     let startedAt: Date
+    /// double-tap lock: the key is no longer held, so the ends get pinned.
+    var isLocked = false
 
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
+
+    /// derived from the line's own metrics so the pins scale with it —
+    /// a hair thicker than the hot core, set just off each end.
+    private static let lockDotRadius =
+        HUDWaveMotion.coreStrokeWidth * 1.35
+    private static let lockDotGap =
+        HUDWaveMotion.strokeWidth * 2.2
 
     private static let paleRGB: [Double] = [249, 233, 168]
     private static let midRGB: [Double] = [229, 190, 98]
@@ -397,6 +423,17 @@ struct GoldRippleLine: View {
                     lineJoin: .round
                 )
             )
+
+            if isLocked, phase == .burn {
+                drawLockDots(
+                    in: &context,
+                    cx: cx,
+                    cy: cy,
+                    half: half,
+                    brightness: b,
+                    alpha: alpha
+                )
+            }
         }
 
         if dotFlash > 0 {
@@ -435,6 +472,48 @@ struct GoldRippleLine: View {
                 lineCap: .round
             )
         )
+
+        if isLocked, phase == .burn {
+            drawLockDots(
+                in: &context,
+                cx: cx,
+                cy: cy,
+                half: HUDWaveMotion.lineWidth / 2,
+                brightness: b,
+                alpha: 1
+            )
+        }
+    }
+
+    /// locked capture holds no key, so the line reads as bolted down: one
+    /// small dot off each end, same gold, no motion of their own.
+    private func drawLockDots(
+        in context: inout GraphicsContext,
+        cx: CGFloat,
+        cy: CGFloat,
+        half: CGFloat,
+        brightness: Double,
+        alpha: Double
+    ) {
+        let radius = Self.lockDotRadius
+        let inset = half + Self.lockDotGap
+        let fill = color(
+            goldMix(brightness),
+            (0.55 + 0.35 * min(brightness, 1)) * alpha
+        )
+        for x in [cx - inset, cx + inset] {
+            context.fill(
+                Path(
+                    ellipseIn: CGRect(
+                        x: x - radius,
+                        y: cy - radius,
+                        width: radius * 2,
+                        height: radius * 2
+                    )
+                ),
+                with: .color(fill)
+            )
+        }
     }
 
     private func wavePath(
