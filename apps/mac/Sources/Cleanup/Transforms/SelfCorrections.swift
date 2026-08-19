@@ -1,8 +1,8 @@
 import Foundation
 
 struct SelfCorrections: TranscriptTransform {
-    static let markerExpression = try! NSRegularExpression(
-        pattern: #"""
+    static let markerExpression = CleanupRegex.compile(
+        #"""
         (?<![\p{L}\p{N}_])
         (?:no\s+wait|i\s+mean|make\s+that|scratch\s+that|actually|sorry|rather)
         (?![\p{L}\p{N}_])
@@ -10,19 +10,30 @@ struct SelfCorrections: TranscriptTransform {
         options: [.caseInsensitive, .allowCommentsAndWhitespace]
     )
 
-    private let wordExpression = try! NSRegularExpression(
-        pattern: "[\\p{L}\\p{N}]+(?:['’-][\\p{L}\\p{N}]+)*"
+    private let wordExpression = CleanupRegex.compile(
+        "[\\p{L}\\p{N}]+(?:['’-][\\p{L}\\p{N}]+)*"
     )
     private let maximumReplacementWords = 6
 
     static func containsMarker(in transcript: String) -> Bool {
-        markerExpression.firstMatch(
+        // without the pattern nothing can be flagged, and an unflagged
+        // transcript is left exactly as dictated.
+        guard let markerExpression = markerExpression else {
+            return false
+        }
+        return markerExpression.firstMatch(
             in: transcript,
             range: transcript.fullNSRange
         ) != nil
     }
 
     func apply(_ transcript: String) -> String {
+        // a correction needs both patterns to be located and measured;
+        // missing either one means the transcript passes through.
+        guard let markerExpression = Self.markerExpression,
+              let wordExpression = wordExpression else {
+            return transcript
+        }
         let trimmed = transcript.trimmingCharacters(
             in: .whitespacesAndNewlines
         )
@@ -33,7 +44,7 @@ struct SelfCorrections: TranscriptTransform {
             return ""
         }
 
-        let matches = Self.markerExpression.matches(
+        let matches = markerExpression.matches(
             in: transcript,
             range: transcript.fullNSRange
         )
