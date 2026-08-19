@@ -4,8 +4,8 @@ struct MessyGate {
     static let lengthThreshold = 24
     static let nonDictionaryDensityThreshold = 0.30
 
-    private let tokenExpression = try! NSRegularExpression(
-        pattern: "[\\p{L}\\p{N}_@/%+\\-]+(?:\\.[\\p{L}\\p{N}_@/%+\\-]+)*"
+    private let tokenExpression = CleanupRegex.compile(
+        "[\\p{L}\\p{N}_@/%+\\-]+(?:\\.[\\p{L}\\p{N}_@/%+\\-]+)*"
     )
 
     func shouldPolish(
@@ -18,6 +18,11 @@ struct MessyGate {
             return true
         }
 
+        // no tokenizer means no evidence of mess; leave the deterministic
+        // output alone rather than sending everything to the model.
+        guard let tokenExpression = tokenExpression else {
+            return false
+        }
         let tokens = tokenExpression.matches(
             in: cleaned,
             range: cleaned.fullNSRange
