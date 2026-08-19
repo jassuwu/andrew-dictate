@@ -529,16 +529,26 @@ private struct DictionaryEditor: View {
             .frame(minWidth: 420, minHeight: 190)
             .overlay {
                 if store.entries.isEmpty {
-                    Text("teach andrew a word.")
+                    // an unreadable file is not an empty dictionary, and
+                    // must never be invited to look like one.
+                    Text(store.lastFailure ?? "teach andrew a word.")
                         .font(.caption)
-                        .foregroundStyle(BrandUI.textSecondary)
+                        .foregroundStyle(
+                            store.lastFailure == nil
+                                ? BrandUI.textSecondary
+                                : BrandUI.gold
+                        )
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 18)
                 }
             }
 
             HStack(spacing: 8) {
                 Button {
-                    let entry = store.add(wrong: "", right: "")
-                    selection = [entry.id]
+                    let entry = DictionaryEntry(wrong: "", right: "")
+                    if store.add(entry) {
+                        selection = [entry.id]
+                    }
                 } label: {
                     Image(systemName: "plus")
                 }
@@ -576,6 +586,14 @@ private struct DictionaryEditor: View {
                     .font(.caption)
                     .foregroundStyle(BrandUI.gold)
             }
+
+            // a dictionary that failed to load, import or save used to
+            // look exactly like an empty one. the store says which.
+            if let failure = store.lastFailure {
+                Text(failure)
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.gold)
+            }
         }
     }
 
@@ -592,13 +610,17 @@ private struct DictionaryEditor: View {
             return
         }
 
-        do {
-            try store.importJSON(from: sourceURL)
-            selection.removeAll()
-            message = nil
-        } catch {
-            message = "couldn’t import dictionary"
+        guard store.importJSON(from: sourceURL) else {
+            // the store publishes the specific reason itself; this is only
+            // the fallback for a failure it somehow didn’t record.
+            message = store.lastFailure == nil
+                ? "couldn’t import dictionary"
+                : nil
+            return
         }
+
+        selection.removeAll()
+        message = nil
     }
 
     private func exportDictionary() {
@@ -613,12 +635,14 @@ private struct DictionaryEditor: View {
             return
         }
 
-        do {
-            try store.exportJSON(to: destinationURL)
-            message = nil
-        } catch {
-            message = "couldn’t export dictionary"
+        guard store.exportJSON(to: destinationURL) else {
+            message = store.lastFailure == nil
+                ? "couldn’t export dictionary"
+                : nil
+            return
         }
+
+        message = nil
     }
 }
 
