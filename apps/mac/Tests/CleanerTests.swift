@@ -463,8 +463,10 @@ final class CleanerTests: XCTestCase {
                     "Visit example.com. Next"
                 ),
                 (
+                    // an address is not a sentence — capitalising it gives
+                    // you John@cypher.io, which is nobody's email.
                     "john@cypher.io",
-                    "John@cypher.io"
+                    "john@cypher.io"
                 ),
                 ("123 hello", "123 hello"),
                 ("iPhone works", "IPhone works"),
