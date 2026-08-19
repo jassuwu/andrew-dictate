@@ -118,6 +118,9 @@ final class DictationCoordinator: ObservableObject {
         }
     }
     private var isPrewarmed = false
+    /// a double-tapped key leaves nothing to hold, so nothing to feel. the
+    /// HUD has to carry the difference for as long as the capture runs.
+    private var isRecordingLocked = false
     private var activeFocusAnchor: FocusAnchor?
     private var pipelineTask: Task<Void, Never>?
     private var pipelineGeneration = 0
@@ -220,6 +223,9 @@ final class DictationCoordinator: ObservableObject {
         }
         recorder?.onInterruption = { [weak self] in
             self?.handleCaptureInterruption()
+        }
+        recorder?.onCapReached = { [weak self] in
+            self?.handleCaptureCapReached()
         }
 
         settings.$preRollEnabled
@@ -431,6 +437,7 @@ final class DictationCoordinator: ObservableObject {
         invalidatePipeline()
         if state == .recording {
             audioRecorder?.cancel()
+            setRecordingLocked(false)
             activeFocusAnchor = nil
             activeTimeline = nil
         }
@@ -478,6 +485,7 @@ final class DictationCoordinator: ObservableObject {
 
         if state == .recording {
             audioRecorder.cancel()
+            setRecordingLocked(false)
             activeFocusAnchor = nil
             activeTimeline = nil
             setState(.idle)
@@ -874,6 +882,9 @@ final class DictationCoordinator: ObservableObject {
             recorder.onInterruption = { [weak self] in
                 self?.handleCaptureInterruption()
             }
+            recorder.onCapReached = { [weak self] in
+                self?.handleCaptureCapReached()
+            }
             audioRecorder = recorder
             hudViewModel.useRecorder(recorder)
             audioLogger.notice("audio recorder rebuilt on demand")
@@ -889,10 +900,21 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
+    /// the recorder stops itself at the ceiling and keeps what it heard.
+    /// the only thing missing is the user knowing why the wave went quiet.
+    private func handleCaptureCapReached() {
+        guard state == .recording else {
+            return
+        }
+
+        flashNotice("five minutes — that's the cap")
+    }
+
     private func handleCaptureInterruption() {
         switch state {
         case .recording:
             audioRecorder?.cancel()
+            setRecordingLocked(false)
             activeFocusAnchor = nil
             activeTimeline = nil
             setState(.idle)
@@ -1038,6 +1060,25 @@ final class DictationCoordinator: ObservableObject {
         invalidatePipeline()
         setState(.idle)
         beginRecording()
+
+        // only claim the lock if the capture took — a missing mic or a
+        // failed engine leaves us idle, and a lamp that says "locked"
+        // over nothing is a lie.
+        guard state == .recording else {
+            return
+        }
+        setRecordingLocked(true)
+        flashNotice("locked — tap to end")
+    }
+
+    /// the HUD is the only place this fact can live: there is no held
+    /// key to look at, and the lamp burns identically either way.
+    private func setRecordingLocked(_ locked: Bool) {
+        guard locked != isRecordingLocked else {
+            return
+        }
+        isRecordingLocked = locked
+        hudViewModel.setRecordingLocked(locked)
     }
 
     private func endRecording() {
@@ -1045,6 +1086,8 @@ final class DictationCoordinator: ObservableObject {
               let audioRecorder else {
             return
         }
+
+        setRecordingLocked(false)
 
         do {
             activeTimeline?.keyUp = timelineClock.now
@@ -1081,6 +1124,7 @@ final class DictationCoordinator: ObservableObject {
         }
 
         audioRecorder.cancel()
+        setRecordingLocked(false)
         activeFocusAnchor = nil
         activeTimeline = nil
         setState(.idle)
@@ -1336,6 +1380,7 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func invalidatePipeline() {
+        setRecordingLocked(false)
         pipelineGeneration += 1
         pipelineTask?.cancel()
         pipelineTask = nil
@@ -1430,6 +1475,7 @@ final class DictationCoordinator: ObservableObject {
 
         if state == .recording {
             audioRecorder?.cancel()
+            setRecordingLocked(false)
             activeFocusAnchor = nil
         }
 

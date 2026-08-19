@@ -24,11 +24,11 @@ struct NumberParser: TranscriptTransform {
         .sorted { $0.count > $1.count }
         .joined(separator: "|")
 
-    private let expression: NSRegularExpression
+    private let expression: NSRegularExpression?
 
     init() {
-        expression = try! NSRegularExpression(
-            pattern: #"""
+        expression = CleanupRegex.compile(
+            #"""
             (?<![\p{L}\p{N}_])
             (
               (?:(?:\#(Self.numberWordPattern))(?:[\s-]+(?:and[\s-]+)?)?)*
@@ -42,7 +42,11 @@ struct NumberParser: TranscriptTransform {
     }
 
     func apply(_ transcript: String) -> String {
-        expression.replacingMatches(in: transcript) { match in
+        // no pattern, no number parsing — spoken numbers stay as words.
+        guard let expression = expression else {
+            return transcript
+        }
+        return expression.replacingMatches(in: transcript) { match in
             guard let spokenNumber = transcript.substring(
                 with: match.range(at: 1)
             ),

@@ -1,4 +1,12 @@
 import FluidAudio
+import OSLog
+
+/// file scope, and named for the file: the engine is an actor with static
+/// members, so there is no single `self` every log site can reach.
+private let transcriptionLogger = Logger(
+    subsystem: "gg.jass.dictate",
+    category: "engine"
+)
 
 enum TranscriptionPreparationUpdate: Sendable {
     case downloading(progress: Double)
@@ -102,12 +110,12 @@ actor ParakeetEngine: TranscriptionEngine {
         let decoderLayerCount = await manager.decoderLayerCount
         var decoderState = TdtDecoderState.make(decoderLayers: decoderLayerCount)
 
-        print("transcribing audio")
+        transcriptionLogger.debug("transcribing audio")
         let result = try await manager.transcribe(
             samples,
             decoderState: &decoderState
         )
-        print("transcription complete")
+        transcriptionLogger.debug("transcription complete")
 
         return result.text
     }
@@ -166,7 +174,12 @@ actor ParakeetEngine: TranscriptionEngine {
             if preparation?.identifier == pendingPreparation.identifier {
                 preparation = nil
             }
-            print("transcription engine prewarm failed")
+            transcriptionLogger.error(
+                """
+                transcription engine prewarm failed: \
+                \(error.localizedDescription, privacy: .public)
+                """
+            )
             throw error
         }
     }
@@ -178,8 +191,10 @@ actor ParakeetEngine: TranscriptionEngine {
         )?
     ) async throws -> AsrManager {
         let asrVersion = version.asrModelVersion
-        print("prewarming transcription engine")
-        print("downloading \(version.displayName) models if needed")
+        transcriptionLogger.notice("prewarming transcription engine")
+        transcriptionLogger.notice(
+            "downloading \(version.displayName) models if needed"
+        )
         let modelDirectory = try await AsrModels.download(
             version: asrVersion,
             progressHandler: { progress in
@@ -193,7 +208,9 @@ actor ParakeetEngine: TranscriptionEngine {
         try Task.checkCancellation()
 
         progressHandler?(.warmingUp)
-        print("loading \(version.displayName) models")
+        transcriptionLogger.notice(
+            "loading \(version.displayName) models"
+        )
         let models = try await AsrModels.load(
             from: modelDirectory,
             version: asrVersion
@@ -201,7 +218,7 @@ actor ParakeetEngine: TranscriptionEngine {
         try Task.checkCancellation()
         let manager = AsrManager(config: .default, models: models)
 
-        print("running transcription warmup")
+        transcriptionLogger.notice("running transcription warmup")
         let decoderLayerCount = await manager.decoderLayerCount
         var decoderState = TdtDecoderState.make(decoderLayers: decoderLayerCount)
         let silence = [Float](repeating: 0, count: 16_000)
@@ -210,7 +227,7 @@ actor ParakeetEngine: TranscriptionEngine {
             decoderState: &decoderState
         )
         try Task.checkCancellation()
-        print("transcription engine ready")
+        transcriptionLogger.notice("transcription engine ready")
 
         return manager
     }

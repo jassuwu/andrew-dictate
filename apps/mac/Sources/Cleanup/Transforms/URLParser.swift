@@ -6,8 +6,8 @@ struct URLParser: TranscriptTransform {
         "ly", "me", "net", "org", "tech", "uk",
     ]
 
-    private let expression = try! NSRegularExpression(
-        pattern: #"""
+    private let expression = CleanupRegex.compile(
+        #"""
         (?<![@\p{L}\p{N}._\-])
         ((?:www\s+dot\s+)?[\p{L}\p{N}\-]+(?:\s+dot\s+[\p{L}\p{N}\-]+)+)
         (
@@ -20,8 +20,19 @@ struct URLParser: TranscriptTransform {
         options: [.caseInsensitive, .allowCommentsAndWhitespace]
     )
 
+    // hoisted out of normalizePath: it runs per match on the dictation
+    // path, and a failed compile would otherwise log once per match too.
+    private static let pathSeparator = CleanupRegex.compile(
+        "\\s+slash(?:\\s+|$)",
+        options: [.caseInsensitive]
+    )
+
     func apply(_ transcript: String) -> String {
-        expression.replacingMatches(in: transcript) { match in
+        // no pattern, no url rewriting — the transcript passes through.
+        guard let expression = expression else {
+            return transcript
+        }
+        return expression.replacingMatches(in: transcript) { match in
             guard let spokenDomain = transcript.substring(
                 with: match.range(at: 1)
             ),
@@ -36,10 +47,11 @@ struct URLParser: TranscriptTransform {
                 with: ".",
                 options: [.regularExpression, .caseInsensitive]
             )
-            guard validDomain(domain) else {
+            guard validDomain(domain),
+                  let path = normalizePath(spokenPath) else {
                 return nil
             }
-            return domain + normalizePath(spokenPath)
+            return domain + path
         }
     }
 
@@ -59,15 +71,17 @@ struct URLParser: TranscriptTransform {
         }
     }
 
-    private func normalizePath(_ spokenPath: String) -> String {
+    /// nil when the path pattern is unavailable, which leaves the whole
+    /// spoken url untouched instead of emitting a half-parsed one.
+    private func normalizePath(_ spokenPath: String) -> String? {
         guard !spokenPath.isEmpty else {
             return ""
         }
+        guard let pathSeparator = Self.pathSeparator else {
+            return nil
+        }
         let components = spokenPath.components(
-            separatedBy: try! NSRegularExpression(
-                pattern: "\\s+slash(?:\\s+|$)",
-                options: [.caseInsensitive]
-            )
+            separatedBy: pathSeparator
         )
         return components.dropFirst().reduce(into: "") { path, component in
             path += "/"

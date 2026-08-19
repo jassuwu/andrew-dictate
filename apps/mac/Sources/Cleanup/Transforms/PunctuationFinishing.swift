@@ -1,20 +1,26 @@
 import Foundation
 
 struct PunctuationFinishing: TranscriptTransform {
-    private let beforePunctuation = try! NSRegularExpression(
-        pattern: "[ \\t]+([,.;:!?%])"
+    private let beforePunctuation = CleanupRegex.compile(
+        "[ \\t]+([,.;:!?%])"
     )
-    private let horizontalWhitespace = try! NSRegularExpression(
-        pattern: "[ \\t]+"
+    private let horizontalWhitespace = CleanupRegex.compile("[ \\t]+")
+    private let afterSeparator = CleanupRegex.compile(
+        "([,;:])(?=[\\p{L}\"])"
     )
-    private let afterSeparator = try! NSRegularExpression(
-        pattern: "([,;:])(?=[\\p{L}\"])"
-    )
-    private let aroundLineBreak = try! NSRegularExpression(
-        pattern: "[ \\t]*\\n[ \\t]*"
+    private let aroundLineBreak = CleanupRegex.compile(
+        "[ \\t]*\\n[ \\t]*"
     )
 
     func apply(_ transcript: String) -> String {
+        // the four passes are one spacing contract; running a subset would
+        // leave spacing worse than the input, so a broken one skips all.
+        guard let beforePunctuation = beforePunctuation,
+              let horizontalWhitespace = horizontalWhitespace,
+              let afterSeparator = afterSeparator,
+              let aroundLineBreak = aroundLineBreak else {
+            return transcript
+        }
         var result = horizontalWhitespace.stringByReplacingMatches(
             in: transcript,
             range: transcript.fullNSRange,

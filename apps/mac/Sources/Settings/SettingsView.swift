@@ -93,10 +93,8 @@ struct SettingsView: View {
                             option: .soundFeedback,
                             settings: settings
                         )
-                        if isCleanupAvailable {
-                            cardDivider
-                            aiCleanupEditor
-                        }
+                        cardDivider
+                        aiCleanupEditor
                         cardDivider
                         cleanupLabControls
                     }
@@ -259,11 +257,14 @@ struct SettingsView: View {
             .accessibilityHidden(true)
     }
 
+    /// shown on every mac, disabled where the os can’t run it: hiding
+    /// the row entirely taught older machines the feature doesn’t exist.
     private var aiCleanupEditor: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
                 Text("ai cleanup")
                     .font(BrandUI.bodyFont.weight(.medium))
+                    .opacity(isCleanupAvailable ? 1 : 0.55)
 
                 Spacer(minLength: 12)
 
@@ -278,11 +279,16 @@ struct SettingsView: View {
                 .frame(width: 210)
             }
 
-            Text(settings.cleanupMode.explanation)
-                .font(.caption)
-                .foregroundStyle(BrandUI.textSecondary)
-                .lineLimit(1)
+            Text(
+                isCleanupAvailable
+                    ? settings.cleanupMode.explanation
+                    : "needs macOS 26 — apple’s on-device model"
+            )
+            .font(.caption)
+            .foregroundStyle(BrandUI.textSecondary)
+            .lineLimit(1)
         }
+        .disabled(!isCleanupAvailable)
     }
 
     private var cleanupLabControls: some View {
@@ -434,20 +440,28 @@ struct SettingsView: View {
         installedModels = modelStore.installedModels()
     }
 
+    /// the filesystem goes first. unloading the engine up front meant a
+    /// failed delete left you with nothing loaded, the model still on
+    /// disk, and no idea why — so a failure here must cost nothing.
     private func removeDownload(_ version: EngineVersion) {
-        let decision = modelStore.removalDecision(for: version)
-        Task { @MainActor in
-            if decision.requiresRepreparation {
-                await coordinator.prepareForActiveModelRemoval(version)
-            }
-
-            do {
-                try modelStore.remove(version)
-                modelStoreMessage = nil
-            } catch {
-                modelStoreMessage = "couldn’t remove download"
-            }
+        let decision: ModelRemovalDecision
+        do {
+            decision = try modelStore.remove(version)
+            modelStoreMessage = nil
+        } catch {
+            modelStoreMessage = error.localizedDescription
             refreshInstalledModels()
+            return
+        }
+
+        refreshInstalledModels()
+
+        guard decision.requiresRepreparation else {
+            return
+        }
+
+        Task { @MainActor in
+            await coordinator.prepareForActiveModelRemoval(version)
         }
     }
 
@@ -515,16 +529,26 @@ private struct DictionaryEditor: View {
             .frame(minWidth: 420, minHeight: 190)
             .overlay {
                 if store.entries.isEmpty {
-                    Text("teach andrew a word.")
+                    // an unreadable file is not an empty dictionary, and
+                    // must never be invited to look like one.
+                    Text(store.lastFailure ?? "teach andrew a word.")
                         .font(.caption)
-                        .foregroundStyle(BrandUI.textSecondary)
+                        .foregroundStyle(
+                            store.lastFailure == nil
+                                ? BrandUI.textSecondary
+                                : BrandUI.gold
+                        )
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 18)
                 }
             }
 
             HStack(spacing: 8) {
                 Button {
-                    let entry = store.add(wrong: "", right: "")
-                    selection = [entry.id]
+                    let entry = DictionaryEntry(wrong: "", right: "")
+                    if store.add(entry) {
+                        selection = [entry.id]
+                    }
                 } label: {
                     Image(systemName: "plus")
                 }
@@ -562,6 +586,14 @@ private struct DictionaryEditor: View {
                     .font(.caption)
                     .foregroundStyle(BrandUI.gold)
             }
+
+            // a dictionary that failed to load, import or save used to
+            // look exactly like an empty one. the store says which.
+            if let failure = store.lastFailure {
+                Text(failure)
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.gold)
+            }
         }
     }
 
@@ -578,13 +610,17 @@ private struct DictionaryEditor: View {
             return
         }
 
-        do {
-            try store.importJSON(from: sourceURL)
-            selection.removeAll()
-            message = nil
-        } catch {
-            message = "couldn’t import dictionary"
+        guard store.importJSON(from: sourceURL) else {
+            // the store publishes the specific reason itself; this is only
+            // the fallback for a failure it somehow didn’t record.
+            message = store.lastFailure == nil
+                ? "couldn’t import dictionary"
+                : nil
+            return
         }
+
+        selection.removeAll()
+        message = nil
     }
 
     private func exportDictionary() {
@@ -599,12 +635,14 @@ private struct DictionaryEditor: View {
             return
         }
 
-        do {
-            try store.exportJSON(to: destinationURL)
-            message = nil
-        } catch {
-            message = "couldn’t export dictionary"
+        guard store.exportJSON(to: destinationURL) else {
+            message = store.lastFailure == nil
+                ? "couldn’t export dictionary"
+                : nil
+            return
         }
+
+        message = nil
     }
 }
 

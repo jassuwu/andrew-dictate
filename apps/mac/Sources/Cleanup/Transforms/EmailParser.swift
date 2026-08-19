@@ -1,8 +1,8 @@
 import Foundation
 
 struct EmailParser: TranscriptTransform {
-    private let expression = try! NSRegularExpression(
-        pattern: #"""
+    private let expression = CleanupRegex.compile(
+        #"""
         (?<![\p{L}\p{N}@._%+\-])
         ([\p{L}\p{N}._%+\-]+(?:\s+(?:dot|underscore|dash|hyphen)\s+[\p{L}\p{N}]+)*)
         \s+at\s+
@@ -13,7 +13,12 @@ struct EmailParser: TranscriptTransform {
     )
 
     func apply(_ transcript: String) -> String {
-        expression.replacingMatches(in: transcript) { match in
+        // no pattern, no spoken-email rewriting — the transcript passes
+        // through as dictated.
+        guard let expression = expression else {
+            return transcript
+        }
+        return expression.replacingMatches(in: transcript) { match in
             guard let local = transcript.substring(
                 with: match.range(at: 1)
             ),
