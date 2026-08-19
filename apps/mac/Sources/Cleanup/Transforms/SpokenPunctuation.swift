@@ -11,87 +11,82 @@ struct SpokenPunctuation: TranscriptTransform {
     private struct Marker {
         let expression: NSRegularExpression
         let kind: Kind
+
+        /// nil for a malformed pattern, so one mistyped marker drops out of
+        /// the list and the other ten keep working.
+        init?(pattern: String, kind: Kind) {
+            guard let expression = CleanupRegex.compile(
+                pattern,
+                options: [.caseInsensitive]
+            ) else {
+                return nil
+            }
+            self.expression = expression
+            self.kind = kind
+        }
     }
+
+    // hoisted out of formatExtractedSymbols: it runs on every utterance,
+    // so the patterns are compiled once, not per transcript.
+    private static let beforePunctuation = CleanupRegex.compile(
+        "[ \\t]+([,.;:!?])"
+    )
+    private static let repeatedHorizontalSpace = CleanupRegex.compile(
+        "[ \\t]+"
+    )
+    private static let aroundLineBreak = CleanupRegex.compile(
+        "[ \\t]*\\n[ \\t]*"
+    )
+    private static let afterPunctuation = CleanupRegex.compile(
+        "([,.;:!?])(?=[\\p{L}\\p{N}\"])"
+    )
 
     private let markers: [Marker] = [
         Marker(
-            expression: try! NSRegularExpression(
-                pattern: "(?<![\\p{L}\\p{N}_])new paragraph(?![\\p{L}\\p{N}_])",
-                options: [.caseInsensitive]
-            ),
+            pattern: "(?<![\\p{L}\\p{N}_])new paragraph(?![\\p{L}\\p{N}_])",
             kind: .lineBreak("\n\n")
         ),
         Marker(
-            expression: try! NSRegularExpression(
-                pattern: "(?<![\\p{L}\\p{N}_])new line(?![\\p{L}\\p{N}_])",
-                options: [.caseInsensitive]
-            ),
+            pattern: "(?<![\\p{L}\\p{N}_])new line(?![\\p{L}\\p{N}_])",
             kind: .lineBreak("\n")
         ),
         Marker(
-            expression: try! NSRegularExpression(
-                pattern: "(?<![\\p{L}\\p{N}_])question mark(?![\\p{L}\\p{N}_])",
-                options: [.caseInsensitive]
-            ),
+            pattern: "(?<![\\p{L}\\p{N}_])question mark(?![\\p{L}\\p{N}_])",
             kind: .trailing("?")
         ),
         Marker(
-            expression: try! NSRegularExpression(
-                pattern: "(?<![\\p{L}\\p{N}_])exclamation (?:mark|point)(?![\\p{L}\\p{N}_])",
-                options: [.caseInsensitive]
-            ),
+            pattern: "(?<![\\p{L}\\p{N}_])exclamation (?:mark|point)(?![\\p{L}\\p{N}_])",
             kind: .trailing("!")
         ),
         Marker(
-            expression: try! NSRegularExpression(
-                pattern: "(?<![\\p{L}\\p{N}_])full stop(?![\\p{L}\\p{N}_])",
-                options: [.caseInsensitive]
-            ),
+            pattern: "(?<![\\p{L}\\p{N}_])full stop(?![\\p{L}\\p{N}_])",
             kind: .trailing(".")
         ),
         Marker(
-            expression: try! NSRegularExpression(
-                pattern: "(?<![\\p{L}\\p{N}_])open quote(?![\\p{L}\\p{N}_])",
-                options: [.caseInsensitive]
-            ),
+            pattern: "(?<![\\p{L}\\p{N}_])open quote(?![\\p{L}\\p{N}_])",
             kind: .openQuote
         ),
         Marker(
-            expression: try! NSRegularExpression(
-                pattern: "(?<![\\p{L}\\p{N}_])close quote(?![\\p{L}\\p{N}_])",
-                options: [.caseInsensitive]
-            ),
+            pattern: "(?<![\\p{L}\\p{N}_])close quote(?![\\p{L}\\p{N}_])",
             kind: .closeQuote
         ),
         Marker(
-            expression: try! NSRegularExpression(
-                pattern: "(?<![\\p{L}\\p{N}_])comma(?![\\p{L}\\p{N}_])",
-                options: [.caseInsensitive]
-            ),
+            pattern: "(?<![\\p{L}\\p{N}_])comma(?![\\p{L}\\p{N}_])",
             kind: .trailing(",")
         ),
         Marker(
-            expression: try! NSRegularExpression(
-                pattern: "(?<![\\p{L}\\p{N}_])period(?![\\p{L}\\p{N}_])",
-                options: [.caseInsensitive]
-            ),
+            pattern: "(?<![\\p{L}\\p{N}_])period(?![\\p{L}\\p{N}_])",
             kind: .trailing(".")
         ),
         Marker(
-            expression: try! NSRegularExpression(
-                pattern: "(?<![\\p{L}\\p{N}_])colon(?![\\p{L}\\p{N}_])",
-                options: [.caseInsensitive]
-            ),
+            pattern: "(?<![\\p{L}\\p{N}_])colon(?![\\p{L}\\p{N}_])",
             kind: .trailing(":")
         ),
         Marker(
-            expression: try! NSRegularExpression(
-                pattern: "(?<![\\p{L}\\p{N}_])semicolon(?![\\p{L}\\p{N}_])",
-                options: [.caseInsensitive]
-            ),
+            pattern: "(?<![\\p{L}\\p{N}_])semicolon(?![\\p{L}\\p{N}_])",
             kind: .trailing(";")
         ),
-    ]
+    ].compactMap { $0 }
 
     func apply(_ transcript: String) -> String {
         var result = transcript
@@ -121,7 +116,12 @@ struct SpokenPunctuation: TranscriptTransform {
             }
         }
 
-        return formatExtractedSymbols(result)
+        // symbols dropped in without their spacing fixed would read worse
+        // than the spoken words, so an unusable formatter voids the stage.
+        guard let formatted = formatExtractedSymbols(result) else {
+            return transcript
+        }
+        return formatted
     }
 
     private func isPlausible(
@@ -150,37 +150,29 @@ struct SpokenPunctuation: TranscriptTransform {
         }
     }
 
-    private func formatExtractedSymbols(_ input: String) -> String {
+    private func formatExtractedSymbols(_ input: String) -> String? {
+        guard let beforePunctuation = Self.beforePunctuation,
+              let repeatedHorizontalSpace = Self.repeatedHorizontalSpace,
+              let aroundLineBreak = Self.aroundLineBreak,
+              let afterPunctuation = Self.afterPunctuation else {
+            return nil
+        }
+
         var result = input
-        let beforePunctuation = try! NSRegularExpression(
-            pattern: "[ \\t]+([,.;:!?])"
-        )
         result = beforePunctuation.stringByReplacingMatches(
             in: result,
             range: result.fullNSRange,
             withTemplate: "$1"
-        )
-
-        let repeatedHorizontalSpace = try! NSRegularExpression(
-            pattern: "[ \\t]+"
         )
         result = repeatedHorizontalSpace.stringByReplacingMatches(
             in: result,
             range: result.fullNSRange,
             withTemplate: " "
         )
-
-        let aroundLineBreak = try! NSRegularExpression(
-            pattern: "[ \\t]*\\n[ \\t]*"
-        )
         result = aroundLineBreak.stringByReplacingMatches(
             in: result,
             range: result.fullNSRange,
             withTemplate: "\n"
-        )
-
-        let afterPunctuation = try! NSRegularExpression(
-            pattern: "([,.;:!?])(?=[\\p{L}\\p{N}\"])"
         )
         result = afterPunctuation.stringByReplacingMatches(
             in: result,
