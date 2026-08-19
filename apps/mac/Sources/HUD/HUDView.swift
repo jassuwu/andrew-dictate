@@ -207,7 +207,7 @@ struct HUDView: View {
     private func textPill(_ message: String) -> some View {
         Text(message)
             .font(Font(HUDLayoutEngine.primaryFont))
-            .foregroundStyle(HUDGold.pale)
+            .foregroundStyle(BrandUI.goldPale)
             .lineLimit(viewModel.layout.lineCount)
             .lineSpacing(HUDLayoutEngine.wrappedLineSpacing)
             .truncationMode(.tail)
@@ -222,7 +222,7 @@ struct HUDView: View {
             .background {
                 ZStack {
                     HUDGlassBackground()
-                    HUDGold.black.opacity(0.22)
+                    BrandUI.black.opacity(0.22)
                 }
                 .clipShape(
                     RoundedRectangle(
@@ -237,35 +237,13 @@ struct HUDView: View {
                     style: .continuous
                 )
                 .stroke(
-                    HUDGold.mid.opacity(0.35),
+                    BrandUI.gold.opacity(0.35),
                     lineWidth: 1
                 )
             }
     }
 }
 
-enum HUDGold {
-    static let pale = Color(
-        red: 249.0 / 255.0,
-        green: 233.0 / 255.0,
-        blue: 168.0 / 255.0
-    )
-    static let mid = Color(
-        red: 229.0 / 255.0,
-        green: 190.0 / 255.0,
-        blue: 98.0 / 255.0
-    )
-    static let deep = Color(
-        red: 158.0 / 255.0,
-        green: 117.0 / 255.0,
-        blue: 39.0 / 255.0
-    )
-    static let black = Color(
-        red: 11.0 / 255.0,
-        green: 11.0 / 255.0,
-        blue: 13.0 / 255.0
-    )
-}
 
 /// the lamp: a bare gold line, bolted in place. flat ember when silent,
 /// waving when voice hits it, tungsten color shift riding the loudness.
@@ -297,9 +275,10 @@ struct GoldRippleLine: View {
     private static let lockDotGap =
         HUDWaveMotion.strokeWidth * 2.2
 
-    private static let paleRGB: [Double] = [249, 233, 168]
-    private static let midRGB: [Double] = [229, 190, 98]
-    private static let deepRGB: [Double] = [158, 117, 39]
+    // the lamp burns the brand's gold, not a second copy of it.
+    private static let paleRGB = BrandUI.goldPaleRGB
+    private static let midRGB = BrandUI.goldRGB
+    private static let deepRGB = BrandUI.goldDeepRGB
 
     var body: some View {
         TimelineView(
