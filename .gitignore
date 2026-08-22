@@ -16,3 +16,6 @@ docs/adr/
 *.local
 .env
 AndrewDictate-*.dmg
+
+# wayfinder map & tickets (local working docs, same as ADRs)
+docs/wayfinder/

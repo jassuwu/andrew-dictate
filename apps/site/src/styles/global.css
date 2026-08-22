@@ -1,1 +1,79 @@
 @import "tailwindcss";
+
+@theme {
+  --font-sans:
+    ui-sans-serif, -apple-system, "SF Pro Text", "Segoe UI", system-ui,
+    sans-serif;
+  --font-mono:
+    ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", Menlo, monospace;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-synthesis-weight: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: #e5be62;
+    color: #0c0c0e;
+  }
+
+  :focus-visible {
+    outline: 2px solid #f9e9a8;
+    outline-offset: 3px;
+    border-radius: 6px;
+  }
+
+  kbd {
+    font-family: var(--font-mono);
+    font-size: 0.82em;
+    padding: 0.15em 0.42em;
+    border-radius: 5px;
+    border: 1px solid rgb(229 190 98 / 0.3);
+    background: #1f1f24;
+    color: #f9e9a8;
+    white-space: nowrap;
+  }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    color: #e5be62;
+    word-break: break-word;
+  }
+}
+
+/* the wordmark lets you in on the name, and only if you go looking.
+   ADR 0013's deadpan rule holds everywhere else. */
+@layer components {
+  .aside {
+    margin-top: 0.25rem;
+    color: transparent;
+    transition: color 500ms ease;
+  }
+
+  /* :has() keeps the trigger on the wordmark itself, not the whole row —
+     hovering the ALPHA sticker should not give the joke away. */
+  .name-row:has(.wordmark:hover) ~ .aside {
+    color: rgb(242 237 224 / 0.45);
+  }
+
+  /* no hover on touch: show it quietly rather than making it unreachable */
+  @media (hover: none) {
+    .aside {
+      color: rgb(242 237 224 / 0.3);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .aside {
+      transition: none;
+    }
+  }
+}
