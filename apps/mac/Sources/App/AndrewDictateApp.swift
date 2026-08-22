@@ -35,6 +35,11 @@ struct AndrewDictateApp: App {
             }
             .disabled(coordinator.lastTranscript == nil)
 
+            Button("fix a word…") {
+                coordinator.openWordFixer()
+            }
+            .disabled(coordinator.lastTranscript == nil)
+
             Divider()
 
             Button("settings…") {

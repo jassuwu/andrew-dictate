@@ -60,6 +60,7 @@ targets:
         excludes:
           - CleanupLabView.swift
           - PipelinePlaygroundView.swift
+          - WordFixerView.swift
       - Sources/Audio/RingSplicer.swift
       - Sources/Audio/TapHealthMonitor.swift
       - Sources/Archive/Dictation.swift

@@ -147,6 +147,9 @@ final class DictationCoordinator: ObservableObject {
     private var activeTimeline: UtteranceTimelineBuilder?
     private var aboutWindowController: AboutWindowController?
     private var cleanupLabWindowController: CleanupLabWindowController?
+    /// Rebuilt per transcript rather than reused: the window is *about* one
+    /// dictation, so keeping a stale one around would show the wrong words.
+    private var wordFixerWindowController: WordFixerWindowController?
     private var pipelinePlaygroundWindowController:
         PipelinePlaygroundWindowController?
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
@@ -348,6 +351,21 @@ final class DictationCoordinator: ObservableObject {
                 )
             }
         }
+    }
+
+    /// The door ticket 011 chose. It hands over the *raw* transcript on
+    /// purpose: a dictionary entry's `wrong` side has to be what the engine
+    /// produced, and `lastTranscript` is already exactly that.
+    func openWordFixer() {
+        guard let lastTranscript else {
+            return
+        }
+        let controller = WordFixerWindowController(
+            transcript: lastTranscript,
+            store: dictionaryStore
+        )
+        wordFixerWindowController = controller
+        controller.present()
     }
 
     func copyLastTranscript() {
