@@ -40,6 +40,10 @@ struct AndrewDictateApp: App {
             }
             .disabled(coordinator.lastTranscript == nil)
 
+            Button("what it keeps…") {
+                coordinator.openArchiveBrowser()
+            }
+
             Divider()
 
             Button("settings…") {

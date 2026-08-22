@@ -154,6 +154,7 @@ final class DictationCoordinator: ObservableObject {
     /// one place that knows whether anything actually reached the page.
     private var pendingArchiveText: (heard: String, inserted: String)?
     private var wordFixerWindowController: WordFixerWindowController?
+    private var archiveBrowserWindowController: ArchiveBrowserWindowController?
     private var pipelinePlaygroundWindowController:
         PipelinePlaygroundWindowController?
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
@@ -364,11 +365,33 @@ final class DictationCoordinator: ObservableObject {
         guard let lastTranscript else {
             return
         }
+        openWordFixer(for: lastTranscript)
+    }
+
+    func openWordFixer(for transcript: String) {
         let controller = WordFixerWindowController(
-            transcript: lastTranscript,
+            transcript: transcript,
             store: dictionaryStore
         )
         wordFixerWindowController = controller
+        controller.present()
+    }
+
+    /// The list, and the only place a single kept dictation can be deleted.
+    /// It is also ticket 011's second door: the raw text of any past dictation
+    /// can be corrected, which is the case no in-the-moment flow reaches.
+    func openArchiveBrowser() {
+        let controller: ArchiveBrowserWindowController
+        if let archiveBrowserWindowController {
+            controller = archiveBrowserWindowController
+        } else {
+            controller = ArchiveBrowserWindowController(
+                fixAWord: { [weak self] heard in
+                    self?.openWordFixer(for: heard)
+                }
+            )
+            archiveBrowserWindowController = controller
+        }
         controller.present()
     }
 
