@@ -1,5 +1,25 @@
 import Foundation
 
+/// Flags spoken self-corrections. Does not act on them.
+///
+/// This transform used to rewrite corrections inline: find a marker, delete
+/// the words before it, keep the words after. Ticket 004 measured what that
+/// did to ordinary English and the answer was that every marker in the list is
+/// also a common word, so the transform deleted the subject of correct
+/// sentences and left no trace — `"we should actually ship this today"` came
+/// out as `"Ship this today."`, a statement turned into an imperative that
+/// reads perfectly. SPEC §4 forbids precisely that: a failure that cannot be
+/// told from a success.
+///
+/// There is no safe subset of markers. `no wait`, `make that` and
+/// `scratch that` damage ordinary speech just as `actually` does — the signal
+/// that separates a correction from an adverb is prosodic, and prosody is not
+/// in the text. So the rewrite is gone.
+///
+/// The capability is not. `containsMarker` still reports every marker, and
+/// `MessyGate` still routes a flagged transcript to the optional model, which
+/// has the context this never had. ADR 0019 already sent ambiguous corrections
+/// there; the measurement widened "ambiguous" to "all of them".
 struct SelfCorrections: TranscriptTransform {
     static let markerExpression = CleanupRegex.compile(
         #"""
@@ -10,10 +30,10 @@ struct SelfCorrections: TranscriptTransform {
         options: [.caseInsensitive, .allowCommentsAndWhitespace]
     )
 
-    private let wordExpression = CleanupRegex.compile(
-        "[\\p{L}\\p{N}]+(?:['’-][\\p{L}\\p{N}]+)*"
-    )
-    private let maximumReplacementWords = 6
+    /// Whole-utterance `scratch that`, and nothing shorter. Anchored at both
+    /// ends, which is what makes it unambiguous: there is no surrounding
+    /// sentence for the words to be an ordinary part of.
+    private static let discardExpression = #"^scratch\s+that[.!?]?$"#
 
     static func containsMarker(in transcript: String) -> Bool {
         // without the pattern nothing can be flagged, and an unflagged
@@ -28,96 +48,16 @@ struct SelfCorrections: TranscriptTransform {
     }
 
     func apply(_ transcript: String) -> String {
-        // a correction needs both patterns to be located and measured;
-        // missing either one means the transcript passes through.
-        guard let markerExpression = Self.markerExpression,
-              let wordExpression = wordExpression else {
-            return transcript
-        }
         let trimmed = transcript.trimmingCharacters(
             in: .whitespacesAndNewlines
         )
         if trimmed.range(
-            of: #"^scratch\s+that[.!?]?$"#,
+            of: Self.discardExpression,
             options: [.regularExpression, .caseInsensitive]
         ) != nil {
             return ""
         }
 
-        let matches = markerExpression.matches(
-            in: transcript,
-            range: transcript.fullNSRange
-        )
-        // More than one marker is a nested/ambiguous correction. ADR 0019
-        // deliberately leaves that case for the optional model.
-        guard matches.count == 1,
-              let match = matches.first,
-              let markerRange = Range(match.range, in: transcript) else {
-            return transcript
-        }
-
-        let marker = String(transcript[markerRange]).lowercased()
-        var prefix = String(transcript[..<markerRange.lowerBound])
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        var replacement = String(transcript[markerRange.upperBound...])
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        replacement = replacement.trimmingCharacters(
-            in: CharacterSet(charactersIn: ",;:")
-                .union(.whitespacesAndNewlines)
-        )
-
-        guard !prefix.isEmpty, !replacement.isEmpty else {
-            return transcript
-        }
-        let loweredReplacement = replacement.lowercased()
-        if marker == "rather",
-           loweredReplacement == "than"
-            || loweredReplacement.hasPrefix("than ") {
-            return transcript
-        }
-
-        let replacementWordCount = wordExpression.numberOfMatches(
-            in: replacement,
-            range: replacement.fullNSRange
-        )
-        guard replacementWordCount > 0,
-              replacementWordCount <= maximumReplacementWords else {
-            return transcript
-        }
-
-        let prefixWords = wordExpression.matches(
-            in: prefix,
-            range: prefix.fullNSRange
-        )
-        guard !prefixWords.isEmpty else {
-            return transcript
-        }
-        let wordsToReplace = min(
-            replacementWordCount,
-            prefixWords.count,
-            maximumReplacementWords
-        )
-        let firstReplacedWord = prefixWords[
-            prefixWords.count - wordsToReplace
-        ]
-        guard let removalRange = Range(
-            NSRange(
-                location: firstReplacedWord.range.location,
-                length: prefix.utf16.count
-                    - firstReplacedWord.range.location
-            ),
-            in: prefix
-        ) else {
-            return transcript
-        }
-        prefix.removeSubrange(removalRange)
-        prefix = prefix.trimmingCharacters(
-            in: CharacterSet(charactersIn: " ,;:")
-                .union(.whitespacesAndNewlines)
-        )
-
-        return [prefix, replacement]
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
+        return transcript
     }
 }

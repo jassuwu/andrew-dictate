@@ -294,34 +294,29 @@ final class CleanerTests: XCTestCase {
         )
     }
 
-    func testSelfCorrectionsTable() {
+    /// These were the transform's showcase cases until ticket 004. Each is a
+    /// genuine spoken correction, and none of them is rewritten any more —
+    /// because the same pattern that catches them also fires on ordinary
+    /// speech, silently. They are flagged for the model instead; see
+    /// `testMarkersStillFlagTheTranscriptForTheModel`.
+    func testGenuineCorrectionsArePassedThroughRatherThanGuessedAt() {
         assertTransform(
             SelfCorrections(),
             cases: [
                 (
                     "ship it friday, actually monday",
-                    "ship it monday"
+                    "ship it friday, actually monday"
                 ),
-                ("send red sorry blue", "send blue"),
-                ("call john i mean jane", "call jane"),
+                ("send red sorry blue", "send red sorry blue"),
+                ("call john i mean jane", "call john i mean jane"),
                 (
                     "meet friday no wait monday",
-                    "meet monday"
+                    "meet friday no wait monday"
                 ),
-                ("paint red rather blue", "paint blue"),
+                ("paint red rather blue", "paint red rather blue"),
                 (
                     "version one make that two",
-                    "version two"
-                ),
-                ("scratch that", ""),
-                ("scratch that.", ""),
-                (
-                    "meet on friday actually next monday",
-                    "meet next monday"
-                ),
-                (
-                    "send the red file actually blue file",
-                    "send the blue file"
+                    "version one make that two"
                 ),
             ]
         )
@@ -352,6 +347,93 @@ final class CleanerTests: XCTestCase {
                 ("no markers here", "no markers here"),
                 ("rather than", "rather than"),
             ]
+        )
+    }
+
+    /// Ticket 004. Every marker in the list is also ordinary English, and the
+    /// transform's job was to delete the words *before* it — so ordinary
+    /// speech came out with its subject missing and no sign anything had
+    /// happened. SPEC §4 forbids exactly that shape: a failure that cannot be
+    /// told from a success.
+    func testOrdinarySpeechContainingAMarkerIsNeverRewritten() {
+        assertTransform(
+            SelfCorrections(),
+            cases: [
+                (
+                    "I actually finished the report last night",
+                    "I actually finished the report last night"
+                ),
+                (
+                    "we should actually ship this today",
+                    "we should actually ship this today"
+                ),
+                (
+                    "hey sorry I'm late to the standup",
+                    "hey sorry I'm late to the standup"
+                ),
+                (
+                    "I'd rather go home than stay here",
+                    "I'd rather go home than stay here"
+                ),
+                (
+                    "she said rather firmly that it was done",
+                    "she said rather firmly that it was done"
+                ),
+                (
+                    "you know what I mean about the deadline",
+                    "you know what I mean about the deadline"
+                ),
+                (
+                    "we can make that work by friday",
+                    "we can make that work by friday"
+                ),
+                (
+                    "there is no wait time on the free tier",
+                    "there is no wait time on the free tier"
+                ),
+                (
+                    "do not scratch that surface",
+                    "do not scratch that surface"
+                ),
+            ]
+        )
+    }
+
+    /// The one form that carries no ambiguity: the whole utterance is the
+    /// marker, so there is nothing it could be a word *in*.
+    func testScratchThatAloneStillDiscardsTheUtterance() {
+        assertTransform(
+            SelfCorrections(),
+            cases: [
+                ("scratch that", ""),
+                ("scratch that.", ""),
+                ("Scratch That!", ""),
+                ("  scratch that  ", ""),
+            ]
+        )
+    }
+
+    /// Dropping the rewrite does not drop the capability. The markers still
+    /// flag the transcript, and MessyGate still routes it to the optional
+    /// model — which has the context a regex never had. ADR 0019 already put
+    /// ambiguous corrections there; this widens "ambiguous" to "all of them".
+    func testMarkersStillFlagTheTranscriptForTheModel() {
+        for transcript in [
+            "ship it friday, actually monday",
+            "call john i mean jane",
+            "meet friday no wait monday",
+            "version one make that two",
+            "send red sorry blue",
+            "paint red rather blue",
+        ] {
+            XCTAssertTrue(
+                SelfCorrections.containsMarker(in: transcript),
+                transcript
+            )
+        }
+
+        XCTAssertFalse(
+            SelfCorrections.containsMarker(in: "no markers here")
         )
     }
 
@@ -514,12 +596,15 @@ final class CleanerTests: XCTestCase {
         )
     }
 
-    func testADRExampleSelfCorrectionPipeline() {
+    /// ADR 0019's original worked example, amended by ticket 004. The
+    /// deterministic pass no longer guesses at the correction; it punctuates
+    /// and capitalises, and leaves the words the user said.
+    func testADRExampleSelfCorrectionIsLeftForTheModel() {
         XCTAssertEqual(
             DeterministicCleaner().clean(
                 "ship it friday, actually monday"
             ),
-            "Ship it monday."
+            "Ship it friday, actually monday."
         )
     }
 
@@ -555,7 +640,7 @@ final class CleanerTests: XCTestCase {
             ),
             (
                 "ship it friday comma actually monday",
-                "Ship it monday."
+                "Ship it friday, actually monday."
             ),
             (
                 "we should we should ship tomorrow",
@@ -591,7 +676,7 @@ final class CleanerTests: XCTestCase {
             ),
             (
                 "call john sorry jane question mark",
-                "Call jane?"
+                "Call john sorry jane?"
             ),
             (
                 "say open quote ship it close quote",
@@ -608,8 +693,12 @@ final class CleanerTests: XCTestCase {
         }
     }
 
+    /// ADR 0019's order contract still bites, on a narrower case than it used
+    /// to. `SelfCorrections` now only recognises a whole utterance that is
+    /// exactly "scratch that" — so whether the trailing spoken "period" has
+    /// already become a full stop decides whether the utterance is discarded.
     func testPipelineOrderPunctuationMustRunBeforeCorrections() {
-        let input = "ship it friday comma actually monday"
+        let input = "scratch that period"
         let punctuationFirst = SelfCorrections().apply(
             SpokenPunctuation().apply(input)
         )
@@ -617,12 +706,9 @@ final class CleanerTests: XCTestCase {
             SelfCorrections().apply(input)
         )
 
-        XCTAssertEqual(punctuationFirst, "ship it monday")
-        XCTAssertNotEqual(correctionsFirst, punctuationFirst)
-        XCTAssertEqual(
-            DeterministicCleaner().clean(input),
-            "Ship it monday."
-        )
+        XCTAssertEqual(punctuationFirst, "")
+        XCTAssertEqual(correctionsFirst, "scratch that.")
+        XCTAssertEqual(DeterministicCleaner().clean(input), "")
     }
 
     private func assertTransform(
