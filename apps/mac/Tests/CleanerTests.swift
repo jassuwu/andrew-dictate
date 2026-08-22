@@ -23,12 +23,14 @@ final class CleanerTests: XCTestCase {
         XCTAssertEqual(cleaner.clean("umbrella gptx"), "Umbrella gptx.")
     }
 
-    func testFillersAndFollowingCommasAreRemoved() {
+    /// ADR 0020: "um" is a word you said. The cleaner renders speech as
+    /// writing; it does not edit you.
+    func testFillersAreLeftWhereYouSaidThem() {
         let cleaner = DeterministicCleaner()
 
         XCTAssertEqual(
             cleaner.clean("um, I uh think erm, this uhm works"),
-            "I think this works."
+            "Um, I uh think erm, this uhm works."
         )
     }
 
@@ -299,211 +301,83 @@ final class CleanerTests: XCTestCase {
     /// because the same pattern that catches them also fires on ordinary
     /// speech, silently. They are flagged for the model instead; see
     /// `testMarkersStillFlagTheTranscriptForTheModel`.
-    func testGenuineCorrectionsArePassedThroughRatherThanGuessedAt() {
-        assertTransform(
-            SelfCorrections(),
-            cases: [
-                (
-                    "ship it friday, actually monday",
-                    "ship it friday, actually monday"
-                ),
-                ("send red sorry blue", "send red sorry blue"),
-                ("call john i mean jane", "call john i mean jane"),
-                (
-                    "meet friday no wait monday",
-                    "meet friday no wait monday"
-                ),
-                ("paint red rather blue", "paint red rather blue"),
-                (
-                    "version one make that two",
-                    "version one make that two"
-                ),
-            ]
-        )
+    /// ADR 0020, the whole of it in one table. Each of these was rewritten by
+    /// a stage that no longer exists, and each rewrite was indistinguishable
+    /// from a clean success — which is what made them worse than the stumble
+    /// they were removing.
+    func testTheCleanerNeverRewritesTheWordsYouSaid() {
+        let cleaner = DeterministicCleaner()
+        let cases = [
+            // self-corrections: ordinary english that lost its subject
+            (
+                "I actually finished the report last night",
+                "I actually finished the report last night."
+            ),
+            (
+                "we should actually ship this today",
+                "we should actually ship this today."
+            ),
+            (
+                "there is no wait time on the free tier",
+                "there is no wait time on the free tier."
+            ),
+            ("do not scratch that surface", "do not scratch that surface."),
+            // self-corrections: genuine corrections, now left for the model
+            ("call john i mean jane", "call john i mean jane."),
+            ("scratch that", "scratch that."),
+            // repetition: intended repetition that was collapsed
+            (
+                "I had had enough of the flakiness",
+                "I had had enough of the flakiness."
+            ),
+            ("that that guy said was wrong", "that that guy said was wrong."),
+            ("it is very very slow right now", "it is very very slow right now."),
+            // repetition: a genuine stumble, now left for the model
+            (
+                "we should we should ship tomorrow",
+                "we should we should ship tomorrow."
+            ),
+            // fillers
+            ("the um value should be higher", "the um value should be higher."),
+        ]
+
+        for (input, expected) in cases {
+            XCTAssertEqual(
+                cleaner.clean(input),
+                expected.prefix(1).uppercased() + expected.dropFirst(),
+                "input: \(input)"
+            )
+        }
     }
 
-    func testSelfCorrectionsLeaveAmbiguityUntouchedTable() {
-        assertTransform(
-            SelfCorrections(),
-            cases: [
-                ("actually ship it", "actually ship it"),
-                ("sorry about that", "sorry about that"),
-                (
-                    "tea rather than coffee",
-                    "tea rather than coffee"
-                ),
-                (
-                    "red actually blue sorry green",
-                    "red actually blue sorry green"
-                ),
-                (
-                    "keep this scratch that",
-                    "keep this scratch that"
-                ),
-                (
-                    "one actually a b c d e f g",
-                    "one actually a b c d e f g"
-                ),
-                ("no markers here", "no markers here"),
-                ("rather than", "rather than"),
-            ]
-        )
-    }
-
-    /// Ticket 004. Every marker in the list is also ordinary English, and the
-    /// transform's job was to delete the words *before* it — so ordinary
-    /// speech came out with its subject missing and no sign anything had
-    /// happened. SPEC §4 forbids exactly that shape: a failure that cannot be
-    /// told from a success.
-    func testOrdinarySpeechContainingAMarkerIsNeverRewritten() {
-        assertTransform(
-            SelfCorrections(),
-            cases: [
-                (
-                    "I actually finished the report last night",
-                    "I actually finished the report last night"
-                ),
-                (
-                    "we should actually ship this today",
-                    "we should actually ship this today"
-                ),
-                (
-                    "hey sorry I'm late to the standup",
-                    "hey sorry I'm late to the standup"
-                ),
-                (
-                    "I'd rather go home than stay here",
-                    "I'd rather go home than stay here"
-                ),
-                (
-                    "she said rather firmly that it was done",
-                    "she said rather firmly that it was done"
-                ),
-                (
-                    "you know what I mean about the deadline",
-                    "you know what I mean about the deadline"
-                ),
-                (
-                    "we can make that work by friday",
-                    "we can make that work by friday"
-                ),
-                (
-                    "there is no wait time on the free tier",
-                    "there is no wait time on the free tier"
-                ),
-                (
-                    "do not scratch that surface",
-                    "do not scratch that surface"
-                ),
-            ]
-        )
-    }
-
-    /// The one form that carries no ambiguity: the whole utterance is the
-    /// marker, so there is nothing it could be a word *in*.
-    func testScratchThatAloneStillDiscardsTheUtterance() {
-        assertTransform(
-            SelfCorrections(),
-            cases: [
-                ("scratch that", ""),
-                ("scratch that.", ""),
-                ("Scratch That!", ""),
-                ("  scratch that  ", ""),
-            ]
-        )
-    }
-
-    /// Dropping the rewrite does not drop the capability. The markers still
-    /// flag the transcript, and MessyGate still routes it to the optional
-    /// model — which has the context a regex never had. ADR 0019 already put
-    /// ambiguous corrections there; this widens "ambiguous" to "all of them".
-    func testMarkersStillFlagTheTranscriptForTheModel() {
+    /// The capability moved rather than disappearing: the gate still sees the
+    /// stumble and still routes it to a model that has the context to judge.
+    func testStumblesAreStillDetectedForTheGate() {
         for transcript in [
             "ship it friday, actually monday",
             "call john i mean jane",
             "meet friday no wait monday",
             "version one make that two",
-            "send red sorry blue",
-            "paint red rather blue",
         ] {
             XCTAssertTrue(
-                SelfCorrections.containsMarker(in: transcript),
+                MessyGateSignals.containsCorrectionMarker(in: transcript),
                 transcript
             )
         }
-
         XCTAssertFalse(
-            SelfCorrections.containsMarker(in: "no markers here")
+            MessyGateSignals.containsCorrectionMarker(in: "no markers here")
         )
-    }
 
-    func testRepetitionCollapseTable() {
-        assertTransform(
-            RepetitionCollapse(),
-            cases: [
-                (
-                    "we should we should ship tomorrow",
-                    "we should ship tomorrow"
-                ),
-                (
-                    "please send please send the report",
-                    "please send the report"
-                ),
-                ("go go go", "go"),
-                ("the the answer", "the answer"),
-                (
-                    "that is that is correct",
-                    "that is correct"
-                ),
-                (
-                    "Ship now ship now please",
-                    "Ship now please"
-                ),
-                ("one one two", "one two"),
-                (
-                    "we can do it we can do it",
-                    "we can do it"
-                ),
-            ]
+        XCTAssertTrue(
+            MessyGateSignals.containsImmediateDuplicate(
+                in: "we should we should ship tomorrow"
+            )
         )
-    }
-
-    func testRepetitionCollapsePreservesEmphasisTable() {
-        assertTransform(
-            RepetitionCollapse(),
-            cases: [
-                (
-                    "this is very, very important",
-                    "this is very, very important"
-                ),
-                ("no, no, no", "no, no, no"),
-                ("far far-away", "far far-away"),
-                ("go—go", "go—go"),
-                ("word. word", "word. word"),
-                ("yes! yes", "yes! yes"),
-                ("had, had", "had, had"),
-                (
-                    "we should, we should",
-                    "we should, we should"
-                ),
-            ]
-        )
-    }
-
-    func testFillerRemovalTable() {
-        assertTransform(
-            FillerRemoval(),
-            cases: [
-                ("um hello", "hello"),
-                ("um, hello", "hello"),
-                ("hello uh world", "hello world"),
-                ("erm, yes", "yes"),
-                ("uhm this works", "this works"),
-                ("umbrella", "umbrella"),
-                ("like this", "like this"),
-                ("you know this", "you know this"),
-                ("hello, um, world", "hello, world"),
-            ]
+        XCTAssertFalse(
+            MessyGateSignals.containsImmediateDuplicate(
+                in: "this is very, very important"
+            ),
+            "comma-separated emphasis is not a stumble"
         )
     }
 
@@ -599,21 +473,16 @@ final class CleanerTests: XCTestCase {
     /// ADR 0019's original worked example, amended by ticket 004. The
     /// deterministic pass no longer guesses at the correction; it punctuates
     /// and capitalises, and leaves the words the user said.
-    func testADRExampleSelfCorrectionIsLeftForTheModel() {
+    /// ADR 0019's worked examples for the two removed stages, kept as
+    /// regressions under ADR 0020's rule: the words survive.
+    func testADRRemovedStagesLeaveTheirWorkedExamplesAlone() {
         XCTAssertEqual(
-            DeterministicCleaner().clean(
-                "ship it friday, actually monday"
-            ),
+            DeterministicCleaner().clean("ship it friday, actually monday"),
             "Ship it friday, actually monday."
         )
-    }
-
-    func testADRExampleImmediateRepetitionPipeline() {
         XCTAssertEqual(
-            DeterministicCleaner().clean(
-                "we should we should ship tomorrow"
-            ),
-            "We should ship tomorrow."
+            DeterministicCleaner().clean("we should we should ship tomorrow"),
+            "We should we should ship tomorrow."
         )
     }
 
@@ -644,7 +513,7 @@ final class CleanerTests: XCTestCase {
             ),
             (
                 "we should we should ship tomorrow",
-                "We should ship tomorrow."
+                "We should we should ship tomorrow."
             ),
             (
                 "this is very comma very important",
@@ -652,7 +521,7 @@ final class CleanerTests: XCTestCase {
             ),
             (
                 "um send it to john at cypher dot io",
-                "Send it to john@cypher.io."
+                "Um send it to john@cypher.io."
             ),
             (
                 "visit cypher dot io slash docs",
@@ -697,18 +566,21 @@ final class CleanerTests: XCTestCase {
     /// to. `SelfCorrections` now only recognises a whole utterance that is
     /// exactly "scratch that" — so whether the trailing spoken "period" has
     /// already become a full stop decides whether the utterance is discarded.
-    func testPipelineOrderPunctuationMustRunBeforeCorrections() {
-        let input = "scratch that period"
-        let punctuationFirst = SelfCorrections().apply(
+    /// ADR 0019's "pipeline order is law" still binds. The correction stage
+    /// it originally protected is gone (ADR 0020), but capitalization still
+    /// depends on sentence boundaries that only spoken punctuation can
+    /// create, so the two cannot be reordered.
+    func testPipelineOrderPunctuationMustRunBeforeCapitalization() {
+        let input = "hello period how are you"
+        let punctuationFirst = Capitalization().apply(
             SpokenPunctuation().apply(input)
         )
-        let correctionsFirst = SpokenPunctuation().apply(
-            SelfCorrections().apply(input)
+        let capitalizationFirst = SpokenPunctuation().apply(
+            Capitalization().apply(input)
         )
 
-        XCTAssertEqual(punctuationFirst, "")
-        XCTAssertEqual(correctionsFirst, "scratch that.")
-        XCTAssertEqual(DeterministicCleaner().clean(input), "")
+        XCTAssertEqual(punctuationFirst, "Hello. How are you")
+        XCTAssertNotEqual(capitalizationFirst, punctuationFirst)
     }
 
     private func assertTransform(

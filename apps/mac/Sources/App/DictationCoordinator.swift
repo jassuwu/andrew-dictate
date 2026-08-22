@@ -1197,13 +1197,10 @@ final class DictationCoordinator: ObservableObject {
             let transcriptReady = timelineClock.now
             activeTimeline?.transcriptReady = transcriptReady
 
-            let rawHadCorrections = SelfCorrections.containsMarker(
-                in: transcript
-            )
-            let rawHadDuplicates =
-                RepetitionCollapse.containsImmediateDuplicate(
-                    in: transcript
-                )
+            let rawHadCorrections = MessyGateSignals
+                .containsCorrectionMarker(in: transcript)
+            let rawHadDuplicates = MessyGateSignals
+                .containsImmediateDuplicate(in: transcript)
             let cleaner = DeterministicCleaner(
                 entries: dictionaryStore.entries
             )

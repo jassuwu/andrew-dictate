@@ -26,8 +26,8 @@ enum PipelineStage: String, CaseIterable, Identifiable, Sendable {
         case .transcription:
             "parakeet turns what you said into words. on-device."
         case .deterministic:
-            "eleven rules: punctuation you spoke, emails, numbers, "
-                + "your dictionary, stumbles."
+            "eight rules: punctuation you spoke, emails, numbers, "
+                + "your dictionary. it never rewrites your words."
         case .polish:
             "apple's on-device model, only when the text looks messy."
         }
@@ -94,7 +94,6 @@ struct PipelineSelection: Equatable, Sendable {
 /// do with it, so the diagram isn't three boxes that all say the same thing.
 enum PipelineSample {
     static let text =
-        "um send it to jass at jass dot gg comma "
-            + "actually to me comma and say we shipped uh five hundred "
-            + "dollars of credits period"
+        "send it to jass at jass dot gg comma and say we shipped "
+            + "five hundred dollars of credits period"
 }

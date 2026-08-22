@@ -121,14 +121,14 @@ final class MessyGateTests: XCTestCase {
         ]
         for marker in cases {
             XCTAssertTrue(
-                SelfCorrections.containsMarker(
+                MessyGateSignals.containsCorrectionMarker(
                     in: "send friday \(marker) monday"
                 ),
                 "marker: \(marker)"
             )
         }
         XCTAssertFalse(
-            SelfCorrections.containsMarker(in: "send friday")
+            MessyGateSignals.containsCorrectionMarker(in: "send friday")
         )
     }
 
@@ -141,7 +141,7 @@ final class MessyGateTests: XCTestCase {
         ]
         for input in duplicates {
             XCTAssertTrue(
-                RepetitionCollapse.containsImmediateDuplicate(
+                MessyGateSignals.containsImmediateDuplicate(
                     in: input
                 ),
                 "input: \(input)"
@@ -156,7 +156,7 @@ final class MessyGateTests: XCTestCase {
         ]
         for input in clean {
             XCTAssertFalse(
-                RepetitionCollapse.containsImmediateDuplicate(
+                MessyGateSignals.containsImmediateDuplicate(
                     in: input
                 ),
                 "input: \(input)"
