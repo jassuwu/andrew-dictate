@@ -50,11 +50,9 @@ struct AndrewDictateApp: App {
                 coordinator.openPipelinePlayground()
             }
 
-            #if DEBUG
             Button("copy timings") {
                 coordinator.copyTimings()
             }
-            #endif
 
             // the way back. ships in release: a user who skipped setup, or
             // whose permissions were withdrawn, had no route but deleting

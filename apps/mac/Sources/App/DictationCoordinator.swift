@@ -378,7 +378,9 @@ final class DictationCoordinator: ObservableObject {
         _ = pasteboard.setString(lastTranscript, forType: .string)
     }
 
-    #if DEBUG
+    /// Ships in release (ADR 0025). A latency claim measured on a debug build
+    /// is not a claim about the app anyone runs — and a number a reader can
+    /// reproduce on their own mac is worth more than one in a README.
     func copyTimings() {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
@@ -391,7 +393,6 @@ final class DictationCoordinator: ObservableObject {
             forType: .string
         )
     }
-    #endif
 
     func presentOnboardingIfNeeded() {
         guard setupPresentation(moment: .launchOrReopen) == .present else {

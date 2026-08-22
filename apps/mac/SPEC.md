@@ -74,7 +74,7 @@ every utterance logs its stage timestamps locally (debug menu to dump):
 
 `keyDown → micFirstBuffer → keyUp → transcriptReady → cleaned → pasteVerified`
 
-working targets, not commitments: key-up → transcript ≤ 250ms, key-up → inserted ≤ 450ms (base M4, warm, p50). the public bench harness + published p50/p95 is **post-v1** — the timers exist so slow moments are debuggable, nothing more.
+working targets, not commitments: key-up → transcript ≤ 250ms, key-up → inserted ≤ 450ms (base M4, warm, p50). **the published quantity is key-up → inserted** — key-up → transcript would flatter us by excluding the span the claim is about (ADR 0025). "copy timings" ships in **release**: it prints p50/p95/max over verified pastes only, with the sample size, the exclusions, and the machine/chip/os/engine/build it was measured on, above the per-utterance table it came from. anyone can produce that number on their own mac from their own speech, which is the point — it replaces the standalone bench harness rather than deferring it. **no competitor benchmark is published**: the only figure that exists anywhere is a rival founder's estimate, and a claim resting on that is not evidence.
 
 ## 8. distribution
 
