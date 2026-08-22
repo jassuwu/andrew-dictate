@@ -64,6 +64,7 @@ targets:
       - Sources/Audio/TapHealthMonitor.swift
       - Sources/Archive/Dictation.swift
       - Sources/Archive/DictationArchive.swift
+      - Sources/Archive/MeetingSession.swift
       - Sources/HUD/WaveLevelShaper.swift
       - Sources/HUD/HUDLayoutEngine.swift
       - Sources/Settings/AppSettings.swift
