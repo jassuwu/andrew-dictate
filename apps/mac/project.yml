@@ -61,6 +61,7 @@ targets:
           - CleanupLabView.swift
           - PipelinePlaygroundView.swift
       - Sources/Audio/RingSplicer.swift
+      - Sources/Audio/TapHealthMonitor.swift
       - Sources/HUD/WaveLevelShaper.swift
       - Sources/HUD/HUDLayoutEngine.swift
       - Sources/Settings/AppSettings.swift
