@@ -210,6 +210,21 @@ final class UtteranceTimelineStore {
         Self.logger.info("\(line, privacy: .public)")
     }
 
+    /// The distribution first, then the conditions, then the raw rows.
+    ///
+    /// Order is deliberate: the summary is the thing a claim gets made from,
+    /// and the per-utterance table underneath it is the working that anyone
+    /// doubting the summary can check.
+    func formattedReport(conditions: BenchConditions) -> String {
+        [
+            TimelineSummary(timelines: orderedTimelines).formatted(),
+            "",
+            conditions.formatted(),
+            "",
+            formattedTable(),
+        ].joined(separator: "\n")
+    }
+
     func formattedTable() -> String {
         let header = [
             "#",
@@ -261,11 +276,7 @@ final class UtteranceTimelineStore {
     }
 
     private static func milliseconds(_ duration: Duration) -> String {
-        let components = duration.components
-        let milliseconds =
-            Double(components.seconds) * 1_000
-            + Double(components.attoseconds) / 1_000_000_000_000_000
-        return String(format: "%.1f", milliseconds)
+        String(format: "%.1f", duration.inMilliseconds)
     }
 
     private static func milliseconds(_ duration: Duration?) -> String {

@@ -365,7 +365,11 @@ final class DictationCoordinator: ObservableObject {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(
-            timelineStore.formattedTable(),
+            timelineStore.formattedReport(
+                conditions: .current(
+                    engine: activeEngineVersion.displayName
+                )
+            ),
             forType: .string
         )
     }

@@ -72,6 +72,7 @@ targets:
       - Sources/Hotkey/TapLockDetector.swift
       - Sources/Insertion/FocusAnchor.swift
       - Sources/Instrumentation/UtteranceTimeline.swift
+      - Sources/Instrumentation/TimelineSummary.swift
     settings:
       base:
         GENERATE_INFOPLIST_FILE: true
