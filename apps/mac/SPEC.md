@@ -37,6 +37,7 @@ hold fn ──▶ mic capture ──▶ key-up ──▶ engine (parakeet v2, pr
 - **insertion strategy (v1): transactional paste only.** snapshot pasteboard (all types), write plain text, synthetic cmd-V resolved for the active layout, verify change, restore only if `changeCount` still ours. AX selected-text insertion is v1.x.
 - **target safety:** frontmost bundle id + focused-element captured at key-down; re-verified before paste. focus changed → don't paste; transcript stays on the clipboard + HUD shows "copied — focus changed."
 - **secure fields:** detected via AX subrole → never auto-insert; HUD offers explicit copy.
+- **what it keeps (ADR 0022, 0026):** every delivered dictation is written to `dictations.jsonl` in application support — raw + inserted text, time, engine, key-up→inserted — **on by default**, stated in onboarding, with the toggle and `delete all` in settings. cancelled dictations are not kept; there was no text. chmod 0600. this is a deliberate contrast with pre-roll's off-by-default: pre-roll opens a microphone, this keeps text already produced and already pasted.
 - **escape hatch:** last transcript always available from the menu-bar menu ("copy last"). it is the **raw** engine output, deliberately — which is also why "fix a word…" sits beside it: you point at what it misheard and the dictionary entry is built from the transcript rather than from your memory of it (ADR 0024). an entry typed from memory that is one character off silently never fires.
 
 ## 4. hud

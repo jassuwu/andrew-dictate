@@ -149,4 +149,24 @@ extension AppSettingsTests {
         let settings = AppSettings(userDefaults: userDefaults)
         XCTAssertEqual(settings.cleanupMode, CleanupMode.on)
     }
+
+    /// ADR 0026. The pre-roll ruling went the other way and this deliberately
+    /// does not follow it: pre-roll opens a microphone, this keeps text the
+    /// app already produced and already pasted.
+    func testKeepingDictationsIsOnUntilTurnedOff() {
+        let defaults = UserDefaults(
+            suiteName: "keep-\(UUID().uuidString)"
+        )!
+        XCTAssertTrue(AppSettings(userDefaults: defaults).keepDictations)
+    }
+
+    func testTurningKeepingOffSurvivesARelaunch() {
+        let suite = "keep-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+
+        let settings = AppSettings(userDefaults: defaults)
+        settings.keepDictations = false
+
+        XCTAssertFalse(AppSettings(userDefaults: defaults).keepDictations)
+    }
 }

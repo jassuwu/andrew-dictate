@@ -447,6 +447,15 @@ struct OnboardingView: View {
                     : BrandUI.textSecondary
             )
             .multilineTextAlignment(.center)
+
+            // ADR 0026 ships keeping on by default, so this is where the user
+            // is told — once, plainly, with the way out named in the same
+            // breath rather than left to be discovered.
+            Text("it keeps what you dictate, here. settings has the off switch and the delete button.")
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.top, 2)
         }
     }
 

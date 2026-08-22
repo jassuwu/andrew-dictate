@@ -107,6 +107,24 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// Whether finished dictations are written to the archive.
+    ///
+    /// On by default (ADR 0026), stated in onboarding. The pre-roll ruling went
+    /// the other way, and the difference is that pre-roll opens a microphone
+    /// while this keeps text the app has already produced and already pasted.
+    /// Nothing new is listened to.
+    @Published var keepDictations: Bool {
+        didSet {
+            guard keepDictations != oldValue else {
+                return
+            }
+            userDefaults.set(
+                keepDictations,
+                forKey: Self.keepDictationsKey
+            )
+        }
+    }
+
     @Published var engineVersion: EngineVersion {
         didSet {
             guard engineVersion != oldValue else {
@@ -150,6 +168,7 @@ final class AppSettings: ObservableObject {
     private static let preRollKey = "AndrewDictate.preRollEnabled"
     private static let soundFeedbackKey =
         "AndrewDictate.soundFeedbackEnabled"
+    private static let keepDictationsKey = "AndrewDictate.keepDictations"
     private static let engineVersionKey = "AndrewDictate.engineVersion"
     private static let cleanupModeKey = "AndrewDictate.cleanupMode"
     private static let totalWordsDictatedKey =
@@ -168,6 +187,12 @@ final class AppSettings: ObservableObject {
         ) == nil
             ? true
             : userDefaults.bool(forKey: Self.soundFeedbackKey)
+        // unset means on: this ships enabled, unlike pre-roll.
+        keepDictations = userDefaults.object(
+            forKey: Self.keepDictationsKey
+        ) == nil
+            ? true
+            : userDefaults.bool(forKey: Self.keepDictationsKey)
         dictationHotkey = userDefaults.hotkeyBinding()
 
         engineVersion = userDefaults

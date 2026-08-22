@@ -41,6 +41,7 @@ struct SettingsView: View {
     @ObservedObject private var settings: AppSettings
     @ObservedObject private var dictionaryStore: DictionaryStore
     @StateObject private var loginItem = LoginItemController()
+    @StateObject private var archive = ArchiveSettingsModel()
 
     private let modelStore: ModelStore
 
@@ -108,6 +109,38 @@ struct SettingsView: View {
                     DictionaryEditor(store: dictionaryStore)
                 }
 
+                settingsSection("what it keeps") {
+                    SettingsToggleRow(
+                        "keep what you dictate",
+                        explanation:
+                            "on this mac, until you delete it.",
+                        isOn: $settings.keepDictations
+                    )
+
+                    HStack(spacing: 10) {
+                        Text(
+                            archive.count == 1
+                                ? "1 dictation kept"
+                                : "\(archive.count) dictations kept"
+                        )
+                        .font(BrandUI.bodyFont)
+                        .foregroundStyle(BrandUI.textSecondary)
+
+                        Spacer(minLength: 8)
+
+                        Button("delete all") { archive.deleteEverything() }
+                            .disabled(archive.count == 0)
+                    }
+                    .padding(.top, 8)
+
+                    if let failure = archive.failure {
+                        Text(failure)
+                            .font(.caption)
+                            .foregroundStyle(BrandUI.attention)
+                            .padding(.top, 6)
+                    }
+                }
+
                 settingsSection("general") {
                     SettingsToggleRow(
                         "launch at login",
@@ -133,6 +166,9 @@ struct SettingsView: View {
         }
         .background(BrandUI.windowBg)
         .foregroundStyle(BrandUI.textPrimary)
+        // read from disk on open: the count has to be the number of things
+        // that exist, not a number this pane remembered.
+        .onAppear { archive.refresh() }
         .font(BrandUI.bodyFont)
         .brandTinted()
         .controlSize(.small)

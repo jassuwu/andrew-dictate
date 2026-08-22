@@ -149,6 +149,10 @@ final class DictationCoordinator: ObservableObject {
     private var cleanupLabWindowController: CleanupLabWindowController?
     /// Rebuilt per transcript rather than reused: the window is *about* one
     /// dictation, so keeping a stale one around would show the wrong words.
+    private let dictationArchive = DictationArchive()
+    /// Held between delivery and the timeline completing, because that is the
+    /// one place that knows whether anything actually reached the page.
+    private var pendingArchiveText: (heard: String, inserted: String)?
     private var wordFixerWindowController: WordFixerWindowController?
     private var pipelinePlaygroundWindowController:
         PipelinePlaygroundWindowController?
@@ -1299,6 +1303,10 @@ final class DictationCoordinator: ObservableObject {
             }
 
             lastTranscript = rawTranscript
+            pendingArchiveText = (
+                heard: transcript,
+                inserted: pasteTranscript
+            )
             let pasteResult = await paster.paste(
                 pasteTranscript,
                 reasonForLeavingOnPasteboard: {
@@ -1459,11 +1467,53 @@ final class DictationCoordinator: ObservableObject {
         at instant: ContinuousClock.Instant,
         stage: UtteranceTimeline.CompletionStage
     ) {
-        defer { activeTimeline = nil }
+        defer {
+            activeTimeline = nil
+            pendingArchiveText = nil
+        }
         guard let timeline = activeTimeline?.complete(stage, at: instant) else {
             return
         }
         timelineStore.append(timeline)
+        archive(timeline, stage: stage)
+    }
+
+    /// A dictation becomes a kept thing only once it has actually been
+    /// delivered. A cancelled one produced no text, so there is nothing to
+    /// keep; one left on the pasteboard reached you by another route and
+    /// still counts.
+    private func archive(
+        _ timeline: UtteranceTimeline,
+        stage: UtteranceTimeline.CompletionStage
+    ) {
+        guard settings.keepDictations,
+              stage != .cancelled,
+              let text = pendingArchiveText else {
+            return
+        }
+
+        do {
+            try dictationArchive.append(
+                Dictation(
+                    // wall-clock start, worked back from the timeline. `Date()`
+                    // here would be the moment it *finished*, which is a
+                    // different thing and would make the field a lie.
+                    startedAt: Date(
+                        timeIntervalSinceNow:
+                            -timeline.durations.total.inMilliseconds / 1_000
+                    ),
+                    heard: text.heard,
+                    inserted: text.inserted,
+                    engine: activeEngineVersion.rawValue,
+                    keyUpToInsertedMilliseconds:
+                        timeline.durations.keyUpToCompletion.inMilliseconds
+                )
+            )
+        } catch {
+            // Never interrupt a dictation over bookkeeping. The settings pane
+            // reports the archive's real state; this is not the place.
+            cleanupLogger.error("could not keep this dictation")
+        }
     }
 
     private func finishPipeline(generation: Int) {
