@@ -56,9 +56,10 @@ struct AndrewDictateApp: App {
 
             Divider()
 
-            Button("settings…") {
-                coordinator.openSettings()
+            SettingsLink {
+                Text("settings…")
             }
+            .keyboardShortcut(",")
 
             // Zero rows when everything works, one click when it does not.
             // SPEC §5 makes settings the router; this is the shortcut for the
@@ -105,5 +106,13 @@ struct AndrewDictateApp: App {
                 }
             }
         }
+
+        // the system settings scene, not a hand-rolled window: pane chrome,
+        // per-pane window title, and dimmed traffic lights come free, and
+        // they're what the HIG asks of a settings window (ADR 0036).
+        Settings {
+            SettingsView(coordinator: coordinator)
+        }
+        .windowResizability(.contentSize)
     }
 }
