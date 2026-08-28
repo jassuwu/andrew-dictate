@@ -260,70 +260,57 @@ struct SettingsView: View {
 
                 Spacer(minLength: 12)
 
-                Picker("", selection: $settings.engineVersion) {
-                    ForEach(EngineVersion.allCases) { version in
-                        Text(version.displayName)
-                            .tag(version)
-                    }
-                }
-                .labelsHidden()
-                .brandMenuStyle()
-                .accessibilityLabel("speech model version")
+                Text("what turns your voice into words. on this mac, always.")
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.textSecondary)
             }
 
-            enginePreparationStatus
+            // the picker is the list (ADR 0039): the tradeoff is the
+            // decision, so it goes on the control.
+            ModelChooserView(
+                selection: $settings.engineVersion,
+                active: coordinator.activeEngineVersion,
+                preparation: coordinator.enginePreparationState,
+                installed: installedModels,
+                onRetry: { coordinator.retryEnginePrewarm() }
+            )
 
-            ForEach(installedModels.filter(\.isDownloaded)) { model in
-                HStack(spacing: 10) {
-                    Text("parakeet \(model.version.rawValue)")
-                        .foregroundStyle(BrandUI.textSecondary)
-                        .font(.caption)
-
-                    Text(model.onDiskSize)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(BrandUI.textSecondary)
-
-                    if model.version == coordinator.activeEngineVersion {
-                        Text("active")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(BrandUI.goldPale)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background {
-                                Capsule()
-                                    .fill(BrandUI.goldDeep.opacity(0.22))
-                            }
-                    }
-
-                    Spacer(minLength: 8)
-
-                    Button("show in finder") {
-                        NSWorkspace.shared.activateFileViewerSelecting(
-                            [AppIdentity.sharedModelDirectory]
-                        )
-                    }
-                    .buttonStyle(.plain)
+            // storage is one quiet line, not a button per row.
+            HStack(spacing: 12) {
+                Text("shared with other FluidAudio apps, downloaded once.")
                     .font(.caption)
                     .foregroundStyle(BrandUI.textSecondary)
 
-                    Button("remove download") {
-                        pendingModelRemoval = model.version
-                    }
-                    .buttonStyle(.plain)
-                    .font(.caption)
-                    // every row's button read "remove download" and
-                    // nothing else, so voiceover users heard the same
-                    // button repeated once per installed model.
-                    .accessibilityLabel(
-                        "remove parakeet \(model.version.rawValue) download"
+                Spacer(minLength: 8)
+
+                Button("show in finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting(
+                        [AppIdentity.sharedModelDirectory]
                     )
-                    .foregroundStyle(BrandUI.textSecondary)
                 }
-                // the standalone "models are shared" row folded into where
-                // the fact matters: the copy on disk.
-                .help(
-                    "downloaded once and shared with other FluidAudio apps"
-                )
+                .buttonStyle(.plain)
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
+
+                if installedModels.contains(where: \.isDownloaded) {
+                    Menu("remove a download…") {
+                        ForEach(
+                            installedModels.filter(\.isDownloaded)
+                        ) { model in
+                            Button(
+                                "\(model.version.shortName) · "
+                                    + model.onDiskSize
+                            ) {
+                                pendingModelRemoval = model.version
+                            }
+                        }
+                    }
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.textSecondary)
+                    .fixedSize()
+                }
             }
 
             if let modelStoreMessage {
@@ -337,49 +324,6 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(BrandUI.gold)
             }
-        }
-    }
-
-    @ViewBuilder
-    private var enginePreparationStatus: some View {
-        switch coordinator.enginePreparationState {
-        case let .downloading(progress):
-            HStack(spacing: 8) {
-                ProgressView(value: bounded(progress))
-                    .progressViewStyle(.linear)
-                    .tint(BrandUI.gold)
-                    .frame(maxWidth: .infinity)
-
-                Text("\(Int(bounded(progress) * 100))%")
-                    .font(BrandUI.valueFont.monospacedDigit())
-                    .foregroundStyle(BrandUI.gold)
-                    .frame(width: 34, alignment: .trailing)
-
-                Text("downloading")
-                    .font(.caption)
-                    .foregroundStyle(BrandUI.textSecondary)
-            }
-
-        case .warmingUp:
-            Text("warming up")
-                .font(.caption)
-                .foregroundStyle(BrandUI.textSecondary)
-
-        case .failed:
-            HStack(spacing: 8) {
-                Text("download failed")
-                    .font(.caption)
-                    .foregroundStyle(BrandUI.textSecondary)
-
-                Button("retry") {
-                    coordinator.retryEnginePrewarm()
-                }
-                .buttonStyle(.link)
-                .foregroundStyle(BrandUI.gold)
-            }
-
-        case .notStarted, .ready:
-            EmptyView()
         }
     }
 
@@ -567,10 +511,6 @@ struct SettingsView: View {
             return "—"
         }
         return "\(Int(duration.inMilliseconds.rounded())) ms"
-    }
-
-    private func bounded(_ progress: Double) -> Double {
-        min(max(progress, 0), 1)
     }
 
     private func refreshInstalledModels() {
