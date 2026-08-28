@@ -85,6 +85,7 @@ targets:
       - Sources/Settings/AppSettings.swift
       - Sources/Settings/EngineSwitchState.swift
       - Sources/Onboarding/OnboardingState.swift
+      - Sources/Onboarding/OnboardingFlow.swift
       - Sources/Permissions/SetupGate.swift
       - Sources/Settings/SetupHealth.swift
       - Sources/Hotkey/HotkeyBinding.swift
