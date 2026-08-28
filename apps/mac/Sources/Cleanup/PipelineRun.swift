@@ -21,12 +21,17 @@ enum PipelineRun {
         )
 
         guard selection.deterministicEnabled else {
+            // off is not "nothing": the dictionary still applies, exactly as
+            // it does on the real path.
             return [
                 heard,
                 PipelineStageResult(
                     stage: .deterministic,
                     input: input,
-                    output: input,
+                    output: DeterministicCleaner(
+                        entries: entries,
+                        fullCleanup: false
+                    ).clean(input),
                     isEnabled: false,
                     unavailableReason: nil
                 ),

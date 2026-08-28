@@ -33,11 +33,11 @@ enum PipelineStage: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// the stage cannot be switched off. transcription *is* the app, and the
-    /// deterministic pass is where your dictionary and spoken punctuation
-    /// live — a toggle would only teach people to break it.
+    /// the stage cannot be switched off. transcription *is* the app.
+    /// cleanup got its switch in ADR 0038 — off still runs the dictionary,
+    /// so switching it off can't break a word you taught it.
     var isAlwaysOn: Bool {
-        self != .polish
+        self == .transcription
     }
 }
 
