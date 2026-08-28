@@ -152,8 +152,8 @@ struct SettingsView: View {
             }
         }
         .sheet(isPresented: $showsRemoval) {
-            RemovalView(viewModel: RemovalViewModel())
-                .frame(width: 480, height: 470)
+            RemovalView()
+                .frame(width: 480, height: 500)
         }
         .alert(item: $pendingModelRemoval) { version in
             let isActive = version == coordinator.activeEngineVersion
