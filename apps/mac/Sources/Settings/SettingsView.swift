@@ -472,58 +472,56 @@ struct SettingsView: View {
 
     // MARK: - history
 
+    /// list first: the two things anyone comes here for are "fix a word
+    /// in something i said" and "delete something i said". keeping-or-not
+    /// is a footer, because it's set once and never looked at again.
     private var historyTab: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Group {
-                SettingsToggleRow(
-                    "keep what you dictate",
-                    explanation: "on this mac, until you delete it.",
-                    isOn: $settings.keepDictations
-                )
-
-                rowDivider
-
-                HStack(spacing: 10) {
-                    Text(
-                        browser.items.count == 1
-                            ? "1 dictation kept"
-                            : "\(browser.items.count) dictations kept"
-                    )
-                    .font(BrandUI.bodyFont)
-                    .foregroundStyle(BrandUI.textSecondary)
-
-                    Spacer(minLength: 8)
-
-                    Button("delete all") {
-                        archive.deleteEverything()
-                        browser.reload()
-                    }
-                    .disabled(browser.items.isEmpty)
-
-                    if Capabilities.current.canUninstall {
-                        Button("remove everything…") {
-                            showsRemoval = true
-                        }
-                    }
-                }
-
-                if let failure = archive.failure {
-                    Text(failure)
-                        .font(.caption)
-                        .foregroundStyle(BrandUI.attention)
-                }
-            }
-            .padding(.horizontal, 24)
-
-            // the list itself, not a button to a second window: what it
-            // keeps is this tab's whole subject.
+        VStack(alignment: .leading, spacing: 0) {
             ArchiveBrowserView(
                 viewModel: browser,
                 fixAWord: { coordinator.openWordFixer(for: $0) }
             )
-            .frame(height: 290)
+            .frame(height: 330)
+
+            rowDivider
+                .padding(.horizontal, 24)
+
+            HStack(spacing: 12) {
+                Toggle(
+                    "keep new dictations",
+                    isOn: $settings.keepDictations
+                )
+                .brandToggleStyle()
+                .font(BrandUI.bodyFont)
+
+                Spacer(minLength: 8)
+
+                Text(
+                    browser.items.count == 1
+                        ? "1 kept"
+                        : "\(browser.items.count) kept"
+                )
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
+
+                Button("delete all") {
+                    archive.deleteEverything()
+                    browser.reload()
+                }
+                .disabled(browser.items.isEmpty)
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 12)
+
+            if let failure = archive.failure {
+                Text(failure)
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.attention)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 10)
+            }
         }
-        .padding(.top, 18)
+        .padding(.top, 8)
     }
 
     // MARK: - general
@@ -548,6 +546,28 @@ struct SettingsView: View {
             rowDivider
 
             numbersDashboard
+
+            // leaving lives here, under its own name — it sat inside the
+            // history pane as "remove everything…" and nobody could find it.
+            if Capabilities.current.canUninstall {
+                rowDivider
+
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("leaving?")
+                            .font(BrandUI.bodyFont.weight(.medium))
+                        Text("removes what's on this mac, piece by piece.")
+                            .font(BrandUI.bodyFont)
+                            .foregroundStyle(BrandUI.textSecondary)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Button("remove Andrew Dictate…") {
+                        showsRemoval = true
+                    }
+                }
+            }
         }
         .padding(.horizontal, 24)
         .padding(.top, 18)
@@ -600,7 +620,7 @@ struct SettingsView: View {
     private func statTile(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(value)
-                .font(.system(size: 22, weight: .semibold))
+                .font(BrandUI.machineFont(size: 22, bold: true))
                 .foregroundStyle(BrandUI.textPrimary)
 
             Text(label)
