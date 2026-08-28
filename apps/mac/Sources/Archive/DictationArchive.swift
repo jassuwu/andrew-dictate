@@ -18,9 +18,7 @@ struct DictationArchive {
     }
 
     static func defaultFileURL() -> URL {
-        FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Andrew Dictate", isDirectory: true)
+        AppIdentity.supportDirectory
             .appendingPathComponent("dictations.jsonl", isDirectory: false)
     }
 

@@ -5,7 +5,7 @@ import OSLog
 /// file scope because the first load runs during init, before there is a
 /// `self` to log through.
 private let dictionaryLogger = Logger(
-    subsystem: "gg.jass.dictate",
+    subsystem: AppIdentity.loggingSubsystem,
     category: "dictionary"
 )
 
@@ -276,9 +276,7 @@ final class DictionaryStore: ObservableObject {
     }
 
     private static func defaultFileURL() -> URL {
-        FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Andrew Dictate", isDirectory: true)
+        AppIdentity.supportDirectory
             .appendingPathComponent("dictionary.json", isDirectory: false)
     }
 }
