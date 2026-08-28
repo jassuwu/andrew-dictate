@@ -18,7 +18,7 @@ final class AboutWindowController: NSWindowController {
         window.styleMask = [.titled, .closable, .fullSizeContentView]
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
-        let size = NSSize(width: 300, height: 280)
+        let size = NSSize(width: 300, height: 300)
         window.setContentSize(size)
         window.minSize = size
         window.maxSize = size
@@ -43,9 +43,18 @@ final class AboutWindowController: NSWindowController {
 }
 
 struct AboutView: View {
+    enum UpdateStatus: Equatable {
+        case idle
+        case checking
+        case upToDate
+        case newer(String, URL)
+        case unreachable
+    }
+
     @ObservedObject private var settings: AppSettings
     @State private var showsRecord = false
     @State private var versionCopied = false
+    @State private var updateStatus: UpdateStatus = .idle
     private let version: String
     private let build: String
 
@@ -104,6 +113,9 @@ struct AboutView: View {
             .help("click to copy")
             .padding(.top, 8)
 
+            updatesLine
+                .padding(.top, 7)
+
             Spacer(minLength: 12)
 
             Text(creditsMarkdown)
@@ -125,7 +137,7 @@ struct AboutView: View {
         .padding(.top, 30)
         .padding(.bottom, 18)
         .padding(.horizontal, 16)
-        .frame(width: 300, height: 280)
+        .frame(width: 300, height: 300)
         .background(BrandUI.windowBg)
         .preferredColorScheme(.dark)
     }
@@ -174,6 +186,59 @@ struct AboutView: View {
             + "(https://github.com/jassuwu/andrew-dictate)"
         return (try? AttributedString(markdown: markdown))
             ?? AttributedString("made by jass")
+    }
+
+    /// asks github only when clicked, and a tag that doesn't parse never
+    /// says "upgrade" — the quiet failure is "couldn't check", not a lie.
+    @ViewBuilder
+    private var updatesLine: some View {
+        Group {
+            switch updateStatus {
+            case .idle:
+                Button("check for updates") { checkForUpdates() }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(BrandUI.textSecondary)
+
+            case .checking:
+                Text("checking…")
+                    .foregroundStyle(BrandUI.textSecondary)
+
+            case .upToDate:
+                Text("you're on the latest.")
+                    .foregroundStyle(BrandUI.textSecondary)
+
+            case let .newer(version, page):
+                Link("\(version) is out — get it", destination: page)
+                    .foregroundStyle(BrandUI.gold)
+
+            case .unreachable:
+                Text("couldn't check — try again later.")
+                    .foregroundStyle(BrandUI.textSecondary)
+            }
+        }
+        .font(.system(size: 11))
+    }
+
+    private func checkForUpdates() {
+        updateStatus = .checking
+        Task {
+            do {
+                let latest = try await UpdateCheck.fetchLatest()
+                updateStatus = UpdateCheck.isNewer(
+                    tag: latest.version,
+                    than: version
+                )
+                    ? .newer(
+                        UpdateCheck.numbers(in: latest.version)
+                            .map(String.init)
+                            .joined(separator: "."),
+                        latest.page
+                    )
+                    : .upToDate
+            } catch {
+                updateStatus = .unreachable
+            }
+        }
     }
 
     private func copyVersion() {
