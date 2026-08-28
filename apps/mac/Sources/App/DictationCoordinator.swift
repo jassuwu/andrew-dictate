@@ -329,6 +329,12 @@ final class DictationCoordinator: ObservableObject {
         transcriptPolisher.isAvailable
     }
 
+    /// nil when cleanup can run; otherwise the reason and the user's next
+    /// move, straight from the os rather than a guess about it.
+    var cleanupUnavailableExplanation: String? {
+        transcriptPolisher.availability.explanation
+    }
+
     /// the pipeline, in a window you can come back to. onboarding shows it
     /// once while the model downloads; this is the door for every time after.
     func openPipelinePlayground() {
