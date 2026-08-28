@@ -41,6 +41,9 @@ targets:
         ENABLE_HARDENED_RUNTIME: false
         SWIFT_STRICT_CONCURRENCY: complete
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # the brand gold as the app accent: native controls, pane icons,
+        # toggles and pickers take it system-wide instead of per-view tints.
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
       configs:
         # a debug build is a *different app* to macOS: its own bundle id, so
         # its own TCC grants, its own UserDefaults, and (via AppIdentity) its
