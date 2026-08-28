@@ -154,9 +154,9 @@ private final class OnboardingPermissionModel: ObservableObject {
 }
 
 struct OnboardingView: View {
-    // Every screen is the same size. The old flow grew from 430 to 648 when
-    // setup began, which moved the window under the pointer at the exact
-    // moment the user was reaching for something.
+    // Every screen is the same size. The window used to grow from 430 to 648
+    // when setup began, moving itself under the pointer at the exact moment
+    // the user was reaching for something.
     private static let windowWidth: CGFloat = 460
     private static let windowHeight: CGFloat = 430
 
@@ -165,7 +165,6 @@ struct OnboardingView: View {
     @StateObject private var permissions: OnboardingPermissionModel
     @State private var onboarding: OnboardingState
     @State private var flow = OnboardingFlow()
-    @State private var hotkeyWasDetected = false
 
     private let windowResizer: OnboardingWindowResizer
 
@@ -195,9 +194,9 @@ struct OnboardingView: View {
     var body: some View {
         VStack(spacing: 0) {
             stepBar
-            Spacer(minLength: 12)
+            Spacer(minLength: 10)
             stepBody
-            Spacer(minLength: 12)
+            Spacer(minLength: 10)
             footer
         }
         .padding(.horizontal, 30)
@@ -209,7 +208,7 @@ struct OnboardingView: View {
         .brandTinted()
         .controlSize(.small)
         .preferredColorScheme(.dark)
-        .animation(.easeInOut(duration: 0.22), value: flow.step)
+        .animation(.easeInOut(duration: 0.2), value: flow.step)
         .onAppear {
             permissions.refresh()
             synchronizeOnboarding()
@@ -224,6 +223,9 @@ struct OnboardingView: View {
         .onChange(of: coordinator.enginePreparationState) { _, _ in
             synchronizeEngine()
         }
+        // The permission rows are read from the system every second, so a
+        // grant made in System Settings shows up here without the user having
+        // to come back and prod anything.
         .task {
             permissions.refresh()
             while !Task.isCancelled {
@@ -235,79 +237,74 @@ struct OnboardingView: View {
                 permissions.refresh()
             }
         }
-        // A granted permission is its own confirmation. Asking the user to
-        // press "continue" after they have already watched it succeed is the
-        // second button this redesign exists to remove.
-        .task(id: "\(flow.step.rawValue)-\(isCurrentStepSatisfied)") {
-            guard isCurrentStepSatisfied,
-                  flow.step != .hello,
-                  !flow.isLastStep else {
-                return
-            }
-            try? await Task.sleep(for: .milliseconds(650))
-            guard isCurrentStepSatisfied else {
-                return
-            }
-            flow.advance()
-        }
-        .task(id: coordinator.hotkeyDetection?.sequence) {
-            guard flow.step == .ready,
-                  let detection = coordinator.hotkeyDetection else {
-                return
-            }
-            hotkeyWasDetected = true
-            try? await Task.sleep(for: .seconds(2))
-            guard coordinator.hotkeyDetection?.sequence
-                    == detection.sequence else {
-                return
-            }
-            hotkeyWasDetected = false
-        }
     }
 
     // MARK: - chrome
 
     private var stepBar: some View {
         HStack(spacing: 10) {
-            Button {
+            chevron(
+                "chevron.left",
+                enabled: flow.canGoBack,
+                label: "back"
+            ) {
                 flow.goBack()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 12, weight: .semibold))
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(BrandUI.textSecondary)
-            .opacity(flow.canGoBack ? 1 : 0)
-            .disabled(!flow.canGoBack)
-            .accessibilityLabel("back")
 
             Spacer()
 
-            HStack(spacing: 5) {
+            // The dots are a control, not just an indicator. Going back to
+            // check something should never mean walking the whole flow.
+            HStack(spacing: 7) {
                 ForEach(OnboardingStep.allCases) { step in
-                    Circle()
-                        .fill(
-                            step.rawValue <= flow.step.rawValue
-                                ? BrandUI.gold
-                                : BrandUI.textPrimary.opacity(0.18)
-                        )
-                        .frame(width: 5, height: 5)
+                    Button {
+                        flow.jump(to: step)
+                    } label: {
+                        Circle()
+                            .fill(
+                                step == flow.step
+                                    ? BrandUI.gold
+                                    : BrandUI.textPrimary.opacity(0.22)
+                            )
+                            .frame(width: 6, height: 6)
+                            .contentShape(Rectangle())
+                            .padding(4)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(step.title)
                 }
             }
-            .accessibilityLabel(
-                "step \(flow.position.index) of \(flow.position.total)"
-            )
 
             Spacer()
 
-            // Balances the chevron so the dots sit centred.
-            Image(systemName: "chevron.left")
-                .font(.system(size: 12, weight: .semibold))
-                .opacity(0)
+            chevron(
+                "chevron.right",
+                enabled: flow.canGoForward,
+                label: "next"
+            ) {
+                flow.advance()
+            }
         }
     }
 
-    // MARK: - the one idea on this screen
+    private func chevron(
+        _ symbol: String,
+        enabled: Bool,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .semibold))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(BrandUI.textSecondary)
+        .opacity(enabled ? 1 : 0)
+        .disabled(!enabled)
+        .accessibilityLabel(label)
+    }
+
+    // MARK: - the screens
 
     private var stepBody: some View {
         VStack(spacing: 10) {
@@ -321,7 +318,6 @@ struct OnboardingView: View {
 
             Text(flow.step.title)
                 .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(BrandUI.textPrimary)
 
             if flow.step == .hello {
                 Text("escape the keyboard.")
@@ -334,51 +330,32 @@ struct OnboardingView: View {
                 .foregroundStyle(BrandUI.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 320)
+                .frame(maxWidth: 330)
 
-            stepDetail
-                .padding(.top, 4)
+            switch flow.step {
+            case .hello:
+                EmptyView()
+            case .model:
+                modelProgress.padding(.top, 10)
+            case .permissions:
+                permissionRows.padding(.top, 14)
+            }
         }
         .frame(maxWidth: .infinity)
     }
 
-    @ViewBuilder
-    private var stepDetail: some View {
-        switch flow.step {
-        case .model:
-            modelProgress
-        case .ready:
-            Text(hotkeyWasDetected ? "heard that." : " ")
-                .font(BrandUI.bodyFont)
-                .foregroundStyle(BrandUI.gold)
-        case .hello, .microphone, .accessibility:
-            deniedHint
-        }
-    }
-
-    /// Only appears when macOS has already refused. Until then the screen says
-    /// one thing, which is the point.
-    @ViewBuilder
-    private var deniedHint: some View {
-        let denied = (flow.step == .microphone
-            && onboarding.microphoneStatus == .actionRequired)
-            || (flow.step == .accessibility
-                && onboarding.accessibilityStatus == .actionRequired)
-
-        Text(denied ? "macOS is holding this one — turn it on in settings." : " ")
-            .font(.caption)
-            .foregroundStyle(denied ? BrandUI.attention : .clear)
-    }
-
+    /// The download does not gate anything. It starts when the user says go and
+    /// keeps running while they carry on — blocking the flow on 440 MB was the
+    /// thing that made setup feel long.
     @ViewBuilder
     private var modelProgress: some View {
         switch coordinator.enginePreparationState {
         case let .downloading(progress):
-            VStack(spacing: 6) {
+            VStack(spacing: 7) {
                 ProgressView(value: bounded(progress))
                     .progressViewStyle(.linear)
-                    .frame(width: 220)
-                Text("about 440 mb, once.")
+                    .frame(width: 240)
+                Text("about 440 mb. carry on — this keeps going.")
                     .font(.caption)
                     .foregroundStyle(BrandUI.textSecondary)
             }
@@ -386,80 +363,101 @@ struct OnboardingView: View {
             Text("warming up…")
                 .font(.caption)
                 .foregroundStyle(BrandUI.textSecondary)
-        case .failed:
-            Text("that download didn't finish.")
+        case .ready:
+            Text("already here.")
                 .font(.caption)
-                .foregroundStyle(BrandUI.attention)
-        case .notStarted, .ready:
-            Text(" ").font(.caption)
+                .foregroundStyle(BrandUI.gold)
+        case .failed:
+            VStack(spacing: 7) {
+                Text("that download didn't finish.")
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.attention)
+                Button("try again") { coordinator.retryEnginePrewarm() }
+                    .font(.caption)
+            }
+        case .notStarted:
+            Text("starting…")
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
+        }
+    }
+
+    private var permissionRows: some View {
+        VStack(spacing: 0) {
+            permissionRow(
+                "microphone",
+                status: onboarding.microphoneStatus,
+                allow: {
+                    permissions.requestMicrophoneAccess {
+                        await coordinator.requestMicrophoneAccess()
+                    }
+                },
+                openSettings: permissions.openMicrophoneSettings
+            )
+
+            Divider().overlay(BrandUI.hairline).padding(.vertical, 10)
+
+            permissionRow(
+                "accessibility",
+                status: onboarding.accessibilityStatus,
+                allow: permissions.requestAccessibilityPrompt,
+                openSettings: permissions.openAccessibilitySettings
+            )
+        }
+        .frame(maxWidth: 330)
+    }
+
+    /// Says what is true right now, in a word. The previous version showed
+    /// three rows reading "pending" before consent had even been given, which
+    /// reads as broken rather than waiting.
+    private func permissionRow(
+        _ name: String,
+        status: OnboardingRowStatus,
+        allow: @escaping () -> Void,
+        openSettings: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 10) {
+            Text(name)
+                .foregroundStyle(BrandUI.textPrimary)
+
+            Spacer(minLength: 8)
+
+            switch status {
+            case .ready:
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .bold))
+                    Text("granted")
+                }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(BrandUI.gold)
+            case .actionRequired:
+                Button("open settings", action: openSettings)
+                    .font(.caption)
+            case .pending:
+                Button("allow", action: allow)
+                    .font(.caption)
+            }
         }
     }
 
     // MARK: - exactly one thing to do
 
+    /// One button. There is no "skip" here and there should never have been
+    /// one: the person launched the app in order to set it up, and macOS
+    /// already gives them the way out — the window is `.closable`.
+    ///
+    /// Closing is also the *better* exit. It leaves `onboardingDismissed`
+    /// false, so setup returns next launch, which is SPEC §5's rule that a
+    /// broken setup gets the window back. The old link set that flag and
+    /// silenced setup for good.
     private var footer: some View {
-        VStack(spacing: 10) {
-            Button(action: performPrimaryAction) {
-                Text(primaryActionTitle)
-                    .frame(minWidth: 176)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(isPrimaryActionBusy)
-
-            // One way out, on one screen. A skip on every screen is another
-            // competing action.
-            if flow.step.offersSkip {
-                Button("not now") {
-                    coordinator.skipOnboarding()
-                }
-                .buttonStyle(.plain)
-                .font(.caption)
-                .foregroundStyle(BrandUI.textSecondary)
-            } else {
-                Text(" ").font(.caption)
-            }
+        Button(action: performPrimaryAction) {
+            Text(flow.step.actionTitle)
+                .frame(minWidth: 176)
         }
-    }
-
-    private var primaryActionTitle: String {
-        if flow.step == .microphone,
-           onboarding.microphoneStatus == .actionRequired {
-            return "open settings"
-        }
-        if flow.step == .accessibility,
-           onboarding.accessibilityStatus == .actionRequired {
-            return "open settings"
-        }
-        if flow.step == .model {
-            switch coordinator.enginePreparationState {
-            case .downloading, .warmingUp:
-                return "downloading…"
-            case .failed:
-                return "try again"
-            case .ready:
-                return "continue"
-            case .notStarted:
-                return flow.step.actionTitle
-            }
-        }
-        return flow.step.actionTitle
-    }
-
-    private var isPrimaryActionBusy: Bool {
-        guard flow.step == .model else {
-            return false
-        }
-        switch coordinator.enginePreparationState {
-        case .downloading, .warmingUp:
-            return true
-        case .notStarted, .ready, .failed:
-            return false
-        }
-    }
-
-    private var isCurrentStepSatisfied: Bool {
-        flow.isSatisfied(by: onboarding)
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
     }
 
     private func performPrimaryAction() {
@@ -467,37 +465,15 @@ struct OnboardingView: View {
         case .hello:
             onboarding.consentToSetup()
             synchronizePermissions()
+            // Kick the download off here so it runs underneath the rest of
+            // setup rather than in front of it.
+            coordinator.beginOnboardingEnginePreparation()
             flow.advance()
 
-        case .microphone:
-            if onboarding.microphoneStatus == .actionRequired {
-                permissions.openMicrophoneSettings()
-            } else {
-                permissions.requestMicrophoneAccess {
-                    await coordinator.requestMicrophoneAccess()
-                }
-            }
-
-        case .accessibility:
-            if onboarding.accessibilityStatus == .actionRequired {
-                permissions.openAccessibilitySettings()
-            } else {
-                permissions.requestAccessibilityPrompt()
-            }
-
         case .model:
-            switch coordinator.enginePreparationState {
-            case .ready:
-                flow.advance()
-            case .failed:
-                coordinator.retryEnginePrewarm()
-            case .notStarted:
-                coordinator.beginOnboardingEnginePreparation()
-            case .downloading, .warmingUp:
-                break
-            }
+            flow.advance()
 
-        case .ready:
+        case .permissions:
             coordinator.finishOnboarding()
         }
     }
