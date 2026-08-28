@@ -4,13 +4,43 @@ import Foundation
 import FoundationModels
 #endif
 
+/// why cleanup can't run, in words that name the user's next move. the os
+/// tells us exactly which of these it is — collapsing them all into "needs
+/// macOS 26" showed a mac already on 26 a reason that wasn't true.
+enum PolisherAvailability: Equatable, Sendable {
+    case available
+    case appleIntelligenceOff
+    case modelStillDownloading
+    case deviceCannotRunIt
+    case osTooOld
+
+    var explanation: String? {
+        switch self {
+        case .available:
+            nil
+        case .appleIntelligenceOff:
+            "turn on Apple Intelligence in system settings to use this"
+        case .modelStillDownloading:
+            "apple's on-device model is still downloading — check back soon"
+        case .deviceCannotRunIt:
+            "this mac can't run apple's on-device model"
+        case .osTooOld:
+            "needs macOS 26 — apple's on-device model"
+        }
+    }
+}
+
 protocol TranscriptPolisher: Sendable {
-    var isAvailable: Bool { get }
+    var availability: PolisherAvailability { get }
 
     func polish(
         _ text: String,
         protectedTerms: [String]
     ) async throws -> String
+}
+
+extension TranscriptPolisher {
+    var isAvailable: Bool { availability == .available }
 }
 
 enum TranscriptPolishSanityGuard {
@@ -211,13 +241,24 @@ enum TranscriptPolisherError: Error {
 struct FoundationModelPolisher: TranscriptPolisher {
     static let backendName = "foundation-models"
 
-    var isAvailable: Bool {
+    var availability: PolisherAvailability {
         #if canImport(FoundationModels)
         if #available(macOS 26.0, *) {
-            return SystemLanguageModel.default.availability == .available
+            switch SystemLanguageModel.default.availability {
+            case .available:
+                return .available
+            case .unavailable(.appleIntelligenceNotEnabled):
+                return .appleIntelligenceOff
+            case .unavailable(.modelNotReady):
+                return .modelStillDownloading
+            case .unavailable(.deviceNotEligible):
+                return .deviceCannotRunIt
+            case .unavailable:
+                return .deviceCannotRunIt
+            }
         }
         #endif
-        return false
+        return .osTooOld
     }
 
     func polish(
