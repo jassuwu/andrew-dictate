@@ -48,6 +48,20 @@ enum AppIdentity {
             .appendingPathComponent(supportDirectoryName, isDirectory: true)
     }
 
+    /// Where FluidAudio keeps the speech models.
+    ///
+    /// Deliberately **not** under this app's folder, and not this app's to
+    /// claim: the path is the library's, so every app built on FluidAudio
+    /// shares one copy. That is why a development build does not re-download
+    /// 443 MB — and why removing it during an uninstall is a choice with a
+    /// consequence for other apps rather than a private cleanup.
+    static var sharedModelDirectory: URL {
+        FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("FluidAudio", isDirectory: true)
+            .appendingPathComponent("Models", isDirectory: true)
+    }
+
     /// Logs are tagged with the real identifier, so a `log stream` filter can
     /// tell a development build from the shipped one.
     static var loggingSubsystem: String {
