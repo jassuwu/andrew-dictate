@@ -41,10 +41,19 @@ targets:
         ENABLE_HARDENED_RUNTIME: false
         SWIFT_STRICT_CONCURRENCY: complete
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        # a debug build is a *different app* to macOS: its own bundle id, so
+        # its own TCC grants, its own UserDefaults, and (via AppIdentity) its
+        # own application-support folder. that is what lets a development build
+        # and the shipped one sit on the same mac without fighting over
+        # permissions or writing to the same archive.
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: gg.jass.dictate.dev
+          PRODUCT_NAME: Andrew Dictate Dev
     info:
       path: Sources/Info.plist
       properties:
-        CFBundleDisplayName: Andrew Dictate
+        CFBundleDisplayName: $(PRODUCT_NAME)
         CFBundleShortVersionString: "0.7.1"
         CFBundleVersion: "2"
         LSUIElement: true
@@ -67,6 +76,7 @@ targets:
       - Sources/Archive/DictationArchive.swift
       - Sources/Archive/MeetingSession.swift
       - Sources/Archive/ArchiveBrowserViewModel.swift
+      - Sources/App/AppIdentity.swift
       - Sources/HUD/WaveLevelShaper.swift
       - Sources/HUD/HUDLayoutEngine.swift
       - Sources/Settings/AppSettings.swift
