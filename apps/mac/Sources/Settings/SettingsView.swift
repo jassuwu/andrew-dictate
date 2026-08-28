@@ -69,8 +69,6 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                identityStrip
-
                 // only when something is actually wrong: three permanent
                 // green ticks would teach you to stop reading this card.
                 if !setupIssues.isEmpty {
@@ -79,12 +77,10 @@ struct SettingsView: View {
                     }
                 }
 
-                settingsSection("dictation key") {
-                    hotkeyRow
-                }
-
                 settingsSection("dictation") {
                     VStack(alignment: .leading, spacing: 13) {
+                        hotkeyRow
+                        cardDivider
                         DictationOptionRow(
                             option: .preRoll,
                             settings: settings
@@ -96,8 +92,10 @@ struct SettingsView: View {
                         )
                         cardDivider
                         aiCleanupEditor
-                        cardDivider
-                        cleanupLabControls
+                        if Capabilities.current.keepsCleanupLab {
+                            cardDivider
+                            cleanupLabControls
+                        }
                     }
                 }
 
@@ -283,33 +281,6 @@ struct SettingsView: View {
             .buttonStyle(.plain)
             .foregroundStyle(BrandUI.gold)
         }
-    }
-
-    private var identityStrip: some View {
-        HStack(spacing: 12) {
-            Image("Badge")
-                .resizable()
-                .interpolation(.high)
-                .frame(width: 36, height: 36)
-                .accessibilityHidden(true)
-
-            Text("Andrew Dictate")
-                .font(BrandUI.titleFont)
-                .foregroundStyle(BrandUI.textPrimary)
-
-            Spacer(minLength: 12)
-
-            Text("v\(shortVersion)")
-                .font(BrandUI.valueFont)
-                .foregroundStyle(BrandUI.textSecondary)
-        }
-        .padding(.horizontal, 2)
-    }
-
-    private var shortVersion: String {
-        Bundle.main.object(
-            forInfoDictionaryKey: "CFBundleShortVersionString"
-        ) as? String ?? "development"
     }
 
     private func settingsSection<Content: View>(
@@ -576,7 +547,9 @@ struct SettingsView: View {
 
     private var hotkeyRow: some View {
         HStack(spacing: 10) {
-            Text("dictation")
+            // the section header already says "dictation" — this row picks
+            // the key you hold for it.
+            Text("key")
                 .font(BrandUI.bodyFont.weight(.medium))
 
             Spacer(minLength: 10)
