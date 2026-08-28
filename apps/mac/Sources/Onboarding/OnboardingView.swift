@@ -445,7 +445,9 @@ struct OnboardingView: View {
                         .font(.system(size: 10, weight: .semibold))
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                // the one prominent control on the surface gets the glass
+                // (ADR 0036); everything else stays quiet.
+                .buttonStyle(.glassProminent)
                 .controlSize(.large)
             }
         }
