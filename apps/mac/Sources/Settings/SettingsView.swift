@@ -35,7 +35,6 @@ struct SettingsView: View {
     @State private var installedModels: [InstalledModel] = []
     @State private var pendingModelRemoval: EngineVersion?
     @State private var modelStoreMessage: String?
-    @State private var isCleanupAvailable: Bool
     @State private var showsRemoval = false
     @State private var timings: TimelineSummary?
 
@@ -49,9 +48,6 @@ struct SettingsView: View {
         )
         modelStore = ModelStore(
             activeVersion: { coordinator.activeEngineVersion }
-        )
-        _isCleanupAvailable = State(
-            initialValue: coordinator.isCleanupAvailable
         )
     }
 
@@ -86,7 +82,7 @@ struct SettingsView: View {
                 generalTab
             }
         }
-        .frame(width: 560)
+        .frame(width: 680)
         .background(BrandUI.windowBg)
         .foregroundStyle(BrandUI.textPrimary)
         .font(BrandUI.bodyFont)
@@ -99,7 +95,6 @@ struct SettingsView: View {
             NSApp.activate(ignoringOtherApps: true)
             loginItem.refresh()
             refreshInstalledModels()
-            isCleanupAvailable = coordinator.isCleanupAvailable
             // read from disk on open: counts have to be the number of things
             // that exist, not a number this pane remembered.
             archive.refresh()
@@ -218,7 +213,7 @@ struct SettingsView: View {
                 settings: settings
             )
             rowDivider
-            aiCleanupEditor
+            PipelineView(coordinator: coordinator, settings: settings)
             if Capabilities.current.keepsCleanupLab {
                 rowDivider
                 cleanupLabControls
@@ -259,41 +254,6 @@ struct SettingsView: View {
             .fixedSize()
             .accessibilityLabel("dictation key")
         }
-    }
-
-    /// shown on every mac, disabled where it can’t run — and the reason line
-    /// is the os’s actual reason, not a guess (the old copy said "needs
-    /// macOS 26" to a mac already on 26 with Apple Intelligence off).
-    private var aiCleanupEditor: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 12) {
-                Text("ai cleanup")
-                    .font(BrandUI.bodyFont.weight(.medium))
-                    .opacity(isCleanupAvailable ? 1 : 0.55)
-
-                Spacer(minLength: 12)
-
-                Picker("", selection: $settings.cleanupMode) {
-                    ForEach(CleanupMode.allCases) { mode in
-                        Text(mode.rawValue)
-                            .tag(mode)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .frame(width: 210)
-                .accessibilityLabel("ai cleanup")
-            }
-
-            Text(
-                coordinator.cleanupUnavailableExplanation
-                    ?? settings.cleanupMode.explanation
-            )
-            .font(.caption)
-            .foregroundStyle(BrandUI.textSecondary)
-            .lineLimit(1)
-        }
-        .disabled(!isCleanupAvailable)
     }
 
     private var cleanupLabControls: some View {
