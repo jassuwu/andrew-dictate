@@ -1,5 +1,4 @@
-import AppKit
-import SwiftUI
+import Foundation
 
 @MainActor
 final class PipelinePlaygroundViewModel: ObservableObject {
@@ -47,6 +46,14 @@ final class PipelinePlaygroundViewModel: ObservableObject {
             return
         }
         selection.polishEnabled = enabled
+        recompute()
+    }
+
+    func setDeterministicEnabled(_ enabled: Bool) {
+        guard selection.deterministicEnabled != enabled else {
+            return
+        }
+        selection.deterministicEnabled = enabled
         recompute()
     }
 
@@ -143,219 +150,5 @@ final class PipelinePlaygroundViewModel: ObservableObject {
                 ),
             ]
         }
-    }
-}
-
-/// the pipeline, made visible: type what you would have said, switch the
-/// layers on and off, watch what each one hands to the next. nothing here
-/// writes to settings — it is a what-if, not a control panel.
-struct PipelinePlaygroundView: View {
-    @ObservedObject var viewModel: PipelinePlaygroundViewModel
-    @ObservedObject var settings: AppSettings
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                header
-                inputCard
-
-                ForEach(viewModel.results) { result in
-                    stageCard(result)
-                }
-
-                footer
-            }
-            .frame(maxWidth: 620)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 22)
-        }
-        .background(BrandUI.windowBg)
-        .foregroundStyle(BrandUI.textPrimary)
-        .font(BrandUI.bodyFont)
-        .brandTinted()
-        .controlSize(.small)
-        .preferredColorScheme(.dark)
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("the pipeline")
-                .font(BrandUI.titleFont)
-
-            Text(
-                "what happens between your voice and the page. "
-                    + "you're standing in for the microphone."
-            )
-            .foregroundStyle(BrandUI.textSecondary)
-        }
-        .padding(.horizontal, 2)
-    }
-
-    private var inputCard: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack {
-                BrandSectionHeader("say something")
-
-                Spacer()
-
-                Button("use the example") {
-                    viewModel.useSample()
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(BrandUI.gold)
-            }
-            .padding(.horizontal, 2)
-
-            BrandCard {
-                TextEditor(text: $viewModel.input)
-                    .font(BrandUI.valueFont)
-                    .scrollContentBackground(.hidden)
-                    .frame(minHeight: 66)
-                    .onChange(of: viewModel.input) { _, _ in
-                        viewModel.recompute()
-                    }
-                    .accessibilityLabel("test transcript")
-            }
-        }
-    }
-
-    private func stageCard(_ result: PipelineStageResult) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 10) {
-                BrandSectionHeader(result.stage.title)
-
-                if result.stage.isAlwaysOn {
-                    Text("always on")
-                        .font(.caption)
-                        .foregroundStyle(BrandUI.textSecondary)
-                }
-
-                Spacer()
-
-                if result.stage == .polish, viewModel.isPolishing {
-                    ProgressView()
-                        .controlSize(.small)
-                        .scaleEffect(0.6)
-                        .frame(width: 12, height: 12)
-                }
-
-                if !result.stage.isAlwaysOn {
-                    Toggle("", isOn: Binding(
-                        get: { result.isEnabled },
-                        set: { _ in viewModel.toggle(result.stage) }
-                    ))
-                    .labelsHidden()
-                    .brandToggleStyle()
-                    .accessibilityLabel(result.stage.title)
-                }
-            }
-            .padding(.horizontal, 2)
-
-            BrandCard {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(result.stage.summary)
-                        .font(.caption)
-                        .foregroundStyle(BrandUI.textSecondary)
-
-                    Text(result.output.isEmpty ? " " : result.output)
-                        .font(BrandUI.valueFont)
-                        .foregroundStyle(
-                            result.isEnabled
-                                ? BrandUI.textPrimary
-                                : BrandUI.textSecondary
-                        )
-                        .textSelection(.enabled)
-                        .frame(
-                            maxWidth: .infinity,
-                            alignment: .leading
-                        )
-
-                    stageNote(result)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func stageNote(_ result: PipelineStageResult) -> some View {
-        if let reason = result.unavailableReason {
-            Text(reason)
-                .font(.caption)
-                .foregroundStyle(BrandUI.gold)
-        } else if !result.isEnabled {
-            Text("off — the text passes straight through")
-                .font(.caption)
-                .foregroundStyle(BrandUI.textSecondary)
-        } else if result.stage == .polish, viewModel.isPolishing {
-            Text("thinking…")
-                .font(.caption)
-                .foregroundStyle(BrandUI.textSecondary)
-        } else if !result.changedAnything, result.stage != .transcription {
-            Text("nothing to change here")
-                .font(.caption)
-                .foregroundStyle(BrandUI.textSecondary)
-        }
-    }
-
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(
-                "these switches are a what-if — they don't change your "
-                    + "settings. cleanup can't actually be turned off: "
-                    + "it's where your dictionary and spoken punctuation live."
-            )
-            .font(.caption)
-            .foregroundStyle(BrandUI.textSecondary)
-
-            if viewModel.isPolishAvailable,
-               settings.cleanupMode == .off {
-                Button("turn ai cleanup on for real") {
-                    settings.cleanupMode = .on
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(BrandUI.gold)
-            }
-        }
-        .padding(.horizontal, 2)
-    }
-}
-
-@MainActor
-final class PipelinePlaygroundWindowController: NSWindowController {
-    init(
-        entries: @escaping @MainActor () -> [DictionaryEntry],
-        settings: AppSettings
-    ) {
-        let viewModel = PipelinePlaygroundViewModel(entries: entries)
-        let rootView = PipelinePlaygroundView(
-            viewModel: viewModel,
-            settings: settings
-        )
-        let hostingController = NSHostingController(rootView: rootView)
-        let window = NSWindow(contentViewController: hostingController)
-        window.title = "the pipeline"
-        window.styleMask = [
-            .titled,
-            .closable,
-            .miniaturizable,
-            .resizable,
-        ]
-        window.setContentSize(NSSize(width: 660, height: 680))
-        window.minSize = NSSize(width: 560, height: 480)
-        window.isReleasedWhenClosed = false
-        window.center()
-
-        super.init(window: window)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is unavailable")
-    }
-
-    func present() {
-        NSApp.activate(ignoringOtherApps: true)
-        showWindow(nil)
-        window?.makeKeyAndOrderFront(nil)
     }
 }
