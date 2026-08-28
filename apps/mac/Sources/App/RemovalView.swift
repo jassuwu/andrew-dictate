@@ -3,7 +3,11 @@ import SwiftUI
 
 /// Leaving, made as easy as arriving.
 struct RemovalView: View {
-    @ObservedObject var viewModel: RemovalViewModel
+    // owned here, not passed in: as sheet content this view gets rebuilt on
+    // every settings re-render, and an inline-constructed model was reborn
+    // blank each time — wiping the failure message mid-read (ADR 0035).
+    @StateObject private var viewModel = RemovalViewModel()
+    @Environment(\.dismiss) private var dismiss
     @State private var isWorking = false
 
     var body: some View {
@@ -70,6 +74,13 @@ struct RemovalView: View {
                     )
             }
 
+            if let detail = viewModel.failureDetail {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.textSecondary)
+                    .textSelection(.enabled)
+            }
+
             Spacer(minLength: 0)
 
             HStack {
@@ -82,6 +93,10 @@ struct RemovalView: View {
                 .foregroundStyle(BrandUI.textSecondary)
 
                 Spacer()
+
+                Button("cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(isWorking)
 
                 Button("remove") { remove() }
                     .disabled(viewModel.selection.isEmpty || isWorking)
@@ -110,9 +125,17 @@ struct RemovalView: View {
             // Long enough to read "removed. quitting."
             try? await Task.sleep(for: .milliseconds(900))
             if trash {
-                try? await NSWorkspace.shared.recycle([Bundle.main.bundleURL])
+                _ = try? await NSWorkspace.shared.recycle(
+                    [Bundle.main.bundleURL]
+                )
             }
+            dismiss()
             NSApp.terminate(nil)
+            // terminate can be politely refused while a sheet is still
+            // coming down — and then nothing here was interactive anymore.
+            // the data is already off the disk; the user asked for gone.
+            try? await Task.sleep(for: .milliseconds(700))
+            exit(0)
         }
     }
 }
