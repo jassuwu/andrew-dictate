@@ -3,47 +3,6 @@ import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
 
-@MainActor
-final class SettingsWindowController: NSWindowController {
-    init(coordinator: DictationCoordinator) {
-        let rootView = SettingsView(coordinator: coordinator)
-        let hostingController = NSHostingController(rootView: rootView)
-        let window = NSWindow(contentViewController: hostingController)
-        window.title = "settings"
-        // same chrome as the about window (ADR 0032): content on the window
-        // itself, no visible title bar, no cards. tabs are the sections.
-        window.styleMask = [
-            .titled,
-            .closable,
-            .miniaturizable,
-            .fullSizeContentView,
-        ]
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        let size = NSSize(width: 560, height: 540)
-        window.setContentSize(size)
-        window.minSize = size
-        window.maxSize = size
-        window.isMovableByWindowBackground = true
-        window.backgroundColor = BrandUI.nsColor(BrandUI.windowBgRGB)
-        window.isReleasedWhenClosed = false
-        window.center()
-
-        super.init(window: window)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is unavailable")
-    }
-
-    func present() {
-        NSApp.activate(ignoringOtherApps: true)
-        showWindow(nil)
-        window?.makeKeyAndOrderFront(nil)
-    }
-}
-
 enum SettingsTab: String, CaseIterable, Identifiable {
     case dictation
     case dictionary
@@ -97,31 +56,37 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            tabBar
-                .padding(.top, 14)
-                .padding(.bottom, 16)
-
-            // only when something is actually wrong: three permanent green
-            // ticks would teach you to stop reading it. shown above every
-            // tab because a broken permission outranks whatever you came for.
-            if !setupIssues.isEmpty {
-                setupBanner
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 14)
+        TabView(selection: $selectedTab) {
+            Tab(
+                "dictation",
+                systemImage: "waveform",
+                value: SettingsTab.dictation
+            ) {
+                dictationTab
             }
-
-            Group {
-                switch selectedTab {
-                case .dictation: dictationTab
-                case .dictionary: dictionaryTab
-                case .keeps: keepsTab
-                case .general: generalTab
-                }
+            Tab(
+                "dictionary",
+                systemImage: "character.book.closed",
+                value: SettingsTab.dictionary
+            ) {
+                dictionaryTab
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            Tab(
+                "what it keeps",
+                systemImage: "archivebox",
+                value: SettingsTab.keeps
+            ) {
+                keepsTab
+            }
+            Tab(
+                "general",
+                systemImage: "gearshape",
+                value: SettingsTab.general
+            ) {
+                generalTab
+            }
         }
-        .frame(width: 560, height: 540)
+        .frame(width: 560)
         .background(BrandUI.windowBg)
         .foregroundStyle(BrandUI.textPrimary)
         .font(BrandUI.bodyFont)
@@ -129,6 +94,9 @@ struct SettingsView: View {
         .controlSize(.small)
         .preferredColorScheme(.dark)
         .onAppear {
+            // an LSUIElement app opening its settings scene may not be the
+            // active app, which would leave the window behind everything.
+            NSApp.activate(ignoringOtherApps: true)
             loginItem.refresh()
             refreshInstalledModels()
             isCleanupAvailable = coordinator.isCleanupAvailable
@@ -184,37 +152,6 @@ struct SettingsView: View {
 
     // MARK: - chrome
 
-    private var tabBar: some View {
-        HStack(spacing: 24) {
-            ForEach(SettingsTab.allCases) { tab in
-                Button {
-                    selectedTab = tab
-                } label: {
-                    Text(tab.title)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(
-                            selectedTab == tab
-                                ? BrandUI.gold
-                                : BrandUI.textSecondary
-                        )
-                        .overlay(alignment: .bottom) {
-                            if selectedTab == tab {
-                                Capsule()
-                                    .fill(BrandUI.gold)
-                                    .frame(height: 2)
-                                    .offset(y: 7)
-                            }
-                        }
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(
-                    selectedTab == tab ? .isSelected : []
-                )
-            }
-        }
-        .animation(.easeOut(duration: 0.15), value: selectedTab)
-    }
-
     private var setupIssues: [SetupIssue] {
         SetupHealth.issues(
             permissions: coordinator.permissions,
@@ -260,6 +197,15 @@ struct SettingsView: View {
 
     private var dictationTab: some View {
         VStack(alignment: .leading, spacing: 13) {
+            // only when something is actually wrong: three permanent green
+            // ticks would teach you to stop reading it. it lives on the
+            // pane you land on, because a broken permission outranks
+            // whatever you came for.
+            if !setupIssues.isEmpty {
+                setupBanner
+                rowDivider
+            }
+
             hotkeyRow
             rowDivider
             DictationOptionRow(
@@ -281,6 +227,7 @@ struct SettingsView: View {
             engineEditor
         }
         .padding(.horizontal, 24)
+        .padding(.top, 18)
         .padding(.bottom, 20)
     }
 
@@ -519,6 +466,7 @@ struct SettingsView: View {
     private var dictionaryTab: some View {
         DictionaryEditor(store: dictionaryStore)
             .padding(.horizontal, 24)
+            .padding(.top, 18)
             .padding(.bottom, 20)
     }
 
@@ -573,7 +521,9 @@ struct SettingsView: View {
                 viewModel: browser,
                 fixAWord: { coordinator.openWordFixer(for: $0) }
             )
+            .frame(height: 290)
         }
+        .padding(.top, 18)
     }
 
     // MARK: - general
@@ -600,6 +550,7 @@ struct SettingsView: View {
             numbersDashboard
         }
         .padding(.horizontal, 24)
+        .padding(.top, 18)
         .padding(.bottom, 20)
     }
 
