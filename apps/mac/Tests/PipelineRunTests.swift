@@ -33,7 +33,13 @@ final class PipelineRunTests: XCTestCase {
         let cleanup = results[1]
         XCTAssertEqual(cleanup.stage, .deterministic)
         XCTAssertFalse(cleanup.isEnabled)
-        XCTAssertEqual(cleanup.output, raw)
+        // off means raw words — but the dictionary still applies, as on the
+        // real path, so the expectation is the dictionary-only cleaner.
+        XCTAssertEqual(
+            cleanup.output,
+            DeterministicCleaner(entries: entries, fullCleanup: false)
+                .clean(raw)
+        )
         XCTAssertFalse(cleanup.changedAnything)
     }
 
@@ -89,7 +95,7 @@ final class PipelineRunTests: XCTestCase {
         XCTAssertEqual(stage.unavailableReason, "needs macOS 26")
     }
 
-    func testOnlyPolishCanBeSwitchedOff() {
+    func testOnlyTranscriptionCannotBeSwitchedOff() {
         var selection = PipelineSelection()
         selection.toggle(.transcription)
         XCTAssertTrue(selection.isEnabled(.transcription))
@@ -99,8 +105,10 @@ final class PipelineRunTests: XCTestCase {
         selection.toggle(.deterministic)
         XCTAssertFalse(selection.isEnabled(.deterministic))
 
+        // transcription is the app; the other two are the user's to switch
+        // (cleanup since ADR 0038 — off still runs the dictionary).
         XCTAssertTrue(PipelineStage.transcription.isAlwaysOn)
-        XCTAssertTrue(PipelineStage.deterministic.isAlwaysOn)
+        XCTAssertFalse(PipelineStage.deterministic.isAlwaysOn)
         XCTAssertFalse(PipelineStage.polish.isAlwaysOn)
     }
 
