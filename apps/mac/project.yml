@@ -77,6 +77,9 @@ targets:
       - Sources/Archive/MeetingSession.swift
       - Sources/Archive/ArchiveBrowserViewModel.swift
       - Sources/App/AppIdentity.swift
+      - Sources/App/Capabilities.swift
+      - Sources/App/RemovalPlan.swift
+      - Sources/App/RemovalViewModel.swift
       - Sources/HUD/WaveLevelShaper.swift
       - Sources/HUD/HUDLayoutEngine.swift
       - Sources/Settings/AppSettings.swift
