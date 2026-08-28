@@ -36,23 +36,23 @@ struct AndrewDictateApp: App {
                 Divider()
             }
 
-            Text(coordinator.state.displayName)
-                .foregroundStyle(.secondary)
-                .disabled(true)
-
-            Button("copy last transcript") {
-                coordinator.copyLastTranscript()
+            // Only when it is *not* ready. A line reading "ready" forever is
+            // furniture; a line that appears when the model is still loading
+            // is the one thing the badge cannot tell you, because prewarming
+            // and idle draw the same icon.
+            if coordinator.state != .idle {
+                Text(coordinator.state.displayName)
+                    .foregroundStyle(.secondary)
+                    .disabled(true)
             }
-            .disabled(coordinator.lastTranscript == nil)
 
+            // The only action here that is time-sensitive: you just watched it
+            // mishear a name. Everything else the app can do is either
+            // configuration or curiosity, and lives in settings (ADR 0030).
             Button("fix a word…") {
                 coordinator.openWordFixer()
             }
             .disabled(coordinator.lastTranscript == nil)
-
-            Button("what it keeps…") {
-                coordinator.openArchiveBrowser()
-            }
 
             Divider()
 
@@ -60,19 +60,12 @@ struct AndrewDictateApp: App {
                 coordinator.openSettings()
             }
 
-            Button("the pipeline…") {
-                coordinator.openPipelinePlayground()
-            }
-
-            if Capabilities.current.canCopyTimings {
-                Button("copy timings") {
-                    coordinator.copyTimings()
-                }
-            }
-
-            if Capabilities.current.canUninstall {
-                Button("remove…") {
-                    coordinator.openRemoval()
+            // Zero rows when everything works, one click when it does not.
+            // SPEC §5 makes settings the router; this is the shortcut for the
+            // case where the user has no reason to go looking.
+            if coordinator.needsPermissionAttention {
+                Button("finish setup") {
+                    coordinator.runOnboardingAgain()
                 }
             }
 
@@ -80,21 +73,6 @@ struct AndrewDictateApp: App {
                 Button("reset & relaunch (dev)") {
                     coordinator.resetInPlaceForDevelopment()
                 }
-            }
-
-            // the way back. ships in release: a user who skipped setup, or
-            // whose permissions were withdrawn, had no route but deleting
-            // their defaults.
-            Button(
-                coordinator.needsPermissionAttention
-                    ? "finish setup"
-                    : "run onboarding again"
-            ) {
-                coordinator.runOnboardingAgain()
-            }
-
-            Button("about Andrew Dictate") {
-                coordinator.openAbout()
             }
 
             Divider()
