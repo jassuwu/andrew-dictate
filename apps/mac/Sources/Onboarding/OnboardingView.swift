@@ -154,13 +154,17 @@ private final class OnboardingPermissionModel: ObservableObject {
 }
 
 struct OnboardingView: View {
-    private static let collapsedHeight: CGFloat = 430
-    private static let expandedHeight: CGFloat = 648
+    // Every screen is the same size. The old flow grew from 430 to 648 when
+    // setup began, which moved the window under the pointer at the exact
+    // moment the user was reaching for something.
+    private static let windowWidth: CGFloat = 460
+    private static let windowHeight: CGFloat = 430
 
     @ObservedObject private var coordinator: DictationCoordinator
     @ObservedObject private var settings: AppSettings
     @StateObject private var permissions: OnboardingPermissionModel
     @State private var onboarding: OnboardingState
+    @State private var flow = OnboardingFlow()
     @State private var hotkeyWasDetected = false
 
     private let windowResizer: OnboardingWindowResizer
@@ -190,34 +194,26 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            primarySetup
-                .frame(height: 390)
-
-            if onboarding.whileYouWaitVisible {
-                whileYouWaitSection
-                    .padding(.top, 14)
-            }
+            stepBar
+            Spacer(minLength: 12)
+            stepBody
+            Spacer(minLength: 12)
+            footer
         }
-        .padding(.horizontal, 28)
+        .padding(.horizontal, 30)
         .padding(.vertical, 20)
-        .frame(
-            width: 460,
-            height: contentHeight,
-            alignment: .top
-        )
+        .frame(width: Self.windowWidth, height: Self.windowHeight)
         .background(BrandUI.windowBg)
         .foregroundStyle(BrandUI.textPrimary)
         .font(BrandUI.bodyFont)
         .brandTinted()
         .controlSize(.small)
         .preferredColorScheme(.dark)
+        .animation(.easeInOut(duration: 0.22), value: flow.step)
         .onAppear {
             permissions.refresh()
             synchronizeOnboarding()
-            windowResizer.resize(
-                to: contentHeight,
-                animated: false
-            )
+            windowResizer.resize(to: Self.windowHeight, animated: false)
         }
         .onChange(of: permissions.microphoneStatus) { _, _ in
             synchronizePermissions()
@@ -227,12 +223,6 @@ struct OnboardingView: View {
         }
         .onChange(of: coordinator.enginePreparationState) { _, _ in
             synchronizeEngine()
-        }
-        .onChange(of: onboarding.whileYouWaitVisible) { _, _ in
-            windowResizer.resize(
-                to: contentHeight,
-                animated: true
-            )
         }
         .task {
             permissions.refresh()
@@ -245,401 +235,274 @@ struct OnboardingView: View {
                 permissions.refresh()
             }
         }
+        // A granted permission is its own confirmation. Asking the user to
+        // press "continue" after they have already watched it succeed is the
+        // second button this redesign exists to remove.
+        .task(id: "\(flow.step.rawValue)-\(isCurrentStepSatisfied)") {
+            guard isCurrentStepSatisfied,
+                  flow.step != .hello,
+                  !flow.isLastStep else {
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(650))
+            guard isCurrentStepSatisfied else {
+                return
+            }
+            flow.advance()
+        }
         .task(id: coordinator.hotkeyDetection?.sequence) {
-            guard onboarding.whileYouWaitVisible,
+            guard flow.step == .ready,
                   let detection = coordinator.hotkeyDetection else {
                 return
             }
-
             hotkeyWasDetected = true
-            do {
-                try await Task.sleep(for: .milliseconds(420))
-            } catch {
-                return
-            }
+            try? await Task.sleep(for: .seconds(2))
             guard coordinator.hotkeyDetection?.sequence
                     == detection.sequence else {
                 return
             }
             hotkeyWasDetected = false
         }
-        .task(id: onboarding.autoFinishArmed) {
-            guard onboarding.autoFinishArmed else {
-                return
+    }
+
+    // MARK: - chrome
+
+    private var stepBar: some View {
+        HStack(spacing: 10) {
+            Button {
+                flow.goBack()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(BrandUI.textSecondary)
+            .opacity(flow.canGoBack ? 1 : 0)
+            .disabled(!flow.canGoBack)
+            .accessibilityLabel("back")
+
+            Spacer()
+
+            HStack(spacing: 5) {
+                ForEach(OnboardingStep.allCases) { step in
+                    Circle()
+                        .fill(
+                            step.rawValue <= flow.step.rawValue
+                                ? BrandUI.gold
+                                : BrandUI.textPrimary.opacity(0.18)
+                        )
+                        .frame(width: 5, height: 5)
+                }
+            }
+            .accessibilityLabel(
+                "step \(flow.position.index) of \(flow.position.total)"
+            )
+
+            Spacer()
+
+            // Balances the chevron so the dots sit centred.
+            Image(systemName: "chevron.left")
+                .font(.system(size: 12, weight: .semibold))
+                .opacity(0)
+        }
+    }
+
+    // MARK: - the one idea on this screen
+
+    private var stepBody: some View {
+        VStack(spacing: 10) {
+            if flow.step == .hello {
+                Image("Badge")
+                    .resizable()
+                    .frame(width: 68, height: 68)
+                    .accessibilityHidden(true)
+                    .padding(.bottom, 2)
             }
 
-            do {
-                try await Task.sleep(for: .seconds(1.5))
-            } catch {
-                return
+            Text(flow.step.title)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(BrandUI.textPrimary)
+
+            if flow.step == .hello {
+                Text("escape the keyboard.")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(BrandUI.gold)
             }
 
-            guard onboarding.finishAutomatically() else {
-                return
+            Text(flow.step.reason)
+                .font(BrandUI.bodyFont)
+                .foregroundStyle(BrandUI.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 320)
+
+            stepDetail
+                .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private var stepDetail: some View {
+        switch flow.step {
+        case .model:
+            modelProgress
+        case .ready:
+            Text(hotkeyWasDetected ? "heard that." : " ")
+                .font(BrandUI.bodyFont)
+                .foregroundStyle(BrandUI.gold)
+        case .hello, .microphone, .accessibility:
+            deniedHint
+        }
+    }
+
+    /// Only appears when macOS has already refused. Until then the screen says
+    /// one thing, which is the point.
+    @ViewBuilder
+    private var deniedHint: some View {
+        let denied = (flow.step == .microphone
+            && onboarding.microphoneStatus == .actionRequired)
+            || (flow.step == .accessibility
+                && onboarding.accessibilityStatus == .actionRequired)
+
+        Text(denied ? "macOS is holding this one — turn it on in settings." : " ")
+            .font(.caption)
+            .foregroundStyle(denied ? BrandUI.attention : .clear)
+    }
+
+    @ViewBuilder
+    private var modelProgress: some View {
+        switch coordinator.enginePreparationState {
+        case let .downloading(progress):
+            VStack(spacing: 6) {
+                ProgressView(value: bounded(progress))
+                    .progressViewStyle(.linear)
+                    .frame(width: 220)
+                Text("about 440 mb, once.")
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.textSecondary)
             }
+        case .warmingUp:
+            Text("warming up…")
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
+        case .failed:
+            Text("that download didn't finish.")
+                .font(.caption)
+                .foregroundStyle(BrandUI.attention)
+        case .notStarted, .ready:
+            Text(" ").font(.caption)
+        }
+    }
+
+    // MARK: - exactly one thing to do
+
+    private var footer: some View {
+        VStack(spacing: 10) {
+            Button(action: performPrimaryAction) {
+                Text(primaryActionTitle)
+                    .frame(minWidth: 176)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(isPrimaryActionBusy)
+
+            // One way out, on one screen. A skip on every screen is another
+            // competing action.
+            if flow.step.offersSkip {
+                Button("not now") {
+                    coordinator.skipOnboarding()
+                }
+                .buttonStyle(.plain)
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
+            } else {
+                Text(" ").font(.caption)
+            }
+        }
+    }
+
+    private var primaryActionTitle: String {
+        if flow.step == .microphone,
+           onboarding.microphoneStatus == .actionRequired {
+            return "open settings"
+        }
+        if flow.step == .accessibility,
+           onboarding.accessibilityStatus == .actionRequired {
+            return "open settings"
+        }
+        if flow.step == .model {
+            switch coordinator.enginePreparationState {
+            case .downloading, .warmingUp:
+                return "downloading…"
+            case .failed:
+                return "try again"
+            case .ready:
+                return "continue"
+            case .notStarted:
+                return flow.step.actionTitle
+            }
+        }
+        return flow.step.actionTitle
+    }
+
+    private var isPrimaryActionBusy: Bool {
+        guard flow.step == .model else {
+            return false
+        }
+        switch coordinator.enginePreparationState {
+        case .downloading, .warmingUp:
+            return true
+        case .notStarted, .ready, .failed:
+            return false
+        }
+    }
+
+    private var isCurrentStepSatisfied: Bool {
+        flow.isSatisfied(by: onboarding)
+    }
+
+    private func performPrimaryAction() {
+        switch flow.step {
+        case .hello:
+            onboarding.consentToSetup()
+            synchronizePermissions()
+            flow.advance()
+
+        case .microphone:
+            if onboarding.microphoneStatus == .actionRequired {
+                permissions.openMicrophoneSettings()
+            } else {
+                permissions.requestMicrophoneAccess {
+                    await coordinator.requestMicrophoneAccess()
+                }
+            }
+
+        case .accessibility:
+            if onboarding.accessibilityStatus == .actionRequired {
+                permissions.openAccessibilitySettings()
+            } else {
+                permissions.requestAccessibilityPrompt()
+            }
+
+        case .model:
+            switch coordinator.enginePreparationState {
+            case .ready:
+                flow.advance()
+            case .failed:
+                coordinator.retryEnginePrewarm()
+            case .notStarted:
+                coordinator.beginOnboardingEnginePreparation()
+            case .downloading, .warmingUp:
+                break
+            }
+
+        case .ready:
             coordinator.finishOnboarding()
         }
     }
 
-    private var contentHeight: CGFloat {
-        onboarding.whileYouWaitVisible
-            ? Self.expandedHeight
-            : Self.collapsedHeight
-    }
-
-    private var primarySetup: some View {
-        VStack(spacing: 0) {
-            header
-
-            setupButtonSlot
-                .padding(.top, 14)
-
-            checklist
-                .padding(.top, 14)
-                .opacity(checklistIsActive ? 1 : 0.42)
-
-            if !onboarding.whileYouWaitVisible {
-                // a signpost you can actually walk through. opening settings
-                // is not leaving setup — the checklist stays behind it.
-                Button("keys and options live in settings") {
-                    coordinator.openSettings()
-                }
-                .buttonStyle(.link)
-                .font(.caption)
-                .padding(.top, 10)
-            }
-
-            Spacer(minLength: 6)
-
-            Button("skip for now") {
-                guard onboarding.skipForNow() else {
-                    return
-                }
-                coordinator.skipOnboarding()
-            }
-            .buttonStyle(.link)
-            .controlSize(.small)
-        }
-    }
-
-    private var whileYouWaitSection: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack {
-                BrandSectionHeader("while you wait")
-
-                Spacer()
-
-                Text("optional")
-                    .font(.caption)
-                    .foregroundStyle(BrandUI.textSecondary)
-            }
-            .padding(.horizontal, 2)
-
-            BrandCard {
-                VStack(alignment: .leading, spacing: 11) {
-                    hotkeyTestRow
-                    cardDivider
-
-                    DictationOptionRow(
-                        option: .preRoll,
-                        settings: settings
-                    )
-                    cardDivider
-
-                    pipelineRow
-                }
-            }
-        }
-    }
-
-    /// the download is dead time, and this is the only thing that explains
-    /// what the app does after the words arrive. it opens the same window the
-    /// menu bar does — one playground, three doors.
-    private var pipelineRow: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("see the pipeline")
-                    .font(BrandUI.bodyFont.weight(.medium))
-
-                Text(
-                    "what happens between your voice and the page."
-                )
-                .font(.caption)
-                .foregroundStyle(BrandUI.textSecondary)
-            }
-
-            Spacer(minLength: 8)
-
-            Button("open") {
-                coordinator.openPipelinePlayground()
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(BrandUI.gold)
-        }
-    }
-
-    private var hotkeyTestRow: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("press to test")
-                    .font(BrandUI.bodyFont.weight(.medium))
-
-                Text(
-                    hotkeyWasDetected
-                        ? "dictation detected"
-                        : "try holding the dictation key"
-                )
-                .font(.caption)
-                .foregroundStyle(
-                    hotkeyWasDetected
-                        ? BrandUI.gold
-                        : BrandUI.textSecondary
-                )
-            }
-
-            Spacer(minLength: 8)
-
-            VStack(spacing: 3) {
-                KeyChip(
-                    settings.dictationHotkey.displayName,
-                    isActive: hotkeyWasDetected
-                )
-
-                Text("dictation")
-                    .font(.caption2)
-                    .foregroundStyle(BrandUI.textSecondary)
-            }
-        }
-    }
-
-    private var cardDivider: some View {
-        Rectangle()
-            .fill(BrandUI.hairline)
-            .frame(height: 1)
-            .accessibilityHidden(true)
-    }
-
-    private var header: some View {
-        VStack(spacing: 5) {
-            Image("Badge")
-                .resizable()
-                .interpolation(.high)
-                .frame(width: 80, height: 80)
-                .accessibilityHidden(true)
-
-            Text("Andrew Dictate")
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(BrandUI.textPrimary)
-
-            Text("escape the keyboard.")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(BrandUI.gold)
-
-            Text(
-                onboarding.autoFinishArmed
-                    ? "ready — hold fn and speak."
-                    : "hold fn, talk, get text — everything stays on this mac."
-            )
-            .font(.caption)
-            .foregroundStyle(
-                onboarding.autoFinishArmed
-                    ? BrandUI.textPrimary
-                    : BrandUI.textSecondary
-            )
-            .multilineTextAlignment(.center)
-
-            // ADR 0026 ships keeping on by default, so this is where the user
-            // is told — once, plainly, with the way out named in the same
-            // breath rather than left to be discovered.
-            Text("it keeps what you dictate, here. settings has the off switch and the delete button.")
-                .font(.caption)
-                .foregroundStyle(BrandUI.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.top, 2)
-        }
-    }
-
-    @ViewBuilder
-    private var setupButtonSlot: some View {
-        if !onboarding.consented && !onboarding.autoFinishArmed {
-            Button("set up Andrew Dictate", action: beginSetup)
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.plain)
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(BrandUI.windowBg)
-                .padding(.horizontal, 22)
-                .frame(height: 34)
-                .background(
-                    BrandUI.gold,
-                    in: RoundedRectangle(cornerRadius: 8)
-                )
-        }
-    }
-
-    private var checklist: some View {
-        VStack(spacing: 0) {
-            microphoneRow
-            Divider()
-                .overlay(BrandUI.hairline)
-            accessibilityRow
-            Divider()
-                .overlay(BrandUI.hairline)
-            modelRow
-        }
-        .padding(.horizontal, 12)
-        .background(
-            BrandUI.cardBg,
-            in: RoundedRectangle(cornerRadius: 12)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(BrandUI.hairline, lineWidth: 1)
-        }
-        .allowsHitTesting(checklistIsActive)
-    }
-
-    private var microphoneRow: some View {
-        checklistRow("microphone") {
-            switch visibleMicrophoneStatus {
-            case .pending:
-                pendingText("pending")
-            case .actionRequired:
-                actionStatus("denied") {
-                    permissions.openMicrophoneSettings()
-                }
-            case .ready:
-                readyText("granted ✓")
-            }
-        }
-    }
-
-    private var accessibilityRow: some View {
-        checklistRow("accessibility") {
-            switch visibleAccessibilityStatus {
-            case .pending:
-                pendingText("pending")
-            case .actionRequired:
-                actionStatus("not yet") {
-                    permissions.openAccessibilitySettings()
-                }
-            case .ready:
-                readyText("granted ✓")
-            }
-        }
-    }
-
-    private var modelRow: some View {
-        checklistRow("speech model") {
-            switch coordinator.enginePreparationState {
-            case .notStarted:
-                pendingText("pending")
-
-            case let .downloading(progress):
-                HStack(spacing: 8) {
-                    ProgressView(value: bounded(progress))
-                        .progressViewStyle(.linear)
-                        .tint(BrandUI.gold)
-                        .frame(width: 92)
-
-                    Text("\(Int(bounded(progress) * 100))%")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(BrandUI.gold)
-                        .frame(width: 34, alignment: .trailing)
-                }
-
-            case .warmingUp:
-                pendingText("warming up")
-
-            case .ready:
-                readyText("ready ✓")
-
-            case .failed:
-                actionStatus("failed") {
-                    coordinator.retryEnginePrewarm()
-                } actionTitle: {
-                    Text("retry")
-                }
-            }
-        }
-    }
-
-    private func checklistRow<Status: View>(
-        _ label: String,
-        @ViewBuilder status: () -> Status
-    ) -> some View {
-        HStack(spacing: 12) {
-            Text(label)
-                .font(.callout.weight(.medium))
-
-            Spacer(minLength: 10)
-
-            status()
-        }
-        .frame(height: 43)
-    }
-
-    private func pendingText(_ text: String) -> some View {
-        Text(text)
-            .font(.caption)
-            .foregroundStyle(BrandUI.textSecondary)
-    }
-
-    private func readyText(_ text: String) -> some View {
-        Text(text)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(BrandUI.textPrimary)
-    }
-
-    private func actionStatus<ActionTitle: View>(
-        _ text: String,
-        action: @escaping () -> Void,
-        @ViewBuilder actionTitle: () -> ActionTitle
-    ) -> some View {
-        HStack(spacing: 8) {
-            Text(text)
-                .font(.caption)
-                .foregroundStyle(BrandUI.gold)
-
-            Button(action: action, label: actionTitle)
-                .buttonStyle(.link)
-                .controlSize(.small)
-                .tint(BrandUI.gold)
-        }
-    }
-
-    private func actionStatus(
-        _ text: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        actionStatus(text, action: action) {
-            Text("open settings")
-        }
-    }
-
-    private var checklistIsActive: Bool {
-        onboarding.consented || onboarding.autoFinishArmed
-    }
-
-    private var visibleMicrophoneStatus: OnboardingRowStatus {
-        checklistIsActive ? onboarding.microphoneStatus : .pending
-    }
-
-    private var visibleAccessibilityStatus: OnboardingRowStatus {
-        checklistIsActive ? onboarding.accessibilityStatus : .pending
-    }
-
-    private func beginSetup() {
-        guard onboarding.consentToSetup() else {
-            return
-        }
-
-        synchronizePermissions()
-        coordinator.beginOnboardingEnginePreparation()
-        permissions.requestMicrophoneAccess {
-            await coordinator.requestMicrophoneAccess()
-        }
-        permissions.requestAccessibilityPrompt()
-    }
+    // MARK: - keeping the state in step with the system
 
     private func synchronizeOnboarding() {
         synchronizePermissions()
