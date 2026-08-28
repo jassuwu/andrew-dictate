@@ -145,7 +145,48 @@ struct KeyChip: View {
     }
 }
 
+/// the brand's window surface on macOS 26: real Liquid Glass over whatever
+/// is behind the window, tinted toward the brand black so type stays
+/// legible. spiked against flat, hudWindow and sidebar materials with a
+/// screenshot before choosing (ADR 0039). the window itself goes
+/// transparent so the glass has something to sample.
+private struct BrandGlassWindow: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .background {
+                Color.clear.glassEffect(
+                    .regular.tint(BrandUI.windowBg.opacity(0.72)),
+                    in: Rectangle()
+                )
+            }
+            .background(WindowTransparency())
+    }
+}
+
+private struct WindowTransparency: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        TransparencyView()
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+private final class TransparencyView: NSView {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window else {
+            return
+        }
+        window.isOpaque = false
+        window.backgroundColor = .clear
+    }
+}
+
 extension View {
+    func brandGlassWindow() -> some View {
+        modifier(BrandGlassWindow())
+    }
+
     func brandTinted() -> some View {
         tint(BrandUI.gold)
     }
