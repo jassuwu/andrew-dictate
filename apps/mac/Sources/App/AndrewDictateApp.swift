@@ -29,7 +29,7 @@ struct AndrewDictateApp: App {
             // two menu bar icons that look identical is a bad time. the badge
             // itself stays untouched — the logo is the logo (ADR 0013) — so the
             // marker goes in the menu instead.
-            if !AppIdentity.isReleaseBuild {
+            if Capabilities.current.announcesItself {
                 Text("dev build — \(AppIdentity.bundleID)")
                     .foregroundStyle(.secondary)
                     .disabled(true)
@@ -64,8 +64,22 @@ struct AndrewDictateApp: App {
                 coordinator.openPipelinePlayground()
             }
 
-            Button("copy timings") {
-                coordinator.copyTimings()
+            if Capabilities.current.canCopyTimings {
+                Button("copy timings") {
+                    coordinator.copyTimings()
+                }
+            }
+
+            if Capabilities.current.canUninstall {
+                Button("remove…") {
+                    coordinator.openRemoval()
+                }
+            }
+
+            if Capabilities.current.canResetInPlace {
+                Button("reset & relaunch (dev)") {
+                    coordinator.resetInPlaceForDevelopment()
+                }
             }
 
             // the way back. ships in release: a user who skipped setup, or
