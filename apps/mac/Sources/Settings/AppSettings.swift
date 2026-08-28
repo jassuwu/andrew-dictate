@@ -137,6 +137,18 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// the deterministic cleanup stage — spoken punctuation, emails,
+    /// numbers, capitalisation. off means raw parakeet words; only the
+    /// dictionary still applies, because a word you taught it is yours.
+    @Published var cleanupEnabled: Bool {
+        didSet {
+            guard cleanupEnabled != oldValue else {
+                return
+            }
+            userDefaults.set(cleanupEnabled, forKey: Self.cleanupEnabledKey)
+        }
+    }
+
     @Published var cleanupMode: CleanupMode {
         didSet {
             guard cleanupMode != oldValue else {
@@ -171,6 +183,7 @@ final class AppSettings: ObservableObject {
     private static let keepDictationsKey = "AndrewDictate.keepDictations"
     private static let engineVersionKey = "AndrewDictate.engineVersion"
     private static let cleanupModeKey = "AndrewDictate.cleanupMode"
+    private static let cleanupEnabledKey = "AndrewDictate.cleanupEnabled"
     private static let totalWordsDictatedKey =
         "AndrewDictate.totalWordsDictated"
 
@@ -198,6 +211,12 @@ final class AppSettings: ObservableObject {
         engineVersion = userDefaults
             .string(forKey: Self.engineVersionKey)
             .flatMap(EngineVersion.init(rawValue:)) ?? .v2
+        // unset means on: cleanup has always shipped enabled.
+        cleanupEnabled = userDefaults.object(
+            forKey: Self.cleanupEnabledKey
+        ) == nil
+            ? true
+            : userDefaults.bool(forKey: Self.cleanupEnabledKey)
         // "shadow" existed briefly pre-release; migrate it to "on"
         let storedCleanupMode = userDefaults
             .string(forKey: Self.cleanupModeKey)
