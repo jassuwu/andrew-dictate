@@ -136,7 +136,6 @@ final class DictationCoordinator: ObservableObject {
     private var settingsCancellables: Set<AnyCancellable> = []
     private var isApplyingPreRollSetting = false
     private var isApplyingEngineVersionSetting = false
-    private var settingsWindowController: SettingsWindowController?
     private var onboardingWindowController: OnboardingWindowController?
     private var isOnboardingPresented: Bool
     private var hotkeyDetectionSequence = 0
@@ -301,16 +300,6 @@ final class DictationCoordinator: ObservableObject {
         hotkeyMonitor.rebind(to: binding)
     }
 
-    func openSettings() {
-        let controller: SettingsWindowController
-        if let settingsWindowController {
-            controller = settingsWindowController
-        } else {
-            controller = SettingsWindowController(coordinator: self)
-            settingsWindowController = controller
-        }
-        controller.present()
-    }
 
     func openAbout() {
         let controller: AboutWindowController
