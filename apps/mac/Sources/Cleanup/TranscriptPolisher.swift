@@ -12,7 +12,6 @@ enum PolisherAvailability: Equatable, Sendable {
     case appleIntelligenceOff
     case modelStillDownloading
     case deviceCannotRunIt
-    case osTooOld
 
     var explanation: String? {
         switch self {
@@ -24,8 +23,6 @@ enum PolisherAvailability: Equatable, Sendable {
             "apple's on-device model is still downloading — check back soon"
         case .deviceCannotRunIt:
             "this mac can't run apple's on-device model"
-        case .osTooOld:
-            "needs macOS 26 — apple's on-device model"
         }
     }
 }
@@ -241,24 +238,26 @@ enum TranscriptPolisherError: Error {
 struct FoundationModelPolisher: TranscriptPolisher {
     static let backendName = "foundation-models"
 
+    // the deployment floor is macOS 26 — canImport stays (a different axis:
+    // whether the SDK has the framework at all), but availability checks
+    // against the running os are dead weight now.
     var availability: PolisherAvailability {
         #if canImport(FoundationModels)
-        if #available(macOS 26.0, *) {
-            switch SystemLanguageModel.default.availability {
-            case .available:
-                return .available
-            case .unavailable(.appleIntelligenceNotEnabled):
-                return .appleIntelligenceOff
-            case .unavailable(.modelNotReady):
-                return .modelStillDownloading
-            case .unavailable(.deviceNotEligible):
-                return .deviceCannotRunIt
-            case .unavailable:
-                return .deviceCannotRunIt
-            }
+        switch SystemLanguageModel.default.availability {
+        case .available:
+            return .available
+        case .unavailable(.appleIntelligenceNotEnabled):
+            return .appleIntelligenceOff
+        case .unavailable(.modelNotReady):
+            return .modelStillDownloading
+        case .unavailable(.deviceNotEligible):
+            return .deviceCannotRunIt
+        case .unavailable:
+            return .deviceCannotRunIt
         }
+        #else
+        return .deviceCannotRunIt
         #endif
-        return .osTooOld
     }
 
     func polish(
@@ -266,19 +265,18 @@ struct FoundationModelPolisher: TranscriptPolisher {
         protectedTerms: [String]
     ) async throws -> String {
         #if canImport(FoundationModels)
-        if #available(macOS 26.0, *) {
-            guard SystemLanguageModel.default.availability == .available
-            else {
-                throw TranscriptPolisherError.unavailable
-            }
-
-            return try await polishWithFoundationModels(
-                text,
-                protectedTerms: protectedTerms
-            )
+        guard SystemLanguageModel.default.availability == .available
+        else {
+            throw TranscriptPolisherError.unavailable
         }
-        #endif
+
+        return try await polishWithFoundationModels(
+            text,
+            protectedTerms: protectedTerms
+        )
+        #else
         throw TranscriptPolisherError.unavailable
+        #endif
     }
 }
 
