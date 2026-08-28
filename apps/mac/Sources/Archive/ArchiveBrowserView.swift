@@ -96,33 +96,3 @@ private struct ArchiveRow: View {
     }
 }
 
-@MainActor
-final class ArchiveBrowserWindowController: NSWindowController {
-    init(fixAWord: @escaping (String) -> Void) {
-        let rootView = ArchiveBrowserView(
-            viewModel: ArchiveBrowserViewModel(),
-            fixAWord: fixAWord
-        )
-        let window = NSWindow(
-            contentViewController: NSHostingController(rootView: rootView)
-        )
-        window.title = "what it keeps"
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: 560, height: 520))
-        window.minSize = NSSize(width: 420, height: 320)
-        window.isReleasedWhenClosed = false
-        window.center()
-        super.init(window: window)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is unavailable")
-    }
-
-    func present() {
-        NSApp.activate(ignoringOtherApps: true)
-        showWindow(nil)
-        window?.makeKeyAndOrderFront(nil)
-    }
-}
