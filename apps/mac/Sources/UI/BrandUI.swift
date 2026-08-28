@@ -151,11 +151,16 @@ struct KeyChip: View {
 /// screenshot before choosing (ADR 0039). the window itself goes
 /// transparent so the glass has something to sample.
 private struct BrandGlassWindow: ViewModifier {
+    /// spiked at 0.72 / 0.55 / 0.40 / 0.25 / 0.10 over a busy desktop.
+    /// 0.72 was a curtain; 0.10 went light grey and lost the black.
+    /// 0.25 is glass you can see through with the ink still crisp.
+    static let tintOpacity = 0.25
+
     func body(content: Content) -> some View {
         content
             .background {
                 Color.clear.glassEffect(
-                    .regular.tint(BrandUI.windowBg.opacity(0.72)),
+                    .regular.tint(BrandUI.windowBg.opacity(Self.tintOpacity)),
                     in: Rectangle()
                 )
             }
