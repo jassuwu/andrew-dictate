@@ -40,6 +40,16 @@ final class PipelinePlaygroundViewModel: ObservableObject {
         recompute()
     }
 
+    /// the settings pipe drives this from the real cleanup mode rather than
+    /// a scratch toggle: there, the pipe *is* the control.
+    func setPolishEnabled(_ enabled: Bool) {
+        guard selection.polishEnabled != enabled else {
+            return
+        }
+        selection.polishEnabled = enabled
+        recompute()
+    }
+
     func useSample() {
         input = PipelineSample.text
         recompute()
