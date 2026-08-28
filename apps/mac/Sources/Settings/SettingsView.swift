@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 enum SettingsTab: String, CaseIterable, Identifiable {
     case dictation
     case dictionary
-    case keeps
+    case history
     case general
 
     var id: String { rawValue }
@@ -15,7 +15,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .dictation: "dictation"
         case .dictionary: "dictionary"
-        case .keeps: "what it keeps"
+        case .history: "history"
         case .general: "general"
         }
     }
@@ -72,11 +72,11 @@ struct SettingsView: View {
                 dictionaryTab
             }
             Tab(
-                "what it keeps",
-                systemImage: "archivebox",
-                value: SettingsTab.keeps
+                "history",
+                systemImage: "clock.arrow.circlepath",
+                value: SettingsTab.history
             ) {
-                keepsTab
+                historyTab
             }
             Tab(
                 "general",
@@ -107,7 +107,7 @@ struct SettingsView: View {
             timings = coordinator.timingsSummary()
         }
         .onChange(of: selectedTab) { _, tab in
-            if tab == .keeps {
+            if tab == .history {
                 browser.reload()
             }
             if tab == .general {
@@ -470,9 +470,9 @@ struct SettingsView: View {
             .padding(.bottom, 20)
     }
 
-    // MARK: - what it keeps
+    // MARK: - history
 
-    private var keepsTab: some View {
+    private var historyTab: some View {
         VStack(alignment: .leading, spacing: 12) {
             Group {
                 SettingsToggleRow(

@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// What it keeps, and the only place to delete one of them.
+/// history: what it kept, and the only place to delete one of them.
 struct ArchiveBrowserView: View {
     @ObservedObject var viewModel: ArchiveBrowserViewModel
     let fixAWord: (String) -> Void
