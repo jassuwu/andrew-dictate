@@ -15,6 +15,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: use xcode 26
+        # the floor is macOS 26 (61765cd): glassEffect, Tab(value:),
+        # FoundationModels. the runner's default xcode may be older.
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE" ]; then
+            echo "no Xcode 26 on this runner:"; ls /Applications | grep -i xcode; exit 1
+          fi
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
       - name: tools
         run: brew install xcodegen
 
