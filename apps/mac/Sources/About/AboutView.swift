@@ -106,7 +106,7 @@ struct AboutView: View {
                         ? "copied"
                         : "version \(version) · build \(build)"
                 )
-                .font(.system(size: 11, design: .monospaced))
+                .font(BrandUI.machineFont(size: 11))
                 .foregroundStyle(BrandUI.textSecondary)
             }
             .buttonStyle(.plain)
@@ -128,8 +128,10 @@ struct AboutView: View {
                         + "this app: MIT"
                 )
 
+            // a name in a hand font is a signature (jass.gg's role
+            // system) — the one place the hand font is allowed.
             Text(signatureMarkdown)
-                .font(.system(size: 12, weight: .medium))
+                .font(BrandUI.handFont(size: 15))
                 .foregroundStyle(BrandUI.textSecondary)
                 .tint(BrandUI.gold)
                 .padding(.top, 5)

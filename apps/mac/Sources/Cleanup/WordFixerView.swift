@@ -33,7 +33,7 @@ struct WordFixerView: View {
                     Text("heard")
                         .foregroundStyle(BrandUI.textSecondary)
                     Text("“\(phrase)”")
-                        .font(.system(size: 13, design: .monospaced))
+                        .font(BrandUI.machineFont(size: 13))
                         .foregroundStyle(BrandUI.goldPale)
                     Text("→")
                         .foregroundStyle(BrandUI.textSecondary)
@@ -86,7 +86,7 @@ private struct WordChip: View {
     var body: some View {
         Button(action: action) {
             Text(text)
-                .font(.system(size: 14, design: .monospaced))
+                .font(BrandUI.machineFont(size: 14))
                 .foregroundStyle(isSaved ? BrandUI.gold : BrandUI.textPrimary)
                 .padding(.horizontal, 5)
                 .padding(.vertical, 3)
