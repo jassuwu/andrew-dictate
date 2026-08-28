@@ -23,26 +23,26 @@ struct HotkeyDetection: Equatable, Sendable {
 /// file scope because the recorder is built during init, before there is a
 /// `self` to log through.
 private let audioLogger = Logger(
-    subsystem: "gg.jass.dictate",
+    subsystem: AppIdentity.loggingSubsystem,
     category: "audio"
 )
 
 @MainActor
 final class DictationCoordinator: ObservableObject {
     private let engineLogger = Logger(
-        subsystem: "gg.jass.dictate",
+        subsystem: AppIdentity.loggingSubsystem,
         category: "engine"
     )
     private let cleanupLogger = Logger(
-        subsystem: "gg.jass.dictate",
+        subsystem: AppIdentity.loggingSubsystem,
         category: "cleanup"
     )
     private let pipelineLogger = Logger(
-        subsystem: "gg.jass.dictate",
+        subsystem: AppIdentity.loggingSubsystem,
         category: "pipeline"
     )
     private let permissionLogger = Logger(
-        subsystem: "gg.jass.dictate",
+        subsystem: AppIdentity.loggingSubsystem,
         category: "permissions"
     )
     enum State: Equatable, Sendable {

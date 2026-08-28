@@ -26,6 +26,16 @@ struct AndrewDictateApp: App {
 
     var body: some Scene {
         MenuBarExtra {
+            // two menu bar icons that look identical is a bad time. the badge
+            // itself stays untouched — the logo is the logo (ADR 0013) — so the
+            // marker goes in the menu instead.
+            if !AppIdentity.isReleaseBuild {
+                Text("dev build — \(AppIdentity.bundleID)")
+                    .foregroundStyle(.secondary)
+                    .disabled(true)
+                Divider()
+            }
+
             Text(coordinator.state.displayName)
                 .foregroundStyle(.secondary)
                 .disabled(true)
