@@ -156,8 +156,6 @@ final class DictationCoordinator: ObservableObject {
     /// one place that knows whether anything actually reached the page.
     private var pendingArchiveText: (heard: String, inserted: String)?
     private var wordFixerWindowController: WordFixerWindowController?
-    private var pipelinePlaygroundWindowController:
-        PipelinePlaygroundWindowController?
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
     private var distributedNotificationObservers: [NSObjectProtocol] = []
 
@@ -320,22 +318,6 @@ final class DictationCoordinator: ObservableObject {
     /// move, straight from the os rather than a guess about it.
     var cleanupUnavailableExplanation: String? {
         transcriptPolisher.availability.explanation
-    }
-
-    /// the pipeline, in a window you can come back to. onboarding shows it
-    /// once while the model downloads; this is the door for every time after.
-    func openPipelinePlayground() {
-        let controller: PipelinePlaygroundWindowController
-        if let pipelinePlaygroundWindowController {
-            controller = pipelinePlaygroundWindowController
-        } else {
-            controller = PipelinePlaygroundWindowController(
-                entries: { [dictionaryStore] in dictionaryStore.entries },
-                settings: settings
-            )
-            pipelinePlaygroundWindowController = controller
-        }
-        controller.present()
     }
 
     func openCleanupLab() {
@@ -1251,7 +1233,8 @@ final class DictationCoordinator: ObservableObject {
             let rawHadDuplicates = MessyGateSignals
                 .containsImmediateDuplicate(in: transcript)
             let cleaner = DeterministicCleaner(
-                entries: dictionaryStore.entries
+                entries: dictionaryStore.entries,
+                fullCleanup: settings.cleanupEnabled
             )
             let rawTranscript = cleaner.clean(transcript)
             activeTimeline?.cleaned = timelineClock.now
