@@ -155,6 +155,7 @@ final class DictationCoordinator: ObservableObject {
     private var pendingArchiveText: (heard: String, inserted: String)?
     private var wordFixerWindowController: WordFixerWindowController?
     private var archiveBrowserWindowController: ArchiveBrowserWindowController?
+    private var removalWindowController: RemovalWindowController?
     private var pipelinePlaygroundWindowController:
         PipelinePlaygroundWindowController?
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
@@ -393,6 +394,34 @@ final class DictationCoordinator: ObservableObject {
             archiveBrowserWindowController = controller
         }
         controller.present()
+    }
+
+    func openRemoval() {
+        let controller = removalWindowController ?? RemovalWindowController()
+        removalWindowController = controller
+        controller.present()
+    }
+
+    /// Development only (`Capabilities.canResetInPlace`). Wipes this build's
+    /// data and settings with no confirmation and restarts, so onboarding can
+    /// be tested on the twentieth run without a trip through Finder. Against a
+    /// real archive this would be a foot-gun; against `Andrew Dictate Dev`'s
+    /// own folder it is just a fresh start.
+    func resetInPlaceForDevelopment() {
+        guard Capabilities.current.canResetInPlace else {
+            return
+        }
+        Remover().remove(Set(RemovalPlan.Item.allCases.filter {
+            $0 != .speechModels
+        }))
+
+        let app = Bundle.main.bundleURL
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        task.arguments = ["-n", app.path]
+        // A relaunch has to outlive us, so it is handed to `open` and we go.
+        try? task.run()
+        NSApp.terminate(nil)
     }
 
     func copyLastTranscript() {
