@@ -1,6 +1,10 @@
 import AppKit
 import SwiftUI
 
+/// the about window is a stamp, not a page: apple's own panel is 284×159
+/// with the content sitting directly on the window — no inner card, no
+/// visible title bar. same recipe here, painted in the brand.
+/// (docs/research/about-windows.md)
 @MainActor
 final class AboutWindowController: NSWindowController {
     init(
@@ -11,13 +15,16 @@ final class AboutWindowController: NSWindowController {
         let hostingController = NSHostingController(rootView: rootView)
         let window = NSWindow(contentViewController: hostingController)
         window.title = "about"
-        window.styleMask = [.titled, .closable]
-        let size = NSSize(width: 380, height: 360)
+        window.styleMask = [.titled, .closable, .fullSizeContentView]
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        let size = NSSize(width: 300, height: 280)
         window.setContentSize(size)
         window.minSize = size
         window.maxSize = size
         window.isReleasedWhenClosed = false
         window.isMovableByWindowBackground = true
+        window.backgroundColor = BrandUI.nsColor(BrandUI.windowBgRGB)
         window.center()
 
         super.init(window: window)
@@ -60,69 +67,65 @@ struct AboutView: View {
     }
 
     var body: some View {
-        BrandCard {
-            VStack(spacing: 0) {
-                Button {
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        showsRecord.toggle()
-                    }
-                } label: {
-                    Image("Badge")
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(width: 120, height: 120)
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    showsRecord.toggle()
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("andrew")
-
-                Text("Andrew Dictate")
-                    .font(BrandUI.titleFont)
-                    .foregroundStyle(BrandUI.textPrimary)
-                    .padding(.top, 5)
-
-                taglineOrRecord
-                    .padding(.top, 3)
-
-                Button {
-                    copyVersion()
-                } label: {
-                    Text(
-                        versionCopied
-                            ? "copied"
-                            : "version \(version) · build \(build)"
-                    )
-                    .font(BrandUI.valueFont)
-                    .foregroundStyle(BrandUI.textSecondary)
-                }
-                .buttonStyle(.plain)
-                .help("click to copy")
-                .padding(.top, 6)
-
-                Spacer(minLength: 14)
-
-                Text(creditsMarkdown)
-                    .font(.system(size: 11))
-                    .foregroundStyle(BrandUI.textSecondary)
-                    .tint(BrandUI.gold.opacity(0.85))
-                    .multilineTextAlignment(.center)
-                    .help(
-                        "FluidAudio: Apache-2.0 · "
-                            + "parakeet weights: CC-BY-4.0 · "
-                            + "this app: MIT"
-                    )
-
-                Link(
-                    "made by jass",
-                    destination: URL(string: "https://jass.gg")!
-                )
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(BrandUI.gold)
-                .padding(.top, 8)
+            } label: {
+                Image("Badge")
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 96, height: 96)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("andrew")
+
+            Text("Andrew Dictate")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(BrandUI.textPrimary)
+                .padding(.top, 10)
+
+            taglineOrRecord
+                .padding(.top, 4)
+
+            Button {
+                copyVersion()
+            } label: {
+                Text(
+                    versionCopied
+                        ? "copied"
+                        : "version \(version) · build \(build)"
+                )
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(BrandUI.textSecondary)
+            }
+            .buttonStyle(.plain)
+            .help("click to copy")
+            .padding(.top, 8)
+
+            Spacer(minLength: 12)
+
+            Text(creditsMarkdown)
+                .font(.system(size: 10.5))
+                .foregroundStyle(BrandUI.textSecondary)
+                .tint(BrandUI.gold.opacity(0.85))
+                .help(
+                    "FluidAudio: Apache-2.0 · "
+                        + "parakeet weights: CC-BY-4.0 · "
+                        + "this app: MIT"
+                )
+
+            Text(signatureMarkdown)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(BrandUI.textSecondary)
+                .tint(BrandUI.gold)
+                .padding(.top, 5)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(16)
-        .frame(width: 380, height: 360)
+        .padding(.top, 30)
+        .padding(.bottom, 18)
+        .padding(.horizontal, 16)
+        .frame(width: 300, height: 280)
         .background(BrandUI.windowBg)
         .preferredColorScheme(.dark)
     }
@@ -142,7 +145,7 @@ struct AboutView: View {
                     .transition(.opacity)
             }
         }
-        .font(.system(size: 13, weight: .medium))
+        .font(.system(size: 12, weight: .medium))
         .lineLimit(1)
         .minimumScaleFactor(0.85)
     }
@@ -156,14 +159,21 @@ struct AboutView: View {
 
     private var creditsMarkdown: AttributedString {
         let markdown =
-            "[open source]"
-            + "(https://github.com/jassuwu/andrew-dictate). "
-            + "built on [FluidAudio]"
+            "built on [FluidAudio]"
             + "(https://github.com/FluidInference/FluidAudio) "
             + "and [NVIDIA's parakeet]"
-            + "(https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2)."
+            + "(https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2)"
         return (try? AttributedString(markdown: markdown))
-            ?? AttributedString("open source.")
+            ?? AttributedString("built on FluidAudio and parakeet")
+    }
+
+    private var signatureMarkdown: AttributedString {
+        let markdown =
+            "[made by jass](https://jass.gg) · "
+            + "[open source]"
+            + "(https://github.com/jassuwu/andrew-dictate)"
+        return (try? AttributedString(markdown: markdown))
+            ?? AttributedString("made by jass")
     }
 
     private func copyVersion() {
