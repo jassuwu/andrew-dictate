@@ -53,14 +53,17 @@ final class DictationCoordinator: ObservableObject {
 
         var displayName: String {
             switch self {
+            // Said the way a person would say it. "prewarming" and "idle" are
+            // words for whoever wrote the state machine — the menu is read by
+            // someone who wants to know whether they can talk yet.
             case .idle:
-                "idle"
+                "ready"
             case .prewarming:
-                "prewarming"
+                "loading the speech model…"
             case .recording:
-                "recording"
+                "listening"
             case .transcribing:
-                "transcribing"
+                "writing it out…"
             }
         }
 
@@ -422,16 +425,6 @@ final class DictationCoordinator: ObservableObject {
         // A relaunch has to outlive us, so it is handed to `open` and we go.
         try? task.run()
         NSApp.terminate(nil)
-    }
-
-    func copyLastTranscript() {
-        guard let lastTranscript else {
-            return
-        }
-
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        _ = pasteboard.setString(lastTranscript, forType: .string)
     }
 
     /// Ships in release (ADR 0025). A latency claim measured on a debug build
