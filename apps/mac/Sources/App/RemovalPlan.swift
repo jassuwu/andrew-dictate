@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Everything this app has put on the machine, and what removing it costs.
 ///
@@ -124,12 +125,22 @@ struct Remover {
         )
     }
 
+    private static let logger = Logger(
+        subsystem: AppIdentity.loggingSubsystem,
+        category: "removal"
+    )
+
     /// Removes each chosen item, and reports the ones it could not.
     /// A partial failure is returned rather than thrown: removing four of five
     /// things is a real outcome, and pretending otherwise would leave the user
-    /// unsure what is still on their disk.
+    /// unsure what is still on their disk. `onFailure` carries the underlying
+    /// error — a failure with no reason attached once cost an evening of
+    /// guessing (ADR 0035).
     @discardableResult
-    func remove(_ items: Set<RemovalPlan.Item>) -> [RemovalPlan.Item] {
+    func remove(
+        _ items: Set<RemovalPlan.Item>,
+        onFailure: (RemovalPlan.Item, Error) -> Void = { _, _ in }
+    ) -> [RemovalPlan.Item] {
         var failed: [RemovalPlan.Item] = []
 
         for item in RemovalPlan.Item.allCases where items.contains(item) {
@@ -146,6 +157,13 @@ struct Remover {
                 try fileManager.removeItem(at: url)
             } catch {
                 failed.append(item)
+                Self.logger.error(
+                    """
+                    couldn't remove \(item.rawValue, privacy: .public): \
+                    \(error.localizedDescription, privacy: .public)
+                    """
+                )
+                onFailure(item, error)
             }
         }
 
