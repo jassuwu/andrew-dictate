@@ -77,6 +77,12 @@ struct AndrewDictateApp: App {
 
             Divider()
 
+            // back from settings (reversing part of ADR 0030, recorded in
+            // 0034): the mac-standard home for a menu bar app's identity.
+            Button("about Andrew Dictate") {
+                coordinator.openAbout()
+            }
+
             Button("quit Andrew Dictate") {
                 NSApp.terminate(nil)
             }
