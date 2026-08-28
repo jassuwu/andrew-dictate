@@ -26,6 +26,13 @@ final class CapabilitiesTests: XCTestCase {
         XCTAssertTrue(Capabilities.development.announcesItself)
     }
 
+    /// The lab log records raw transcripts outside the "keep what you
+    /// dictate" toggle. In release that would make the toggle a lie.
+    func testOnlyDevelopmentKeepsTheCleanupLab() {
+        XCTAssertFalse(Capabilities.release.keepsCleanupLab)
+        XCTAssertTrue(Capabilities.development.keepsCleanupLab)
+    }
+
     func testTheReleaseBuildNeverGetsDevelopmentCapabilities() {
         // Belt and braces: if `current` ever resolved the wrong way, the
         // release app would ship a one-click wipe of a stranger's archive.
@@ -35,7 +42,8 @@ final class CapabilitiesTests: XCTestCase {
                 canUninstall: true,
                 canResetInPlace: false,
                 canCopyTimings: true,
-                announcesItself: false
+                announcesItself: false,
+                keepsCleanupLab: false
             )
         )
     }
