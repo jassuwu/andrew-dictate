@@ -6,7 +6,7 @@ import os
 /// line — never a crash mid-dictation, which is all `try!` could offer.
 enum CleanupRegex {
     private static let logger = Logger(
-        subsystem: "gg.jass.dictate",
+        subsystem: AppIdentity.loggingSubsystem,
         category: "cleanup"
     )
 

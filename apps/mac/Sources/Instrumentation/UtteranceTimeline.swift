@@ -173,7 +173,7 @@ struct UtteranceTimelineBuilder {
 @MainActor
 final class UtteranceTimelineStore {
     private static let logger = Logger(
-        subsystem: "gg.jass.dictate",
+        subsystem: AppIdentity.loggingSubsystem,
         category: "timeline"
     )
 

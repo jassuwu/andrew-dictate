@@ -5,7 +5,7 @@ import os
 /// file scope because the tap and its storage run off the main actor, where
 /// there is no `self` to log through.
 private let recorderLogger = Logger(
-    subsystem: "gg.jass.dictate",
+    subsystem: AppIdentity.loggingSubsystem,
     category: "audio"
 )
 

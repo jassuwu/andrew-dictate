@@ -4,7 +4,7 @@ import os
 /// file scope because the cues load during init, before there is a `self`
 /// to log through.
 private let soundsLogger = Logger(
-    subsystem: "gg.jass.dictate",
+    subsystem: AppIdentity.loggingSubsystem,
     category: "audio"
 )
 

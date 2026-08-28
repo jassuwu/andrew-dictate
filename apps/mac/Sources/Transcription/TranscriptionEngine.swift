@@ -4,7 +4,7 @@ import OSLog
 /// file scope, and named for the file: the engine is an actor with static
 /// members, so there is no single `self` every log site can reach.
 private let transcriptionLogger = Logger(
-    subsystem: "gg.jass.dictate",
+    subsystem: AppIdentity.loggingSubsystem,
     category: "engine"
 )
 
