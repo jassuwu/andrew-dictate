@@ -61,7 +61,7 @@ key, pre-roll, and dictionary configuration are omitted. defaults apply: fn for 
 
 when all three rows are ready, the card says "ready — hold fn and speak." and closes automatically after a short confirmation. no account, no tour, no newsletter.
 
-**permissions are re-verified, never remembered (2026-08-13).** "skip for now" records only that the window was closed — it no longer claims setup succeeded. whether the app can dictate is asked of the system at launch, at reopen, on wake and unlock, and when macOS reports a trust change. a working setup is never nagged again; a broken one gets the window back at launch or reopen, and mid-session revocation only badges the menu bar — stealing focus while you type is the sin this app exists to prevent. settings shows what's missing and routes here, because this is the only place that knows how to ask.
+**permissions are re-verified, never remembered (2026-08-13).** there is no "skip" button (ADR 0029, 2026-08-22): someone who launched the app launched it in order to set it up, and macOS already provides the exit — the window is closable. **closing is the better exit**, because it records nothing and setup returns next launch; the old link marked onboarding dismissed and silenced it for good. only "done" claims setup finished. whether the app can dictate is asked of the system at launch, at reopen, on wake and unlock, and when macOS reports a trust change. a working setup is never nagged again; a broken one gets the window back at launch or reopen, and mid-session revocation only badges the menu bar — stealing focus while you type is the sin this app exists to prevent. settings shows what's missing and routes here, because this is the only place that knows how to ask.
 
 ## 6. settings (one sheet)
 
