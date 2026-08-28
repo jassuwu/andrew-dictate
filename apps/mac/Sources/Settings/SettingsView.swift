@@ -83,7 +83,7 @@ struct SettingsView: View {
             }
         }
         .frame(width: 800)
-        .background(BrandUI.windowBg)
+        .brandGlassWindow()
         .foregroundStyle(BrandUI.textPrimary)
         .font(BrandUI.bodyFont)
         .brandTinted()

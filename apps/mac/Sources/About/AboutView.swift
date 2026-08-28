@@ -140,7 +140,7 @@ struct AboutView: View {
         .padding(.bottom, 18)
         .padding(.horizontal, 16)
         .frame(width: 300, height: 300)
-        .background(BrandUI.windowBg)
+        .brandGlassWindow()
         .preferredColorScheme(.dark)
     }
 

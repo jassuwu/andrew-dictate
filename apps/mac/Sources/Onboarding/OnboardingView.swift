@@ -201,7 +201,7 @@ struct OnboardingView: View {
         .padding(.horizontal, 30)
         .padding(.vertical, 20)
         .frame(width: Self.windowWidth, height: Self.windowHeight)
-        .background(BrandUI.windowBg)
+        .brandGlassWindow()
         .foregroundStyle(BrandUI.textPrimary)
         .font(BrandUI.bodyFont)
         .brandTinted()
