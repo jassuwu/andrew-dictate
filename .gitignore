@@ -19,6 +19,7 @@ AndrewDictate-*.dmg
 
 # wayfinder map & tickets (local working docs, same as ADRs)
 docs/wayfinder/
+docs/research/
 
 # local dev build output (see apps/mac/dev.sh)
 apps/mac/.build-dev/
