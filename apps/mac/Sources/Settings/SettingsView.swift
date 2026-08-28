@@ -325,9 +325,8 @@ struct SettingsView: View {
             }
 
             Text(
-                isCleanupAvailable
-                    ? settings.cleanupMode.explanation
-                    : "needs macOS 26 — apple’s on-device model"
+                coordinator.cleanupUnavailableExplanation
+                    ?? settings.cleanupMode.explanation
             )
             .font(.caption)
             .foregroundStyle(BrandUI.textSecondary)
