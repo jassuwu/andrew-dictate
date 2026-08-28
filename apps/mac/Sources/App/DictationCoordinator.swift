@@ -263,6 +263,15 @@ final class DictationCoordinator: ObservableObject {
             .store(in: &settingsCancellables)
 
         installSystemLifecycleObservers()
+
+        // a build that doesn't keep the lab must also not inherit the log an
+        // earlier version wrote — the toggle-less transcript file goes.
+        if !Capabilities.current.keepsCleanupLab {
+            Task { [cleanupLabStore] in
+                try? await cleanupLabStore.clear()
+            }
+        }
+
         permissions = SystemPermissions.snapshot()
         // the stored flag only knows the window was closed once. whether this
         // app can actually dictate is a question for the permissions.
@@ -1439,6 +1448,9 @@ final class DictationCoordinator: ObservableObject {
         cleaned: String,
         started: ContinuousClock.Instant
     ) {
+        guard Capabilities.current.keepsCleanupLab else {
+            return
+        }
         let latency = started.duration(to: ContinuousClock().now)
         Task {
             do {
