@@ -157,8 +157,6 @@ final class DictationCoordinator: ObservableObject {
     /// one place that knows whether anything actually reached the page.
     private var pendingArchiveText: (heard: String, inserted: String)?
     private var wordFixerWindowController: WordFixerWindowController?
-    private var archiveBrowserWindowController: ArchiveBrowserWindowController?
-    private var removalWindowController: RemovalWindowController?
     private var pipelinePlaygroundWindowController:
         PipelinePlaygroundWindowController?
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
@@ -396,28 +394,11 @@ final class DictationCoordinator: ObservableObject {
         controller.present()
     }
 
-    /// The list, and the only place a single kept dictation can be deleted.
-    /// It is also ticket 011's second door: the raw text of any past dictation
-    /// can be corrected, which is the case no in-the-moment flow reaches.
-    func openArchiveBrowser() {
-        let controller: ArchiveBrowserWindowController
-        if let archiveBrowserWindowController {
-            controller = archiveBrowserWindowController
-        } else {
-            controller = ArchiveBrowserWindowController(
-                fixAWord: { [weak self] heard in
-                    self?.openWordFixer(for: heard)
-                }
-            )
-            archiveBrowserWindowController = controller
-        }
-        controller.present()
-    }
-
-    func openRemoval() {
-        let controller = removalWindowController ?? RemovalWindowController()
-        removalWindowController = controller
-        controller.present()
+    /// The dashboard's numbers, straight from the same store the copied
+    /// report reads — two surfaces disagreeing about one measurement would
+    /// be worse than either alone.
+    func timingsSummary() -> TimelineSummary {
+        timelineStore.summary()
     }
 
     /// Development only (`Capabilities.canResetInPlace`). Wipes this build's
