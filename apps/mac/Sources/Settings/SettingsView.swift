@@ -385,6 +385,28 @@ struct SettingsView: View {
 
             enginePreparationStatus
 
+            // The models are not this app's private copy — FluidAudio keeps one
+            // shared cache, so a second app built on it (and this app's own
+            // development build) reuses the same 443 MB rather than fetching it
+            // again. That was already true and completely invisible.
+            cardDivider
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("models are shared, and downloaded once")
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.textSecondary)
+
+                Spacer(minLength: 8)
+
+                Button("show in finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting(
+                        [AppIdentity.sharedModelDirectory]
+                    )
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
+
             ForEach(installedModels.filter(\.isDownloaded)) { model in
                 cardDivider
 
