@@ -76,6 +76,18 @@ struct AndrewDictateApp: App {
                 }
             }
 
+            // the lab is a workbench, not a setting: it left the dictation
+            // pane when the pipe arrived (ADR 0038) and lives with the other
+            // dev-only rows.
+            if Capabilities.current.keepsCleanupLab {
+                Button("cleanup lab (dev)") {
+                    coordinator.openCleanupLab()
+                }
+                Button("clear lab data (dev)") {
+                    coordinator.clearCleanupLabData()
+                }
+            }
+
             Divider()
 
             // back from settings (reversing part of ADR 0030, recorded in
