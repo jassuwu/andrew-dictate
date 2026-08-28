@@ -193,11 +193,10 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            stepBar
             Spacer(minLength: 10)
             stepBody
             Spacer(minLength: 10)
-            footer
+            navigation
         }
         .padding(.horizontal, 30)
         .padding(.vertical, 20)
@@ -237,71 +236,6 @@ struct OnboardingView: View {
                 permissions.refresh()
             }
         }
-    }
-
-    // MARK: - chrome
-
-    private var stepBar: some View {
-        HStack(spacing: 10) {
-            chevron(
-                "chevron.left",
-                enabled: flow.canGoBack,
-                label: "back"
-            ) {
-                flow.goBack()
-            }
-
-            Spacer()
-
-            // The dots are a control, not just an indicator. Going back to
-            // check something should never mean walking the whole flow.
-            HStack(spacing: 7) {
-                ForEach(OnboardingStep.allCases) { step in
-                    Button {
-                        flow.jump(to: step)
-                    } label: {
-                        Circle()
-                            .fill(
-                                step == flow.step
-                                    ? BrandUI.gold
-                                    : BrandUI.textPrimary.opacity(0.22)
-                            )
-                            .frame(width: 6, height: 6)
-                            .contentShape(Rectangle())
-                            .padding(4)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(step.title)
-                }
-            }
-
-            Spacer()
-
-            chevron(
-                "chevron.right",
-                enabled: flow.canGoForward,
-                label: "next"
-            ) {
-                flow.advance()
-            }
-        }
-    }
-
-    private func chevron(
-        _ symbol: String,
-        enabled: Bool,
-        label: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 12, weight: .semibold))
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(BrandUI.textSecondary)
-        .opacity(enabled ? 1 : 0)
-        .disabled(!enabled)
-        .accessibilityLabel(label)
     }
 
     // MARK: - the screens
@@ -364,7 +298,11 @@ struct OnboardingView: View {
                 .font(.caption)
                 .foregroundStyle(BrandUI.textSecondary)
         case .ready:
-            Text("already here.")
+            // The models live in FluidAudio's shared folder, not this app's, so
+            // another app on this mac may already have fetched them — or a
+            // previous install did. Saying nothing here would let the user
+            // assume a download happened and quietly took their bandwidth.
+            Text("found it already on this mac. nothing to download.")
                 .font(.caption)
                 .foregroundStyle(BrandUI.gold)
         case .failed:
@@ -443,21 +381,74 @@ struct OnboardingView: View {
 
     // MARK: - exactly one thing to do
 
-    /// One button. There is no "skip" here and there should never have been
-    /// one: the person launched the app in order to set it up, and macOS
-    /// already gives them the way out — the window is `.closable`.
+    // MARK: - one row, at the bottom, with one way forward
+
+    /// The first version of this screen had a `>` chevron at the top *and* a
+    /// "get started" button at the bottom — two controls doing one job, which
+    /// is the ambiguity the whole redesign is supposed to be removing. They are
+    /// the same control now: the call to action **is** the forward button.
     ///
-    /// Closing is also the *better* exit. It leaves `onboardingDismissed`
-    /// false, so setup returns next launch, which is SPEC §5's rule that a
-    /// broken setup gets the window back. The old link set that flag and
-    /// silenced setup for good.
-    private var footer: some View {
-        Button(action: performPrimaryAction) {
-            Text(flow.step.actionTitle)
-                .frame(minWidth: 176)
+    /// There is no skip. Someone who launched the app launched it in order to
+    /// set it up, and macOS already provides the exit — the window is
+    /// `.closable`, and closing it leaves setup to return next launch rather
+    /// than silencing it (SPEC §5).
+    private var navigation: some View {
+        ZStack {
+            // Centred independently of the buttons, which are different widths
+            // and would otherwise push the dots off-centre.
+            HStack(spacing: 7) {
+                ForEach(OnboardingStep.allCases) { step in
+                    Button {
+                        flow.jump(to: step)
+                    } label: {
+                        Circle()
+                            .fill(
+                                step == flow.step
+                                    ? BrandUI.gold
+                                    : BrandUI.textPrimary.opacity(0.22)
+                            )
+                            .frame(width: 6, height: 6)
+                            .contentShape(Rectangle())
+                            .padding(5)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(step.title)
+                }
+            }
+
+            HStack {
+                Button {
+                    flow.goBack()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("back")
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(.callout)
+                .foregroundStyle(BrandUI.textSecondary)
+                .opacity(flow.canGoBack ? 1 : 0)
+                .disabled(!flow.canGoBack)
+
+                Spacer()
+
+                Button(action: performPrimaryAction) {
+                    HStack(spacing: 5) {
+                        Text(flow.step.actionTitle)
+                        Image(
+                            systemName: flow.canGoForward
+                                ? "chevron.right"
+                                : "checkmark"
+                        )
+                        .font(.system(size: 10, weight: .semibold))
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            }
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
     }
 
     private func performPrimaryAction() {

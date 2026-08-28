@@ -33,7 +33,7 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
         case .hello:
             "hold fn, talk, let go. the text lands where your cursor is."
         case .model:
-            "one download, and then it works with no internet at all."
+            "it runs on this mac, so nothing you say needs the internet."
         case .permissions:
             "so it can hear you, and put the text where your cursor is."
         }
