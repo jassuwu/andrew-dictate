@@ -12,7 +12,7 @@ final class AboutWindowController: NSWindowController {
         let window = NSWindow(contentViewController: hostingController)
         window.title = "about"
         window.styleMask = [.titled, .closable]
-        let size = NSSize(width: 380, height: 460)
+        let size = NSSize(width: 380, height: 360)
         window.setContentSize(size)
         window.minSize = size
         window.maxSize = size
@@ -37,6 +37,8 @@ final class AboutWindowController: NSWindowController {
 
 struct AboutView: View {
     @ObservedObject private var settings: AppSettings
+    @State private var showsRecord = false
+    @State private var versionCopied = false
     private let version: String
     private let build: String
 
@@ -60,67 +62,54 @@ struct AboutView: View {
     var body: some View {
         BrandCard {
             VStack(spacing: 0) {
-                Image("Badge")
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: 120, height: 120)
-                    .accessibilityHidden(true)
+                Button {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        showsRecord.toggle()
+                    }
+                } label: {
+                    Image("Badge")
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 120, height: 120)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("andrew")
 
                 Text("Andrew Dictate")
                     .font(BrandUI.titleFont)
                     .foregroundStyle(BrandUI.textPrimary)
                     .padding(.top, 5)
 
-                Text("escape the keyboard.")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(BrandUI.gold)
+                taglineOrRecord
                     .padding(.top, 3)
 
-                Text("version \(version) · build \(build)")
+                Button {
+                    copyVersion()
+                } label: {
+                    Text(
+                        versionCopied
+                            ? "copied"
+                            : "version \(version) · build \(build)"
+                    )
                     .font(BrandUI.valueFont)
                     .foregroundStyle(BrandUI.textSecondary)
-                    .padding(.top, 6)
-
-                Text(lifetimeWordsText)
-                    .font(.system(size: 11))
-                    .foregroundStyle(BrandUI.goldPale)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                    .padding(.top, 11)
-
-                Rectangle()
-                    .fill(BrandUI.hairline)
-                    .frame(height: 1)
-                    .padding(.vertical, 14)
-                    .accessibilityHidden(true)
-
-                VStack(spacing: 10) {
-                    attribution(
-                        "FluidAudio",
-                        license: "Apache-2.0",
-                        url:
-                            "https://github.com/FluidInference/"
-                            + "FluidAudio"
-                    )
-
-                    attribution(
-                        "NVIDIA Parakeet weights",
-                        license: "CC-BY-4.0",
-                        url:
-                            "https://huggingface.co/nvidia/"
-                            + "parakeet-tdt-0.6b-v2"
-                    )
-
-                    attribution(
-                        "MIT license",
-                        license: "open source",
-                        url:
-                            "https://github.com/jassuwu/"
-                            + "andrew-dictate/blob/main/LICENSE"
-                    )
                 }
+                .buttonStyle(.plain)
+                .help("click to copy")
+                .padding(.top, 6)
 
-                Spacer(minLength: 8)
+                Spacer(minLength: 14)
+
+                Text(creditsMarkdown)
+                    .font(.system(size: 11))
+                    .foregroundStyle(BrandUI.textSecondary)
+                    .tint(BrandUI.gold.opacity(0.85))
+                    .multilineTextAlignment(.center)
+                    .help(
+                        "FluidAudio: Apache-2.0 · "
+                            + "parakeet weights: CC-BY-4.0 · "
+                            + "this app: MIT"
+                    )
 
                 Link(
                     "made by jass",
@@ -128,13 +117,34 @@ struct AboutView: View {
                 )
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(BrandUI.gold)
+                .padding(.top, 8)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(16)
-        .frame(width: 380, height: 460)
+        .frame(width: 380, height: 360)
         .background(BrandUI.windowBg)
         .preferredColorScheme(.dark)
+    }
+
+    /// one slot, two lines. the tagline is the screen; the lifetime word
+    /// count is the reward for poking andrew.
+    @ViewBuilder
+    private var taglineOrRecord: some View {
+        ZStack {
+            if showsRecord {
+                Text(lifetimeWordsText)
+                    .foregroundStyle(BrandUI.goldPale)
+                    .transition(.opacity)
+            } else {
+                Text("escape the keyboard.")
+                    .foregroundStyle(BrandUI.gold)
+                    .transition(.opacity)
+            }
+        }
+        .font(.system(size: 13, weight: .medium))
+        .lineLimit(1)
+        .minimumScaleFactor(0.85)
     }
 
     private var lifetimeWordsText: String {
@@ -144,23 +154,29 @@ struct AboutView: View {
         return "andrew has typed \(count) words. undefeated."
     }
 
-    private func attribution(
-        _ name: String,
-        license: String,
-        url: String
-    ) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Link(name, destination: URL(string: url)!)
-                .foregroundStyle(BrandUI.gold)
-                .lineLimit(1)
+    private var creditsMarkdown: AttributedString {
+        let markdown =
+            "[open source]"
+            + "(https://github.com/jassuwu/andrew-dictate). "
+            + "built on [FluidAudio]"
+            + "(https://github.com/FluidInference/FluidAudio) "
+            + "and [NVIDIA's parakeet]"
+            + "(https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2)."
+        return (try? AttributedString(markdown: markdown))
+            ?? AttributedString("open source.")
+    }
 
-            Spacer(minLength: 8)
-
-            Text(license)
-                .font(BrandUI.valueFont)
-                .foregroundStyle(BrandUI.textSecondary)
-                .lineLimit(1)
+    private func copyVersion() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(
+            "\(version) · build \(build)",
+            forType: .string
+        )
+        versionCopied = true
+        Task {
+            try? await Task.sleep(for: .seconds(1.2))
+            versionCopied = false
         }
-        .font(BrandUI.bodyFont)
     }
 }
