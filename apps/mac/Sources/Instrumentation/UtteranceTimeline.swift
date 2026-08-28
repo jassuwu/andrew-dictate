@@ -210,6 +210,10 @@ final class UtteranceTimelineStore {
         Self.logger.info("\(line, privacy: .public)")
     }
 
+    func summary() -> TimelineSummary {
+        TimelineSummary(timelines: orderedTimelines)
+    }
+
     /// The distribution first, then the conditions, then the raw rows.
     ///
     /// Order is deliberate: the summary is the thing a claim gets made from,
