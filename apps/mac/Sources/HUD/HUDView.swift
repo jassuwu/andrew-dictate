@@ -219,28 +219,15 @@ struct HUDView: View {
                 width: viewModel.layout.size.width,
                 height: viewModel.layout.size.height
             )
-            .background {
-                ZStack {
-                    HUDGlassBackground()
-                    BrandUI.black.opacity(0.22)
-                }
-                .clipShape(
-                    RoundedRectangle(
-                        cornerRadius: 22,
-                        style: .continuous
-                    )
-                )
-            }
-            .overlay {
-                RoundedRectangle(
-                    cornerRadius: 22,
-                    style: .continuous
-                )
-                .stroke(
-                    BrandUI.gold.opacity(0.35),
-                    lineWidth: 1
-                )
-            }
+            // real Liquid Glass: it samples whatever is behind the panel
+            // and draws its own edge, which retired the NSVisualEffectView
+            // + maskImage workaround and the hand-drawn gold stroke. proven
+            // over a borderless non-activating panel by a screenshot spike
+            // before betting the HUD on it (ADR 0037).
+            .glassEffect(
+                .regular.tint(BrandUI.gold.opacity(0.16)),
+                in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+            )
     }
 }
 
