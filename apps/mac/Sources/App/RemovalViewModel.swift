@@ -14,6 +14,9 @@ final class RemovalViewModel: ObservableObject {
     /// deleting its data, and someone may only want a reset.
     @Published var alsoTrashTheApp = false
     @Published private(set) var outcome: String?
+    /// the underlying error text when something couldn't be removed — the
+    /// sentence says what's still on disk, this says why.
+    @Published private(set) var failureDetail: String?
     @Published private(set) var didRemoveAnything = false
 
     private let remover: Remover
@@ -28,6 +31,7 @@ final class RemovalViewModel: ObservableObject {
         entries = plan.entries
         selection = Set(plan.entries.filter(\.exists).map(\.item))
         outcome = nil
+        failureDetail = nil
     }
 
     var hasAnythingToRemove: Bool {
@@ -61,9 +65,17 @@ final class RemovalViewModel: ObservableObject {
     /// look like one that did.
     @discardableResult
     func removeSelected() -> [RemovalPlan.Item] {
-        let failed = remover.remove(selection)
+        var details: [String] = []
+        let failed = remover.remove(selection) { item, error in
+            details.append(
+                "\(item.title): \(error.localizedDescription)"
+            )
+        }
         didRemoveAnything = true
         reloadKeepingOutcome()
+        failureDetail = details.isEmpty
+            ? nil
+            : details.joined(separator: "\n")
 
         if failed.isEmpty {
             outcome = "removed. quitting."
