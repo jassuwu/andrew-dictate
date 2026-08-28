@@ -61,8 +61,8 @@ targets:
       path: Sources/Info.plist
       properties:
         CFBundleDisplayName: $(PRODUCT_NAME)
-        CFBundleShortVersionString: "0.7.1"
-        CFBundleVersion: "2"
+        CFBundleShortVersionString: "0.8.0"
+        CFBundleVersion: "3"
         LSUIElement: true
         LSMinimumSystemVersion: "26.0"
         NSHumanReadableCopyright: "© 2026 jass. MIT license."
