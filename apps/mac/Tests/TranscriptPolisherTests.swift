@@ -182,8 +182,8 @@ final class TranscriptPolisherTests: XCTestCase {
 private struct MockPolisher: TranscriptPolisher {
     let output: String
 
-    var isAvailable: Bool {
-        true
+    var availability: PolisherAvailability {
+        .available
     }
 
     func polish(
