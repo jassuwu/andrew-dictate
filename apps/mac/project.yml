@@ -26,6 +26,10 @@ targets:
         buildPhase: resources
       - path: Sources/Resources/Sounds/dictation-end.wav
         buildPhase: resources
+      # copied as a folder so ATSApplicationFontsPath can point at it.
+      - path: Sources/Resources/Fonts
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: FluidAudio
     settings:
@@ -62,6 +66,7 @@ targets:
         LSUIElement: true
         LSMinimumSystemVersion: "26.0"
         NSHumanReadableCopyright: "© 2026 jass. MIT license."
+        ATSApplicationFontsPath: Fonts
         NSMicrophoneUsageDescription: "andrew dictate uses your microphone for local dictation. with pre-roll on, the mic stays warm while the app runs."
 
   AndrewDictateTests:
