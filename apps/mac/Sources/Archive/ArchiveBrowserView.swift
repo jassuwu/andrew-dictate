@@ -38,7 +38,6 @@ struct ArchiveBrowserView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(BrandUI.windowBg)
         .preferredColorScheme(.dark)
         .onAppear { viewModel.reload() }
     }
