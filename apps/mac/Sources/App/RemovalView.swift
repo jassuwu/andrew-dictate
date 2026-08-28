@@ -99,6 +99,7 @@ struct RemovalView: View {
                     .disabled(isWorking)
 
                 Button("remove") { remove() }
+                    .buttonStyle(.glassProminent)
                     .disabled(viewModel.selection.isEmpty || isWorking)
             }
         }
