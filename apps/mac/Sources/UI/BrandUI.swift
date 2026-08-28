@@ -54,7 +54,20 @@ enum BrandUI {
         weight: .semibold
     )
     static let bodyFont = Font.system(size: 13)
-    static let valueFont = Font.system(size: 12, design: .monospaced)
+
+    // three roles, borrowed from jass.gg: paper (SF — prose, controls),
+    // machine (Ioskeley Mono — anything factual: keys, versions, numbers),
+    // hand (Excalifont — a signature, and nothing else; anywhere else a
+    // hand font reads as a gimmick). fonts ship in Resources/Fonts (OFL).
+    static let valueFont = machineFont(size: 12)
+
+    static func machineFont(size: CGFloat, bold: Bool = false) -> Font {
+        Font.custom(bold ? "Ioskeley-Mono-Bold" : "Ioskeley-Mono", size: size)
+    }
+
+    static func handFont(size: CGFloat) -> Font {
+        Font.custom("Excalifont-Regular", size: size)
+    }
 }
 
 struct BrandCard<Content: View>: View {
