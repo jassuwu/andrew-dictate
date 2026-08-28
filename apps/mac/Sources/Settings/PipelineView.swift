@@ -1,18 +1,36 @@
+import AppKit
 import SwiftUI
 
-/// the cleanup pipeline as a pipe: five sections of one tube, the text
-/// riding through it, and the one switch sitting on the one section that
-/// has one. your last dictation flows through live; before any, a sample.
+/// the cleanup pipeline as a pipe: five sections of one tube, a coupling
+/// ring at every joint, the one switch on each section that has one.
+///
+/// two sizes of the same thing (ADR 0038): `.strip` is the control that
+/// lives in the dictation pane — tube, names, switches — and `.stage` is
+/// the pop-out where the text actually rides through: type anything, or
+/// let your last dictation flow, and watch each section hand it on.
 struct PipelineView: View {
+    enum Mode {
+        case strip
+        case stage
+    }
+
+    @ObservedObject private var coordinator: DictationCoordinator
     @ObservedObject private var settings: AppSettings
     @StateObject private var run: PipelinePlaygroundViewModel
-    private let lastTranscript: String?
-    private let unavailableReason: String?
+    private let mode: Mode
 
-    init(coordinator: DictationCoordinator, settings: AppSettings) {
+    /// how many sections the text has reached, for the conveyor reveal.
+    @State private var revealed = 5
+    @State private var revealTask: Task<Void, Never>?
+
+    init(
+        coordinator: DictationCoordinator,
+        settings: AppSettings,
+        mode: Mode
+    ) {
+        _coordinator = ObservedObject(wrappedValue: coordinator)
         _settings = ObservedObject(wrappedValue: settings)
-        lastTranscript = coordinator.lastTranscript
-        unavailableReason = coordinator.cleanupUnavailableExplanation
+        self.mode = mode
         let store = coordinator.dictionaryStore
         _run = StateObject(
             wrappedValue: PipelinePlaygroundViewModel(
@@ -20,6 +38,10 @@ struct PipelineView: View {
                 input: coordinator.lastTranscript ?? PipelineSample.text
             )
         )
+    }
+
+    private var unavailableReason: String? {
+        coordinator.cleanupUnavailableExplanation
     }
 
     private var polishWanted: Bool {
@@ -30,59 +52,67 @@ struct PipelineView: View {
         polishWanted && unavailableReason == nil
     }
 
+    private var sectionsLit: [Bool] {
+        [true, true, settings.cleanupEnabled, polishLit, true]
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                Text("cleanup")
-                    .font(BrandUI.bodyFont.weight(.medium))
+        VStack(alignment: .leading, spacing: mode == .stage ? 18 : 12) {
+            header
 
-                Spacer(minLength: 8)
-
-                Text(
-                    lastTranscript == nil
-                        ? "a sample, until you dictate something."
-                        : "your last dictation, live."
-                )
-                .font(.caption)
-                .foregroundStyle(BrandUI.textSecondary)
+            if mode == .stage {
+                inputField
             }
 
-            PipeTrack(lit: [true, true, true, polishLit, true])
-                .frame(height: 26)
+            PipeTrack(
+                lit: sectionsLit.enumerated().map { $1 && $0 < revealed }
+            )
+            .frame(height: mode == .stage ? 30 : 26)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if mode == .strip {
+                    coordinator.openPipeline()
+                }
+            }
 
             HStack(alignment: .top, spacing: 0) {
-                column(title: "you speak", lit: true) {
-                    Image(systemName: "mic.fill")
-                        .foregroundStyle(BrandUI.gold)
-                        .font(.system(size: 13))
-                    Text("hold fn, talk, let go.")
-                        .foregroundStyle(BrandUI.textSecondary)
+                column(0, title: "you speak", lit: true) {
+                    if mode == .stage {
+                        Image(systemName: "mic.fill")
+                            .foregroundStyle(BrandUI.gold)
+                            .font(.system(size: 14))
+                        Text("hold fn, talk, let go.")
+                            .foregroundStyle(BrandUI.textSecondary)
+                    }
                 }
 
-                column(title: "speech model", lit: true) {
-                    flowText(plain(heardText))
+                column(1, title: "speech model", lit: true) {
+                    if mode == .stage {
+                        flowText(plain(heardText))
+                    }
                 }
 
-                column(title: "cleanup", lit: settings.cleanupEnabled) {
+                column(2, title: "cleanup", lit: settings.cleanupEnabled) {
                     Toggle("", isOn: $settings.cleanupEnabled)
                         .labelsHidden()
                         .brandToggleStyle()
                         .controlSize(.mini)
                         .accessibilityLabel("cleanup")
-                        .padding(.bottom, 2)
 
-                    if settings.cleanupEnabled {
-                        flowText(diffText(heardText, cleanedText))
-                    } else {
-                        Text("off. only your dictionary still applies.")
-                            .foregroundStyle(BrandUI.textSecondary)
-                        if cleanedText != heardText {
+                    if mode == .stage {
+                        if settings.cleanupEnabled {
                             flowText(diffText(heardText, cleanedText))
+                        } else {
+                            Text("off. only your dictionary still applies.")
+                                .foregroundStyle(BrandUI.textSecondary)
+                            if cleanedText != heardText {
+                                flowText(diffText(heardText, cleanedText))
+                            }
                         }
                     }
                 }
 
-                column(title: "ai polish", lit: polishLit) {
+                column(3, title: "ai polish", lit: polishLit) {
                     Picker("", selection: $settings.cleanupMode) {
                         ForEach(CleanupMode.allCases) { mode in
                             Text(mode.rawValue).tag(mode)
@@ -92,19 +122,38 @@ struct PipelineView: View {
                     .pickerStyle(.segmented)
                     .controlSize(.mini)
                     .accessibilityLabel("ai polish")
-                    .padding(.bottom, 2)
 
-                    polishBody
+                    if mode == .stage {
+                        polishBody
+                    } else if polishWanted, let unavailableReason {
+                        // the one caption the strip keeps: a switch that
+                        // does nothing must say why, right there.
+                        Text(unavailableReason)
+                            .font(.system(size: 10))
+                            .foregroundStyle(BrandUI.textSecondary)
+                            .lineLimit(3)
+                    }
                 }
 
-                column(title: "lands at your cursor", lit: true) {
-                    flowText(plain(finalText))
+                column(4, title: "lands at your cursor", lit: true) {
+                    if mode == .stage {
+                        flowText(plain(finalText))
+                    }
                 }
+            }
+
+            if mode == .stage {
+                Text("gold — that section added it · struck red — it took it out")
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.textSecondary)
             }
         }
         .onAppear {
             run.setDeterministicEnabled(settings.cleanupEnabled)
             run.setPolishEnabled(polishWanted)
+            if mode == .stage {
+                replay()
+            }
         }
         .onChange(of: settings.cleanupMode) { _, _ in
             run.setPolishEnabled(polishWanted)
@@ -112,9 +161,86 @@ struct PipelineView: View {
         .onChange(of: settings.cleanupEnabled) { _, enabled in
             run.setDeterministicEnabled(enabled)
         }
-        .onChange(of: lastTranscript) { _, transcript in
+        .onChange(of: coordinator.lastTranscript) { _, transcript in
             run.input = transcript ?? PipelineSample.text
             run.recompute()
+            replay()
+        }
+    }
+
+    // MARK: - pieces
+
+    @ViewBuilder
+    private var header: some View {
+        HStack(spacing: 12) {
+            Text(mode == .stage ? "what happens to your words" : "cleanup")
+                .font(
+                    mode == .stage
+                        ? .system(size: 17, weight: .semibold)
+                        : BrandUI.bodyFont.weight(.medium)
+                )
+
+            Spacer(minLength: 8)
+
+            if mode == .stage {
+                Text(
+                    coordinator.lastTranscript == nil
+                        ? "a sample, until you dictate something."
+                        : "your last dictation. type to try your own."
+                )
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
+            } else {
+                Button("watch it flow…") {
+                    coordinator.openPipeline()
+                }
+                .buttonStyle(.plain)
+                .font(.caption)
+                .foregroundStyle(BrandUI.gold)
+            }
+        }
+    }
+
+    /// the stage's superpower: it doesn't have to be something you said.
+    private var inputField: some View {
+        TextField(
+            "type or paste anything — it runs through live",
+            text: $run.input,
+            axis: .vertical
+        )
+        .textFieldStyle(.plain)
+        .font(BrandUI.bodyFont)
+        .lineLimit(2...4)
+        .padding(12)
+        .background {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(BrandUI.cardBg)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(BrandUI.hairline, lineWidth: 1)
+        }
+        .onChange(of: run.input) { _, _ in
+            run.recompute()
+            replay()
+        }
+    }
+
+    /// the conveyor: sections light and their text appears left to right,
+    /// so a change reads as the words travelling rather than a repaint.
+    private func replay() {
+        revealTask?.cancel()
+        revealed = 1
+        revealTask = Task { @MainActor in
+            for step in 2...5 {
+                try? await Task.sleep(for: .milliseconds(150))
+                guard !Task.isCancelled else {
+                    return
+                }
+                withAnimation(.easeOut(duration: 0.22)) {
+                    revealed = step
+                }
+            }
         }
     }
 
@@ -159,6 +285,7 @@ struct PipelineView: View {
     }
 
     private func column<Content: View>(
+        _ index: Int,
         title: String,
         lit: Bool,
         @ViewBuilder content: () -> Content
@@ -170,16 +297,18 @@ struct PipelineView: View {
                 .lineLimit(1)
             content()
         }
-        .font(.system(size: 11))
+        .font(.system(size: mode == .stage ? 12 : 11))
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
         .opacity(lit ? 1 : 0.6)
+        .opacity(index < revealed ? 1 : 0.12)
     }
 
     private func flowText(_ text: AttributedString) -> some View {
         Text(text)
-            .lineLimit(5)
+            .lineLimit(mode == .stage ? 10 : 5)
             .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
             .help(String(text.characters))
     }
 
@@ -284,6 +413,53 @@ struct PipeTrack: View {
                 )
             }
         }
+        .animation(.easeOut(duration: 0.22), value: lit)
         .accessibilityHidden(true)
+    }
+}
+
+/// the pop-out. same chrome as the stamp (0032): no visible title bar, the
+/// content on the window itself.
+@MainActor
+final class PipelineWindowController: NSWindowController {
+    init(coordinator: DictationCoordinator) {
+        let rootView = PipelineView(
+            coordinator: coordinator,
+            settings: coordinator.settings,
+            mode: .stage
+        )
+        .padding(.top, 34)
+        .padding(.horizontal, 28)
+        .padding(.bottom, 24)
+        .frame(width: 960, alignment: .top)
+        .background(BrandUI.windowBg)
+        .foregroundStyle(BrandUI.textPrimary)
+        .brandTinted()
+        .preferredColorScheme(.dark)
+
+        let hosting = NSHostingController(rootView: rootView)
+        let window = NSWindow(contentViewController: hosting)
+        window.title = "what happens to your words"
+        window.styleMask = [.titled, .closable, .fullSizeContentView]
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
+        window.backgroundColor = BrandUI.nsColor(BrandUI.windowBgRGB)
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 960, height: 440))
+        window.center()
+
+        super.init(window: window)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is unavailable")
+    }
+
+    func present() {
+        NSApp.activate(ignoringOtherApps: true)
+        showWindow(nil)
+        window?.makeKeyAndOrderFront(nil)
     }
 }

@@ -149,6 +149,7 @@ final class DictationCoordinator: ObservableObject {
     private var activeTimeline: UtteranceTimelineBuilder?
     private var aboutWindowController: AboutWindowController?
     private var cleanupLabWindowController: CleanupLabWindowController?
+    private var pipelineWindowController: PipelineWindowController?
     /// Rebuilt per transcript rather than reused: the window is *about* one
     /// dictation, so keeping a stale one around would show the wrong words.
     private let dictationArchive = DictationArchive()
@@ -318,6 +319,15 @@ final class DictationCoordinator: ObservableObject {
     /// move, straight from the os rather than a guess about it.
     var cleanupUnavailableExplanation: String? {
         transcriptPolisher.availability.explanation
+    }
+
+    /// the pipe, popped out (ADR 0038 addendum): a visualizer is a tool,
+    /// not a setting, so it gets the room a window gives it.
+    func openPipeline() {
+        let controller = pipelineWindowController
+            ?? PipelineWindowController(coordinator: self)
+        pipelineWindowController = controller
+        controller.present()
     }
 
     func openCleanupLab() {
