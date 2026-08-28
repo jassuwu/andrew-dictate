@@ -139,6 +139,24 @@ struct SettingsView: View {
                             .foregroundStyle(BrandUI.attention)
                             .padding(.top, 6)
                     }
+
+                    // Both moved out of the menu bar (ADR 0030) and landed
+                    // next to the toggle that governs them — browsing what is
+                    // kept, and removing it, are the same subject as keeping it.
+                    HStack(spacing: 10) {
+                        Button("browse…") {
+                            coordinator.openArchiveBrowser()
+                        }
+
+                        Spacer(minLength: 8)
+
+                        if Capabilities.current.canUninstall {
+                            Button("remove everything…") {
+                                coordinator.openRemoval()
+                            }
+                        }
+                    }
+                    .padding(.top, 10)
                 }
 
                 settingsSection("general") {
@@ -158,6 +176,25 @@ struct SettingsView: View {
                             .foregroundStyle(BrandUI.textSecondary)
                             .padding(.top, 6)
                     }
+
+                    // Both left the menu bar (ADR 0030). "copy timings" is a
+                    // diagnostic nobody needs mid-sentence, and ADR 0025 only
+                    // ever required that it not be DEBUG-gated — a reader can
+                    // still generate the number here.
+                    HStack(spacing: 10) {
+                        if Capabilities.current.canCopyTimings {
+                            Button("copy timings") {
+                                coordinator.copyTimings()
+                            }
+                        }
+
+                        Spacer(minLength: 8)
+
+                        Button("about Andrew Dictate") {
+                            coordinator.openAbout()
+                        }
+                    }
+                    .padding(.top, 12)
                 }
             }
             .frame(maxWidth: 540)
