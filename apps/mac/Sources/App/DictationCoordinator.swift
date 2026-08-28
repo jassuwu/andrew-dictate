@@ -466,10 +466,6 @@ final class DictationCoordinator: ObservableObject {
         dismissOnboarding()
     }
 
-    func skipOnboarding() {
-        dismissOnboarding()
-    }
-
     /// "skip for now" and "we're done" both close the window. what neither
     /// does any more is claim the setup succeeded — that claim belongs to the
     /// permissions, and they are asked again every time it matters.
