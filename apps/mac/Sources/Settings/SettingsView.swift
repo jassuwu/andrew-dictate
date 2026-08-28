@@ -10,14 +10,22 @@ final class SettingsWindowController: NSWindowController {
         let hostingController = NSHostingController(rootView: rootView)
         let window = NSWindow(contentViewController: hostingController)
         window.title = "settings"
+        // same chrome as the about window (ADR 0032): content on the window
+        // itself, no visible title bar, no cards. tabs are the sections.
         window.styleMask = [
             .titled,
             .closable,
             .miniaturizable,
-            .resizable,
+            .fullSizeContentView,
         ]
-        window.setContentSize(NSSize(width: 560, height: 720))
-        window.minSize = NSSize(width: 540, height: 560)
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        let size = NSSize(width: 560, height: 540)
+        window.setContentSize(size)
+        window.minSize = size
+        window.maxSize = size
+        window.isMovableByWindowBackground = true
+        window.backgroundColor = BrandUI.nsColor(BrandUI.windowBgRGB)
         window.isReleasedWhenClosed = false
         window.center()
 
@@ -36,19 +44,41 @@ final class SettingsWindowController: NSWindowController {
     }
 }
 
+enum SettingsTab: String, CaseIterable, Identifiable {
+    case dictation
+    case dictionary
+    case keeps
+    case general
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .dictation: "dictation"
+        case .dictionary: "dictionary"
+        case .keeps: "what it keeps"
+        case .general: "general"
+        }
+    }
+}
+
 struct SettingsView: View {
     @ObservedObject private var coordinator: DictationCoordinator
     @ObservedObject private var settings: AppSettings
     @ObservedObject private var dictionaryStore: DictionaryStore
     @StateObject private var loginItem = LoginItemController()
     @StateObject private var archive = ArchiveSettingsModel()
+    @StateObject private var browser = ArchiveBrowserViewModel()
 
     private let modelStore: ModelStore
 
+    @State private var selectedTab: SettingsTab = .dictation
     @State private var installedModels: [InstalledModel] = []
     @State private var pendingModelRemoval: EngineVersion?
     @State private var modelStoreMessage: String?
     @State private var isCleanupAvailable: Bool
+    @State private var showsRemoval = false
+    @State private var timings: TimelineSummary?
 
     init(coordinator: DictationCoordinator) {
         let settings = coordinator.settings
@@ -67,157 +97,63 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                // only when something is actually wrong: three permanent
-                // green ticks would teach you to stop reading this card.
-                if !setupIssues.isEmpty {
-                    settingsSection("setup") {
-                        setupHealthCard
-                    }
-                }
+        VStack(spacing: 0) {
+            tabBar
+                .padding(.top, 14)
+                .padding(.bottom, 16)
 
-                settingsSection("dictation") {
-                    VStack(alignment: .leading, spacing: 13) {
-                        hotkeyRow
-                        cardDivider
-                        DictationOptionRow(
-                            option: .preRoll,
-                            settings: settings
-                        )
-                        cardDivider
-                        DictationOptionRow(
-                            option: .soundFeedback,
-                            settings: settings
-                        )
-                        cardDivider
-                        aiCleanupEditor
-                        if Capabilities.current.keepsCleanupLab {
-                            cardDivider
-                            cleanupLabControls
-                        }
-                    }
-                }
+            // only when something is actually wrong: three permanent green
+            // ticks would teach you to stop reading it. shown above every
+            // tab because a broken permission outranks whatever you came for.
+            if !setupIssues.isEmpty {
+                setupBanner
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 14)
+            }
 
-                settingsSection("speech model") {
-                    engineEditor
-                }
-
-                settingsSection("dictionary") {
-                    DictionaryEditor(store: dictionaryStore)
-                }
-
-                settingsSection("what it keeps") {
-                    SettingsToggleRow(
-                        "keep what you dictate",
-                        explanation:
-                            "on this mac, until you delete it.",
-                        isOn: $settings.keepDictations
-                    )
-
-                    HStack(spacing: 10) {
-                        Text(
-                            archive.count == 1
-                                ? "1 dictation kept"
-                                : "\(archive.count) dictations kept"
-                        )
-                        .font(BrandUI.bodyFont)
-                        .foregroundStyle(BrandUI.textSecondary)
-
-                        Spacer(minLength: 8)
-
-                        Button("delete all") { archive.deleteEverything() }
-                            .disabled(archive.count == 0)
-                    }
-                    .padding(.top, 8)
-
-                    if let failure = archive.failure {
-                        Text(failure)
-                            .font(.caption)
-                            .foregroundStyle(BrandUI.attention)
-                            .padding(.top, 6)
-                    }
-
-                    // Both moved out of the menu bar (ADR 0030) and landed
-                    // next to the toggle that governs them — browsing what is
-                    // kept, and removing it, are the same subject as keeping it.
-                    HStack(spacing: 10) {
-                        Button("browse…") {
-                            coordinator.openArchiveBrowser()
-                        }
-
-                        Spacer(minLength: 8)
-
-                        if Capabilities.current.canUninstall {
-                            Button("remove everything…") {
-                                coordinator.openRemoval()
-                            }
-                        }
-                    }
-                    .padding(.top, 10)
-                }
-
-                settingsSection("general") {
-                    SettingsToggleRow(
-                        "launch at login",
-                        explanation:
-                            "starts Andrew Dictate when you sign in.",
-                        isOn: Binding(
-                            get: { loginItem.isEnabled },
-                            set: { loginItem.setEnabled($0) }
-                        )
-                    )
-
-                    if let message = loginItem.message {
-                        Text(message)
-                            .font(.caption)
-                            .foregroundStyle(BrandUI.textSecondary)
-                            .padding(.top, 6)
-                    }
-
-                    // Both left the menu bar (ADR 0030). "copy timings" is a
-                    // diagnostic nobody needs mid-sentence, and ADR 0025 only
-                    // ever required that it not be DEBUG-gated — a reader can
-                    // still generate the number here.
-                    HStack(spacing: 10) {
-                        if Capabilities.current.canCopyTimings {
-                            Button("copy timings") {
-                                coordinator.copyTimings()
-                            }
-                        }
-
-                        Spacer(minLength: 8)
-
-                        Button("about Andrew Dictate") {
-                            coordinator.openAbout()
-                        }
-                    }
-                    .padding(.top, 12)
+            Group {
+                switch selectedTab {
+                case .dictation: dictationTab
+                case .dictionary: dictionaryTab
+                case .keeps: keepsTab
+                case .general: generalTab
                 }
             }
-            .frame(maxWidth: 540)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 22)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+        .frame(width: 560, height: 540)
         .background(BrandUI.windowBg)
         .foregroundStyle(BrandUI.textPrimary)
-        // read from disk on open: the count has to be the number of things
-        // that exist, not a number this pane remembered.
-        .onAppear { archive.refresh() }
         .font(BrandUI.bodyFont)
         .brandTinted()
         .controlSize(.small)
-        .frame(minWidth: 540, minHeight: 560)
         .preferredColorScheme(.dark)
         .onAppear {
             loginItem.refresh()
             refreshInstalledModels()
             isCleanupAvailable = coordinator.isCleanupAvailable
+            // read from disk on open: counts have to be the number of things
+            // that exist, not a number this pane remembered.
+            archive.refresh()
+            browser.reload()
+            timings = coordinator.timingsSummary()
+        }
+        .onChange(of: selectedTab) { _, tab in
+            if tab == .keeps {
+                browser.reload()
+            }
+            if tab == .general {
+                timings = coordinator.timingsSummary()
+            }
         }
         .onChange(of: coordinator.enginePreparationState) { _, state in
             if state == .ready || state == .failed {
                 refreshInstalledModels()
             }
+        }
+        .sheet(isPresented: $showsRemoval) {
+            RemovalView(viewModel: RemovalViewModel())
+                .frame(width: 480, height: 470)
         }
         .alert(item: $pendingModelRemoval) { version in
             let isActive = version == coordinator.activeEngineVersion
@@ -246,6 +182,39 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - chrome
+
+    private var tabBar: some View {
+        HStack(spacing: 24) {
+            ForEach(SettingsTab.allCases) { tab in
+                Button {
+                    selectedTab = tab
+                } label: {
+                    Text(tab.title)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(
+                            selectedTab == tab
+                                ? BrandUI.gold
+                                : BrandUI.textSecondary
+                        )
+                        .overlay(alignment: .bottom) {
+                            if selectedTab == tab {
+                                Capsule()
+                                    .fill(BrandUI.gold)
+                                    .frame(height: 2)
+                                    .offset(y: 7)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(
+                    selectedTab == tab ? .isSelected : []
+                )
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: selectedTab)
+    }
+
     private var setupIssues: [SetupIssue] {
         SetupHealth.issues(
             permissions: coordinator.permissions,
@@ -256,23 +225,19 @@ struct SettingsView: View {
 
     /// names what's missing, then hands back to onboarding — the one place
     /// that knows how to ask macOS for any of it.
-    private var setupHealthCard: some View {
-        VStack(alignment: .leading, spacing: 13) {
+    private var setupBanner: some View {
+        VStack(alignment: .leading, spacing: 8) {
             ForEach(setupIssues) { issue in
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(issue.title)
                         .font(BrandUI.bodyFont.weight(.medium))
-                        .foregroundStyle(BrandUI.textPrimary)
+                        .foregroundStyle(BrandUI.attention)
 
                     Text(issue.detail)
-                        .font(BrandUI.bodyFont)
+                        .font(.caption)
                         .foregroundStyle(BrandUI.textSecondary)
                 }
                 .accessibilityElement(children: .combine)
-
-                if issue.id != setupIssues.last?.id {
-                    cardDivider
-                }
             }
 
             Button("finish setup") {
@@ -281,28 +246,77 @@ struct SettingsView: View {
             .buttonStyle(.plain)
             .foregroundStyle(BrandUI.gold)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func settingsSection<Content: View>(
-        _ title: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            BrandSectionHeader(title)
-                .padding(.leading, 2)
-            BrandCard(content: content)
-        }
-    }
-
-    private var cardDivider: some View {
+    private var rowDivider: some View {
         Rectangle()
             .fill(BrandUI.hairline)
             .frame(height: 1)
             .accessibilityHidden(true)
     }
 
-    /// shown on every mac, disabled where the os can’t run it: hiding
-    /// the row entirely taught older machines the feature doesn’t exist.
+    // MARK: - dictation
+
+    private var dictationTab: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            hotkeyRow
+            rowDivider
+            DictationOptionRow(
+                option: .preRoll,
+                settings: settings
+            )
+            rowDivider
+            DictationOptionRow(
+                option: .soundFeedback,
+                settings: settings
+            )
+            rowDivider
+            aiCleanupEditor
+            if Capabilities.current.keepsCleanupLab {
+                rowDivider
+                cleanupLabControls
+            }
+            rowDivider
+            engineEditor
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 20)
+    }
+
+    private var hotkeyRow: some View {
+        HStack(spacing: 10) {
+            Text("key")
+                .font(BrandUI.bodyFont.weight(.medium))
+
+            Spacer(minLength: 10)
+
+            // the chip is the control — it and a picker beside it showed the
+            // same value twice.
+            Menu {
+                ForEach(HotkeyBinding.supported) { binding in
+                    Button(binding.displayName) {
+                        _ = coordinator.rebindHotkey(to: binding)
+                    }
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    KeyChip(settings.dictationHotkey.displayName)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(BrandUI.textSecondary)
+                }
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .fixedSize()
+            .accessibilityLabel("dictation key")
+        }
+    }
+
+    /// shown on every mac, disabled where it can’t run — and the reason line
+    /// is the os’s actual reason, not a guess (the old copy said "needs
+    /// macOS 26" to a mac already on 26 with Apple Intelligence off).
     private var aiCleanupEditor: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
@@ -372,9 +386,7 @@ struct SettingsView: View {
     private var engineEditor: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                // the section header already says "speech model" — this row
-                // picks which one, so it says that instead of repeating it.
-                Text("version")
+                Text("speech model")
                     .font(BrandUI.bodyFont.weight(.medium))
 
                 Spacer(minLength: 12)
@@ -392,52 +404,38 @@ struct SettingsView: View {
 
             enginePreparationStatus
 
-            // The models are not this app's private copy — FluidAudio keeps one
-            // shared cache, so a second app built on it (and this app's own
-            // development build) reuses the same 443 MB rather than fetching it
-            // again. That was already true and completely invisible.
-            cardDivider
-
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("models are shared, and downloaded once")
-                    .font(.caption)
-                    .foregroundStyle(BrandUI.textSecondary)
-
-                Spacer(minLength: 8)
-
-                Button("show in finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting(
-                        [AppIdentity.sharedModelDirectory]
-                    )
-                }
-                .buttonStyle(.link)
-                .font(.caption)
-            }
-
             ForEach(installedModels.filter(\.isDownloaded)) { model in
-                cardDivider
-
                 HStack(spacing: 10) {
                     Text("parakeet \(model.version.rawValue)")
-                    .foregroundStyle(BrandUI.textPrimary)
+                        .foregroundStyle(BrandUI.textSecondary)
+                        .font(.caption)
 
                     Text(model.onDiskSize)
-                        .font(BrandUI.valueFont)
+                        .font(.caption.monospacedDigit())
                         .foregroundStyle(BrandUI.textSecondary)
-
-                    Spacer(minLength: 8)
 
                     if model.version == coordinator.activeEngineVersion {
                         Text("active")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(BrandUI.goldPale)
                             .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
+                            .padding(.vertical, 2)
                             .background {
                                 Capsule()
                                     .fill(BrandUI.goldDeep.opacity(0.22))
                             }
                     }
+
+                    Spacer(minLength: 8)
+
+                    Button("show in finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting(
+                            [AppIdentity.sharedModelDirectory]
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.textSecondary)
 
                     Button("remove download") {
                         pendingModelRemoval = model.version
@@ -452,6 +450,11 @@ struct SettingsView: View {
                     )
                     .foregroundStyle(BrandUI.textSecondary)
                 }
+                // the standalone "models are shared" row folded into where
+                // the fact matters: the copy on disk.
+                .help(
+                    "downloaded once and shared with other FluidAudio apps"
+                )
             }
 
             if let modelStoreMessage {
@@ -511,6 +514,168 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - dictionary
+
+    private var dictionaryTab: some View {
+        DictionaryEditor(store: dictionaryStore)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 20)
+    }
+
+    // MARK: - what it keeps
+
+    private var keepsTab: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Group {
+                SettingsToggleRow(
+                    "keep what you dictate",
+                    explanation: "on this mac, until you delete it.",
+                    isOn: $settings.keepDictations
+                )
+
+                rowDivider
+
+                HStack(spacing: 10) {
+                    Text(
+                        browser.items.count == 1
+                            ? "1 dictation kept"
+                            : "\(browser.items.count) dictations kept"
+                    )
+                    .font(BrandUI.bodyFont)
+                    .foregroundStyle(BrandUI.textSecondary)
+
+                    Spacer(minLength: 8)
+
+                    Button("delete all") {
+                        archive.deleteEverything()
+                        browser.reload()
+                    }
+                    .disabled(browser.items.isEmpty)
+
+                    if Capabilities.current.canUninstall {
+                        Button("remove everything…") {
+                            showsRemoval = true
+                        }
+                    }
+                }
+
+                if let failure = archive.failure {
+                    Text(failure)
+                        .font(.caption)
+                        .foregroundStyle(BrandUI.attention)
+                }
+            }
+            .padding(.horizontal, 24)
+
+            // the list itself, not a button to a second window: what it
+            // keeps is this tab's whole subject.
+            ArchiveBrowserView(
+                viewModel: browser,
+                fixAWord: { coordinator.openWordFixer(for: $0) }
+            )
+        }
+    }
+
+    // MARK: - general
+
+    private var generalTab: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            SettingsToggleRow(
+                "launch at login",
+                explanation: "starts Andrew Dictate when you sign in.",
+                isOn: Binding(
+                    get: { loginItem.isEnabled },
+                    set: { loginItem.setEnabled($0) }
+                )
+            )
+
+            if let message = loginItem.message {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.textSecondary)
+            }
+
+            rowDivider
+
+            numbersDashboard
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 20)
+    }
+
+    /// the numbers, visible. "copy timings" used to be a button whose output
+    /// you could only see by pasting it somewhere; the claim it carries now
+    /// has a face, and the copy button ships the full report underneath it.
+    private var numbersDashboard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            BrandSectionHeader("the numbers")
+
+            HStack(alignment: .top, spacing: 36) {
+                statTile(
+                    "words typed",
+                    settings.totalWordsDictated.formatted(
+                        .number.grouping(.automatic)
+                    )
+                )
+                statTile(
+                    "typical paste",
+                    milliseconds(timings?.keyUpToCompletion?.p50)
+                )
+                statTile(
+                    "worst 1-in-20",
+                    milliseconds(timings?.keyUpToCompletion?.p95)
+                )
+            }
+
+            HStack(spacing: 10) {
+                Text(sampleLine)
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.textSecondary)
+
+                Spacer(minLength: 8)
+
+                if Capabilities.current.canCopyTimings {
+                    Button("copy the full report") {
+                        coordinator.copyTimings()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.gold)
+                }
+            }
+        }
+    }
+
+    private func statTile(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(value)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(BrandUI.textPrimary)
+
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var sampleLine: String {
+        guard let timings, timings.sampleSize > 0 else {
+            return "no verified pastes measured yet — dictate something."
+        }
+        return timings.sampleSize == 1
+            ? "measured over 1 verified paste on this mac."
+            : "measured over \(timings.sampleSize) verified pastes "
+                + "on this mac."
+    }
+
+    private func milliseconds(_ duration: Duration?) -> String {
+        guard let duration else {
+            return "—"
+        }
+        return "\(Int(duration.inMilliseconds.rounded())) ms"
+    }
+
     private func bounded(_ progress: Double) -> Double {
         min(max(progress, 0), 1)
     }
@@ -543,39 +708,6 @@ struct SettingsView: View {
             await coordinator.prepareForActiveModelRemoval(version)
         }
     }
-
-    private var hotkeyRow: some View {
-        HStack(spacing: 10) {
-            // the section header already says "dictation" — this row picks
-            // the key you hold for it.
-            Text("key")
-                .font(BrandUI.bodyFont.weight(.medium))
-
-            Spacer(minLength: 10)
-
-            KeyChip(settings.dictationHotkey.displayName)
-
-            Picker(
-                "",
-                selection: Binding(
-                    get: { settings.dictationHotkey },
-                    set: { binding in
-                        _ = coordinator.rebindHotkey(to: binding)
-                    }
-                )
-            ) {
-                ForEach(HotkeyBinding.supported) { binding in
-                    Text(binding.displayName)
-                        .tag(binding)
-                }
-            }
-            .labelsHidden()
-            .brandMenuStyle()
-            .accessibilityLabel("dictation key")
-            .frame(width: 146)
-        }
-    }
-
 }
 
 private struct DictionaryEditor: View {
