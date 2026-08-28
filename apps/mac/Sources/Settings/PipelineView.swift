@@ -31,7 +31,7 @@ struct PipelineView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
                 Text("cleanup")
                     .font(BrandUI.bodyFont.weight(.medium))
@@ -63,8 +63,23 @@ struct PipelineView: View {
                     flowText(plain(heardText))
                 }
 
-                column(title: "cleanup", lit: true) {
-                    flowText(diffText(heardText, cleanedText))
+                column(title: "cleanup", lit: settings.cleanupEnabled) {
+                    Toggle("", isOn: $settings.cleanupEnabled)
+                        .labelsHidden()
+                        .brandToggleStyle()
+                        .controlSize(.mini)
+                        .accessibilityLabel("cleanup")
+                        .padding(.bottom, 2)
+
+                    if settings.cleanupEnabled {
+                        flowText(diffText(heardText, cleanedText))
+                    } else {
+                        Text("off. only your dictionary still applies.")
+                            .foregroundStyle(BrandUI.textSecondary)
+                        if cleanedText != heardText {
+                            flowText(diffText(heardText, cleanedText))
+                        }
+                    }
                 }
 
                 column(title: "ai polish", lit: polishLit) {
@@ -88,10 +103,14 @@ struct PipelineView: View {
             }
         }
         .onAppear {
+            run.setDeterministicEnabled(settings.cleanupEnabled)
             run.setPolishEnabled(polishWanted)
         }
         .onChange(of: settings.cleanupMode) { _, _ in
             run.setPolishEnabled(polishWanted)
+        }
+        .onChange(of: settings.cleanupEnabled) { _, enabled in
+            run.setDeterministicEnabled(enabled)
         }
         .onChange(of: lastTranscript) { _, transcript in
             run.input = transcript ?? PipelineSample.text
@@ -144,7 +163,7 @@ struct PipelineView: View {
         lit: Bool,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 7) {
             Text(title)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(lit ? BrandUI.gold : BrandUI.textSecondary)
@@ -153,13 +172,13 @@ struct PipelineView: View {
         }
         .font(.system(size: 11))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 10)
         .opacity(lit ? 1 : 0.6)
     }
 
     private func flowText(_ text: AttributedString) -> some View {
         Text(text)
-            .lineLimit(4)
+            .lineLimit(5)
             .fixedSize(horizontal: false, vertical: true)
             .help(String(text.characters))
     }

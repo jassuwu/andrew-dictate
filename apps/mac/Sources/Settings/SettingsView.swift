@@ -82,7 +82,7 @@ struct SettingsView: View {
                 generalTab
             }
         }
-        .frame(width: 680)
+        .frame(width: 800)
         .background(BrandUI.windowBg)
         .foregroundStyle(BrandUI.textPrimary)
         .font(BrandUI.bodyFont)
@@ -214,10 +214,6 @@ struct SettingsView: View {
             )
             rowDivider
             PipelineView(coordinator: coordinator, settings: settings)
-            if Capabilities.current.keepsCleanupLab {
-                rowDivider
-                cleanupLabControls
-            }
             rowDivider
             engineEditor
         }
@@ -253,40 +249,6 @@ struct SettingsView: View {
             .buttonStyle(.plain)
             .fixedSize()
             .accessibilityLabel("dictation key")
-        }
-    }
-
-    private var cleanupLabControls: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 12) {
-                Text("cleanup lab")
-                    .font(BrandUI.bodyFont.weight(.medium))
-
-                Spacer(minLength: 12)
-
-                Button("view the pipeline") {
-                    coordinator.openPipelinePlayground()
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(BrandUI.gold)
-
-                Button("view cleanup lab") {
-                    coordinator.openCleanupLab()
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(BrandUI.gold)
-
-                Button("clear lab data") {
-                    coordinator.clearCleanupLabData()
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(BrandUI.textSecondary)
-            }
-
-            Text("compares recent raw/cleaned pairs newest first.")
-                .font(.caption)
-                .foregroundStyle(BrandUI.textSecondary)
-                .lineLimit(1)
         }
     }
 
