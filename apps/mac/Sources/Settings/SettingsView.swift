@@ -213,7 +213,11 @@ struct SettingsView: View {
                 settings: settings
             )
             rowDivider
-            PipelineView(coordinator: coordinator, settings: settings)
+            PipelineView(
+                coordinator: coordinator,
+                settings: settings,
+                mode: .strip
+            )
             rowDivider
             engineEditor
         }
