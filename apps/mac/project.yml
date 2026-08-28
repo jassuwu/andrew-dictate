@@ -77,6 +77,7 @@ targets:
       - Sources/Archive/DictationArchive.swift
       - Sources/Archive/MeetingSession.swift
       - Sources/Archive/ArchiveBrowserViewModel.swift
+      - Sources/About/UpdateCheck.swift
       - Sources/App/AppIdentity.swift
       - Sources/App/Capabilities.swift
       - Sources/App/RemovalPlan.swift
