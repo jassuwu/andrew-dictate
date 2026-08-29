@@ -282,3 +282,43 @@ private struct FakeDiarizer: MeetingDiarizer {
         }
     }
 }
+
+extension MeetingCoordinatorTests {
+    /// The engine failing is the app's fault, not the permission's: it must
+    /// not read as "can't hear", must not write an empty transcript, and
+    /// must leave the spool for the next launch to recover.
+    func testAModelThatWillNotLoadAbandonsTheMeetingButKeepsTheSpool() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meeting-coordinator-engine-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let spool = MeetingSpool(root: dir.appendingPathComponent("spool"))
+        let source = FakeSource()
+        var events: [MeetingEvent] = []
+
+        struct WillNotLoad: Error {}
+        let c = MeetingCoordinator(
+            source: source,
+            makeTranscriber: { _ in throw WillNotLoad() },
+            diarizer: FakeDiarizer(),
+            spool: spool,
+            hookRunner: HookRunner(logURL: dir.appendingPathComponent("hooks.log")),
+            preferences: {
+                MeetingPreferences(folder: dir.appendingPathComponent("docs"), hook: nil, model: .whisperLargeV3)
+            }
+        )
+        c.onEvent = { events.append($0) }
+        c.start(tapping: RunningApp(name: "zoom.us", bundleID: "us.zoom.xos", pid: 1))
+        try? await Task.sleep(for: .milliseconds(400))
+
+        XCTAssertEqual(c.state, .idle)
+        XCTAssertEqual(events.count, 1)
+        guard case .engineFailed = events.first else {
+            return XCTFail("expected engineFailed, got \(events)")
+        }
+        XCTAssertEqual(MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).count, 0)
+        // The spool folder survives, with its manifest, for recovery.
+        let folders = try FileManager.default.contentsOfDirectory(atPath: spool.root.path)
+        XCTAssertEqual(folders.count, 1)
+    }
+}

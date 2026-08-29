@@ -156,40 +156,53 @@ final class MeetingCoordinator: ObservableObject {
         let appName = MeetingApps.displayName(app)
         captureTask = Task { [weak self] in
             guard let self else { return }
+
+            // Ours to get right: the spool and the engine. A failure here is
+            // the app's, not the permission's, and is told as such.
+            let transcriber: any MeetingTranscriber
             do {
                 let handle = try spool.begin(.init(
                     app: appName, started: startedAt,
                     engine: prefs.model.rawValue, model: prefs.model))
                 self.handle = handle
                 audioFile = try SpoolAudioFile(url: handle.audioURL)
-                let transcriber = try await makeTranscriber(prefs.model)
-                self.transcriber = transcriber
-                listenForLines(transcriber)
-                // Loading whisper takes ten-odd seconds; the tap opens now
-                // and the transcriber buffers what it is fed until ready.
-                let loading = Task { try await transcriber.begin() }
-                Task { [weak self] in
-                    do {
-                        try await loading.value
-                    } catch {
-                        guard let self else { return }
-                        onEvent?(.engineFailed(error.localizedDescription))
-                        stop()
-                    }
-                }
-                let chunks = try await source.start(tapping: app)
-                for await chunk in chunks {
-                    guard !Task.isCancelled else { break }
-                    await ingest(chunk)
-                }
+                transcriber = try await makeTranscriber(prefs.model)
             } catch {
-                logger.error("meeting capture failed: \(error.localizedDescription, privacy: .public)")
-                session.neverHeardTheProbe()
-                session.rebuildFailed()
-                publish()
-                if session.state == .cannotHear {
-                    onEvent?(.cannotHear(app: appName))
+                logger.error("meeting could not start: \(error.localizedDescription, privacy: .public)")
+                onEvent?(.engineFailed(error.localizedDescription))
+                abandonKeepingSpool()
+                return
+            }
+            self.transcriber = transcriber
+            listenForLines(transcriber)
+            // Loading whisper takes ten-odd seconds; the tap opens now and
+            // the transcriber buffers what it is fed until ready.
+            let loading = Task { try await transcriber.begin() }
+            Task { [weak self] in
+                do {
+                    try await loading.value
+                } catch {
+                    guard let self else { return }
+                    onEvent?(.engineFailed(error.localizedDescription))
+                    abandonKeepingSpool()
                 }
+            }
+
+            // Theirs: the tap. This is the one that reads as "can't hear".
+            let chunks: AsyncStream<MeetingAudioChunk>
+            do {
+                chunks = try await source.start(tapping: app)
+            } catch {
+                logger.error("tap failed to open: \(error.localizedDescription, privacy: .public)")
+                loading.cancel()
+                session.neverHeardTheProbe()
+                publish()
+                onEvent?(.cannotHear(app: appName))
+                return
+            }
+            for await chunk in chunks {
+                guard !Task.isCancelled else { break }
+                await ingest(chunk)
             }
         }
     }
@@ -225,6 +238,23 @@ final class MeetingCoordinator: ObservableObject {
                 app: appName, started: startedAt, model: preferences().model,
                 recovered: false)
         }
+    }
+
+    /// The engine is gone but the audio is not: capture ends, the spool
+    /// stays on disk, and the next launch finds it and transcribes it as
+    /// `recovered`. Nothing is written now, because a transcript with no
+    /// words in it would read as a meeting where nobody spoke.
+    private func abandonKeepingSpool() {
+        captureTask?.cancel()
+        captureTask = nil
+        linesTask?.cancel()
+        linesTask = nil
+        transcriber = nil
+        audioFile = nil
+        handle = nil
+        Task { [source] in await source.stop() }
+        _ = session.finish(at: elapsed)
+        publish()
     }
 
     /// The nudge asked; the user said yes.
