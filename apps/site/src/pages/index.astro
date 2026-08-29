@@ -12,14 +12,14 @@ const compare = [
   { row: "your voice", ours: "never leaves the mac", theirs: "transcribed in the cloud", src: "https://wisprflow.ai/privacy" },
   { row: "also sent", ours: "nothing", theirs: "text around your cursor, on-screen text, and a screenshot", src: "https://docs.wisprflow.ai/articles/4678293671-feature-context-awareness" },
   { row: "on a plane", ours: "works", theirs: "needs a connection", src: "https://docs.wisprflow.ai/articles/5094956927-fix-no-internet-connection-issues" },
-  { row: "source", ours: "MIT, ~10k lines you can read", theirs: "closed" },
-  { row: "languages", ours: "english", theirs: "100+, auto-detected", src: "https://wisprflow.ai/", them: true },
+  { row: "meetings", ours: "transcript written on your mac, audio never kept", theirs: "notetaker, on the free tier", src: "https://wisprflow.ai/post/wispr-flow-notetaker" },
+  { row: "source", ours: "MIT, ~17k lines you can read", theirs: "closed" },
+  { row: "languages", ours: "english, or a 25-language model", theirs: "100+, auto-detected", src: "https://wisprflow.ai/", them: true },
   { row: "platforms", ours: "macOS, apple silicon", theirs: "mac, windows, iphone, android", src: "https://wisprflow.ai/", them: true },
-  { row: "meeting notes", ours: "not yet", theirs: "notetaker, on the free tier", src: "https://wisprflow.ai/post/wispr-flow-notetaker", them: true },
 ];
 
 const description =
-  "a free, fully local dictation app for macOS. hold fn, speak, release, and your text appears wherever the cursor is. alpha, and honest about it.";
+  "free, local dictation and meeting transcripts for macOS. hold fn, talk, let go. the speech models run on your mac. alpha, and honest about it.";
 ---
 
 <html lang="en" class="bg-[#0c0c0e]">
@@ -51,7 +51,7 @@ const description =
             <span class="wordmark">andrew dictate</span>
           </h1>
           <span
-            class="-rotate-[4deg] rounded-[3px] bg-[#e5be62] px-1.5 py-[3px] font-mono text-[11px] font-bold leading-none tracking-[0.14em] text-[#0c0c0e]"
+            class="-rotate-[4deg] rounded-[3px] bg-[#e5be62] px-1.5 py-[3px] font-mono text-[11px] leading-none tracking-[0.14em] text-[#0c0c0e]"
           >
             ALPHA
           </span>
@@ -61,10 +61,16 @@ const description =
         <p class="aside text-[13px] leading-[1.7]" aria-hidden="true">yes. like that.</p>
 
         <p class="mt-6 text-[15px] leading-[1.75] text-[#f2ede0]/70">
-          a dictation app for macOS. hold <kbd>fn</kbd>, speak, release. your text
-          appears wherever the cursor is, a few hundred milliseconds after you let
-          go. the speech model ships inside the app and runs on your mac, so
-          nothing you say leaves the machine. no account, no subscription.
+          dictation for macOS. hold <kbd>fn</kbd>, talk, let go. the text lands
+          where your cursor is. the speech model runs on your mac, so there is
+          no server between you and the paste, and nothing you say leaves the
+          machine. no account, no subscription.
+        </p>
+
+        <p class="mt-4 text-[15px] leading-[1.75] text-[#f2ede0]/70">
+          i made it because i wanted this without paying a subscription or
+          sending my voice somewhere. i use it all day. it's alpha, and the
+          rough parts are listed below rather than hidden.
         </p>
       </header>
 
@@ -77,13 +83,13 @@ const description =
           <span class="hint shrink-0 text-[11px] text-[#f2ede0]/55" aria-live="polite">copy</span>
         </button>
 
-        <p class="mt-3 text-[13px] text-[#f2ede0]/45">
-          apple silicon · macOS 14+ · free forever · MIT
+        <p class="mt-3 font-mono text-[12px] tracking-[0.02em] text-[#f2ede0]/45">
+          apple silicon · macOS 26 · free forever · MIT
         </p>
 
         <div class="mt-7">
           <p class="text-[14px] leading-[1.7] text-[#f2ede0]/60">
-            builds are unsigned, because i haven't paid apple the $99 for a
+            the build is unsigned, because i haven't paid apple the $99 for a
             developer membership. so the first launch needs right-click → open, or
             this once:
           </p>
@@ -97,8 +103,39 @@ const description =
         </div>
       </section>
 
+      <section class="mt-14">
+        <h2 class="text-[17px] font-semibold tracking-[-0.01em] text-[#f2ede0]">
+          it records meetings too
+        </h2>
+        <p class="mt-4 text-[15px] leading-[1.75] text-[#f2ede0]/70">
+          pick the app from the menu bar. your mic is you, the app is them.
+          when you stop, you get one markdown file with the speakers split
+          out. hindi on their side comes out as english. no audio is kept,
+          and it never watches what's using your mic. you press start and
+          you press stop.
+        </p>
+        <p class="mt-4 text-[14px] leading-[1.7] text-[#f2ede0]/50">
+          the meeting model is a <span class="font-mono text-[13px]">2.9 gb</span> download.
+          setup lets you skip it if dictation is all you want. transcripts
+          only come out in english for now.
+        </p>
+      </section>
 
-      <section class="mt-16">
+      <section class="mt-14">
+        <h2 class="text-[17px] font-semibold tracking-[-0.01em] text-[#f2ede0]">
+          where your words go
+        </h2>
+        <p class="mt-4 text-[15px] leading-[1.75] text-[#f2ede0]/70">
+          nowhere. two things in the app touch the network, and you trigger
+          both: downloading a speech model at setup, and the
+          <span class="font-mono text-[13px]">check for updates</span> button,
+          which asks github for the latest version. no account, no analytics,
+          no crash reports. your dictations are kept in a local history you can
+          switch off or wipe.
+        </p>
+      </section>
+
+      <section class="mt-14">
         <h2 class="text-[17px] font-semibold tracking-[-0.01em] text-[#f2ede0]">
           against the one everyone pays for
         </h2>
@@ -148,10 +185,11 @@ const description =
         </dl>
 
         <p class="mt-5 text-[13px] leading-[1.7] text-[#f2ede0]/45">
-          the last three rows go to them, and i'm not going to pretend otherwise.
+          the last two rows go to them, and i'm not going to pretend otherwise.
           every claim about wispr flow links to their own site or docs, checked
-          21 august 2026. speed is missing on purpose: i haven't measured it
-          properly yet, so there's nothing honest to put there.
+          21 august 2026. speed is not in the table on purpose. i won't put a
+          number there i haven't measured, and i don't have theirs. what i can
+          say is that there's no round trip, because there's no network.
         </p>
       </section>
 
@@ -160,11 +198,10 @@ const description =
           typing is for brokies.
         </p>
 
-        <nav class="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-[14px]">
+        <nav class="mt-6 flex flex-wrap items-baseline gap-x-6 gap-y-2 text-[14px]">
           <a class="text-[#e5be62] transition hover:text-[#f9e9a8]" href="https://github.com/jassuwu/andrew-dictate">github</a>
-          <a class="text-[#e5be62] transition hover:text-[#f9e9a8]" href="https://github.com/jassuwu/andrew-dictate#roadmap">roadmap</a>
           <a class="text-[#e5be62] transition hover:text-[#f9e9a8]" href="https://github.com/jassuwu/andrew-dictate/releases">releases</a>
-          <a class="text-[#e5be62] transition hover:text-[#f9e9a8]" href="https://jass.gg">made by jass</a>
+          <a class="hand text-[16px] text-[#e5be62] transition hover:text-[#f9e9a8]" href="https://jass.gg">made by jass</a>
         </nav>
 
         <p class="mt-8 text-[13px] text-[#f2ede0]/30">the matrix wants you typing.</p>
