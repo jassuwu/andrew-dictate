@@ -21,14 +21,12 @@ one pipeline, one sink (ADR 0003):
 hold fn ──▶ mic capture ──▶ key-up ──▶ engine (parakeet v2, prewarmed)
                                               │ transcript
                                               ▼ deterministic cleaner (always)
-                                              ▼ ai polish (optional, on-device)
                                               ▼ inserter (paste into frontmost app)
 ```
 
 - **engine:** parakeet-tdt-0.6b-v2 int8 via FluidAudio, batch on key-up, prewarmed at launch with one dummy inference (ADR 0002, 0007). v3 optional in settings. engine sits behind an `Engine` protocol (streaming engines are additive later).
 - **capture:** AVAudioEngine, hardware-native format, graph prepared at launch. **pre-roll is a user toggle (ADR 0012), chosen at onboarding:** ON = a ~300ms rolling ring buffer runs while the app is active (mic stays open, indicator stays lit, buffer lives only in memory and is discarded continuously) so the first word is never clipped; OFF = mic starts at key-down, maximum privacy posture. changeable in settings.
-- **cleaner (deterministic, always on — ADR 0004, 0019, 0020):** eight staged transforms — whitespace normalization, spoken punctuation, email/url/number parsing, dictionary substitutions, capitalization, punctuation finishing. **it renders what you said into how it is written, and never decides you meant something else** (ADR 0020): the three stages that edited rather than transcribed — self-corrections, repetition collapse, filler removal — are gone, because each of them could silently change correct speech into something that still read perfectly. stumbles reach the page unless the optional polish is on. microseconds, no model, pure functions. not user-disableable: it is where the dictionary and spoken punctuation live, and without it you get raw asr.
-- **ai polish (optional, shipped 2026-08 — ADR 0018):** apple's on-device foundation model (`SystemLanguageModel`, macOS 26+), off by default, three modes: `off` · `on` (600ms budget, raw on timeout) · `always` (15s ceiling). a messy gate decides whether a transcript is worth sending at all. when `always` can't deliver — model unavailable, threw, or blew the deadline — it pastes raw and **says so** in the hud; `on` falling back to raw is that mode working and stays silent. below macOS 26 the whole layer is absent and the settings row must say so rather than vanish.
+- **cleaner (deterministic, always on — ADR 0004, 0019, 0020):** eight staged transforms — whitespace normalization, spoken punctuation, email/url/number parsing, dictionary substitutions, capitalization, punctuation finishing. **it renders what you said into how it is written, and never decides you meant something else** (ADR 0020): the three stages that edited rather than transcribed — self-corrections, repetition collapse, filler removal — are gone, because each of them could silently change correct speech into something that still read perfectly. stumbles reach the page. microseconds, no model, pure functions. not user-disableable: it is where the dictionary and spoken punctuation live, and without it you get raw asr.
 - **hotkeys (ADR 0008):** fn = dictation, rebindable, chord-cancel semantics. NSEvent flagsChanged monitoring; no Input Monitoring permission. **locked recording:** double-tap the dictation key to lock its capture hands-free; a single tap ends it and inserts as normal.
 
 ## 3. dictation
@@ -45,7 +43,7 @@ hold fn ──▶ mic capture ──▶ key-up ──▶ engine (parakeet v2, pr
 one nonactivating, click-through `NSPanel` (borderless, floating, all-spaces), in two styles:
 
 - **bare — the lamp (2026-08-12).** a single gold line drawn in a canvas on a transparent panel: dim ember while prewarming, a wave whose amplitude and tungsten colour ride your voice while recording, then a cool-out that collapses it to a hot dot and fades. no capsule, no shadow — they would clip the bloom. **success is silent: the afterglow is the whole goodbye.** the earlier glass capsule with eleven bars, and the transcript flash that followed a paste, are both removed.
-- **glass — the pill.** the exceptional-message style, and the only thing that ever speaks: `copied — secure field` · `copied — focus changed` · `couldn't transcribe` · `heard nothing` · `recording was lost` · `polish timed out — pasted raw` · `couldn't polish — pasted raw` · `speech model failed — retrying` · `microphone access is off` · `no microphone available`.
+- **glass — the pill.** the exceptional-message style, and the only thing that ever speaks: `copied — secure field` · `copied — focus changed` · `couldn't transcribe` · `heard nothing` · `recording was lost` · `speech model failed — retrying` · `microphone access is off` · `no microphone available`.
 
 the rule: **a failed dictation must never look like a successful one.** anything that goes wrong cuts the afterglow short and says why.
 
@@ -67,7 +65,7 @@ when all three rows are ready, the card says "ready — hold fn and speak." and 
 
 ## 6. settings (tabs — ADR 0034, 0038, 0040)
 
-the native `Settings` scene, five glass tabs: **dictation** (setup banner only when something is missing · hotkey · pre-roll · sound feedback · the pipeline — heard → cleanup → polish → pasted, one word each, a switch in each stage · the dictation model cards) · **dictionary** (wrong→right pairs, import/export json) · **history** (`dictations | meetings`, keep-new-dictations toggle, delete) · **meetings** (the meeting model cards · save folder · the hook — §11) · **general** (launch at login · the numbers dashboard · remove Andrew Dictate). the thing that opened you is where you live: nothing in settings opens another window except onboarding, which is the only surface that knows how to ask for a permission.
+the native `Settings` scene, five glass tabs: **dictation** (setup banner only when something is missing · hotkey · pre-roll · sound feedback · the pipeline — heard → cleanup → pasted, one word each, a switch in each stage · the dictation model cards) · **dictionary** (wrong→right pairs, import/export json) · **history** (`dictations | meetings`, keep-new-dictations toggle, delete) · **meetings** (the meeting model cards · save folder · the hook — §11) · **general** (launch at login · the numbers dashboard · remove Andrew Dictate). the thing that opened you is where you live: nothing in settings opens another window except onboarding, which is the only surface that knows how to ask for a permission.
 
 two rules, both learned the hard way: options that appear on more than one screen are **defined once** (`DictationOption`) and rendered twice — the copy cannot drift because there is only one copy. and the user-facing word for the asr backend is **speech model** everywhere; `engine` survives only in code (`ParakeetEngine`, `EngineVersion`). "parakeet 0.3" is a value, not a category.
 
@@ -90,7 +88,7 @@ working targets, not commitments: key-up → transcript ≤ 250ms, key-up → in
 - **M1 — dictation shippable:** onboarding, HUD, cleaner+dictionary, settings sheet, menu bar, cask. success: WisprFlow uninstalled.
 - **M2 — release:** README, cask, about/attributions, polish pass. success: someone else could install it from scratch.
 - *(historical: M2/M3 were command-mode tiers and delegation — built, shipped, then removed 2026-08-06. see §1.)*
-- *(historical: LLM cleanup was post-v1 until it shipped as on-device ai polish, 2026-08. see §2.)*
+- *(historical: on-device ai polish shipped 2026-08 (ADR 0018) and was removed 2026-08-29 (ADR 0041): it was never field-tested, and a layer that rewrites words sat badly next to ADR 0020.)*
 - **post-v1 (ordered):** signing (ADR 0009) · AX insertion · public bench harness + published p50/p95 · always-on ambient mode (ADR 0003) · v3/multilingual polish.
 
 ## 10. open questions (parked, non-blocking)
