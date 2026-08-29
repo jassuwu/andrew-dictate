@@ -24,7 +24,11 @@ actor WhisperMeetingTranscriber: MeetingTranscriber {
     private let logger = Logger(subsystem: AppIdentity.loggingSubsystem, category: "whisper")
 
     private var whisper: WhisperKit?
+    /// Only the audio since the last confirmed segment; what is behind that
+    /// point is on the spool, not in memory. `mixedOffset` is the meeting
+    /// sample index of `mixed[0]`.
     private var mixed: [Float] = []
+    private var mixedOffset = 0
     /// One entry per 100 ms of the meeting: RMS of each side.
     private var energies: [(you: Float, them: Float)] = []
     private var confirmedUpTo = 0
@@ -97,14 +101,14 @@ actor WhisperMeetingTranscriber: MeetingTranscriber {
     private func pass(final: Bool) async {
         guard let whisper, !isDecoding else { return }
         let start = confirmedUpTo
-        let end = mixed.count
+        let end = mixedOffset + mixed.count
         let pending = end - start
         guard pending >= Self.minimumPass || (final && pending > Self.sampleRate / 2) else { return }
 
         isDecoding = true
         defer { isDecoding = false }
 
-        let window = Array(mixed[start..<end])
+        let window = Array(mixed[(start - mixedOffset)..<(end - mixedOffset)])
         var options = decodingOptions()
         if window.count > 30 * Self.sampleRate {
             options.chunkingStrategy = .vad
@@ -144,6 +148,10 @@ actor WhisperMeetingTranscriber: MeetingTranscriber {
             // A whole window of nothing worth keeping: silence, or noise
             // whisper declined. Move on rather than re-decoding it forever.
             confirmedUpTo = end
+        }
+        if confirmedUpTo > mixedOffset {
+            mixed.removeFirst(min(mixed.count, confirmedUpTo - mixedOffset))
+            mixedOffset = confirmedUpTo
         }
 
         if !confirmWhole, let tail = segments.last {
