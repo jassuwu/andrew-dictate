@@ -125,6 +125,8 @@ struct AboutView: View {
                 .help(
                     "FluidAudio: Apache-2.0 · "
                         + "parakeet weights: CC-BY-4.0 · "
+                        + "WhisperKit: MIT · "
+                        + "whisper weights: MIT · "
                         + "this app: MIT"
                 )
 
@@ -174,11 +176,17 @@ struct AboutView: View {
     private var creditsMarkdown: AttributedString {
         let markdown =
             "built on [FluidAudio]"
-            + "(https://github.com/FluidInference/FluidAudio) "
-            + "and [NVIDIA's parakeet]"
-            + "(https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2)"
+            + "(https://github.com/FluidInference/FluidAudio), "
+            + "[parakeet]"
+            + "(https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2), "
+            + "[WhisperKit]"
+            + "(https://github.com/argmaxinc/WhisperKit) "
+            + "and [whisper]"
+            + "(https://github.com/openai/whisper)"
         return (try? AttributedString(markdown: markdown))
-            ?? AttributedString("built on FluidAudio and parakeet")
+            ?? AttributedString(
+                "built on FluidAudio, parakeet, WhisperKit and whisper"
+            )
     }
 
     private var signatureMarkdown: AttributedString {
