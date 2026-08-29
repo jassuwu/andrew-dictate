@@ -49,6 +49,10 @@ final class OnboardingWindowController:
     NSWindowController,
     NSWindowDelegate
 {
+    /// which jobs this window was built for; a different ask needs a
+    /// different window.
+    let scope: OnboardingScope
+
     private weak var coordinator: DictationCoordinator?
 
     /// `scope` and the two meeting closures are the whole seam: the coordinator
@@ -65,6 +69,7 @@ final class OnboardingWindowController:
                 OnboardingMeetingSetup.stubbedMeetingModelPreparation
     ) {
         self.coordinator = coordinator
+        self.scope = scope
 
         let resizer = OnboardingWindowResizer()
         let rootView = OnboardingView(

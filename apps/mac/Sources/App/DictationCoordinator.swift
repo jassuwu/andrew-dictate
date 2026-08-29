@@ -156,6 +156,15 @@ final class DictationCoordinator: ObservableObject {
     /// one place that knows whether anything actually reached the page.
     private var pendingArchiveText: (heard: String, inserted: String)?
     private var wordFixerWindowController: WordFixerWindowController?
+
+    // MARK: meetings (ADR 0023, 0040)
+    let meetings: MeetingCoordinator
+    let liveTranscript = LiveTranscriptModel(app: "", elapsed: .zero)
+    @Published private(set) var meetingModelDownloads: [MeetingModel: Double] = [:]
+    @Published private(set) var isLiveTranscriptShown = false
+    private let meetingNotifier = MeetingNudgeNotifier()
+    private var liveTranscriptPanel: LiveTranscriptPanel?
+    private var meetingCancellables: Set<AnyCancellable> = []
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
     private var distributedNotificationObservers: [NSObjectProtocol] = []
 
@@ -190,6 +199,18 @@ final class DictationCoordinator: ObservableObject {
         }
         audioRecorder = recorder
         feedbackSounds = FeedbackSounds(settings: settings)
+        meetings = MeetingCoordinator(
+            source: CoreAudioMeetingSource(),
+            makeTranscriber: { try await MeetingEngines.makeTranscriber(for: $0) },
+            diarizer: MeetingEngines.makeDiarizer(),
+            preferences: {
+                MeetingPreferences(
+                    folder: settings.meetingsFolder,
+                    hook: settings.meetingHook,
+                    model: settings.meetingModel
+                )
+            }
+        )
 
         let viewModel = HUDViewModel(
             state: .prewarming,
@@ -258,6 +279,7 @@ final class DictationCoordinator: ObservableObject {
             .store(in: &settingsCancellables)
 
         installSystemLifecycleObservers()
+        wireMeetings()
 
         // a build that doesn't keep the lab must also not inherit the log an
         // earlier version wrote — the toggle-less transcript file goes.
@@ -418,8 +440,8 @@ final class DictationCoordinator: ObservableObject {
         presentOnboarding()
     }
 
-    func runOnboardingAgain() {
-        presentOnboarding()
+    func runOnboardingAgain(scope: OnboardingScope = .everything) {
+        presentOnboarding(scope: scope)
     }
 
     func finishOnboarding() {
@@ -512,17 +534,30 @@ final class DictationCoordinator: ObservableObject {
         await transcriptionEngine.unloadModels()
     }
 
-    private func presentOnboarding() {
+    private func presentOnboarding(scope: OnboardingScope = .everything) {
         isOnboardingPresented = true
         hotkeyMonitor.setDetectionOnly(true)
         withHUDPanel { $0.dismiss() }
 
+        // a cached window keeps the scope it was built with; a different
+        // scope means a different window.
         if let onboardingWindowController {
-            onboardingWindowController.present()
-            return
+            if onboardingWindowController.scope == scope {
+                onboardingWindowController.present()
+                return
+            }
+            onboardingWindowController.close()
+            self.onboardingWindowController = nil
         }
 
-        let controller = OnboardingWindowController(coordinator: self)
+        let controller = OnboardingWindowController(
+            coordinator: self,
+            scope: scope,
+            proveSystemAudio: { await CoreAudioMeetingSource.proveSystemAudio() },
+            prepareMeetingModel: { [weak self] progress in
+                await self?.prepareMeetingModel(progress: progress) ?? false
+            }
+        )
         onboardingWindowController = controller
         controller.present()
     }
@@ -1027,6 +1062,13 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func beginRecording() {
+        // ADR 0023: refused during a meeting, and it says why. you started
+        // the recording, so a dead hotkey is not a mystery — but a silent
+        // one would still be spec §4's forbidden shape.
+        if meetings.dictationResponse == .refuseAndSayWhy {
+            flashNotice("recording a meeting — stop it to dictate", duration: 2)
+            return
+        }
         if state == .transcribing {
             invalidatePipeline()
             setState(.idle)
@@ -1663,5 +1705,113 @@ final class DictationCoordinator: ObservableObject {
                     .accessibilityDisplayShouldReduceMotion
             )
         }
+    }
+}
+
+// MARK: - meetings
+
+extension DictationCoordinator {
+    var installedMeetingModels: Set<MeetingModel> {
+        MeetingEngines.installed()
+    }
+
+    var meetingAppName: String {
+        meetings.app.map(MeetingApps.displayName) ?? ""
+    }
+
+    /// `record a meeting ▸ zoom`. the model is a download you may not have
+    /// asked for yet: then this is the route back to the one surface that
+    /// knows how to ask (SPEC §5).
+    func startMeeting(_ app: RunningApp) {
+        guard !meetings.isRecording else { return }
+        guard installedMeetingModels.contains(settings.meetingModel) else {
+            runOnboardingAgain(scope: .meetingsOnly)
+            return
+        }
+        if state == .recording {
+            flashNotice("finish dictating first")
+            return
+        }
+        liveTranscript.clear()
+        liveTranscript.app = MeetingApps.displayName(app)
+        liveTranscript.elapsed = .zero
+        Task { [meetingNotifier] in
+            await meetingNotifier.requestPermissionIfNeeded()
+        }
+        meetings.start(tapping: app)
+    }
+
+    func stopMeeting() {
+        meetingNotifier.withdraw()
+        meetings.stop()
+    }
+
+    func toggleLiveTranscript() {
+        let panel = liveTranscriptPanel ?? LiveTranscriptPanel(model: liveTranscript)
+        liveTranscriptPanel = panel
+        panel.toggle()
+        isLiveTranscriptShown = panel.isShown
+    }
+
+    private func wireMeetings() {
+        meetings.onEvent = { [weak self] event in
+            self?.handle(event)
+        }
+        meetings.onLine = { [weak self] line in
+            self?.liveTranscript.upsert(line)
+        }
+        meetings.recordHookRun = { [weak self] run in
+            self?.settings.meetingHookLastRunAt = run.finishedAt
+            self?.settings.meetingHookLastRunLabel = run.outcome.label
+        }
+        meetings.$elapsed
+            .sink { [weak self] elapsed in
+                self?.liveTranscript.elapsed = elapsed
+            }
+            .store(in: &meetingCancellables)
+        meetingNotifier.onKeepGoing = { [weak self] in
+            self?.meetings.keepGoing()
+        }
+        meetingNotifier.onStop = { [weak self] in
+            self?.stopMeeting()
+        }
+        meetings.recoverOrphans()
+    }
+
+    private func handle(_ event: MeetingEvent) {
+        switch event {
+        case .started:
+            if LiveTranscriptPanel.wasOpenLastTime, !isLiveTranscriptShown {
+                toggleLiveTranscript()
+            }
+        case .nudge:
+            meetingNotifier.ask(app: meetingAppName, quietFor: meetings.thresholds.quietNudgeAfter)
+        case .saved, .nothingToKeep:
+            liveTranscriptPanel?.dismissKeepingPreference()
+            isLiveTranscriptShown = false
+        case .cannotHear, .gapBegan, .gapEnded, .writingItOut, .hookFailed:
+            break
+        }
+
+        if let text = event.hudText {
+            let duration: TimeInterval
+            switch event {
+            case .cannotHear, .hookFailed: duration = 4
+            case .writingItOut: duration = 6
+            default: duration = 2
+            }
+            flashNotice(text, duration: duration)
+        }
+    }
+
+    private func prepareMeetingModel(progress: @escaping @Sendable (Double) -> Void) async -> Bool {
+        let model = settings.meetingModel
+        meetingModelDownloads[model] = 0
+        let ok = await MeetingEngines.prepare(model) { [weak self] value in
+            progress(value)
+            Task { @MainActor in self?.meetingModelDownloads[model] = value }
+        }
+        meetingModelDownloads[model] = nil
+        return ok
     }
 }
