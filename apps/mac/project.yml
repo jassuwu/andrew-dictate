@@ -86,6 +86,7 @@ targets:
       - Sources/Archive/MeetingSession.swift
       - Sources/Archive/ArchiveBrowserViewModel.swift
       - Sources/About/UpdateCheck.swift
+      - Sources/Meetings
       - Sources/App/AppIdentity.swift
       - Sources/App/Capabilities.swift
       - Sources/App/RemovalPlan.swift
