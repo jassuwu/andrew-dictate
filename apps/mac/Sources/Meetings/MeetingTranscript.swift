@@ -208,16 +208,17 @@ enum MeetingTranscriptFile {
         fileManager: FileManager = .default
     ) -> [MeetingSummary] {
         let folder = parent.appendingPathComponent(folderName, isDirectory: true)
-        guard let enumerator = fileManager.enumerator(
-            at: folder,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else {
+        // Relative paths, joined back onto `folder`: the URL-based enumerator
+        // resolves symlinks (/private/var/…) and the result would never equal
+        // the URL `write` handed out a moment ago.
+        guard let enumerator = fileManager.enumerator(atPath: folder.path) else {
             return []
         }
 
         var found: [MeetingSummary] = []
-        for case let url as URL in enumerator where url.pathExtension == "md" {
+        for case let relative as String in enumerator
+        where relative.hasSuffix(".md") && !relative.hasPrefix(".") {
+            let url = folder.appendingPathComponent(relative, isDirectory: false)
             if let summary = try? summary(of: url) {
                 found.append(summary)
             }
