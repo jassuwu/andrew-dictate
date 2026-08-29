@@ -1756,10 +1756,17 @@ extension DictationCoordinator {
     }
 
     func toggleLiveTranscript() {
-        let panel = liveTranscriptPanel ?? LiveTranscriptPanel(model: liveTranscript)
-        liveTranscriptPanel = panel
+        let panel = liveTranscriptPanel ?? makeLiveTranscriptPanel()
         panel.toggle()
-        isLiveTranscriptShown = panel.isShown
+    }
+
+    private func makeLiveTranscriptPanel() -> LiveTranscriptPanel {
+        let panel = LiveTranscriptPanel(model: liveTranscript)
+        panel.onVisibilityChange = { [weak self] shown in
+            self?.isLiveTranscriptShown = shown
+        }
+        liveTranscriptPanel = panel
+        return panel
     }
 
     private func wireMeetings() {
@@ -1795,17 +1802,16 @@ extension DictationCoordinator {
             }
         case .nudge:
             meetingNotifier.ask(app: meetingAppName, quietFor: meetings.thresholds.quietNudgeAfter)
-        case .saved, .nothingToKeep:
+        case .saved, .nothingToKeep, .saveFailed, .engineFailed:
             liveTranscriptPanel?.dismissKeepingPreference()
-            isLiveTranscriptShown = false
-        case .cannotHear, .gapBegan, .gapEnded, .writingItOut, .hookFailed, .engineFailed:
+        case .cannotHear, .gapBegan, .gapEnded, .writingItOut, .hookFailed:
             break
         }
 
         if let text = event.hudText {
             let duration: TimeInterval
             switch event {
-            case .cannotHear, .hookFailed, .engineFailed: duration = 4
+            case .cannotHear, .hookFailed, .engineFailed, .saveFailed: duration = 4
             case .writingItOut: duration = 6
             default: duration = 2
             }

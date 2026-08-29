@@ -30,6 +30,10 @@ final class LiveTranscriptPanel: NSObject, NSWindowDelegate {
     /// part of the screen edge.
     private static let screenMargin: CGFloat = 24
 
+    /// Told on every show and hide, including the close button — the menu's
+    /// "hide live transcript" must not outlive the panel.
+    var onVisibilityChange: ((Bool) -> Void)?
+
     private let panel: NSPanel
     private let defaults: UserDefaults
 
@@ -91,11 +95,13 @@ final class LiveTranscriptPanel: NSObject, NSWindowDelegate {
         // meeting it is transcribing.
         panel.orderFrontRegardless()
         remember(true)
+        onVisibilityChange?(true)
     }
 
     func hide() {
         panel.orderOut(nil)
         remember(false)
+        onVisibilityChange?(false)
     }
 
     /// The meeting ended: the panel goes, the preference stays. Whoever left
@@ -104,6 +110,7 @@ final class LiveTranscriptPanel: NSObject, NSWindowDelegate {
         panel.delegate = nil
         panel.orderOut(nil)
         panel.delegate = self
+        onVisibilityChange?(false)
     }
 
     func toggle() {
@@ -120,6 +127,7 @@ final class LiveTranscriptPanel: NSObject, NSWindowDelegate {
     /// has to be recorded the same as choosing hide from the menu.
     func windowWillClose(_ notification: Notification) {
         remember(false)
+        onVisibilityChange?(false)
     }
 
     private func remember(_ isOpen: Bool) {
