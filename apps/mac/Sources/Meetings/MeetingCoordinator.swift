@@ -79,15 +79,20 @@ final class MeetingCoordinator: ObservableObject {
     @Published private(set) var liveLines: [LiveLine] = []
 
     var onEvent: (@MainActor (MeetingEvent) -> Void)?
+    var onLine: (@MainActor (LiveLine) -> Void)?
     var recordHookRun: (@MainActor (HookRun) -> Void)?
 
+    let thresholds: MeetingThresholds
+
     private let source: any MeetingAudioSource
-    private let transcriber: any MeetingTranscriber
+    /// One transcriber per meeting, built for the model chosen at the time —
+    /// the setting can change between meetings, not during one.
+    private let makeTranscriber: @Sendable (MeetingModel) async throws -> any MeetingTranscriber
+    private var transcriber: (any MeetingTranscriber)?
     private let diarizer: any MeetingDiarizer
     private let spool: MeetingSpool
     private let preferences: @MainActor () -> MeetingPreferences
     private let hookRunner: HookRunner
-    private let thresholds: MeetingThresholds
     private let logger = Logger(subsystem: AppIdentity.loggingSubsystem, category: "meeting")
 
     private var session: MeetingSession
@@ -102,7 +107,7 @@ final class MeetingCoordinator: ObservableObject {
 
     init(
         source: any MeetingAudioSource,
-        transcriber: any MeetingTranscriber,
+        makeTranscriber: @escaping @Sendable (MeetingModel) async throws -> any MeetingTranscriber,
         diarizer: any MeetingDiarizer,
         spool: MeetingSpool = MeetingSpool(),
         hookRunner: HookRunner = HookRunner(logURL: HookRunner.defaultLogURL),
@@ -110,7 +115,7 @@ final class MeetingCoordinator: ObservableObject {
         preferences: @escaping @MainActor () -> MeetingPreferences
     ) {
         self.source = source
-        self.transcriber = transcriber
+        self.makeTranscriber = makeTranscriber
         self.diarizer = diarizer
         self.spool = spool
         self.hookRunner = hookRunner
@@ -153,8 +158,10 @@ final class MeetingCoordinator: ObservableObject {
                     engine: prefs.model.rawValue, model: prefs.model))
                 self.handle = handle
                 audioFile = try SpoolAudioFile(url: handle.audioURL)
+                let transcriber = try await makeTranscriber(prefs.model)
+                self.transcriber = transcriber
                 try await transcriber.begin()
-                listenForLines()
+                listenForLines(transcriber)
                 let chunks = try await source.start(tapping: app)
                 for await chunk in chunks {
                     guard !Task.isCancelled else { break }
@@ -195,7 +202,8 @@ final class MeetingCoordinator: ObservableObject {
             }
 
             onEvent?(.writingItOut)
-            let turns = await transcriber.finish()
+            let turns = await transcriber?.finish() ?? []
+            transcriber = nil
             audioFile = nil
             await finish(
                 turns: turns, recording: recording, handle: handle,
@@ -264,7 +272,7 @@ final class MeetingCoordinator: ObservableObject {
         }
 
         if session.state == .recording || session.state == .rebuilding {
-            await transcriber.feed(chunk)
+            await transcriber?.feed(chunk)
         }
 
         if !nudgePending, session.shouldNudge(at: elapsed) {
@@ -292,16 +300,16 @@ final class MeetingCoordinator: ObservableObject {
         }
     }
 
-    private func listenForLines() {
+    private func listenForLines(_ transcriber: any MeetingTranscriber) {
         linesTask = Task { [weak self] in
-            guard let self else { return }
             for await line in transcriber.lines {
-                guard !Task.isCancelled else { break }
+                guard let self, !Task.isCancelled else { break }
                 if let i = liveLines.firstIndex(where: { $0.id == line.id }) {
                     liveLines[i] = line
                 } else {
                     liveLines.append(line)
                 }
+                onLine?(line)
             }
         }
     }
@@ -377,6 +385,7 @@ final class MeetingCoordinator: ObservableObject {
         let duration = Duration.seconds(
             Double(max(audio.you.count, audio.them.count)) / MeetingAudioChunk.sampleRate)
         do {
+            let transcriber = try await makeTranscriber(manifest.model)
             let turns = try await transcriber.transcribe(you: audio.you, them: audio.them)
             await finish(
                 turns: turns,

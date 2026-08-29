@@ -34,7 +34,7 @@ final class MeetingCoordinatorTests: XCTestCase {
         let folder = dir.appendingPathComponent("docs")
         let c = MeetingCoordinator(
             source: source,
-            transcriber: transcriber,
+            makeTranscriber: { [transcriber] _ in transcriber! },
             diarizer: FakeDiarizer(),
             spool: MeetingSpool(root: dir.appendingPathComponent("spool")),
             hookRunner: HookRunner(logURL: dir.appendingPathComponent("hooks.log")),
