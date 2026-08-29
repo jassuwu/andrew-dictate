@@ -1,6 +1,20 @@
 import XCTest
 
 final class OnboardingStateTests: XCTestCase {
+    /// Both jobs are ticked out of the box, so a test about the dictation
+    /// half has to say so — otherwise it is testing both.
+    private func dictationOnly() -> OnboardingState {
+        var state = OnboardingState()
+        XCTAssertTrue(state.setMeetingsSelected(false))
+        return state
+    }
+
+    private func meetingsOnlyByChoice() -> OnboardingState {
+        var state = OnboardingState()
+        XCTAssertTrue(state.setDictationSelected(false))
+        return state
+    }
+
     func testSingleConsentIsTheOnlySetupStartSignal() {
         var state = OnboardingState()
         var setupStartCount = 0
@@ -21,11 +35,70 @@ final class OnboardingStateTests: XCTestCase {
         XCTAssertEqual(state.accessibilityStatus, .actionRequired)
     }
 
-    func testAutoFinishArmsOnlyWhenAllThreeRowsAreReady() {
+    // MARK: - both jobs are the default
+
+    func testBothJobsAreOnUntilSomebodySaysOtherwise() {
+        let state = OnboardingState()
+
+        XCTAssertEqual(state.scope, .everything)
+        XCTAssertTrue(state.dictationSelected)
+        XCTAssertTrue(state.meetingsSelected)
+        XCTAssertEqual(state.jobs.downloadSize, "~1.1 gb")
+    }
+
+    func testBothJobsNeedAllFiveRows() {
+        var state = OnboardingState()
+        _ = state.consentToSetup()
+        state.updateMicrophoneStatus(.ready)
+        state.updateAccessibility(granted: true)
+        state.updateModelStatus(.ready)
+
+        XCTAssertFalse(
+            state.autoFinishArmed,
+            "the dictation three are not the whole checklist any more"
+        )
+
+        state.updateSystemAudioStatus(.ready)
+        XCTAssertFalse(state.autoFinishArmed)
+
+        state.updateMeetingModelStatus(.ready)
+        XCTAssertTrue(state.autoFinishArmed)
+        XCTAssertTrue(state.finishAutomatically())
+    }
+
+    /// Each of the five rows, dropped one at a time: any one of them missing
+    /// keeps the card open.
+    func testAnyMissingRowOfEitherJobDisarmsAutoFinish() {
+        let drops: [(String, (inout OnboardingState) -> Void)] = [
+            ("microphone", { $0.updateMicrophoneStatus(.pending) }),
+            ("accessibility", { $0.updateAccessibility(granted: false) }),
+            ("model", { $0.updateModelStatus(.pending) }),
+            ("system audio", { $0.updateSystemAudioStatus(.pending) }),
+            ("meeting model", { $0.updateMeetingModelStatus(.pending) }),
+        ]
+
+        for (name, drop) in drops {
+            var state = OnboardingState()
+            state.updateMicrophoneStatus(.ready)
+            state.updateAccessibility(granted: true)
+            state.updateModelStatus(.ready)
+            state.updateSystemAudioStatus(.ready)
+            state.updateMeetingModelStatus(.ready)
+            XCTAssertTrue(state.autoFinishArmed, name)
+
+            drop(&state)
+
+            XCTAssertFalse(state.autoFinishArmed, name)
+        }
+    }
+
+    // MARK: - one job, one checklist
+
+    func testDictationOnlyStillArmsOnTheOldThree() {
         for microphoneReady in [false, true] {
             for accessibilityReady in [false, true] {
                 for modelReady in [false, true] {
-                    var state = OnboardingState()
+                    var state = dictationOnly()
                     _ = state.consentToSetup()
                     state.updateMicrophoneStatus(
                         microphoneReady ? .ready : .pending
@@ -55,8 +128,78 @@ final class OnboardingStateTests: XCTestCase {
         }
     }
 
-    func testDeniedMicrophoneKeepsCardOpenWithSettingsStatus() {
+    /// The meeting rows are not the dictation rows: no accessibility, no
+    /// dictation model, and system audio instead.
+    func testMeetingsOnlyArmsOnMicSystemAudioAndItsOwnModel() {
+        var state = meetingsOnlyByChoice()
+        _ = state.consentToSetup()
+        state.updateMicrophoneStatus(.ready)
+        state.updateSystemAudioStatus(.ready)
+        state.updateMeetingModelStatus(.ready)
+
+        XCTAssertTrue(state.autoFinishArmed)
+        XCTAssertEqual(
+            state.accessibilityStatus,
+            .pending,
+            "meetings never ask for accessibility, so it is never demanded"
+        )
+        XCTAssertEqual(state.modelStatus, .pending)
+        XCTAssertTrue(state.finishAutomatically())
+    }
+
+    func testNoJobSelectedIsNeverArmed() {
         var state = OnboardingState()
+        XCTAssertTrue(state.setDictationSelected(false))
+        XCTAssertTrue(state.setMeetingsSelected(false))
+
+        state.updateMicrophoneStatus(.ready)
+        state.updateAccessibility(granted: true)
+        state.updateModelStatus(.ready)
+        state.updateSystemAudioStatus(.ready)
+        state.updateMeetingModelStatus(.ready)
+
+        XCTAssertFalse(state.autoFinishArmed)
+        XCTAssertFalse(state.finishAutomatically())
+        XCTAssertEqual(state.jobs.downloadSize, "")
+    }
+
+    // MARK: - the ticks are asked once
+
+    func testTicksAreRefusedOnceSetupHasStarted() {
+        var state = OnboardingState()
+        XCTAssertTrue(state.setMeetingsSelected(false))
+        XCTAssertTrue(state.consentToSetup())
+
+        XCTAssertFalse(state.setMeetingsSelected(true))
+        XCTAssertFalse(state.setDictationSelected(false))
+        XCTAssertTrue(state.dictationSelected)
+        XCTAssertFalse(state.meetingsSelected)
+    }
+
+    func testMeetingsOnlyScopeForcesTheJobsAndRefusesChanges() {
+        var state = OnboardingState(scope: .meetingsOnly)
+
+        XCTAssertFalse(state.dictationSelected)
+        XCTAssertTrue(state.meetingsSelected)
+
+        XCTAssertFalse(state.setDictationSelected(true))
+        XCTAssertFalse(state.setMeetingsSelected(false))
+        XCTAssertFalse(state.dictationSelected)
+        XCTAssertTrue(state.meetingsSelected)
+    }
+
+    func testMeetingsOnlyConsentDoesNotDemandAccessibility() {
+        var state = OnboardingState(scope: .meetingsOnly)
+
+        XCTAssertTrue(state.consentToSetup())
+
+        XCTAssertEqual(state.accessibilityStatus, .pending)
+    }
+
+    // MARK: - the rest of the card
+
+    func testDeniedMicrophoneKeepsCardOpenWithSettingsStatus() {
+        var state = dictationOnly()
         _ = state.consentToSetup()
         state.updateMicrophoneStatus(.actionRequired)
         state.updateAccessibility(granted: true)
@@ -79,7 +222,7 @@ final class OnboardingStateTests: XCTestCase {
     }
 
     func testAllGreenRelaunchAutoFinishesWithoutSetupRetrigger() {
-        var state = OnboardingState()
+        var state = dictationOnly()
         var setupStartCount = 0
         state.updateMicrophoneStatus(.ready)
         state.updateAccessibility(granted: true)
@@ -98,7 +241,7 @@ final class OnboardingStateTests: XCTestCase {
     }
 
     func testLosingReadinessDisarmsAutoFinish() {
-        var state = OnboardingState()
+        var state = dictationOnly()
         state.updateMicrophoneStatus(.ready)
         state.updateAccessibility(granted: true)
         state.updateModelStatus(.ready)
@@ -112,7 +255,7 @@ final class OnboardingStateTests: XCTestCase {
     }
 
     func testWhileYouWaitAppearsAfterConsentAndStaysThroughReadiness() {
-        var state = OnboardingState()
+        var state = dictationOnly()
         state.updateMicrophoneStatus(.ready)
         state.updateAccessibility(granted: true)
         state.updateModelStatus(.pending)
@@ -128,7 +271,7 @@ final class OnboardingStateTests: XCTestCase {
     }
 
     func testWhileYouWaitNeverAppearsWhenModelWasReadyAtConsent() {
-        var state = OnboardingState()
+        var state = dictationOnly()
         state.updateMicrophoneStatus(.ready)
         state.updateAccessibility(granted: true)
         state.updateModelStatus(.ready)
@@ -136,5 +279,15 @@ final class OnboardingStateTests: XCTestCase {
         XCTAssertTrue(state.consentToSetup())
         XCTAssertFalse(state.whileYouWaitVisible)
         XCTAssertTrue(state.autoFinishArmed)
+    }
+
+    /// The meeting model is a download too, so it earns the panel on its own.
+    func testWhileYouWaitAppearsForAPendingMeetingModel() {
+        var state = meetingsOnlyByChoice()
+        state.updateMicrophoneStatus(.ready)
+        state.updateMeetingModelStatus(.pending)
+
+        XCTAssertTrue(state.consentToSetup())
+        XCTAssertTrue(state.whileYouWaitVisible)
     }
 }

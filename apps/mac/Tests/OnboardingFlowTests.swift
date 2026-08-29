@@ -68,19 +68,156 @@ final class OnboardingFlowTests: XCTestCase {
 
     // MARK: - the copy
 
+    private static let everySelection: [OnboardingJobs] = [
+        OnboardingJobs(dictation: true, meetings: true),
+        OnboardingJobs(dictation: true, meetings: false),
+        OnboardingJobs(dictation: false, meetings: true),
+        OnboardingJobs(dictation: false, meetings: false),
+        OnboardingJobs(
+            scope: .meetingsOnly,
+            dictation: false,
+            meetings: true
+        ),
+    ]
+
     /// Length, not punctuation: "hold fn, talk, let go. the text lands where
     /// your cursor is." is two sentences and one idea. Seventy characters is
     /// about two lines in a window this narrow.
     func testEveryScreenSaysWhyBriefly() {
-        for step in OnboardingStep.allCases {
-            XCTAssertFalse(step.reason.isEmpty, "\(step)")
-            XCTAssertLessThanOrEqual(
-                step.reason.count,
-                70,
-                "\(step): \"\(step.reason)\" is long enough to be its own screen"
-            )
-            XCTAssertFalse(step.actionTitle.isEmpty, "\(step)")
-            XCTAssertLessThanOrEqual(step.actionTitle.count, 24, "\(step)")
+        for jobs in Self.everySelection {
+            for step in OnboardingStep.allCases {
+                let reason = step.reason(for: jobs)
+                XCTAssertFalse(reason.isEmpty, "\(step) \(jobs)")
+                XCTAssertLessThanOrEqual(
+                    reason.count,
+                    70,
+                    "\(step): \"\(reason)\" is long enough to be its own screen"
+                )
+                XCTAssertFalse(
+                    step.title(for: jobs).isEmpty,
+                    "\(step) \(jobs)"
+                )
+            }
         }
+    }
+
+    /// The button on the first card carries a price, so it is allowed to be
+    /// longer than the two words that follow it.
+    func testTheButtonsAreShortExceptTheOneThatQuotesAPrice() {
+        for jobs in Self.everySelection {
+            XCTAssertLessThanOrEqual(
+                OnboardingStep.hello.actionTitle(for: jobs).count,
+                34,
+                "\(jobs)"
+            )
+            for step in [OnboardingStep.model, .permissions] {
+                let title = step.actionTitle(for: jobs)
+                XCTAssertFalse(title.isEmpty, "\(step)")
+                XCTAssertLessThanOrEqual(title.count, 24, "\(step)")
+            }
+        }
+    }
+
+    /// One model or two — the plural is the tell that both jobs are ticked.
+    func testTheModelScreenCountsTheModels() {
+        XCTAssertEqual(
+            OnboardingStep.model.title(
+                for: OnboardingJobs(dictation: true, meetings: true)
+            ),
+            "the speech models"
+        )
+        XCTAssertEqual(
+            OnboardingStep.model.title(
+                for: OnboardingJobs(dictation: true, meetings: false)
+            ),
+            "the speech model"
+        )
+        XCTAssertEqual(
+            OnboardingStep.model.title(
+                for: OnboardingJobs(dictation: false, meetings: true)
+            ),
+            "the speech model"
+        )
+    }
+
+    /// Microphone is both jobs'; accessibility is dictation's and system
+    /// audio is meetings'. So two, three, or two again.
+    func testThePermissionScreenCountsWhatEachJobNeeds() {
+        let both = OnboardingJobs(dictation: true, meetings: true)
+        XCTAssertEqual(
+            both.permissions,
+            ["microphone", "accessibility", "system audio"]
+        )
+        XCTAssertEqual(
+            OnboardingStep.permissions.title(for: both),
+            "three permissions"
+        )
+
+        let dictation = OnboardingJobs(dictation: true, meetings: false)
+        XCTAssertEqual(dictation.permissions, ["microphone", "accessibility"])
+        XCTAssertEqual(
+            OnboardingStep.permissions.title(for: dictation),
+            "two permissions"
+        )
+
+        let meetings = OnboardingJobs(dictation: false, meetings: true)
+        XCTAssertEqual(meetings.permissions, ["microphone", "system audio"])
+        XCTAssertEqual(
+            OnboardingStep.permissions.title(for: meetings),
+            "two permissions"
+        )
+    }
+
+    /// Reopened from `record a meeting`, this window is one errand, and says
+    /// so instead of introducing an app you already have.
+    func testMeetingsOnlySaysHelloAsAnErrand() {
+        let meetingsOnly = OnboardingJobs(
+            scope: .meetingsOnly,
+            dictation: false,
+            meetings: true
+        )
+
+        XCTAssertEqual(
+            OnboardingStep.hello.title(for: meetingsOnly),
+            "set up meeting recording"
+        )
+        XCTAssertEqual(
+            OnboardingStep.hello.actionTitle(for: meetingsOnly),
+            "set up meeting recording (~650 mb)"
+        )
+        XCTAssertEqual(
+            OnboardingStep.permissions.title(for: meetingsOnly),
+            "two permissions"
+        )
+    }
+
+    /// Nothing downloads before the click, so the click says what it will
+    /// cost — and reprices the moment a tick changes.
+    func testTheButtonPricesWhatTheClickWillDownload() {
+        XCTAssertEqual(
+            OnboardingStep.hello.actionTitle(
+                for: OnboardingJobs(dictation: true, meetings: true)
+            ),
+            "set up andrew dictate (~1.1 gb)"
+        )
+        XCTAssertEqual(
+            OnboardingStep.hello.actionTitle(
+                for: OnboardingJobs(dictation: true, meetings: false)
+            ),
+            "set up andrew dictate (~460 mb)"
+        )
+        XCTAssertEqual(
+            OnboardingStep.hello.actionTitle(
+                for: OnboardingJobs(dictation: false, meetings: true)
+            ),
+            "set up andrew dictate (~650 mb)"
+        )
+        XCTAssertEqual(
+            OnboardingStep.hello.actionTitle(
+                for: OnboardingJobs(dictation: false, meetings: false)
+            ),
+            "set up andrew dictate",
+            "nothing ticked is nothing to price"
+        )
     }
 }
