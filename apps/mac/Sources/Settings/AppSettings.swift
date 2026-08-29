@@ -161,6 +161,90 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// which model listens to meetings — its own pick, not dictation's
+    /// (ADR 0040). the two jobs want opposite things and the cards say so.
+    @Published var meetingModel: MeetingModel {
+        didSet {
+            guard meetingModel != oldValue else {
+                return
+            }
+            userDefaults.set(
+                meetingModel.rawValue,
+                forKey: Self.meetingModelKey
+            )
+        }
+    }
+
+    /// the parent folder meetings are written under; the app makes
+    /// `meetings/<year-month>/` inside it. a real folder you can open in
+    /// finder, because the file *is* the artifact (SPEC §11).
+    @Published var meetingsFolder: URL {
+        didSet {
+            guard meetingsFolder != oldValue else {
+                return
+            }
+            userDefaults.set(
+                meetingsFolder.path(percentEncoded: false),
+                forKey: Self.meetingsFolderKey
+            )
+        }
+    }
+
+    /// one executable run detached after a transcript is closed, or nil.
+    @Published var meetingHook: URL? {
+        didSet {
+            guard meetingHook != oldValue else {
+                return
+            }
+            if let meetingHook {
+                userDefaults.set(
+                    meetingHook.path(percentEncoded: false),
+                    forKey: Self.meetingHookKey
+                )
+            } else {
+                userDefaults.removeObject(forKey: Self.meetingHookKey)
+            }
+        }
+    }
+
+    /// when the hook last ran, and how it went — "ok", "exit 3". kept
+    /// because a hook that failed silently is a hook nobody can fix.
+    @Published var meetingHookLastRunAt: Date? {
+        didSet {
+            guard meetingHookLastRunAt != oldValue else {
+                return
+            }
+            if let meetingHookLastRunAt {
+                userDefaults.set(
+                    meetingHookLastRunAt,
+                    forKey: Self.meetingHookLastRunAtKey
+                )
+            } else {
+                userDefaults.removeObject(
+                    forKey: Self.meetingHookLastRunAtKey
+                )
+            }
+        }
+    }
+
+    @Published var meetingHookLastRunLabel: String? {
+        didSet {
+            guard meetingHookLastRunLabel != oldValue else {
+                return
+            }
+            if let meetingHookLastRunLabel {
+                userDefaults.set(
+                    meetingHookLastRunLabel,
+                    forKey: Self.meetingHookLastRunLabelKey
+                )
+            } else {
+                userDefaults.removeObject(
+                    forKey: Self.meetingHookLastRunLabelKey
+                )
+            }
+        }
+    }
+
     @Published private(set) var totalWordsDictated: Int {
         didSet {
             guard totalWordsDictated != oldValue else {
@@ -186,6 +270,20 @@ final class AppSettings: ObservableObject {
     private static let cleanupEnabledKey = "AndrewDictate.cleanupEnabled"
     private static let totalWordsDictatedKey =
         "AndrewDictate.totalWordsDictated"
+    private static let meetingModelKey = "AndrewDictate.meetingModel"
+    private static let meetingsFolderKey = "AndrewDictate.meetingsFolder"
+    private static let meetingHookKey = "AndrewDictate.meetingHook"
+    private static let meetingHookLastRunAtKey =
+        "AndrewDictate.meetingHookLastRunAt"
+    private static let meetingHookLastRunLabelKey =
+        "AndrewDictate.meetingHookLastRunLabel"
+
+    /// `~/Documents/andrew-dictate` — no spaces anywhere the app creates
+    /// a path, so a hook can be a one-line shell script (SPEC §11).
+    static let defaultMeetingsFolder: URL = FileManager.default
+        .homeDirectoryForCurrentUser
+        .appendingPathComponent("Documents", isDirectory: true)
+        .appendingPathComponent("andrew-dictate", isDirectory: true)
 
     private let userDefaults: UserDefaults
 
@@ -229,6 +327,21 @@ final class AppSettings: ObservableObject {
             0,
             userDefaults.integer(forKey: Self.totalWordsDictatedKey)
         )
+
+        meetingModel = userDefaults
+            .string(forKey: Self.meetingModelKey)
+            .flatMap(MeetingModel.init(rawValue:)) ?? .whisperLargeV3Turbo
+        meetingsFolder = userDefaults
+            .string(forKey: Self.meetingsFolderKey)
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? Self.defaultMeetingsFolder
+        meetingHook = userDefaults
+            .string(forKey: Self.meetingHookKey)
+            .map { URL(fileURLWithPath: $0) }
+        meetingHookLastRunAt = userDefaults
+            .object(forKey: Self.meetingHookLastRunAtKey) as? Date
+        meetingHookLastRunLabel = userDefaults
+            .string(forKey: Self.meetingHookLastRunLabelKey)
     }
 
     @discardableResult

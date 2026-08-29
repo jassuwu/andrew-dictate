@@ -132,6 +132,74 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(dictatedWordCount(in: "...?!"), 1)
     }
 
+    func testMeetingsDefaultToWhisperTurboInDocumentsWithNoHook() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppSettings(userDefaults: userDefaults)
+
+        XCTAssertEqual(settings.meetingModel, .whisperLargeV3Turbo)
+        XCTAssertEqual(
+            settings.meetingsFolder,
+            FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Documents", isDirectory: true)
+                .appendingPathComponent("andrew-dictate", isDirectory: true)
+        )
+        XCTAssertNil(settings.meetingHook)
+        XCTAssertNil(settings.meetingHookLastRunAt)
+        XCTAssertNil(settings.meetingHookLastRunLabel)
+    }
+
+    func testMeetingChoicesSurviveARelaunch() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let folder = URL(fileURLWithPath: "/tmp/meetings", isDirectory: true)
+        let hook = URL(fileURLWithPath: "/usr/local/bin/on-meeting")
+        let ranAt = Date(timeIntervalSince1970: 1_756_000_000)
+
+        let settings = AppSettings(userDefaults: userDefaults)
+        settings.meetingModel = .parakeetV3
+        settings.meetingsFolder = folder
+        settings.meetingHook = hook
+        settings.meetingHookLastRunAt = ranAt
+        settings.meetingHookLastRunLabel = "exit 3"
+
+        let reloaded = AppSettings(userDefaults: userDefaults)
+
+        XCTAssertEqual(reloaded.meetingModel, .parakeetV3)
+        XCTAssertEqual(reloaded.meetingsFolder, folder)
+        XCTAssertEqual(reloaded.meetingHook, hook)
+        XCTAssertEqual(reloaded.meetingHookLastRunAt, ranAt)
+        XCTAssertEqual(reloaded.meetingHookLastRunLabel, "exit 3")
+    }
+
+    /// clearing the hook has to erase the stored path, not leave the old
+    /// one behind for the next launch to resurrect.
+    func testClearingTheHookForgetsIt() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppSettings(userDefaults: userDefaults)
+        settings.meetingHook = URL(fileURLWithPath: "/usr/bin/true")
+        settings.meetingHook = nil
+
+        XCTAssertNil(AppSettings(userDefaults: userDefaults).meetingHook)
+    }
+
+    func testUnknownMeetingModelFallsBackToWhisperTurbo() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        userDefaults.set(
+            "future-model",
+            forKey: "AndrewDictate.meetingModel"
+        )
+
+        XCTAssertEqual(
+            AppSettings(userDefaults: userDefaults).meetingModel,
+            .whisperLargeV3Turbo
+        )
+    }
+
     private func makeUserDefaults() -> (UserDefaults, String) {
         let suiteName = "AndrewDictateTests.AppSettings.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
