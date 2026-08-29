@@ -6,12 +6,19 @@ enum MenuBarBrandIcon {
 
     static func image(
         for state: DictationCoordinator.State,
-        needsAttention: Bool = false
+        needsAttention: Bool = false,
+        isRecordingMeeting: Bool = false
     ) -> NSImage {
         // a permission gap outranks every other state: without it the other
         // states can never be reached anyway.
         if needsAttention {
             return attentionBadge()
+        }
+        // a meeting outranks dictation states because dictation is refused
+        // while one runs (ADR 0023); the dot is the persistent indicator
+        // the hud deliberately is not (ADR 0040).
+        if isRecordingMeeting {
+            return badge(recording: true, color: NSColor.systemRed)
         }
 
         switch state {
@@ -69,7 +76,10 @@ enum MenuBarBrandIcon {
 
     /// the actual brand badge, full color. non-template by design: the logo
     /// is the logo, everywhere (user directive).
-    private static func badge(recording: Bool) -> NSImage {
+    private static func badge(
+        recording: Bool,
+        color: NSColor = BrandUI.nsColor(BrandUI.goldRGB)
+    ) -> NSImage {
         guard let base = NSImage(named: "MenuBarBadge") else {
             let fallback = NSImage(
                 systemSymbolName: "mic.fill",
@@ -88,7 +98,7 @@ enum MenuBarBrandIcon {
         let composed = NSImage(size: iconSize, flipped: false) { rect in
             base.draw(in: rect)
             let dot = NSRect(x: rect.maxX - 6.5, y: rect.minY, width: 6, height: 6)
-            BrandUI.nsColor(BrandUI.goldRGB).setFill()
+            color.setFill()
             NSBezierPath(ovalIn: dot).fill()
             BrandUI.nsColor(BrandUI.blackRGB).setStroke()
             let ring = NSBezierPath(ovalIn: dot)
