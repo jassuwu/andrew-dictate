@@ -1785,6 +1785,18 @@ extension DictationCoordinator {
                 self?.liveTranscript.elapsed = elapsed
             }
             .store(in: &meetingCancellables)
+        // The menu observes *this* object, not the one nested inside it: a
+        // meeting that starts without this line leaves the menu drawing the
+        // idle version, with no way to stop what it cannot see.
+        meetings.$state
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &meetingCancellables)
+        meetings.$elapsed
+            .map { $0.components.seconds }
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &meetingCancellables)
         meetingNotifier.onKeepGoing = { [weak self] in
             self?.meetings.keepGoing()
         }

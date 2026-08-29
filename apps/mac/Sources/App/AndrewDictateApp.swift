@@ -57,9 +57,10 @@ struct AndrewDictateApp: App {
                 .foregroundStyle(.secondary)
                 .disabled(true)
 
-                Button("stop recording") {
+                Button("stop recording \(coordinator.meetingAppName)") {
                     coordinator.stopMeeting()
                 }
+                .keyboardShortcut(".", modifiers: [.command, .shift])
 
                 Button(
                     coordinator.isLiveTranscriptShown
