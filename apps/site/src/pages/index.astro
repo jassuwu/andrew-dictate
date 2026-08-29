@@ -58,23 +58,65 @@ const description =
         </div>
 
         <p class="mt-1.5 text-[15px] text-[#e5be62]">escape the keyboard.</p>
-        <p class="aside text-[13px] leading-[1.7]" aria-hidden="true">yes. like that.</p>
+        <p class="aside text-[13px] leading-[1.7]" aria-hidden="true">get it?</p>
 
         <p class="mt-6 text-[15px] leading-[1.75] text-[#f2ede0]/70">
-          dictation for macOS. hold <kbd>fn</kbd>, talk, let go. the text lands
-          where your cursor is. the speech model runs on your mac, so there is
-          no server between you and the paste, and nothing you say leaves the
-          machine. no account, no subscription.
-        </p>
-
-        <p class="mt-4 text-[15px] leading-[1.75] text-[#f2ede0]/70">
-          i made it because i wanted this without paying a subscription or
-          sending my voice somewhere. i use it all day. it's alpha, and the
-          rough parts are listed below rather than hidden.
+          speech to text for macOS, with the models on your mac. i made it
+          because i wanted this without a subscription or my voice going to a
+          server. i use it all day. it's alpha, and the rough parts are on this
+          page.
         </p>
       </header>
 
-      <section class="mt-9">
+      <section class="mt-10 grid gap-4 sm:grid-cols-2">
+        <div class="rounded-xl border border-[#f2ede0]/[0.08] bg-[#f2ede0]/[0.025] p-5">
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#e5be62"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            aria-hidden="true"
+          >
+            <path d="M2 10v4" /><path d="M6 6v12" /><path d="M10 3v18" /><path d="M14 8v8" /><path d="M18 5v14" /><path d="M22 10v4" />
+          </svg>
+          <h2 class="mt-4 text-[16px] font-semibold tracking-[-0.01em] text-[#f9e9a8]">dictate</h2>
+          <p class="mt-2 text-[14px] leading-[1.7] text-[#f2ede0]/65">
+            hold <kbd>fn</kbd>, talk, let go. the text lands where your cursor is.
+          </p>
+          <p class="mt-4 font-mono text-[11.5px] leading-[1.8] tracking-[0.02em] text-[#f2ede0]/40">
+            ~460 mb · english, or 25 languages · a dictionary for the words it mishears
+          </p>
+        </div>
+
+        <div class="rounded-xl border border-[#f2ede0]/[0.08] bg-[#f2ede0]/[0.025] p-5">
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#e5be62"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><circle cx="17" cy="9" r="3" /><path d="M16 15.4a5.6 5.6 0 0 1 5.5 4.6" />
+          </svg>
+          <h2 class="mt-4 text-[16px] font-semibold tracking-[-0.01em] text-[#f9e9a8]">record a meeting</h2>
+          <p class="mt-2 text-[14px] leading-[1.7] text-[#f2ede0]/65">
+            pick the app from the menu bar. press stop and you have one markdown
+            file, speakers split out, everything in english.
+          </p>
+          <p class="mt-4 font-mono text-[11.5px] leading-[1.8] tracking-[0.02em] text-[#f2ede0]/40">
+            ~2.9 gb · no audio kept · you start it, you stop it
+          </p>
+        </div>
+      </section>
+
+      <section class="mt-10">
         <button
           data-cmd={install}
           class="copy flex w-full items-start justify-between gap-4 rounded-lg border border-[#f2ede0]/10 bg-[#1f1f24] px-4 py-3 text-left font-mono text-[12px] leading-[1.6] text-[#f9e9a8] transition hover:border-[#e5be62]/40 sm:text-[13px]"
@@ -105,33 +147,10 @@ const description =
 
       <section class="mt-14">
         <h2 class="text-[17px] font-semibold tracking-[-0.01em] text-[#f2ede0]">
-          it records meetings too
-        </h2>
-        <p class="mt-4 text-[15px] leading-[1.75] text-[#f2ede0]/70">
-          pick the app from the menu bar. your mic is you, the app is them.
-          when you stop, you get one markdown file with the speakers split
-          out. hindi on their side comes out as english. no audio is kept,
-          and it never watches what's using your mic. you press start and
-          you press stop.
-        </p>
-        <p class="mt-4 text-[14px] leading-[1.7] text-[#f2ede0]/50">
-          the meeting model is a <span class="font-mono text-[13px]">2.9 gb</span> download.
-          setup lets you skip it if dictation is all you want. transcripts
-          only come out in english for now.
-        </p>
-      </section>
-
-      <section class="mt-14">
-        <h2 class="text-[17px] font-semibold tracking-[-0.01em] text-[#f2ede0]">
           where your words go
         </h2>
         <p class="mt-4 text-[15px] leading-[1.75] text-[#f2ede0]/70">
-          nowhere. two things in the app touch the network, and you trigger
-          both: downloading a speech model at setup, and the
-          <span class="font-mono text-[13px]">check for updates</span> button,
-          which asks github for the latest version. no account, no analytics,
-          no crash reports. your dictations are kept in a local history you can
-          switch off or wipe.
+          nowhere. two things in the app touch the network, and you trigger both: downloading a speech model at setup, and the <span class="font-mono text-[13px]">check for updates</span> button, which asks github for the latest version. no account, no analytics, no crash reports. your dictations are kept in a local history you can switch off or wipe.
         </p>
       </section>
 
