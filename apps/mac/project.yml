@@ -13,6 +13,10 @@ packages:
     # resolve whatever was newest that morning. 0.15.6 arrived unable to
     # compile for x86_64 and took a release build with it.
     exactVersion: 0.15.5
+  WhisperKit:
+    url: https://github.com/argmaxinc/WhisperKit
+    # the meeting engine (ADR 0040). pinned for the same reason as above.
+    exactVersion: 1.1.0
 
 targets:
   AndrewDictate:
@@ -32,6 +36,7 @@ targets:
         buildPhase: resources
     dependencies:
       - package: FluidAudio
+      - package: WhisperKit
     settings:
       base:
         PRODUCT_NAME: Andrew Dictate
@@ -94,6 +99,7 @@ targets:
           # not link; the coordinator is tested through the seams instead
           - FluidDiarizer.swift
           - MeetingEngines.swift
+          - WhisperMeetingTranscriber.swift
       - Sources/Settings/MeetingsListModel.swift
       - Sources/Onboarding/OnboardingMeetingSetup.swift
       - Sources/App/AppIdentity.swift
