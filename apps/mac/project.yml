@@ -86,7 +86,12 @@ targets:
       - Sources/Archive/MeetingSession.swift
       - Sources/Archive/ArchiveBrowserViewModel.swift
       - Sources/About/UpdateCheck.swift
-      - Sources/Meetings
+      - path: Sources/Meetings
+        excludes:
+          - LiveTranscriptView.swift
+          - LiveTranscriptPanel.swift
+      - Sources/Settings/MeetingsListModel.swift
+      - Sources/Onboarding/OnboardingMeetingSetup.swift
       - Sources/App/AppIdentity.swift
       - Sources/App/Capabilities.swift
       - Sources/App/RemovalPlan.swift
