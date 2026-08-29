@@ -6,17 +6,17 @@
 
 <p align="center"><strong>escape the keyboard.</strong></p>
 
-local speech-to-text for macOS. free, open source, runs entirely on your mac.
+dictation and meeting transcripts for macOS. free, open source, and the speech models run on your mac, so nothing you say goes anywhere.
 
-**alpha.** v0.7.0 works and is not finished. see the [roadmap](#roadmap).
+i built it because i wanted the wispr flow experience without the account, the subscription, or my voice going to a server. i use it all day. it's alpha and i'll tell you where it's rough.
 
 ## what it does
 
-**hold `fn`, speak, release** → text pastes wherever your cursor is. ~250ms after key-up, on-device.
+**hold `fn`, talk, let go.** the text lands where your cursor is.
 
-a personal dictionary fixes the words it mishears ("jason" → `json`).
+the model is on your mac, so there's no server to wait for. you let go, it pastes. a dictionary fixes the words it keeps mishearing ("jason" → `json`), and `fix a word…` in the menu bar adds one from the last thing you said. spoken punctuation, emails, and numbers get written the way you'd type them. it never rewrites your words. if you want that, there's an optional polish pass on apple's on-device model, off by default.
 
-cleanup is built in: spoken punctuation ("comma", "new paragraph"), emails ("jass at jass dot gg" → `jass@jass.gg`), numbers ("five hundred dollars" → $500), your own dictionary — all deterministic, all on-device, all instant. it renders what you said into how it's written and never rewrites your words: no filler stripping, no guessing at self-corrections. optional ai polish on top (apple's on-device model, off by default, three modes: off / on / always) with a local "cleanup lab" showing raw-vs-cleaned pairs so you can judge it on your own speech before trusting it.
+**record a meeting** from the menu bar. your mic is you, the app you pick is them. when you stop, you get one markdown file with speakers split out. hindi or hinglish on their side comes out as english. no audio is kept. you start it and stop it yourself, it doesn't watch what's using your mic.
 
 ## install
 
@@ -25,59 +25,39 @@ brew install --cask jassuwu/tap/andrew-dictate
 xattr -dr com.apple.quarantine "/Applications/Andrew Dictate.app"
 ```
 
-or the dmg from [releases](https://github.com/jassuwu/andrew-dictate/releases). builds are unsigned (no apple developer membership); the `xattr` line or right-click → open clears gatekeeper.
+or grab the dmg from [releases](https://github.com/jassuwu/andrew-dictate/releases).
 
-first run: one click, ~450 mb model download, mic + accessibility permissions. dictating in about a minute.
+the `xattr` line is there because the build is unsigned. i haven't paid apple the $99 for a developer account yet, so macOS quarantines it. right-click → open works too.
 
-## privacy
+first launch asks which jobs you want. dictation is a ~460 mb download, meetings are ~2.9 gb. tick one or both.
 
-- transcription is fully on-device ([parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) via [FluidAudio](https://github.com/FluidInference/FluidAudio)). audio never leaves the mac.
-- no accounts, no telemetry, no network code except the model download.
-- small swift codebase. read it.
+## where your words go
+
+nowhere. the app has two things that touch the network, and you trigger both.
+
+- downloading a speech model, the first time you set up a job.
+- `check for updates` in the about window, which asks github for the latest tag.
+
+there's no account, no analytics, and no crash reporting. audio is never written to disk, except during a meeting, where a temp file holds it until the transcript is saved and then it's deleted. dictations are kept in a local history you can switch off or wipe.
+
+it's about 17k lines of swift. read it.
 
 ## limits
 
-- apple silicon, macOS 14+.
-- english by default; multilingual model optional in settings.
-- ai polish uses apple's on-device model (macos 26) — no downloadable model option yet.
+- apple silicon, macOS 26 or newer.
+- dictation is english by default. a multilingual model is one click away in settings.
+- meetings only write english. if you read hindi and want hindi, that's not here yet.
+- unsigned builds mean no auto-update. `check for updates` tells you, you install.
 
-## roadmap
+## next
 
-**works today**
+signed builds with auto-update. whisper as a dictation option, for languages parakeet doesn't do.
 
-- hold `fn`, speak, release — text pastes wherever your cursor is
-- transcription runs fully on-device (parakeet, via FluidAudio)
-- eight deterministic cleanup transforms — spoken punctuation, emails, numbers, your dictionary, capitalization. it never rewrites the words you said
-- a personal dictionary for the words it mishears
-- optional ai polish on apple's on-device model, off by default
-- a lab that shows raw-vs-cleaned pairs on your own speech, so you can judge the cleanup before you trust it
-- locked recording — double-tap the key to go hands-free
-
-**building next**
-
-- signed and notarized builds with auto-update — this kills the `xattr` step
-- meeting capture: record a call, get a transcript, with the speakers separated
-- a history surface — everything you've dictated, not just the last thing
-- published latency benchmarks you can reproduce on your own mac
-
-**thinking about**
-
-- formatting that adapts to the app you're dictating into
-- learning from the corrections you make by hand
-- inserting text directly instead of pasting, for apps where paste fights back
-- always-on ambient mode
-- more languages
-
-**never**
-
-- accounts, cloud, sync
-- a paid tier — it's free, permanently
-- telemetry of any kind
-- windows, linux, ios — this is a mac app
+not coming: accounts, cloud, sync, a paid tier, telemetry, windows, linux, ios.
 
 ## credits
 
-[FluidAudio](https://github.com/FluidInference/FluidAudio) (apache-2.0) · [parakeet weights](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) (cc-by-4.0) · [mit](LICENSE) · made by [jass](https://jass.gg)
+[FluidAudio](https://github.com/FluidInference/FluidAudio) (apache-2.0) · [parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) (cc-by-4.0) · [WhisperKit](https://github.com/argmaxinc/WhisperKit) (mit) · [whisper](https://github.com/openai/whisper) (mit) · [mit](LICENSE) · made by [jass](https://jass.gg)
 
 ---
 
