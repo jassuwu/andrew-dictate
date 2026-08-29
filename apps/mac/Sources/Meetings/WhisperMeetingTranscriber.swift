@@ -58,19 +58,9 @@ actor WhisperMeetingTranscriber: MeetingTranscriber {
     }
 
     func feed(_ chunk: MeetingAudioChunk) {
-        let n = min(chunk.you.count, chunk.them.count)
-        mixed.reserveCapacity(mixed.count + n)
-        for i in 0..<n {
-            mixed.append(max(-1, min(1, chunk.you[i] + chunk.them[i])))
-        }
-        var offset = 0
-        while offset < n {
-            let end = min(offset + Self.energyBucket, n)
-            energies.append((
-                Self.rms(chunk.you[offset..<end]),
-                Self.rms(chunk.them[offset..<end])))
-            offset = end
-        }
+        let (mix, buckets) = Self.mixAndBucket(you: chunk.you, them: chunk.them)
+        mixed.append(contentsOf: mix)
+        energies.append(contentsOf: buckets)
     }
 
     func finish() async -> [MeetingTurn] {
@@ -87,16 +77,7 @@ actor WhisperMeetingTranscriber: MeetingTranscriber {
 
     func transcribe(you: [Float], them: [Float]) async throws -> [MeetingTurn] {
         let whisper = try await Self.load(model)
-        let n = min(you.count, them.count)
-        var mix = [Float](repeating: 0, count: n)
-        for i in 0..<n { mix[i] = max(-1, min(1, you[i] + them[i])) }
-        var buckets: [(you: Float, them: Float)] = []
-        var offset = 0
-        while offset < n {
-            let end = min(offset + Self.energyBucket, n)
-            buckets.append((Self.rms(you[offset..<end]), Self.rms(them[offset..<end])))
-            offset = end
-        }
+        let (mix, buckets) = Self.mixAndBucket(you: you, them: them)
 
         var options = decodingOptions()
         options.chunkingStrategy = .vad
@@ -231,6 +212,24 @@ actor WhisperMeetingTranscriber: MeetingTranscriber {
 
     private static func liveSpeaker(_ speaker: MeetingTurn.Speaker) -> LiveLine.Speaker {
         if case .you = speaker { .you } else { .them }
+    }
+
+    /// Both sides summed into one clamped stream, plus each side's loudness
+    /// per 100 ms — the two things every decode needs, made the same way.
+    private static func mixAndBucket(
+        you: [Float], them: [Float]
+    ) -> (mix: [Float], buckets: [(you: Float, them: Float)]) {
+        let n = min(you.count, them.count)
+        var mix = [Float](repeating: 0, count: n)
+        for i in 0..<n { mix[i] = max(-1, min(1, you[i] + them[i])) }
+        var buckets: [(you: Float, them: Float)] = []
+        var offset = 0
+        while offset < n {
+            let end = min(offset + energyBucket, n)
+            buckets.append((rms(you[offset..<end]), rms(them[offset..<end])))
+            offset = end
+        }
+        return (mix, buckets)
     }
 
     private static func rms(_ samples: ArraySlice<Float>) -> Float {
