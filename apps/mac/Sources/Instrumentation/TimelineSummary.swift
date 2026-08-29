@@ -34,7 +34,6 @@ struct TimelineSummary: Equatable, Sendable {
     /// The stages that span decomposes into.
     let transcription: Distribution?
     let cleanup: Distribution?
-    let polish: Distribution?
     let delivery: Distribution?
 
     /// Only `pasteVerified` utterances count.
@@ -62,7 +61,6 @@ struct TimelineSummary: Equatable, Sendable {
         keyUpToCompletion = Self.distribution(of: counted.map(\.keyUpToCompletion))
         transcription = Self.distribution(of: counted.map(\.transcription))
         cleanup = Self.distribution(of: counted.map(\.cleanup))
-        polish = Self.distribution(of: counted.map(\.polish))
         delivery = Self.distribution(of: counted.map(\.delivery))
     }
 
@@ -111,7 +109,6 @@ extension TimelineSummary {
             ("key-up → inserted", keyUpToCompletion),
             ("  transcription", transcription),
             ("  cleanup", cleanup),
-            ("  polish", polish),
             ("  delivery", delivery),
         ].compactMap { label, distribution -> String? in
             guard let distribution else {

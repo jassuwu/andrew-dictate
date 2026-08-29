@@ -7,7 +7,6 @@ final class TimelineSummaryTests: XCTestCase {
         keyUpToCompletion ms: Int,
         transcription: Int = 0,
         cleanup: Int = 0,
-        polish: Int = 0,
         stage: UtteranceTimeline.CompletionStage = .pasteVerified
     ) -> UtteranceTimeline {
         let keyUp = ContinuousClock.now
@@ -17,9 +16,6 @@ final class TimelineSummaryTests: XCTestCase {
             keyUp: keyUp,
             transcriptReady: keyUp.advanced(by: .milliseconds(transcription)),
             cleaned: keyUp.advanced(by: .milliseconds(transcription + cleanup)),
-            polished: keyUp.advanced(
-                by: .milliseconds(transcription + cleanup + polish)
-            ),
             completionStage: stage,
             completed: keyUp.advanced(by: .milliseconds(ms))
         )
@@ -133,15 +129,13 @@ final class TimelineSummaryTests: XCTestCase {
             timeline(
                 keyUpToCompletion: 450,
                 transcription: 200,
-                cleanup: 5,
-                polish: 180
+                cleanup: 5
             )
         ])
 
         XCTAssertEqual(summary.transcription?.p50, .milliseconds(200))
         XCTAssertEqual(summary.cleanup?.p50, .milliseconds(5))
-        XCTAssertEqual(summary.polish?.p50, .milliseconds(180))
-        XCTAssertEqual(summary.delivery?.p50, .milliseconds(65))
+        XCTAssertEqual(summary.delivery?.p50, .milliseconds(245))
     }
 }
 
@@ -157,7 +151,6 @@ final class TimelineSummaryFormattingTests: XCTestCase {
             keyUp: keyUp,
             transcriptReady: keyUp.advanced(by: .milliseconds(ms / 2)),
             cleaned: keyUp.advanced(by: .milliseconds(ms / 2)),
-            polished: keyUp.advanced(by: .milliseconds(ms / 2)),
             completionStage: stage,
             completed: keyUp.advanced(by: .milliseconds(ms))
         )
