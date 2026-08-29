@@ -7,6 +7,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case dictation
     case dictionary
     case history
+    case meetings
     case general
 
     var id: String { rawValue }
@@ -16,9 +17,20 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .dictation: "dictation"
         case .dictionary: "dictionary"
         case .history: "history"
+        case .meetings: "meetings"
         case .general: "general"
         }
     }
+}
+
+/// history holds two different nouns — your own speech, and other people's
+/// words — and ADR 0022 keeps them apart on purpose. one switch, not two
+/// panes: it is the same question asked of two piles.
+private enum HistorySegment: String, CaseIterable, Identifiable {
+    case dictations
+    case meetings
+
+    var id: String { rawValue }
 }
 
 struct SettingsView: View {
@@ -28,20 +40,30 @@ struct SettingsView: View {
     @StateObject private var loginItem = LoginItemController()
     @StateObject private var archive = ArchiveSettingsModel()
     @StateObject private var browser = ArchiveBrowserViewModel()
+    @StateObject private var meetings: MeetingsListModel
 
     private let modelStore: ModelStore
 
     @State private var selectedTab: SettingsTab = .dictation
+    @State private var historySegment: HistorySegment = .dictations
     @State private var installedModels: [InstalledModel] = []
     @State private var pendingModelRemoval: EngineVersion?
     @State private var modelStoreMessage: String?
     @State private var showsRemoval = false
     @State private var timings: TimelineSummary?
 
-    init(coordinator: DictationCoordinator) {
+    /// `meetingsLoader` is left open on purpose: this pane knows how to draw
+    /// the meetings folder, not where it is or how to read it.
+    init(
+        coordinator: DictationCoordinator,
+        meetingsLoader: @escaping () -> [MeetingSummary] = { [] }
+    ) {
         let settings = coordinator.settings
 
         _coordinator = ObservedObject(wrappedValue: coordinator)
+        _meetings = StateObject(
+            wrappedValue: MeetingsListModel(load: meetingsLoader)
+        )
         _settings = ObservedObject(wrappedValue: settings)
         _dictionaryStore = ObservedObject(
             wrappedValue: coordinator.dictionaryStore
@@ -75,6 +97,13 @@ struct SettingsView: View {
                 historyTab
             }
             Tab(
+                "meetings",
+                systemImage: "person.2.wave.2",
+                value: SettingsTab.meetings
+            ) {
+                meetingsTab
+            }
+            Tab(
                 "general",
                 systemImage: "gearshape",
                 value: SettingsTab.general
@@ -99,14 +128,21 @@ struct SettingsView: View {
             // that exist, not a number this pane remembered.
             archive.refresh()
             browser.reload()
+            meetings.reload()
             timings = coordinator.timingsSummary()
         }
         .onChange(of: selectedTab) { _, tab in
             if tab == .history {
                 browser.reload()
+                meetings.reload()
             }
             if tab == .general {
                 timings = coordinator.timingsSummary()
+            }
+        }
+        .onChange(of: historySegment) { _, segment in
+            if segment == .meetings {
+                meetings.reload()
             }
         }
         .onChange(of: coordinator.enginePreparationState) { _, state in
@@ -343,15 +379,43 @@ struct SettingsView: View {
     /// is a footer, because it's set once and never looked at again.
     private var historyTab: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ArchiveBrowserView(
-                viewModel: browser,
-                fixAWord: { coordinator.openWordFixer(for: $0) }
-            )
-            .frame(height: 330)
+            Picker("", selection: $historySegment) {
+                ForEach(HistorySegment.allCases) { segment in
+                    Text(segment.rawValue).tag(segment)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 240)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 10)
+            .accessibilityLabel("what history shows")
+
+            switch historySegment {
+            case .dictations:
+                ArchiveBrowserView(
+                    viewModel: browser,
+                    fixAWord: { coordinator.openWordFixer(for: $0) }
+                )
+                .frame(height: 330)
+            case .meetings:
+                MeetingsBrowserView(viewModel: meetings)
+                    .frame(height: 330)
+            }
 
             rowDivider
                 .padding(.horizontal, 24)
 
+            switch historySegment {
+            case .dictations: dictationsFooter
+            case .meetings: meetingsFooter
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    private var dictationsFooter: some View {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {
                 Toggle(
                     "keep new dictations",
@@ -387,7 +451,236 @@ struct SettingsView: View {
                     .padding(.bottom, 10)
             }
         }
-        .padding(.top, 8)
+    }
+
+    /// no keep-or-not switch here: a meeting recording is kept until you
+    /// delete it, and the folder it lives in is the whole feature.
+    private var meetingsFooter: some View {
+        HStack(spacing: 12) {
+            Text(
+                meetings.items.count == 1
+                    ? "1 meeting"
+                    : "\(meetings.items.count) meetings"
+            )
+            .font(.caption)
+            .foregroundStyle(BrandUI.textSecondary)
+
+            Spacer(minLength: 8)
+
+            Button("show folder in finder") {
+                showInFinder(
+                    settings.meetingsFolder
+                        .appendingPathComponent("meetings", isDirectory: true)
+                )
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 12)
+    }
+
+    // MARK: - meetings
+
+    private var meetingsTab: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            meetingModelEditor
+            rowDivider
+            meetingsFolderRow
+            rowDivider
+            meetingHookRow
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 18)
+        .padding(.bottom, 20)
+    }
+
+    /// the same cards dictation uses — each job picks its own model, and the
+    /// card states the consequence (ADR 0040).
+    private var meetingModelEditor: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Text("meeting model")
+                    .font(BrandUI.bodyFont.weight(.medium))
+
+                Spacer(minLength: 12)
+
+                Text("what listens in meetings. on this mac, always.")
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.textSecondary)
+            }
+
+            MeetingModelChooserView(selection: $settings.meetingModel)
+        }
+    }
+
+    private var meetingsFolderRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("save meetings in")
+                    .font(BrandUI.bodyFont.weight(.medium))
+
+                Text(tildePath(settings.meetingsFolder))
+                    .font(BrandUI.machineFont(size: 12))
+                    .foregroundStyle(BrandUI.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
+
+            Spacer(minLength: 8)
+
+            Button("change…", action: chooseMeetingsFolder)
+
+            Button("show in finder") {
+                showInFinder(settings.meetingsFolder)
+            }
+            .buttonStyle(.plain)
+            .font(.caption)
+            .foregroundStyle(BrandUI.textSecondary)
+        }
+    }
+
+    private var meetingHookRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("after a meeting is saved, run")
+                        .font(BrandUI.bodyFont.weight(.medium))
+
+                    Text(settings.meetingHook.map(tildePath) ?? "nothing")
+                        .font(BrandUI.machineFont(size: 12))
+                        .foregroundStyle(BrandUI.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+
+                Spacer(minLength: 8)
+
+                Button("choose…", action: chooseMeetingHook)
+
+                if settings.meetingHook != nil {
+                    Button("clear") {
+                        settings.meetingHook = nil
+                        settings.meetingHookLastRunAt = nil
+                        settings.meetingHookLastRunLabel = nil
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.textSecondary)
+                }
+            }
+
+            // a hook that failed silently is a hook nobody can fix, so the
+            // last run stays on the row until the next one replaces it.
+            if let ranAt = settings.meetingHookLastRunAt {
+                HStack(spacing: 6) {
+                    Text(
+                        "last run: "
+                            + ranAt.formatted(
+                                .relative(presentation: .named)
+                            )
+                            + " · "
+                            + (settings.meetingHookLastRunLabel ?? "ok")
+                    )
+                    .font(.caption)
+                    .foregroundStyle(
+                        hookFailed ? BrandUI.attention : BrandUI.textSecondary
+                    )
+
+                    if hookFailed {
+                        Text("·")
+                            .font(.caption)
+                            .foregroundStyle(BrandUI.textSecondary)
+                            .accessibilityHidden(true)
+
+                        Button("open log", action: openHooksLog)
+                            .buttonStyle(.plain)
+                            .font(.caption)
+                            .foregroundStyle(BrandUI.gold)
+                    }
+                }
+            }
+
+            Text(
+                "gets the transcript path as $1 and the same details as "
+                    + "json on stdin."
+            )
+            .font(.caption)
+            .foregroundStyle(BrandUI.textSecondary)
+        }
+    }
+
+    private var hookFailed: Bool {
+        guard let label = settings.meetingHookLastRunLabel else {
+            return false
+        }
+        return label != "ok"
+    }
+
+    private func chooseMeetingsFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "save meetings in"
+        panel.prompt = "choose"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = settings.meetingsFolder
+
+        guard panel.runModal() == .OK, let folder = panel.url else {
+            return
+        }
+        settings.meetingsFolder = folder
+    }
+
+    /// any file: the hook is whatever you can run — a shell script, a
+    /// binary, a shortcut wrapper. filtering by type would only be a guess
+    /// about someone else's toolchain.
+    private func chooseMeetingHook() {
+        let panel = NSOpenPanel()
+        panel.title = "after a meeting is saved, run"
+        panel.prompt = "choose"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.treatsFilePackagesAsDirectories = true
+        panel.directoryURL = settings.meetingHook?.deletingLastPathComponent()
+
+        guard panel.runModal() == .OK, let hook = panel.url else {
+            return
+        }
+        settings.meetingHook = hook
+        settings.meetingHookLastRunAt = nil
+        settings.meetingHookLastRunLabel = nil
+    }
+
+    /// everything the hook printed, in one file beside everything else this
+    /// app keeps.
+    private func openHooksLog() {
+        let log = AppIdentity.supportDirectory
+            .appendingPathComponent("hooks.log", isDirectory: false)
+        if !NSWorkspace.shared.open(log) {
+            showInFinder(log)
+        }
+    }
+
+    private func tildePath(_ url: URL) -> String {
+        (url.path(percentEncoded: false) as NSString)
+            .abbreviatingWithTildeInPath
+    }
+
+    /// revealing something that isn't there yet opens nothing at all, which
+    /// is a button that looks broken. walk up to the nearest folder that
+    /// does exist — the meetings folder is made on the first recording.
+    private func showInFinder(_ url: URL) {
+        var target = url
+        while target.pathComponents.count > 1,
+              !FileManager.default.fileExists(
+                  atPath: target.path(percentEncoded: false)
+              ) {
+            target = target.deletingLastPathComponent()
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([target])
     }
 
     // MARK: - general
