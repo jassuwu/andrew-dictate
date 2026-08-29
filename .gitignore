@@ -23,3 +23,6 @@ docs/research/
 
 # local dev build output (see apps/mac/dev.sh)
 apps/mac/.build-dev/
+
+# per-session workflow worktrees
+.claude/worktrees/
