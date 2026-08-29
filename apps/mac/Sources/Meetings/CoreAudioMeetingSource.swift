@@ -12,6 +12,10 @@ import os
 ///
 /// Everything arrives here at the device rate (48 kHz on this mac) and leaves
 /// as 16 kHz mono pairs, in ~100 ms chunks, on the IO queue.
+///
+/// `@unchecked Sendable` because Core Audio hands us raw object ids and an
+/// IOProc on its own queue; every field they touch is behind `lock`, and the
+/// ids themselves are plain integers the HAL owns.
 final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     enum Failure: Error, LocalizedError {
         case coreAudio(String, OSStatus)
@@ -88,11 +92,23 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             bundleID: Bundle.main.bundleIdentifier ?? AppIdentity.bundleID,
             pid: ProcessInfo.processInfo.processIdentifier)
         guard let stream = try? await source.start(tapping: me) else { return false }
-        let deadline = ContinuousClock.now + window
-        var heard = false
-        for await chunk in stream {
-            if chunk.themRMS > 0.001 { heard = true; break }
-            if ContinuousClock.now > deadline { break }
+        // The deadline is a task of its own: a tap that never yields a
+        // chunk would otherwise leave the row "proving…" forever, which is
+        // a failure wearing a spinner (SPEC §4).
+        let heard = await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                for await chunk in stream where chunk.themRMS > 0.001 {
+                    return true
+                }
+                return false
+            }
+            group.addTask {
+                try? await Task.sleep(for: window)
+                return false
+            }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
         }
         await source.stop()
         return heard
