@@ -23,27 +23,6 @@ enum EngineVersion: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-enum CleanupMode: String, CaseIterable, Identifiable, Sendable {
-    case off
-    case on
-    case always
-
-    var id: Self {
-        self
-    }
-
-    var explanation: String {
-        switch self {
-        case .off:
-            "uses deterministic cleanup only."
-        case .on:
-            "cleans when it's fast enough, raw otherwise."
-        case .always:
-            "waits for the clean version."
-        }
-    }
-}
-
 struct ModelRemovalDecision: Equatable, Sendable {
     let isAllowed: Bool
     let requiresRepreparation: Bool
@@ -146,18 +125,6 @@ final class AppSettings: ObservableObject {
                 return
             }
             userDefaults.set(cleanupEnabled, forKey: Self.cleanupEnabledKey)
-        }
-    }
-
-    @Published var cleanupMode: CleanupMode {
-        didSet {
-            guard cleanupMode != oldValue else {
-                return
-            }
-            userDefaults.set(
-                cleanupMode.rawValue,
-                forKey: Self.cleanupModeKey
-            )
         }
     }
 
@@ -266,7 +233,6 @@ final class AppSettings: ObservableObject {
         "AndrewDictate.soundFeedbackEnabled"
     private static let keepDictationsKey = "AndrewDictate.keepDictations"
     private static let engineVersionKey = "AndrewDictate.engineVersion"
-    private static let cleanupModeKey = "AndrewDictate.cleanupMode"
     private static let cleanupEnabledKey = "AndrewDictate.cleanupEnabled"
     private static let totalWordsDictatedKey =
         "AndrewDictate.totalWordsDictated"
@@ -328,13 +294,6 @@ final class AppSettings: ObservableObject {
         ) == nil
             ? true
             : userDefaults.bool(forKey: Self.cleanupEnabledKey)
-        // "shadow" existed briefly pre-release; migrate it to "on"
-        let storedCleanupMode = userDefaults
-            .string(forKey: Self.cleanupModeKey)
-        cleanupMode = storedCleanupMode == "shadow"
-            ? .on
-            : storedCleanupMode
-                .flatMap(CleanupMode.init(rawValue:)) ?? .off
 
         totalWordsDictated = max(
             0,

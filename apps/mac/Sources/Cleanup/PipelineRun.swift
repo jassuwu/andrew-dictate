@@ -4,7 +4,7 @@ import Foundation
 /// records what each layer handed to the next. the same order the real
 /// dictation path uses — if these two ever disagree, the playground is a lie.
 enum PipelineRun {
-    /// the deterministic half: pure, instant, safe to run on every keystroke.
+    /// pure, instant, safe to run on every keystroke.
     static func throughCleaner(
         _ input: String,
         selection: PipelineSelection,
@@ -16,8 +16,7 @@ enum PipelineRun {
             // you are standing in for the microphone: what you typed is what
             // parakeet is pretending to have heard.
             output: input,
-            isEnabled: true,
-            unavailableReason: nil
+            isEnabled: true
         )
 
         guard selection.deterministicEnabled else {
@@ -32,8 +31,7 @@ enum PipelineRun {
                         entries: entries,
                         fullCleanup: false
                     ).clean(input),
-                    isEnabled: false,
-                    unavailableReason: nil
+                    isEnabled: false
                 ),
             ]
         }
@@ -45,32 +43,8 @@ enum PipelineRun {
                 stage: .deterministic,
                 input: input,
                 output: cleaned,
-                isEnabled: true,
-                unavailableReason: nil
+                isEnabled: true
             ),
         ]
-    }
-
-    /// the text the polish stage should be handed: whatever the last enabled
-    /// stage produced.
-    static func polishInput(
-        from results: [PipelineStageResult]
-    ) -> String {
-        results.last?.output ?? ""
-    }
-
-    static func polishResult(
-        input: String,
-        output: String?,
-        isEnabled: Bool,
-        unavailableReason: String?
-    ) -> PipelineStageResult {
-        PipelineStageResult(
-            stage: .polish,
-            input: input,
-            output: output ?? input,
-            isEnabled: isEnabled,
-            unavailableReason: unavailableReason
-        )
     }
 }

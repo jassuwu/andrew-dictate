@@ -30,27 +30,18 @@ struct Capabilities: Equatable, Sendable {
     /// released app has no reason to talk about itself.
     let announcesItself: Bool
 
-    /// Record every raw/cleaned pair to the lab log and offer the lab and
-    /// pipeline viewers. **Development only.** The lab exists to develop the
-    /// cleaner; a user's record of what cleanup changed is the archive, which
-    /// they opted into. Keeping a transcript log the "keep what you dictate"
-    /// toggle doesn't govern would make that toggle a lie.
-    let keepsCleanupLab: Bool
-
     static let release = Capabilities(
         canUninstall: true,
         canResetInPlace: false,
         canCopyTimings: true,
-        announcesItself: false,
-        keepsCleanupLab: false
+        announcesItself: false
     )
 
     static let development = Capabilities(
         canUninstall: true,
         canResetInPlace: true,
         canCopyTimings: true,
-        announcesItself: true,
-        keepsCleanupLab: true
+        announcesItself: true
     )
 
     static var current: Capabilities {

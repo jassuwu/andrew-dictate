@@ -65,34 +65,7 @@ final class PipelineRunTests: XCTestCase {
 
         let cleanup = results[1]
         XCTAssertTrue(cleanup.isEnabled)
-        XCTAssertNil(cleanup.unavailableReason)
         XCTAssertFalse(cleanup.changedAnything)
-    }
-
-    func testPolishIsHandedWhateverTheLastStageProduced() {
-        let results = PipelineRun.throughCleaner(
-            "um hello comma world",
-            selection: PipelineSelection(),
-            entries: entries
-        )
-
-        XCTAssertEqual(
-            PipelineRun.polishInput(from: results),
-            results[1].output
-        )
-    }
-
-    func testUnavailablePolishPassesTextThroughAndSaysWhy() {
-        let stage = PipelineRun.polishResult(
-            input: "Hello, world.",
-            output: nil,
-            isEnabled: true,
-            unavailableReason: "needs macOS 26"
-        )
-
-        XCTAssertEqual(stage.output, "Hello, world.")
-        XCTAssertFalse(stage.changedAnything)
-        XCTAssertEqual(stage.unavailableReason, "needs macOS 26")
     }
 
     func testOnlyTranscriptionCannotBeSwitchedOff() {
@@ -100,16 +73,13 @@ final class PipelineRunTests: XCTestCase {
         selection.toggle(.transcription)
         XCTAssertTrue(selection.isEnabled(.transcription))
 
-        selection.toggle(.polish)
-        XCTAssertTrue(selection.isEnabled(.polish))
         selection.toggle(.deterministic)
         XCTAssertFalse(selection.isEnabled(.deterministic))
 
-        // transcription is the app; the other two are the user's to switch
-        // (cleanup since ADR 0038 — off still runs the dictionary).
+        // transcription is the app; cleanup is the user's to switch
+        // (since ADR 0038 — off still runs the dictionary).
         XCTAssertTrue(PipelineStage.transcription.isAlwaysOn)
         XCTAssertFalse(PipelineStage.deterministic.isAlwaysOn)
-        XCTAssertFalse(PipelineStage.polish.isAlwaysOn)
     }
 
     func testTheOpeningSampleGivesEveryStageSomethingToDo() {

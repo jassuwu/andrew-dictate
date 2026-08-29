@@ -100,7 +100,6 @@ targets:
       - Tests
       - path: Sources/Cleanup
         excludes:
-          - CleanupLabView.swift
           - PipelinePlaygroundView.swift
           - WordFixerView.swift
       - Sources/Audio/RingSplicer.swift

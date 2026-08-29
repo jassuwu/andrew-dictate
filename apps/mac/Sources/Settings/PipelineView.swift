@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// the cleanup pipeline, as a conveyor: four stages, an arrow between each,
+/// the cleanup pipeline, as a conveyor: three stages, an arrow between each,
 /// a switch on the ones that have one, and under every stage the text as
 /// it leaves it — your last dictation, or a sample until there is one.
 /// nothing decorative: every mark on it is a stage, a switch, or a word.
@@ -19,18 +19,6 @@ struct PipelineView: View {
                 input: coordinator.lastTranscript ?? PipelineSample.text
             )
         )
-    }
-
-    private var unavailableReason: String? {
-        coordinator.cleanupUnavailableExplanation
-    }
-
-    private var polishWanted: Bool {
-        settings.cleanupMode != .off
-    }
-
-    private var polishLit: Bool {
-        polishWanted && unavailableReason == nil
     }
 
     var body: some View {
@@ -77,22 +65,6 @@ struct PipelineView: View {
 
                 arrow
 
-                stage("polish", lit: polishLit) {
-                    Picker("", selection: $settings.cleanupMode) {
-                        ForEach(CleanupMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .controlSize(.mini)
-                    .accessibilityLabel("ai polish")
-
-                    polishBody
-                }
-
-                arrow
-
                 stage("pasted", lit: true) {
                     flowText(plain(finalText))
                 }
@@ -100,10 +72,6 @@ struct PipelineView: View {
         }
         .onAppear {
             run.setDeterministicEnabled(settings.cleanupEnabled)
-            run.setPolishEnabled(polishWanted)
-        }
-        .onChange(of: settings.cleanupMode) { _, _ in
-            run.setPolishEnabled(polishWanted)
         }
         .onChange(of: settings.cleanupEnabled) { _, enabled in
             run.setDeterministicEnabled(enabled)
@@ -151,34 +119,8 @@ struct PipelineView: View {
         run.results.first { $0.stage == .deterministic }?.output ?? heardText
     }
 
-    private var polish: PipelineStageResult? {
-        run.results.first { $0.stage == .polish }
-    }
-
     private var finalText: String {
         run.results.last?.output ?? cleanedText
-    }
-
-    @ViewBuilder
-    private var polishBody: some View {
-        if !polishWanted {
-            Text("off. the words stay exactly yours.")
-                .foregroundStyle(BrandUI.textSecondary)
-        } else if let unavailableReason {
-            Text(unavailableReason)
-                .foregroundStyle(BrandUI.textSecondary)
-        } else if run.isPolishing {
-            Text("polishing…")
-                .foregroundStyle(BrandUI.textSecondary)
-        } else if let polish, let reason = polish.unavailableReason {
-            Text(reason)
-                .foregroundStyle(BrandUI.textSecondary)
-        } else if let polish, !polish.changedAnything {
-            Text("nothing to add this time.")
-                .foregroundStyle(BrandUI.textSecondary)
-        } else {
-            flowText(diffText(cleanedText, finalText))
-        }
     }
 
     private func flowText(_ text: AttributedString) -> some View {

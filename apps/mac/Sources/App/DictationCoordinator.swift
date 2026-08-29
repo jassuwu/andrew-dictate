@@ -99,8 +99,6 @@ final class DictationCoordinator: ObservableObject {
     /// dock unplugged) and arrive later. one failed build must not be final.
     private var audioRecorder: AudioRecorder?
     private let feedbackSounds: FeedbackSounds
-    private let transcriptPolisher = FoundationModelPolisher()
-    private let cleanupLabStore = LabStore()
     private let hudViewModel: HUDViewModel
     private var hudPanelStorage: HUDPanel?
 
@@ -150,7 +148,6 @@ final class DictationCoordinator: ObservableObject {
     private var timelineSequence: UInt64 = 0
     private var activeTimeline: UtteranceTimelineBuilder?
     private var aboutWindowController: AboutWindowController?
-    private var cleanupLabWindowController: CleanupLabWindowController?
     /// Rebuilt per transcript rather than reused: the window is *about* one
     /// dictation, so keeping a stale one around would show the wrong words.
     private let dictationArchive = DictationArchive()
@@ -283,14 +280,6 @@ final class DictationCoordinator: ObservableObject {
         installSystemLifecycleObservers()
         wireMeetings()
 
-        // a build that doesn't keep the lab must also not inherit the log an
-        // earlier version wrote — the toggle-less transcript file goes.
-        if !Capabilities.current.keepsCleanupLab {
-            Task { [cleanupLabStore] in
-                try? await cleanupLabStore.clear()
-            }
-        }
-
         permissions = SystemPermissions.snapshot()
         // the stored flag only knows the window was closed once. whether this
         // app can actually dictate is a question for the permissions.
@@ -332,42 +321,6 @@ final class DictationCoordinator: ObservableObject {
             aboutWindowController = controller
         }
         controller.present()
-    }
-
-    var isCleanupAvailable: Bool {
-        transcriptPolisher.isAvailable
-    }
-
-    /// nil when cleanup can run; otherwise the reason and the user's next
-    /// move, straight from the os rather than a guess about it.
-    var cleanupUnavailableExplanation: String? {
-        transcriptPolisher.availability.explanation
-    }
-
-    func openCleanupLab() {
-        let controller: CleanupLabWindowController
-        if let cleanupLabWindowController {
-            controller = cleanupLabWindowController
-        } else {
-            controller = CleanupLabWindowController(
-                store: cleanupLabStore
-            )
-            cleanupLabWindowController = controller
-        }
-        controller.present()
-    }
-
-    func clearCleanupLabData() {
-        Task { [weak self, cleanupLabStore] in
-            do {
-                try await cleanupLabStore.clear()
-                self?.cleanupLabWindowController?.reload()
-            } catch {
-                self?.cleanupLogger.error(
-                    "cleanup lab clear failed: \(error.localizedDescription, privacy: .public)"
-                )
-            }
-        }
     }
 
     /// The door ticket 011 chose. It hands over the *raw* transcript on
@@ -1279,10 +1232,6 @@ final class DictationCoordinator: ObservableObject {
             let transcriptReady = timelineClock.now
             activeTimeline?.transcriptReady = transcriptReady
 
-            let rawHadCorrections = MessyGateSignals
-                .containsCorrectionMarker(in: transcript)
-            let rawHadDuplicates = MessyGateSignals
-                .containsImmediateDuplicate(in: transcript)
             let cleaner = DeterministicCleaner(
                 entries: dictionaryStore.entries,
                 fullCleanup: settings.cleanupEnabled
@@ -1300,67 +1249,7 @@ final class DictationCoordinator: ObservableObject {
                 )
                 return
             }
-            let pasteTranscript: String
-            var shortfall = PolishShortfall.none
-            switch settings.cleanupMode {
-            case .off:
-                activeTimeline?.polished = timelineClock.now
-                pasteTranscript = rawTranscript
-            case .on, .always:
-                let protectedTerms = cleanupProtectedTerms()
-                let shouldPolish = MessyGate().shouldPolish(
-                    rawTranscript,
-                    rawHadCorrections: rawHadCorrections,
-                    rawHadDuplicates: rawHadDuplicates,
-                    dictionaryTerms: protectedTerms
-                )
-                activeTimeline?.polishGateDecision = shouldPolish
-                if shouldPolish {
-                    // on: tight budget, raw on timeout. always: waits,
-                    // with a hard ceiling so a hung model cannot consume
-                    // an entire dictation interaction.
-                    let budget: Duration = settings.cleanupMode == .on
-                        ? .milliseconds(600)
-                        : .seconds(15)
-                    let timedResult = await polishWithinDeadline(
-                        rawTranscript,
-                        protectedTerms: protectedTerms,
-                        using: transcriptPolisher,
-                        deadline: transcriptReady.advanced(by: budget)
-                    )
-                    try Task.checkCancellation()
-                    guard generation == pipelineGeneration else {
-                        return
-                    }
-                    activeTimeline?.polished = timelineClock.now
-                    let pasteChoice = cleanupPasteChoice(
-                        raw: rawTranscript,
-                        polishResult: timedResult.result,
-                        deadline: timedResult.deadline
-                    )
-                    pasteTranscript = pasteChoice.text
-                    if pasteChoice.text != rawTranscript {
-                        logCleanupPair(
-                            raw: rawTranscript,
-                            cleaned: pasteChoice.text,
-                            started: transcriptReady
-                        )
-                    }
-                    if timedResult.result == .failure {
-                        cleanupLogger.notice(
-                            "foreground polish fell back to raw"
-                        )
-                    }
-                    shortfall = polishShortfall(
-                        mode: settings.cleanupMode,
-                        polishResult: timedResult.result,
-                        deadline: timedResult.deadline
-                    )
-                } else {
-                    activeTimeline?.polished = timelineClock.now
-                    pasteTranscript = rawTranscript
-                }
-            }
+            let pasteTranscript = rawTranscript
 
             lastTranscript = rawTranscript
             pendingArchiveText = (
@@ -1396,12 +1285,6 @@ final class DictationCoordinator: ObservableObject {
                     at: timelineClock.now,
                     stage: .pasteVerified
                 )
-                // "always" is the mode whose whole promise is that raw text
-                // never reaches the page unannounced. keep it.
-                if let notice = polishShortfallMessage(shortfall) {
-                    setState(.idle, fastHUDDismiss: true)
-                    await flashFeedback(notice, duration: 1.6)
-                }
             case let .leftOnPasteboard(reason):
                 completeTimeline(
                     at: timelineClock.now,
@@ -1442,71 +1325,12 @@ final class DictationCoordinator: ObservableObject {
         await flashFeedback(message)
     }
 
-    private func cleanupProtectedTerms() -> [String] {
-        var seen: Set<String> = []
-        return dictionaryStore.entries.compactMap { entry in
-            let term = entry.right
-            guard !term.isEmpty, seen.insert(term).inserted else {
-                return nil
-            }
-            return term
-        }
-    }
-
-    private func logCleanupPair(
-        raw: String,
-        cleaned: String,
-        started: ContinuousClock.Instant
-    ) {
-        guard Capabilities.current.keepsCleanupLab else {
-            return
-        }
-        let latency = started.duration(to: ContinuousClock().now)
-        Task {
-            do {
-                try await cleanupLabStore.append(
-                    CleanupLabEntry(
-                        ts: Date(),
-                        backend: FoundationModelPolisher.backendName,
-                        latencyMs: cleanupMilliseconds(latency),
-                        raw: raw,
-                        cleaned: cleaned
-                    )
-                )
-            } catch {
-                cleanupLogger.error(
-                    "lab append failed: \(error.localizedDescription, privacy: .public)"
-                )
-            }
-        }
-    }
-
-    private func cleanupMilliseconds(_ duration: Duration) -> Double {
-        let components = duration.components
-        return Double(components.seconds) * 1_000
-            + Double(components.attoseconds)
-                / 1_000_000_000_000_000
-    }
-
     private func invalidatePipeline() {
         setRecordingLocked(false)
         pipelineGeneration += 1
         pipelineTask?.cancel()
         pipelineTask = nil
         activeTimeline = nil
-    }
-
-    private func polishShortfallMessage(
-        _ shortfall: PolishShortfall
-    ) -> String? {
-        switch shortfall {
-        case .none:
-            nil
-        case .timedOut:
-            "polish timed out — pasted raw"
-        case .failed:
-            "couldn't polish — pasted raw"
-        }
     }
 
     private func feedbackMessage(

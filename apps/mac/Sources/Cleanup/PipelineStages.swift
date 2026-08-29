@@ -1,12 +1,11 @@
 import Foundation
 
-/// the three layers a word passes through on its way to the page. the
+/// the two layers a word passes through on its way to the page. the
 /// playground renders these; nothing else in the app knew the pipeline had a
 /// shape a user could see.
 enum PipelineStage: String, CaseIterable, Identifiable, Sendable {
     case transcription
     case deterministic
-    case polish
 
     var id: String { rawValue }
 
@@ -16,8 +15,6 @@ enum PipelineStage: String, CaseIterable, Identifiable, Sendable {
             "speech model"
         case .deterministic:
             "cleanup"
-        case .polish:
-            "ai polish"
         }
     }
 
@@ -28,8 +25,6 @@ enum PipelineStage: String, CaseIterable, Identifiable, Sendable {
         case .deterministic:
             "eight rules: punctuation you spoke, emails, numbers, "
                 + "your dictionary. it never rewrites your words."
-        case .polish:
-            "apple's on-device model, only when the text looks messy."
         }
     }
 
@@ -48,15 +43,13 @@ struct PipelineStageResult: Equatable, Sendable, Identifiable {
     let input: String
     let output: String
     let isEnabled: Bool
-    /// nil unless the stage couldn't run at all (no model on this mac, the
-    /// polish threw). a stage that ran and changed nothing is not a failure —
-    /// having nothing to add is an answer.
-    let unavailableReason: String?
 
     var id: String { stage.rawValue }
 
+    /// a stage that ran and changed nothing is not a failure — having
+    /// nothing to add is an answer.
     var changedAnything: Bool {
-        isEnabled && unavailableReason == nil && input != output
+        isEnabled && input != output
     }
 }
 
@@ -65,7 +58,6 @@ struct PipelineStageResult: Equatable, Sendable, Identifiable {
 /// without shipping yourself a broken dictation.
 struct PipelineSelection: Equatable, Sendable {
     var deterministicEnabled = true
-    var polishEnabled = false
 
     func isEnabled(_ stage: PipelineStage) -> Bool {
         switch stage {
@@ -73,8 +65,6 @@ struct PipelineSelection: Equatable, Sendable {
             true
         case .deterministic:
             deterministicEnabled
-        case .polish:
-            polishEnabled
         }
     }
 
@@ -84,14 +74,12 @@ struct PipelineSelection: Equatable, Sendable {
             break
         case .deterministic:
             deterministicEnabled.toggle()
-        case .polish:
-            polishEnabled.toggle()
         }
     }
 }
 
 /// the worked example the playground opens with: every layer has something to
-/// do with it, so the diagram isn't three boxes that all say the same thing.
+/// do with it, so the diagram isn't two boxes that say the same thing.
 enum PipelineSample {
     static let text =
         "send it to jass at jass dot gg comma and say we shipped "

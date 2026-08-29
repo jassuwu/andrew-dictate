@@ -64,7 +64,6 @@ final class RemovalPlanTests: XCTestCase {
         XCTAssertTrue(byItem[.dictations]!.exists)
         XCTAssertGreaterThan(byItem[.dictations]!.bytes, 0)
         XCTAssertTrue(byItem[.dictionary]!.exists)
-        XCTAssertFalse(byItem[.labLog]!.exists)
     }
 
     /// The models are a directory somewhere else entirely, and they are the
@@ -129,9 +128,7 @@ final class RemovalPlanTests: XCTestCase {
     func testTheAppsFolderGoesOnceItIsEmpty() throws {
         try write("dictations.jsonl")
         try write("dictionary.json")
-        try write("cleanup-lab.jsonl")
-
-        remover().remove([.dictations, .dictionary, .labLog])
+        remover().remove([.dictations, .dictionary])
 
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: support.path),

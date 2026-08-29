@@ -12,7 +12,6 @@ struct RemovalPlan {
     enum Item: String, CaseIterable, Identifiable, Sendable {
         case dictations
         case dictionary
-        case labLog
         case meetingLeftovers
         case settings
         case speechModels
@@ -24,7 +23,6 @@ struct RemovalPlan {
             switch self {
             case .dictations: "everything you've dictated"
             case .dictionary: "your dictionary"
-            case .labLog: "the cleanup lab log"
             case .meetingLeftovers: "unfinished meeting audio and the hook log"
             case .settings: "settings and preferences"
             case .speechModels: "the speech models"
@@ -44,7 +42,7 @@ struct RemovalPlan {
                 "microphone, accessibility, system audio. macOS asks again if you come back."
             case .meetingLeftovers:
                 "your saved transcripts are documents, in the folder you chose — they stay."
-            case .dictionary, .labLog, .settings:
+            case .dictionary, .settings:
                 nil
             }
         }
@@ -120,8 +118,6 @@ struct Remover {
             supportDirectory.appendingPathComponent("dictations.jsonl")
         case .dictionary:
             supportDirectory.appendingPathComponent("dictionary.json")
-        case .labLog:
-            supportDirectory.appendingPathComponent("cleanup-lab.jsonl")
         case .meetingLeftovers:
             // two things, one item: the spool folder and hooks.log. the
             // folder is the url; the log goes with it in `remove`.

@@ -13,7 +13,6 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(settings.soundFeedbackEnabled)
         XCTAssertEqual(settings.dictationHotkey, .dictation)
         XCTAssertEqual(settings.engineVersion, .v2)
-        XCTAssertEqual(settings.cleanupMode, .off)
         XCTAssertEqual(settings.totalWordsDictated, 0)
     }
 
@@ -27,7 +26,6 @@ final class AppSettingsTests: XCTestCase {
         settings.soundFeedbackEnabled = false
         XCTAssertTrue(settings.setHotkeyBinding(.leftCommand))
         settings.engineVersion = .v3
-        settings.cleanupMode = .always
         settings.recordDictatedTranscript("two dictated words")
 
         let reloaded = AppSettings(userDefaults: userDefaults)
@@ -37,7 +35,6 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(reloaded.soundFeedbackEnabled)
         XCTAssertEqual(reloaded.dictationHotkey, .leftCommand)
         XCTAssertEqual(reloaded.engineVersion, .v3)
-        XCTAssertEqual(reloaded.cleanupMode, .always)
         XCTAssertEqual(reloaded.totalWordsDictated, 3)
     }
 
@@ -75,28 +72,6 @@ final class AppSettingsTests: XCTestCase {
                 from: persistedData
             ),
             .rightControl
-        )
-    }
-
-    func testCleanupModePersistsOnAndFallsBackToOffForUnknownValue() {
-        let (userDefaults, suiteName) = makeUserDefaults()
-        defer { userDefaults.removePersistentDomain(forName: suiteName) }
-
-        let settings = AppSettings(userDefaults: userDefaults)
-        settings.cleanupMode = .on
-
-        XCTAssertEqual(
-            AppSettings(userDefaults: userDefaults).cleanupMode,
-            .on
-        )
-
-        userDefaults.set(
-            "future-mode",
-            forKey: "AndrewDictate.cleanupMode"
-        )
-        XCTAssertEqual(
-            AppSettings(userDefaults: userDefaults).cleanupMode,
-            .off
         )
     }
 
@@ -210,14 +185,6 @@ final class AppSettingsTests: XCTestCase {
 
 extension AppSettingsTests {
     @MainActor
-    func testShadowModeMigratesToOn() {
-        let (userDefaults, suiteName) = makeUserDefaults()
-        defer { UserDefaults().removePersistentDomain(forName: suiteName) }
-        userDefaults.set("shadow", forKey: "AndrewDictate.cleanupMode")
-        let settings = AppSettings(userDefaults: userDefaults)
-        XCTAssertEqual(settings.cleanupMode, CleanupMode.on)
-    }
-
     /// ADR 0026. The pre-roll ruling went the other way and this deliberately
     /// does not follow it: pre-roll opens a microphone, this keeps text the
     /// app already produced and already pasted.

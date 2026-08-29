@@ -350,37 +350,6 @@ final class CleanerTests: XCTestCase {
         }
     }
 
-    /// The capability moved rather than disappearing: the gate still sees the
-    /// stumble and still routes it to a model that has the context to judge.
-    func testStumblesAreStillDetectedForTheGate() {
-        for transcript in [
-            "ship it friday, actually monday",
-            "call john i mean jane",
-            "meet friday no wait monday",
-            "version one make that two",
-        ] {
-            XCTAssertTrue(
-                MessyGateSignals.containsCorrectionMarker(in: transcript),
-                transcript
-            )
-        }
-        XCTAssertFalse(
-            MessyGateSignals.containsCorrectionMarker(in: "no markers here")
-        )
-
-        XCTAssertTrue(
-            MessyGateSignals.containsImmediateDuplicate(
-                in: "we should we should ship tomorrow"
-            )
-        )
-        XCTAssertFalse(
-            MessyGateSignals.containsImmediateDuplicate(
-                in: "this is very, very important"
-            ),
-            "comma-separated emphasis is not a stumble"
-        )
-    }
-
     func testDictionarySubstitutionsStageTable() {
         let transform = DictionarySubstitutions(
             entries: [
