@@ -40,10 +40,18 @@ enum SetupGate {
     static func presentation(
         onboardingDismissed: Bool,
         permissions: PermissionSnapshot,
-        moment: SetupCheckMoment
+        moment: SetupCheckMoment,
+        dictationWanted: Bool = true
     ) -> SetupPresentation {
         guard onboardingDismissed else {
             return .present
+        }
+        // a meetings-only setup has nothing here to be re-verified: system
+        // audio is proved at every capture (ADR 0021), and there is no
+        // hotkey to be dead. nagging for accessibility would be asking for a
+        // grant the app was told not to want.
+        guard dictationWanted else {
+            return .none
         }
         guard !permissions.isDictationReady else {
             return .none

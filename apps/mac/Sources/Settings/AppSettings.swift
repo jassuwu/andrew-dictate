@@ -270,6 +270,19 @@ final class AppSettings: ObservableObject {
     private static let cleanupEnabledKey = "AndrewDictate.cleanupEnabled"
     private static let totalWordsDictatedKey =
         "AndrewDictate.totalWordsDictated"
+    /// whether this mac set the app up for dictation at all. someone who
+    /// ticked only meetings must not be asked for accessibility at every
+    /// launch — the gate reads this before it reads the permissions.
+    @Published var dictationWanted: Bool {
+        didSet {
+            guard dictationWanted != oldValue else {
+                return
+            }
+            userDefaults.set(dictationWanted, forKey: Self.dictationWantedKey)
+        }
+    }
+
+    private static let dictationWantedKey = "AndrewDictate.dictationWanted"
     private static let meetingModelKey = "AndrewDictate.meetingModel"
     private static let meetingsFolderKey = "AndrewDictate.meetingsFolder"
     private static let meetingHookKey = "AndrewDictate.meetingHook"
@@ -328,6 +341,9 @@ final class AppSettings: ObservableObject {
             userDefaults.integer(forKey: Self.totalWordsDictatedKey)
         )
 
+        dictationWanted = userDefaults.object(forKey: Self.dictationWantedKey) == nil
+            ? true
+            : userDefaults.bool(forKey: Self.dictationWantedKey)
         meetingModel = userDefaults
             .string(forKey: Self.meetingModelKey)
             .flatMap(MeetingModel.init(rawValue:)) ?? .whisperLargeV3Turbo

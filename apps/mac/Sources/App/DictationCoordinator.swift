@@ -84,7 +84,9 @@ final class DictationCoordinator: ObservableObject {
     )
 
     var needsPermissionAttention: Bool {
-        settings.onboardingDismissed && !permissions.isDictationReady
+        settings.onboardingDismissed
+            && settings.dictationWanted
+            && !permissions.isDictationReady
     }
 
     let dictionaryStore: DictionaryStore
@@ -444,7 +446,13 @@ final class DictationCoordinator: ObservableObject {
         presentOnboarding(scope: scope)
     }
 
-    func finishOnboarding() {
+    /// `dictationWanted` is nil when this run of setup had no say in it —
+    /// the meetings-only window must not un-set a dictation setup that was
+    /// made on an earlier day.
+    func finishOnboarding(dictationWanted: Bool? = nil) {
+        if let dictationWanted {
+            settings.dictationWanted = dictationWanted
+        }
         dismissOnboarding()
     }
 
@@ -463,7 +471,8 @@ final class DictationCoordinator: ObservableObject {
         SetupGate.presentation(
             onboardingDismissed: settings.onboardingDismissed,
             permissions: permissions,
-            moment: moment
+            moment: moment,
+            dictationWanted: settings.dictationWanted
         )
     }
 

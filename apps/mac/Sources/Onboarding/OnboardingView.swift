@@ -772,7 +772,11 @@ struct OnboardingView: View {
             flow.advance()
 
         case .permissions:
-            coordinator.finishOnboarding()
+            coordinator.finishOnboarding(
+                dictationWanted: onboarding.scope == .everything
+                    ? onboarding.dictationSelected
+                    : nil
+            )
         }
     }
 

@@ -71,3 +71,30 @@ final class SetupGateTests: XCTestCase {
         )
     }
 }
+
+extension SetupGateTests {
+    /// someone who set up meetings only has no hotkey to be dead, so a
+    /// missing accessibility grant is not a reason to bring setup back.
+    func testAMeetingsOnlySetupIsNeverNaggedForAccessibility() {
+        for moment in [SetupCheckMoment.launchOrReopen, .midSession] {
+            XCTAssertEqual(
+                SetupGate.presentation(
+                    onboardingDismissed: true,
+                    permissions: noAccessibility,
+                    moment: moment,
+                    dictationWanted: false
+                ),
+                .none
+            )
+        }
+        XCTAssertEqual(
+            SetupGate.presentation(
+                onboardingDismissed: false,
+                permissions: noAccessibility,
+                moment: .launchOrReopen,
+                dictationWanted: false
+            ),
+            .present
+        )
+    }
+}
