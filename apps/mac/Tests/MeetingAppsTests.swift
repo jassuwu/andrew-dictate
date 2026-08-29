@@ -31,3 +31,15 @@ final class MeetingAppsTests: XCTestCase {
         XCTAssertTrue(ranked.meeting.isEmpty && ranked.other.isEmpty)
     }
 }
+
+extension MeetingAppsTests {
+    func testBrowsersAreTappedThroughTheirAudioProcess() {
+        let safari = RunningApp(name: "Safari", bundleID: "com.apple.Safari", pid: 1)
+        XCTAssertEqual(MeetingApps.tapBundleIDs(for: safari), ["com.apple.Safari", "com.apple.WebKit.GPU"])
+        let arc = RunningApp(name: "Arc", bundleID: "company.thebrowser.Browser", pid: 2)
+        XCTAssertEqual(MeetingApps.tapBundleIDs(for: arc).last, "company.thebrowser.browser.helper")
+        let chrome = RunningApp(name: "Google Chrome", bundleID: "com.google.Chrome", pid: 3)
+        XCTAssertTrue(MeetingApps.tapBundleIDs(for: chrome).contains("com.google.Chrome.helper"))
+        XCTAssertEqual(MeetingApps.tapBundleIDs(for: RunningApp(name: "x", bundleID: nil, pid: 4)), [])
+    }
+}
