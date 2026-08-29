@@ -428,7 +428,7 @@ struct OnboardingView: View {
     }
 
     /// The download does not gate anything. It starts when the user says go and
-    /// keeps running while they carry on — blocking the flow on 440 MB was the
+    /// keeps running while they carry on — blocking the flow on ~460 MB was the
     /// thing that made setup feel long.
     @ViewBuilder
     private var dictationModelProgress: some View {
@@ -438,7 +438,7 @@ struct OnboardingView: View {
                 ProgressView(value: bounded(progress))
                     .progressViewStyle(.linear)
                     .frame(width: 240)
-                Text("about 440 mb. carry on — this keeps going.")
+                Text("about \(coordinator.settings.engineVersion.approximateSize.dropFirst()). carry on — this keeps going.")
                     .font(.caption)
                     .foregroundStyle(BrandUI.textSecondary)
             }
