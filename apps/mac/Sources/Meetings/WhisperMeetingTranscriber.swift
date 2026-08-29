@@ -92,7 +92,7 @@ actor WhisperMeetingTranscriber: MeetingTranscriber {
             return MeetingTurn(
                 speaker: Self.speaker(from: start, to: end, energies: buckets),
                 at: .seconds(start),
-                text: segment.text.trimmingCharacters(in: .whitespacesAndNewlines))
+                text: Self.clean(segment.text))
         }
     }
 
@@ -131,7 +131,7 @@ actor WhisperMeetingTranscriber: MeetingTranscriber {
             let turn = MeetingTurn(
                 speaker: Self.speaker(from: at, to: base + Double(segment.end), energies: energies),
                 at: .seconds(at),
-                text: segment.text.trimmingCharacters(in: .whitespacesAndNewlines))
+                text: Self.clean(segment.text))
             confirmedTurns.append(turn)
             // The first newly confirmed line takes over the dimmed one's id,
             // so the panel replaces it instead of showing both.
@@ -162,7 +162,7 @@ actor WhisperMeetingTranscriber: MeetingTranscriber {
                 id: id,
                 speaker: Self.liveSpeaker(Self.speaker(from: at, to: base + Double(tail.end), energies: energies)),
                 at: .seconds(at),
-                text: tail.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                text: Self.clean(tail.text),
                 isConfirmed: false))
         }
     }
@@ -238,6 +238,16 @@ actor WhisperMeetingTranscriber: MeetingTranscriber {
             offset = end
         }
         return (mix, buckets)
+    }
+
+    /// Whisper marks a change of speaker with a leading dash, from the
+    /// subtitles it learned on. The speaker is already labelled here.
+    private static func clean(_ text: String) -> String {
+        var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        while t.hasPrefix("-") || t.hasPrefix("–") {
+            t = String(t.dropFirst()).trimmingCharacters(in: .whitespaces)
+        }
+        return t
     }
 
     private static func rms(_ samples: ArraySlice<Float>) -> Float {
