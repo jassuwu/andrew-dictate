@@ -175,35 +175,68 @@ extension RemovalPlanTests {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         nonisolated(unsafe) var resetFor: [String] = []
+        // persistent domains are machine-wide, not per suite: a fixed name
+        // would leak between runs and turn "fresh machine" into a lie.
+        let domain = "gg.jass.dictate.test-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: domain)!
+        defer { defaults.removePersistentDomain(forName: domain) }
         let remover = Remover(
             supportDirectory: dir.appendingPathComponent("support"),
             modelDirectory: dir.appendingPathComponent("models"),
-            preferencesDomain: "gg.jass.dictate.test",
-            userDefaults: UserDefaults(suiteName: "gg.jass.dictate.test-\(UUID().uuidString)")!,
+            preferencesDomain: domain,
+            userDefaults: defaults,
             resetPermissions: { resetFor.append($0) }
         )
 
         XCTAssertEqual(
             remover.plan().entries.first { $0.item == .permissions }?.exists, false,
             "nothing was ever asked for on a fresh machine")
-        remover.userDefaults.setPersistentDomain(
-            ["AndrewDictate.onboardingCompleted": true], forName: "gg.jass.dictate.test")
+        defaults.setPersistentDomain(
+            ["AndrewDictate.onboardingCompleted": true], forName: domain)
         XCTAssertEqual(remover.plan().entries.first { $0.item == .permissions }?.exists, true)
 
         let failed = remover.remove([.permissions])
         XCTAssertEqual(failed, [])
-        XCTAssertEqual(resetFor, ["gg.jass.dictate.test"])
+        XCTAssertEqual(resetFor, [domain])
     }
 
     func testAPermissionResetThatFailsIsReported() {
         struct Nope: Error {}
+        let domain = "gg.jass.dictate.test-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: domain)!
+        defer { defaults.removePersistentDomain(forName: domain) }
         let remover = Remover(
             supportDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
             modelDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
-            preferencesDomain: "gg.jass.dictate.test",
-            userDefaults: UserDefaults(suiteName: "gg.jass.dictate.test-\(UUID().uuidString)")!,
+            preferencesDomain: domain,
+            userDefaults: defaults,
             resetPermissions: { _ in throw Nope() }
         )
         XCTAssertEqual(remover.remove([.permissions]), [.permissions])
+    }
+}
+
+extension RemovalPlanTests {
+    func testMeetingLeftoversCoverTheSpoolAndTheHookLog() throws {
+        let support = FileManager.default.temporaryDirectory
+            .appendingPathComponent("removal-leftovers-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: support.appendingPathComponent("meeting-spool/abc"), withIntermediateDirectories: true)
+        try Data([1, 2, 3]).write(to: support.appendingPathComponent("hooks.log"))
+        defer { try? FileManager.default.removeItem(at: support) }
+        let domain = "gg.jass.dictate.test-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: domain)!
+        defer { defaults.removePersistentDomain(forName: domain) }
+        let remover = Remover(
+            supportDirectory: support,
+            modelDirectory: support.appendingPathComponent("models"),
+            preferencesDomain: domain,
+            userDefaults: defaults,
+            resetPermissions: { _ in }
+        )
+        XCTAssertEqual(remover.plan().entries.first { $0.item == .meetingLeftovers }?.exists, true)
+        XCTAssertEqual(remover.remove([.meetingLeftovers]), [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: support.appendingPathComponent("meeting-spool").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: support.appendingPathComponent("hooks.log").path))
     }
 }

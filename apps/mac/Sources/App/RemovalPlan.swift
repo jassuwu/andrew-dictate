@@ -13,6 +13,7 @@ struct RemovalPlan {
         case dictations
         case dictionary
         case labLog
+        case meetingLeftovers
         case settings
         case speechModels
         case permissions
@@ -24,6 +25,7 @@ struct RemovalPlan {
             case .dictations: "everything you've dictated"
             case .dictionary: "your dictionary"
             case .labLog: "the cleanup lab log"
+            case .meetingLeftovers: "unfinished meeting audio and the hook log"
             case .settings: "settings and preferences"
             case .speechModels: "the speech models"
             case .permissions: "the permissions you granted"
@@ -40,6 +42,8 @@ struct RemovalPlan {
                 "cannot be recovered"
             case .permissions:
                 "microphone, accessibility, system audio. macOS asks again if you come back."
+            case .meetingLeftovers:
+                "your saved transcripts are documents, in the folder you chose — they stay."
             case .dictionary, .labLog, .settings:
                 nil
             }
@@ -118,6 +122,10 @@ struct Remover {
             supportDirectory.appendingPathComponent("dictionary.json")
         case .labLog:
             supportDirectory.appendingPathComponent("cleanup-lab.jsonl")
+        case .meetingLeftovers:
+            // two things, one item: the spool folder and hooks.log. the
+            // folder is the url; the log goes with it in `remove`.
+            supportDirectory.appendingPathComponent("meeting-spool", isDirectory: true)
         case .speechModels:
             modelDirectory
         case .settings, .permissions:
@@ -144,12 +152,16 @@ struct Remover {
                             : domain?.isEmpty == false
                     )
                 }
-                let size = allocatedSize(of: url)
-                return RemovalPlan.Entry(
-                    item: item,
-                    bytes: size,
-                    exists: fileManager.fileExists(atPath: url.path)
-                )
+                var size = allocatedSize(of: url)
+                var exists = fileManager.fileExists(atPath: url.path)
+                if item == .meetingLeftovers {
+                    let log = supportDirectory.appendingPathComponent("hooks.log")
+                    if fileManager.fileExists(atPath: log.path) {
+                        size += allocatedSize(of: log)
+                        exists = true
+                    }
+                }
+                return RemovalPlan.Entry(item: item, bytes: size, exists: exists)
             }
         )
     }
@@ -188,6 +200,12 @@ struct Remover {
                     )
                 }
                 continue
+            }
+            if item == .meetingLeftovers {
+                let log = supportDirectory.appendingPathComponent("hooks.log")
+                if fileManager.fileExists(atPath: log.path) {
+                    try? fileManager.removeItem(at: log)
+                }
             }
             guard fileManager.fileExists(atPath: url.path) else {
                 continue
