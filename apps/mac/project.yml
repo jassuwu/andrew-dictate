@@ -62,6 +62,25 @@ targets:
         Debug:
           PRODUCT_BUNDLE_IDENTIFIER: gg.jass.dictate.dev
           PRODUCT_NAME: Andrew Dictate Dev
+          # xcode's own signing runs *after* every script phase, so it would
+          # overwrite the re-sign below with a fresh ad-hoc one. off, then;
+          # the script signs, with the real identity or ad hoc as a fallback.
+          CODE_SIGNING_ALLOWED: "NO"
+
+    postBuildScripts:
+      # an ad-hoc signature changes on every build, so macOS treats each debug
+      # build as a new app and the accessibility / microphone / system-audio
+      # toggles never stick. xcode refuses to *build* with the development
+      # certificate on this machine, but codesign is happy to use it, so the
+      # debug app is re-signed after the fact. no certificate → nothing
+      # happens, and ci is untouched.
+      - name: re-sign debug build with a stable identity
+        script: |
+          if [ "$CONFIGURATION" != "Debug" ]; then exit 0; fi
+          identity=$(security find-identity -v -p codesigning | awk -F'"' '/Apple Development/ {print $2; exit}')
+          if [ -z "$identity" ]; then identity="-"; fi
+          codesign --force --deep --sign "$identity" --timestamp=none "$CODESIGNING_FOLDER_PATH"
+        basedOnDependencyAnalysis: false
     info:
       path: Sources/Info.plist
       properties:
