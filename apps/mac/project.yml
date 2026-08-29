@@ -90,6 +90,10 @@ targets:
         excludes:
           - LiveTranscriptView.swift
           - LiveTranscriptPanel.swift
+          # these reach FluidAudio / WhisperKit, which the test bundle does
+          # not link; the coordinator is tested through the seams instead
+          - FluidDiarizer.swift
+          - MeetingEngines.swift
       - Sources/Settings/MeetingsListModel.swift
       - Sources/Onboarding/OnboardingMeetingSetup.swift
       - Sources/App/AppIdentity.swift
