@@ -30,7 +30,12 @@ struct FluidDiarizer: MeetingDiarizer {
         let segments: [TimedSpeakerSegment]
         do {
             let models = try await DiarizerModels.download(to: Self.modelDirectory)
-            let manager = DiarizerManager()
+            // 0.7, the library default, folded two synthesized voices into
+            // one on the spike; 0.5 separated them perfectly. Between, on
+            // the side of finding a second speaker.
+            var config = DiarizerConfig.default
+            config.clusteringThreshold = 0.55
+            let manager = DiarizerManager(config: config)
             manager.initialize(models: models)
             defer { manager.cleanup() }
             segments = try manager.performCompleteDiarization(them).segments
