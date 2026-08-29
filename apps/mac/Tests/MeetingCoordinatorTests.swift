@@ -73,9 +73,12 @@ final class MeetingCoordinatorTests: XCTestCase {
         source.send(quiet(at: .seconds(2)))
         await settle()
 
-        XCTAssertEqual(c.state, .cannotHear)
+        // "can't hear" is said once and the session ends — the menu must
+        // never read "recording" over a tap that delivered nothing.
+        XCTAssertEqual(c.state, .idle)
         XCTAssertEqual(events, [.cannotHear(app: "zoom")])
         XCTAssertEqual(c.dictationResponse, .allow)
+        XCTAssertEqual(MeetingSpool(root: dir.appendingPathComponent("spool")).orphans().count, 0)
     }
 
     func testStoppingWritesTheFileDeletesTheSpoolAndRunsTheHook() async throws {

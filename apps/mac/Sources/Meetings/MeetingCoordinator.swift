@@ -40,6 +40,9 @@ enum MeetingEvent: Equatable, Sendable {
     /// The model would not load. The recording stops; the spool stays for
     /// recovery, so the audio is not lost with it.
     case engineFailed(String)
+    /// The transcript could not be written where it was asked to go. The
+    /// spool stays; the next launch tries again.
+    case saveFailed(String)
 
     /// The words on the lamp. `nil` means the HUD stays quiet.
     var hudText: String? {
@@ -57,6 +60,7 @@ enum MeetingEvent: Equatable, Sendable {
         case .nothingToKeep: "nothing was heard, nothing kept"
         case .hookFailed(let label): "hook failed (\(label))"
         case .engineFailed(let reason): "meeting model failed — \(reason)"
+        case .saveFailed(let reason): "couldn't save the transcript — \(reason). kept for next launch"
         }
     }
 
@@ -192,6 +196,7 @@ final class MeetingCoordinator: ObservableObject {
                 session.neverHeardTheProbe()
                 publish()
                 onEvent?(.cannotHear(app: appName))
+                stop(announcingNothingKept: false)
                 return
             }
             for await chunk in chunks {
@@ -202,6 +207,13 @@ final class MeetingCoordinator: ObservableObject {
     }
 
     func stop() {
+        stop(announcingNothingKept: true)
+    }
+
+    /// `announcingNothingKept` is false when the lamp has just said "can't
+    /// hear" — a second line saying nothing was kept would be the same news
+    /// twice.
+    private func stop(announcingNothingKept: Bool) {
         guard session.state != .idle, let app else { return }
         captureTask?.cancel()
         captureTask = nil
@@ -219,7 +231,8 @@ final class MeetingCoordinator: ObservableObject {
                 if let handle { spool.discard(handle) }
                 self.handle = nil
                 audioFile = nil
-                onEvent?(.nothingToKeep)
+                transcriber = nil
+                if announcingNothingKept { onEvent?(.nothingToKeep) }
                 return
             }
 
@@ -300,6 +313,9 @@ final class MeetingCoordinator: ObservableObject {
                 session.neverHeardTheProbe()
                 publish()
                 if let app { onEvent?(.cannotHear(app: MeetingApps.displayName(app))) }
+                // Nothing was ever heard, so there is nothing to keep and no
+                // meeting to keep running: the menu must not say "recording".
+                stop(announcingNothingKept: false)
             }
         case .wentSilent:
             if session.state == .recording {
@@ -335,6 +351,8 @@ final class MeetingCoordinator: ObservableObject {
                 session.rebuildFailed()
                 publish()
                 if let app { onEvent?(.cannotHear(app: MeetingApps.displayName(app))) }
+                // Most of a meeting is on the spool; write what there is.
+                stop(announcingNothingKept: false)
             }
         }
     }
@@ -383,9 +401,12 @@ final class MeetingCoordinator: ObservableObject {
             url = try MeetingTranscriptFile.write(transcript, in: prefs.folder)
         } catch {
             // The spool stays: it is the only copy, and next launch will
-            // find it and try again.
+            // find it and try again. Said out loud — "writing it out…" was
+            // the last thing the lamp showed, and silence after it would
+            // read as done (SPEC §4).
             logger.error("could not write the transcript: \(error.localizedDescription, privacy: .public)")
             self.handle = nil
+            onEvent?(.saveFailed(error.localizedDescription))
             return
         }
         try? spool.finish(handle)
