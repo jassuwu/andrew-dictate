@@ -56,8 +56,7 @@ struct FluidDiarizer: MeetingDiarizer {
 
         return turns.map { turn in
             guard case .them = turn.speaker else { return turn }
-            let at = Double(turn.at.components.seconds)
-                + Double(turn.at.components.attoseconds) / 1e18
+            let at = turn.at.totalSeconds
             let covering = segments.first {
                 Double($0.startTimeSeconds) <= at && at < Double($0.endTimeSeconds)
             } ?? segments.min {

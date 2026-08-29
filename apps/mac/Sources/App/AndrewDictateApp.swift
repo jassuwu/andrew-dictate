@@ -52,7 +52,7 @@ struct AndrewDictateApp: App {
             if coordinator.meetings.isRecording {
                 Text(
                     "recording \(coordinator.meetingAppName) · "
-                        + LiveTranscriptModel.clockText(coordinator.meetings.elapsed)
+                        + coordinator.meetings.elapsed.runningClock
                 )
                 .foregroundStyle(.secondary)
                 .disabled(true)

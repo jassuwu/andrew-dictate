@@ -51,7 +51,7 @@ struct LiveTranscriptView: View {
     }
 
     private var clock: String {
-        LiveTranscriptModel.clockText(model.elapsed)
+        model.elapsed.runningClock
     }
 
     @ViewBuilder
@@ -105,7 +105,7 @@ struct LiveTranscriptView: View {
 
     private func row(_ line: LiveLine) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text("[\(LiveTranscriptModel.stampText(line.at))]")
+            Text("[\(line.at.stamp)]")
                 .font(BrandUI.machineFont(size: 10))
                 .foregroundStyle(BrandUI.textSecondary)
 

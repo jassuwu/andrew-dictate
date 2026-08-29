@@ -48,7 +48,7 @@ final class MeetingNudgeNotifier: NSObject, UNUserNotificationCenterDelegate {
         guard let center else { return }
         let content = UNMutableNotificationContent()
         content.title = "still recording \(app)?"
-        content.body = "nothing has been heard for \(MeetingEvent.clock(quietFor)). it keeps going unless you stop it."
+        content.body = "nothing has been heard for \(quietFor.spoken). it keeps going unless you stop it."
         content.categoryIdentifier = Self.category
         content.interruptionLevel = .timeSensitive
         let request = UNNotificationRequest(

@@ -122,7 +122,7 @@ enum MeetingTranscriptFile {
         if !transcript.gaps.isEmpty {
             let count = transcript.gaps.count
             let spans = transcript.gaps
-                .map { "between \(clock($0.began)) and \(clock($0.ended))" }
+                .map { "between \($0.began.stamp) and \($0.ended.stamp)" }
                 .joined(separator: ", and ")
             lines.append(
                 "> \(count) \(count == 1 ? "gap" : "gaps") — audio was lost \(spans)")
@@ -130,7 +130,7 @@ enum MeetingTranscriptFile {
         }
 
         for turn in transcript.turns {
-            lines.append("[\(clock(turn.at))] \(turn.speaker.label): \(turn.text)")
+            lines.append("[\(turn.at.stamp)] \(turn.speaker.label): \(turn.text)")
             lines.append("")
         }
         // every block above ends with an empty line, so the join already
@@ -233,14 +233,7 @@ enum MeetingTranscriptFile {
     }
 
     private static func oneDecimal(_ duration: Duration) -> String {
-        let total = Double(duration.components.seconds)
-            + Double(duration.components.attoseconds) / 1e18
-        return String(format: "%.1f", total)
-    }
-
-    private static func clock(_ duration: Duration) -> String {
-        let s = seconds(duration)
-        return String(format: "%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
+        String(format: "%.1f", duration.totalSeconds)
     }
 
     private static func formatter(_ pattern: String, _ timeZone: TimeZone) -> DateFormatter {

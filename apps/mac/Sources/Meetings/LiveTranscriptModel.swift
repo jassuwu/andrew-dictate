@@ -47,27 +47,4 @@ final class LiveTranscriptModel: ObservableObject {
 }
 
 extension LiveTranscriptModel {
-    /// The running clock in the header: `12:34`, and `1:02:03` once a meeting
-    /// passes an hour. Hours are not padded — a leading zero would make an
-    /// eleven-minute meeting look like it had been going all day.
-    static func clockText(_ duration: Duration) -> String {
-        let (hours, minutes, seconds) = parts(of: duration)
-        return hours > 0
-            ? String(format: "%d:%02d:%02d", hours, minutes, seconds)
-            : String(format: "%02d:%02d", minutes, seconds)
-    }
-
-    /// The stamp in front of a line, always the same width so the text after
-    /// it lines up: `00:07:12`.
-    static func stampText(_ duration: Duration) -> String {
-        let (hours, minutes, seconds) = parts(of: duration)
-        return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
-    }
-
-    private static func parts(
-        of duration: Duration
-    ) -> (hours: Int, minutes: Int, seconds: Int) {
-        let total = max(0, Int(duration.components.seconds))
-        return (total / 3_600, (total % 3_600) / 60, total % 60)
-    }
 }

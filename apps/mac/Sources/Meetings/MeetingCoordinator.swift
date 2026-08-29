@@ -52,7 +52,7 @@ enum MeetingEvent: Equatable, Sendable {
         case .writingItOut: "writing it out…"
         case .saved(let summary):
             summary.gapCount == 0
-                ? "saved · \(Self.clock(summary.duration))"
+                ? "saved · \(summary.duration.spoken)"
                 : "saved · \(summary.gapCount) \(summary.gapCount == 1 ? "gap" : "gaps")"
         case .nothingToKeep: "nothing was heard, nothing kept"
         case .hookFailed(let label): "hook failed (\(label))"
@@ -61,12 +61,6 @@ enum MeetingEvent: Equatable, Sendable {
     }
 
     private static let themWord = "the other side"
-
-    static func clock(_ duration: Duration) -> String {
-        let s = duration.components.seconds
-        let h = s / 3600, m = (s % 3600) / 60
-        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
-    }
 }
 
 /// One meeting, start to file. Holds the state machine (`MeetingSession`),
@@ -410,7 +404,7 @@ final class MeetingCoordinator: ObservableObject {
             startedAt: started,
             durationS: Int(recording.duration.components.seconds),
             complete: recording.isComplete,
-            gaps: recording.gaps.map { [Self.seconds($0.began), Self.seconds($0.ended)] },
+            gaps: recording.gaps.map { [$0.began.totalSeconds, $0.ended.totalSeconds] },
             recovered: recovered
         )
         let run = await hookRunner.run(executable: hook, event: event)
@@ -456,9 +450,5 @@ final class MeetingCoordinator: ObservableObject {
             probeTimeout: t.probeTimeout,
             silenceTimeout: t.silenceTimeout,
             silenceFloor: t.silenceFloor)
-    }
-
-    private static func seconds(_ d: Duration) -> Double {
-        Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18
     }
 }

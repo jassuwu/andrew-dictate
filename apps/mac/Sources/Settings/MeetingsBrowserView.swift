@@ -64,7 +64,7 @@ private struct MeetingRow: View {
                     .lineLimit(1)
 
                 separator
-                Text(meetingLength(meeting.duration))
+                Text(meeting.duration.spoken)
                     .font(BrandUI.machineFont(size: 12))
                     .foregroundStyle(BrandUI.textSecondary)
 
@@ -118,16 +118,6 @@ private struct MeetingRow: View {
         }
         return ("complete", BrandUI.textSecondary)
     }
-}
-
-/// "1h 42m" / "12m" — how long a meeting is talked about, not seconds.
-func meetingLength(_ duration: Duration) -> String {
-    let minutes = max(0, Int(duration.components.seconds / 60))
-    guard minutes > 0 else {
-        return "<1m"
-    }
-    let hours = minutes / 60
-    return hours > 0 ? "\(hours)h \(minutes % 60)m" : "\(minutes)m"
 }
 
 #Preview("meetings") {

@@ -123,24 +123,24 @@ final class LiveTranscriptModelTests: XCTestCase {
     // MARK: - the clock
 
     func testTheHeaderClockDropsHoursUntilThereAreSome() {
-        XCTAssertEqual(LiveTranscriptModel.clockText(.seconds(0)), "00:00")
-        XCTAssertEqual(LiveTranscriptModel.clockText(.seconds(9)), "00:09")
-        XCTAssertEqual(LiveTranscriptModel.clockText(.seconds(754)), "12:34")
-        XCTAssertEqual(LiveTranscriptModel.clockText(.seconds(3_599)), "59:59")
+        XCTAssertEqual(Duration.seconds(0).runningClock, "00:00")
+        XCTAssertEqual(Duration.seconds(9).runningClock, "00:09")
+        XCTAssertEqual(Duration.seconds(754).runningClock, "12:34")
+        XCTAssertEqual(Duration.seconds(3_599).runningClock, "59:59")
         XCTAssertEqual(
-            LiveTranscriptModel.clockText(.seconds(3_723)),
+            Duration.seconds(3_723).runningClock,
             "1:02:03"
         )
     }
 
     func testALineStampIsAlwaysTheSameWidth() {
-        XCTAssertEqual(LiveTranscriptModel.stampText(.seconds(0)), "00:00:00")
+        XCTAssertEqual(Duration.seconds(0).stamp, "00:00:00")
         XCTAssertEqual(
-            LiveTranscriptModel.stampText(.seconds(432)),
+            Duration.seconds(432).stamp,
             "00:07:12"
         )
         XCTAssertEqual(
-            LiveTranscriptModel.stampText(.seconds(3_723)),
+            Duration.seconds(3_723).stamp,
             "01:02:03"
         )
     }
@@ -149,9 +149,9 @@ final class LiveTranscriptModelTests: XCTestCase {
     /// does not claim to have been said at one second.
     func testStampsTruncateTowardTheSecondTheLineBeganIn() {
         XCTAssertEqual(
-            LiveTranscriptModel.stampText(.milliseconds(1_900)),
+            Duration.milliseconds(1_900).stamp,
             "00:00:01"
         )
-        XCTAssertEqual(LiveTranscriptModel.clockText(.milliseconds(900)), "00:00")
+        XCTAssertEqual(Duration.milliseconds(900).runningClock, "00:00")
     }
 }
