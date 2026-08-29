@@ -30,7 +30,7 @@ enum MeetingEngines {
     }
 
     static func makeDiarizer() -> any MeetingDiarizer {
-        NoDiarizer()
+        FluidDiarizer()
     }
 
     /// Downloads (or verifies) the model, reporting 0…1. False means it did
@@ -40,12 +40,5 @@ enum MeetingEngines {
         progress: @escaping @Sendable (Double) -> Void
     ) async -> Bool {
         false
-    }
-}
-
-/// Leaves `them` whole. Stands in until FluidAudio's diarizer is wired.
-struct NoDiarizer: MeetingDiarizer {
-    func split(them: [Float], turns: [MeetingTurn]) async -> [MeetingTurn] {
-        turns
     }
 }
