@@ -13,36 +13,27 @@ struct RunningApp: Identifiable, Equatable, Sendable {
 /// rest follow alphabetically so a call in some app we have never heard of is
 /// still one click away.
 enum MeetingApps {
-    /// Bundle ids in menu order. Browsers are here because meet lives in one.
-    static let known: [String] = [
-        "us.zoom.xos",
-        "com.microsoft.teams2",
-        "com.microsoft.teams",
-        "com.tinyspeck.slackmacgap",
-        "com.apple.FaceTime",
-        "com.hnc.Discord",
-        "com.google.Chrome",
-        "com.apple.Safari",
-        "company.thebrowser.Browser",
-        "org.mozilla.firefox",
-        "com.brave.Browser",
-        "com.microsoft.edgemac",
+    /// Meeting apps in menu order, with the word the menu uses for each.
+    /// Browsers are here because meet lives in one.
+    private static let knownApps: [(id: String, name: String)] = [
+        ("us.zoom.xos", "zoom"),
+        ("com.microsoft.teams2", "teams"),
+        ("com.microsoft.teams", "teams"),
+        ("com.tinyspeck.slackmacgap", "slack"),
+        ("com.apple.FaceTime", "facetime"),
+        ("com.hnc.Discord", "discord"),
+        ("com.google.Chrome", "chrome"),
+        ("com.apple.Safari", "safari"),
+        ("company.thebrowser.Browser", "arc"),
+        ("org.mozilla.firefox", "firefox"),
+        ("com.brave.Browser", "brave"),
+        ("com.microsoft.edgemac", "edge"),
     ]
 
-    private static let shortNames: [String: String] = [
-        "us.zoom.xos": "zoom",
-        "com.microsoft.teams2": "teams",
-        "com.microsoft.teams": "teams",
-        "com.tinyspeck.slackmacgap": "slack",
-        "com.apple.FaceTime": "facetime",
-        "com.hnc.Discord": "discord",
-        "com.google.Chrome": "chrome",
-        "com.apple.Safari": "safari",
-        "company.thebrowser.Browser": "arc",
-        "org.mozilla.firefox": "firefox",
-        "com.brave.Browser": "brave",
-        "com.microsoft.edgemac": "edge",
-    ]
+    static var known: [String] { knownApps.map(\.id) }
+
+    private static let shortNames: [String: String] =
+        Dictionary(knownApps.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
 
     /// Which bundle ids the tap should follow for an app. The spike found
     /// that the main app is often not the process that plays the audio:
