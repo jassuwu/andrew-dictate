@@ -132,7 +132,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(dictatedWordCount(in: "...?!"), 1)
     }
 
-    func testMeetingsDefaultToWhisperTurboInDocumentsWithNoHook() {
+    func testMeetingsDefaultToWhisperLargeInDocumentsWithNoHook() {
         let (userDefaults, suiteName) = makeUserDefaults()
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
 
@@ -186,7 +186,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertNil(AppSettings(userDefaults: userDefaults).meetingHook)
     }
 
-    func testUnknownMeetingModelFallsBackToWhisperTurbo() {
+    func testUnknownMeetingModelFallsBackToWhisperLarge() {
         let (userDefaults, suiteName) = makeUserDefaults()
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
         userDefaults.set(
