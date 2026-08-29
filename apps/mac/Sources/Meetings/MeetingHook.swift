@@ -124,6 +124,14 @@ struct HookRunner: Sendable {
         process.standardOutput = output
         process.standardError = output
 
+        // Drain stdout/stderr while the hook runs: a pipe holds 64 KB, and a
+        // hook that prints more would block on write and never exit — with
+        // no timeout, forever.
+        let reader = output.fileHandleForReading
+        let drained = Task.detached(priority: .utility) {
+            (try? reader.readToEnd()) ?? Data()
+        }
+
         let status: Int32? = await withCheckedContinuation { continuation in
             process.terminationHandler = { finished in
                 continuation.resume(returning: finished.terminationStatus)
@@ -149,7 +157,7 @@ struct HookRunner: Sendable {
             return HookRun(finishedAt: Date(), outcome: .couldNotLaunch("could not start"))
         }
 
-        let printed = output.fileHandleForReading.readDataToEndOfFile()
+        let printed = await drained.value
         var text = header
         text += String(decoding: printed, as: UTF8.self)
         if !text.hasSuffix("\n") { text += "\n" }
