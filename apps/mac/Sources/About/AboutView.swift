@@ -122,13 +122,7 @@ struct AboutView: View {
                 .font(.system(size: 10.5))
                 .foregroundStyle(BrandUI.textSecondary)
                 .tint(BrandUI.gold.opacity(0.85))
-                .help(
-                    "FluidAudio: Apache-2.0 · "
-                        + "parakeet weights: CC-BY-4.0 · "
-                        + "WhisperKit: MIT · "
-                        + "whisper weights: MIT · "
-                        + "this app: MIT"
-                )
+                .help(Self.licenceTooltip)
 
             // a name in a hand font is a signature (jass.gg's role
             // system) — the one place the hand font is allowed.
@@ -173,17 +167,23 @@ struct AboutView: View {
         return "andrew has typed \(count) words. undefeated."
     }
 
+    // single literals, not `+` chains: a chain of eight string literals
+    // sent the release compiler into "unable to type-check in reasonable
+    // time" and failed a tag build.
+    private static let licenceTooltip = """
+        FluidAudio: Apache-2.0 · parakeet weights: CC-BY-4.0 · \
+        WhisperKit: MIT · whisper weights: MIT · this app: MIT
+        """
+
+    private static let creditsSource = """
+        built on [FluidAudio](https://github.com/FluidInference/FluidAudio), \
+        [parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2), \
+        [WhisperKit](https://github.com/argmaxinc/WhisperKit) \
+        and [whisper](https://github.com/openai/whisper)
+        """
+
     private var creditsMarkdown: AttributedString {
-        let markdown =
-            "built on [FluidAudio]"
-            + "(https://github.com/FluidInference/FluidAudio), "
-            + "[parakeet]"
-            + "(https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2), "
-            + "[WhisperKit]"
-            + "(https://github.com/argmaxinc/WhisperKit) "
-            + "and [whisper]"
-            + "(https://github.com/openai/whisper)"
-        return (try? AttributedString(markdown: markdown))
+        (try? AttributedString(markdown: Self.creditsSource))
             ?? AttributedString(
                 "built on FluidAudio, parakeet, WhisperKit and whisper"
             )
