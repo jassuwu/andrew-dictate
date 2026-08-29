@@ -31,7 +31,9 @@ final class RemovalPlanTests: XCTestCase {
             supportDirectory: support,
             modelDirectory: models,
             preferencesDomain: domain,
-            userDefaults: defaults
+            userDefaults: defaults,
+            // never `tccutil` against the author's own machine from a test
+            resetPermissions: { _ in }
         )
     }
 
@@ -163,5 +165,45 @@ final class RemovalPlanTests: XCTestCase {
         )
         XCTAssertNotNil(RemovalPlan.Item.dictations.caveat)
         XCTAssertNil(RemovalPlan.Item.dictionary.caveat)
+    }
+}
+
+extension RemovalPlanTests {
+    func testPermissionsAreAlwaysOfferedAndResetByBundleID() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("removal-permissions-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        nonisolated(unsafe) var resetFor: [String] = []
+        let remover = Remover(
+            supportDirectory: dir.appendingPathComponent("support"),
+            modelDirectory: dir.appendingPathComponent("models"),
+            preferencesDomain: "gg.jass.dictate.test",
+            userDefaults: UserDefaults(suiteName: "gg.jass.dictate.test-\(UUID().uuidString)")!,
+            resetPermissions: { resetFor.append($0) }
+        )
+
+        XCTAssertEqual(
+            remover.plan().entries.first { $0.item == .permissions }?.exists, false,
+            "nothing was ever asked for on a fresh machine")
+        remover.userDefaults.setPersistentDomain(
+            ["AndrewDictate.onboardingCompleted": true], forName: "gg.jass.dictate.test")
+        XCTAssertEqual(remover.plan().entries.first { $0.item == .permissions }?.exists, true)
+
+        let failed = remover.remove([.permissions])
+        XCTAssertEqual(failed, [])
+        XCTAssertEqual(resetFor, ["gg.jass.dictate.test"])
+    }
+
+    func testAPermissionResetThatFailsIsReported() {
+        struct Nope: Error {}
+        let remover = Remover(
+            supportDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
+            modelDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
+            preferencesDomain: "gg.jass.dictate.test",
+            userDefaults: UserDefaults(suiteName: "gg.jass.dictate.test-\(UUID().uuidString)")!,
+            resetPermissions: { _ in throw Nope() }
+        )
+        XCTAssertEqual(remover.remove([.permissions]), [.permissions])
     }
 }

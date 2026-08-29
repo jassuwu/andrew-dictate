@@ -15,6 +15,7 @@ struct RemovalPlan {
         case labLog
         case settings
         case speechModels
+        case permissions
 
         var id: String { rawValue }
 
@@ -25,6 +26,7 @@ struct RemovalPlan {
             case .labLog: "the cleanup lab log"
             case .settings: "settings and preferences"
             case .speechModels: "the speech models"
+            case .permissions: "the permissions you granted"
             }
         }
 
@@ -36,6 +38,8 @@ struct RemovalPlan {
                     + "removing this makes them download it again"
             case .dictations:
                 "cannot be recovered"
+            case .permissions:
+                "microphone, accessibility, system audio. macOS asks again if you come back."
             case .dictionary, .labLog, .settings:
                 nil
             }
@@ -70,19 +74,40 @@ struct Remover {
     let preferencesDomain: String
     let fileManager: FileManager
     let userDefaults: UserDefaults
+    /// Forgets every grant macOS holds for a bundle id. Injected so a test
+    /// never runs `tccutil` against the author's real machine.
+    let resetPermissions: (String) throws -> Void
 
     init(
         supportDirectory: URL = AppIdentity.supportDirectory,
         modelDirectory: URL = AppIdentity.sharedModelDirectory,
         preferencesDomain: String = AppIdentity.bundleID,
         fileManager: FileManager = .default,
-        userDefaults: UserDefaults = .standard
+        userDefaults: UserDefaults = .standard,
+        resetPermissions: @escaping (String) throws -> Void = Remover.resetPermissionsWithTCCUtil
     ) {
         self.supportDirectory = supportDirectory
         self.modelDirectory = modelDirectory
         self.preferencesDomain = preferencesDomain
         self.fileManager = fileManager
         self.userDefaults = userDefaults
+        self.resetPermissions = resetPermissions
+    }
+
+    /// `tccutil reset All <bundle id>` — the same thing a person would type,
+    /// and the only supported way to make macOS forget. Notifications are
+    /// not TCC and stay in system settings › notifications.
+    static func resetPermissionsWithTCCUtil(_ bundleID: String) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        process.arguments = ["reset", "All", bundleID]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw CocoaError(.executableRuntimeMismatch)
+        }
     }
 
     func url(for item: RemovalPlan.Item) -> URL? {
@@ -95,7 +120,7 @@ struct Remover {
             supportDirectory.appendingPathComponent("cleanup-lab.jsonl")
         case .speechModels:
             modelDirectory
-        case .settings:
+        case .settings, .permissions:
             nil
         }
     }
@@ -106,13 +131,17 @@ struct Remover {
                 guard let url = url(for: item) else {
                     // Preferences are a domain, not a file. They are always
                     // worth offering: leaving them behind is how an app
-                    // "reinstalls" with its old state intact.
+                    // "reinstalls" with its old state intact. Permissions
+                    // cannot be asked about at all (ADR 0021); they are
+                    // offered once setup has ever run, because that is when
+                    // a grant was first asked for.
+                    let domain = userDefaults.persistentDomain(forName: preferencesDomain)
                     return RemovalPlan.Entry(
                         item: item,
                         bytes: 0,
-                        exists: userDefaults
-                            .persistentDomain(forName: preferencesDomain)?
-                            .isEmpty == false
+                        exists: item == .permissions
+                            ? domain?["AndrewDictate.onboardingCompleted"] as? Bool == true
+                            : domain?.isEmpty == false
                     )
                 }
                 let size = allocatedSize(of: url)
@@ -145,9 +174,19 @@ struct Remover {
 
         for item in RemovalPlan.Item.allCases where items.contains(item) {
             guard let url = url(for: item) else {
-                userDefaults.removePersistentDomain(
-                    forName: preferencesDomain
-                )
+                if item == .permissions {
+                    do {
+                        try resetPermissions(preferencesDomain)
+                    } catch {
+                        failed.append(item)
+                        Self.logger.error("couldn't reset permissions: \(error.localizedDescription, privacy: .public)")
+                        onFailure(item, error)
+                    }
+                } else {
+                    userDefaults.removePersistentDomain(
+                        forName: preferencesDomain
+                    )
+                }
                 continue
             }
             guard fileManager.fileExists(atPath: url.path) else {

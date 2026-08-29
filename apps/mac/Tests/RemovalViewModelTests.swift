@@ -33,7 +33,8 @@ final class RemovalViewModelTests: XCTestCase {
                 supportDirectory: support,
                 modelDirectory: models,
                 preferencesDomain: domain,
-                userDefaults: defaults
+                userDefaults: defaults,
+                resetPermissions: { _ in }
             )
         )
     }
