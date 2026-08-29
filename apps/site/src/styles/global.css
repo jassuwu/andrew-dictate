@@ -1,11 +1,29 @@
 @import "tailwindcss";
 
+/* the app's type roles (ADR 0037): paper is prose, machine is anything
+   factual (keycaps, commands, versions), hand is the one signature.
+   same files the app ships, OFL, in public/fonts. */
+@font-face {
+  font-family: "Ioskeley Mono";
+  src: url("/fonts/IoskeleyMono-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Excalifont";
+  src: url("/fonts/Excalifont-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-display: swap;
+}
+
 @theme {
   --font-sans:
     ui-sans-serif, -apple-system, "SF Pro Text", "Segoe UI", system-ui,
     sans-serif;
   --font-mono:
-    ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", Menlo, monospace;
+    "Ioskeley Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  --font-hand: "Excalifont", "Comic Sans MS", cursive;
 }
 
 @layer base {
@@ -52,13 +70,17 @@
 /* the wordmark lets you in on the name, and only if you go looking.
    ADR 0013's deadpan rule holds everywhere else. */
 @layer components {
+  .hand {
+    font-family: var(--font-hand);
+  }
+
   .aside {
     margin-top: 0.25rem;
     color: transparent;
     transition: color 500ms ease;
   }
 
-  /* :has() keeps the trigger on the wordmark itself, not the whole row —
+  /* :has() keeps the trigger on the wordmark itself, not the whole row.
      hovering the ALPHA sticker should not give the joke away. */
   .name-row:has(.wordmark:hover) ~ .aside {
     color: rgb(242 237 224 / 0.45);
