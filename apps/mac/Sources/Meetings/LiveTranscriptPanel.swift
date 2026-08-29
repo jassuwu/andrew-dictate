@@ -98,6 +98,14 @@ final class LiveTranscriptPanel: NSObject, NSWindowDelegate {
         remember(false)
     }
 
+    /// The meeting ended: the panel goes, the preference stays. Whoever left
+    /// it open gets it back at the next meeting.
+    func dismissKeepingPreference() {
+        panel.delegate = nil
+        panel.orderOut(nil)
+        panel.delegate = self
+    }
+
     func toggle() {
         if isShown {
             hide()
