@@ -46,13 +46,61 @@ struct AndrewDictateApp: App {
                     .disabled(true)
             }
 
-            // The only action here that is time-sensitive: you just watched it
-            // mishear a name. Everything else the app can do is either
-            // configuration or curiosity, and lives in settings (ADR 0030).
-            Button("fix a word…") {
-                coordinator.openWordFixer()
+            // a meeting owns the mic and the menu while it runs (ADR 0023):
+            // the state line, the stop, the live view. dictation's row goes,
+            // because dictation is refused until you stop.
+            if coordinator.meetings.isRecording {
+                Text(
+                    "recording \(coordinator.meetingAppName) · "
+                        + LiveTranscriptModel.clockText(coordinator.meetings.elapsed)
+                )
+                .foregroundStyle(.secondary)
+                .disabled(true)
+
+                Button("stop recording") {
+                    coordinator.stopMeeting()
+                }
+
+                Button(
+                    coordinator.isLiveTranscriptShown
+                        ? "hide live transcript"
+                        : "live transcript"
+                ) {
+                    coordinator.toggleLiveTranscript()
+                }
+            } else {
+                // The only action here that is time-sensitive: you just
+                // watched it mishear a name. Everything else the app can do
+                // is configuration or curiosity, and lives in settings
+                // (ADR 0030).
+                Button("fix a word…") {
+                    coordinator.openWordFixer()
+                }
+                .disabled(coordinator.lastTranscript == nil)
+
+                // nothing starts a recording but the user, and the user
+                // names the app (ADR 0023, 0040). meeting apps first.
+                Menu("record a meeting") {
+                    let ranked = MeetingApps.rank(MeetingApps.running())
+                    ForEach(ranked.meeting) { app in
+                        Button(MeetingApps.displayName(app)) {
+                            coordinator.startMeeting(app)
+                        }
+                    }
+                    if !ranked.meeting.isEmpty, !ranked.other.isEmpty {
+                        Divider()
+                    }
+                    ForEach(ranked.other) { app in
+                        Button(MeetingApps.displayName(app)) {
+                            coordinator.startMeeting(app)
+                        }
+                    }
+                    if ranked.meeting.isEmpty, ranked.other.isEmpty {
+                        Text("nothing is running that could be recorded")
+                            .disabled(true)
+                    }
+                }
             }
-            .disabled(coordinator.lastTranscript == nil)
 
             Divider()
 
@@ -104,7 +152,8 @@ struct AndrewDictateApp: App {
             Image(
                 nsImage: MenuBarBrandIcon.image(
                     for: coordinator.state,
-                    needsAttention: coordinator.needsPermissionAttention
+                    needsAttention: coordinator.needsPermissionAttention,
+                    isRecordingMeeting: coordinator.meetings.isRecording
                 )
             )
             .accessibilityLabel(
@@ -123,7 +172,13 @@ struct AndrewDictateApp: App {
         // per-pane window title, and dimmed traffic lights come free, and
         // they're what the HIG asks of a settings window (ADR 0036).
         Settings {
-            SettingsView(coordinator: coordinator)
+            SettingsView(
+                coordinator: coordinator,
+                meetingsLoader: {
+                    MeetingTranscriptFile.listAll(
+                        in: coordinator.settings.meetingsFolder)
+                }
+            )
         }
         .windowResizability(.contentSize)
     }

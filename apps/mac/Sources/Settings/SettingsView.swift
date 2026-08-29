@@ -508,7 +508,11 @@ struct SettingsView: View {
                     .foregroundStyle(BrandUI.textSecondary)
             }
 
-            MeetingModelChooserView(selection: $settings.meetingModel)
+            MeetingModelChooserView(
+                selection: $settings.meetingModel,
+                installed: coordinator.installedMeetingModels,
+                downloading: coordinator.meetingModelDownloads
+            )
         }
     }
 
