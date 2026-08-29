@@ -62,12 +62,12 @@ struct MeetingModelChooserView: View {
 }
 
 #Preview("meeting model") {
-    @Previewable @State var selection: MeetingModel = .whisperLargeV3Turbo
+    @Previewable @State var selection: MeetingModel = .whisperLargeV3
 
     return MeetingModelChooserView(
         selection: $selection,
-        installed: [.whisperLargeV3Turbo],
-        downloading: [.parakeetV3: 0.4]
+        installed: [.whisperLargeV3],
+        downloading: [.whisperLargeV3Turbo: 0.4]
     )
     .padding(24)
     .frame(width: 800)

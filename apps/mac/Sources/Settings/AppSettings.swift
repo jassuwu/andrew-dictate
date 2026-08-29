@@ -346,7 +346,7 @@ final class AppSettings: ObservableObject {
             : userDefaults.bool(forKey: Self.dictationWantedKey)
         meetingModel = userDefaults
             .string(forKey: Self.meetingModelKey)
-            .flatMap(MeetingModel.init(rawValue:)) ?? .whisperLargeV3Turbo
+            .flatMap(MeetingModel.init(rawValue:)) ?? .default
         meetingsFolder = userDefaults
             .string(forKey: Self.meetingsFolderKey)
             .map { URL(fileURLWithPath: $0, isDirectory: true) }

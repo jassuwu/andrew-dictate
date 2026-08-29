@@ -138,7 +138,7 @@ final class AppSettingsTests: XCTestCase {
 
         let settings = AppSettings(userDefaults: userDefaults)
 
-        XCTAssertEqual(settings.meetingModel, .whisperLargeV3Turbo)
+        XCTAssertEqual(settings.meetingModel, .whisperLargeV3)
         XCTAssertEqual(
             settings.meetingsFolder,
             FileManager.default.homeDirectoryForCurrentUser
@@ -158,7 +158,7 @@ final class AppSettingsTests: XCTestCase {
         let ranAt = Date(timeIntervalSince1970: 1_756_000_000)
 
         let settings = AppSettings(userDefaults: userDefaults)
-        settings.meetingModel = .parakeetV3
+        settings.meetingModel = .whisperLargeV3Turbo
         settings.meetingsFolder = folder
         settings.meetingHook = hook
         settings.meetingHookLastRunAt = ranAt
@@ -166,7 +166,7 @@ final class AppSettingsTests: XCTestCase {
 
         let reloaded = AppSettings(userDefaults: userDefaults)
 
-        XCTAssertEqual(reloaded.meetingModel, .parakeetV3)
+        XCTAssertEqual(reloaded.meetingModel, .whisperLargeV3Turbo)
         XCTAssertEqual(reloaded.meetingsFolder, folder)
         XCTAssertEqual(reloaded.meetingHook, hook)
         XCTAssertEqual(reloaded.meetingHookLastRunAt, ranAt)
@@ -196,7 +196,7 @@ final class AppSettingsTests: XCTestCase {
 
         XCTAssertEqual(
             AppSettings(userDefaults: userDefaults).meetingModel,
-            .whisperLargeV3Turbo
+            .whisperLargeV3
         )
     }
 
