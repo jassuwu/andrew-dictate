@@ -8,7 +8,7 @@ decisions in this spec are backed by ADRs kept in `docs/adr/` and research in `~
 ## 1. product
 
 - **name:** Andrew Dictate. binary/app: `Andrew Dictate.app`, cask `andrew-dictate`, repo `jassuwu/andrew-dictate` (MIT, public day one — ADR 0010).
-- **platform:** macOS 14+, Apple Silicon only.
+- **platform:** macOS 26+, Apple Silicon only. *(was 14+ until 0.8.0; the glass windows and the meeting tap both need 26, and a floor that moves once is better than two features that each say "not on this mac".)*
 - **thesis:** frontier-fast dictation, with the smallest possible surface: no account, no cloud, no settings maze, no subscription. trust is architectural — the app contains no networking code except the model downloader.
 - **non-goals (v1):** windows/linux, iOS, always-on listening (deferred — ADR 0003), ~~meeting transcription~~ (**crossed 2026-08-22 — ADR 0023**: manual start and stop, the app never observes which processes hold the mic), ~~history browser~~ (**superseded — ADR 0022**), App Store.
 - **voice command mode: removed (2026-08-06).** shipped in early v1 (router tiers, agent delegation, ask/screen-ask), cut entirely to focus the product on dictation. this spec describes the app as it is; command-mode sections and terms are gone from here and the glossary.
@@ -59,13 +59,15 @@ the click starts the parakeet v2 download and warmup, requests microphone access
 
 key, pre-roll, and dictionary configuration are omitted. defaults apply: fn for dictation, pre-roll off. settings owns every option.
 
+**onboarding forks by job (ADR 0040, 2026-08-29).** the first card carries two check rows, both on: `dictation · ~460 mb` and `meeting recording · ~650 mb`; the button prices the total and unticking a job removes its rows and its download. meeting rows in the checklist: `meeting model`, and `system audio` — proved, not asked, by tapping our own process while the start sound plays, which is what fires the real prompt (ADR 0021, one screen earlier). someone who unticked meetings and later presses `record a meeting` gets this window back filtered to the meeting rows, headed `set up meeting recording`.
+
 when all three rows are ready, the card says "ready — hold fn and speak." and closes automatically after a short confirmation. no account, no tour, no newsletter.
 
 **permissions are re-verified, never remembered (2026-08-13).** there is no "skip" button (ADR 0029, 2026-08-22): someone who launched the app launched it in order to set it up, and macOS already provides the exit — the window is closable. **closing is the better exit**, because it records nothing and setup returns next launch; the old link marked onboarding dismissed and silenced it for good. only "done" claims setup finished. whether the app can dictate is asked of the system at launch, at reopen, on wake and unlock, and when macOS reports a trust change. a working setup is never nagged again; a broken one gets the window back at launch or reopen, and mid-session revocation only badges the menu bar — stealing focus while you type is the sin this app exists to prevent. settings shows what's missing and routes here, because this is the only place that knows how to ask.
 
-## 6. settings (one sheet)
+## 6. settings (tabs — ADR 0034, 0038, 0040)
 
-one scroll, in order: **setup** (only when something is missing — names it, hands back to onboarding) · **dictation key** · **dictation** (pre-roll · sound feedback · ai cleanup · cleanup lab) · **speech model** (v2 default, v3 downloadable, with preparation status and removal) · **dictionary** (the one power feature: wrong→right pairs, import/export json) · **general** (launch at login).
+the native `Settings` scene, five glass tabs: **dictation** (setup banner only when something is missing · hotkey · pre-roll · sound feedback · the pipeline — heard → cleanup → polish → pasted, one word each, a switch in each stage · the dictation model cards) · **dictionary** (wrong→right pairs, import/export json) · **history** (`dictations | meetings`, keep-new-dictations toggle, delete) · **meetings** (the meeting model cards · save folder · the hook — §11) · **general** (launch at login · the numbers dashboard · remove Andrew Dictate). the thing that opened you is where you live: nothing in settings opens another window except onboarding, which is the only surface that knows how to ask for a permission.
 
 two rules, both learned the hard way: options that appear on more than one screen are **defined once** (`DictationOption`) and rendered twice — the copy cannot drift because there is only one copy. and the user-facing word for the asr backend is **speech model** everywhere; `engine` survives only in code (`ParakeetEngine`, `EngineVersion`). "parakeet 0.3" is a value, not a category.
 
@@ -98,3 +100,16 @@ working targets, not commitments: key-up → transcript ≤ 250ms, key-up → in
 - **HUD placement/personality — decided (2026-08-12):** bottom-centre, the lamp. see §4.
 - ~~dictation history beyond "copy last" — deliberately absent~~ **superseded 2026-08-22 (ADR 0022).** two durable nouns: a **dictation** is your own speech and is kept until you delete it (raw + inserted text, 0600 on disk, no record of which app you were in); a **meeting recording** holds other people's words and is a separate type with its own retention rules, decided alongside meeting capture. the old test — "revisit only if losing a transcript hurts" — was measured and fails: nothing is lost, because a bad dictation gets fixed in place. history exists because a tool used a hundred times a day should leave a trace, not as a safety net.
 - pre-roll buffer depth (~300ms is a starting guess) — tune once real first-word-loss data exists.
+
+## 11. meetings (ADR 0021, 0023, 0040)
+
+a local meeting recorder. your mic is *you*; the system audio of one named process is *them*. what comes out is **one english markdown transcript**; no audio is kept.
+
+- **start / stop:** `record a meeting ▸` in the menu lists running apps, meeting apps first. manual both ends; the app never observes which processes hold the mic. while recording the menu reads `recording zoom · 12:34`, offers `stop recording` and `live transcript`, and hides `fix a word…` — dictation is refused mid-meeting and mid-rebuild, and the hud says why. the menu-bar badge gets a red dot.
+- **proving it can hear:** capture starts by playing the start sound; the tap must hear it (ADR 0021). never heard → `can't hear zoom`, with a link to privacy › system audio recording. went silent after working → rebuild; the gap is kept with its timestamps and the file says `complete: false`.
+- **the nudge:** an hour of silence asks `still recording?` through a notification with `keep going` / `stop`. it asks; it never acts.
+- **engine:** whisper large-v3 (turbo or full — the spike decides) via WhisperKit, streaming; the mic channel transcribed, the system channel in translate mode so hindi, tamil and hinglish all come out as english. **the live pass is the transcript.** after stop, FluidAudio's diarizer splits `them` into `them 1`, `them 2`…, the file is written, the spool deleted — seconds, not a batch re-pass. a spool orphaned by a crash is transcribed at next launch and saved flagged `recovered`.
+- **live view:** a floating glass panel toggled from the menu, remembered; interleaved `you` / `them` lines with timestamps, confirmed text in ink, the tentative tail dimmed.
+- **the file:** `<folder you picked>/meetings/2026-08/2026-08-29-1402-zoom.md`, default parent `~/Documents/andrew-dictate/`, no spaces. front matter: app, started, duration, engine, complete, gaps, recovered. kept until you delete it — in finder or in history.
+- **hook:** settings → meetings → *after a meeting is saved, run:* one executable chosen by file picker. invoked detached once the file is closed: transcript path as `$1`, json on stdin (`event`, `transcript`, `folder`, `app`, `started_at`, `duration_s`, `complete`, `gaps`, `recovered`), the same as `ANDREW_*` env. no timeout; output to `hooks.log`. a failure is announced once on the hud and stays on the row as `last run: failed · open log`. the only event is `meeting-saved`.
+- **models:** each job picks its own model from the same cards; the card states the consequence (whisper for dictation is slow; parakeet for meetings has no hindi). the meeting model downloads at onboarding when the job is ticked, or the first time you press record.
