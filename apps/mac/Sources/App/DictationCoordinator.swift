@@ -1798,14 +1798,14 @@ extension DictationCoordinator {
         case .saved, .nothingToKeep:
             liveTranscriptPanel?.dismissKeepingPreference()
             isLiveTranscriptShown = false
-        case .cannotHear, .gapBegan, .gapEnded, .writingItOut, .hookFailed:
+        case .cannotHear, .gapBegan, .gapEnded, .writingItOut, .hookFailed, .engineFailed:
             break
         }
 
         if let text = event.hudText {
             let duration: TimeInterval
             switch event {
-            case .cannotHear, .hookFailed: duration = 4
+            case .cannotHear, .hookFailed, .engineFailed: duration = 4
             case .writingItOut: duration = 6
             default: duration = 2
             }

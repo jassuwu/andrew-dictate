@@ -37,6 +37,9 @@ enum MeetingEvent: Equatable, Sendable {
     case saved(MeetingSummary)
     case nothingToKeep
     case hookFailed(String)
+    /// The model would not load. The recording stops; the spool stays for
+    /// recovery, so the audio is not lost with it.
+    case engineFailed(String)
 
     /// The words on the lamp. `nil` means the HUD stays quiet.
     var hudText: String? {
@@ -53,6 +56,7 @@ enum MeetingEvent: Equatable, Sendable {
                 : "saved · \(summary.gapCount) \(summary.gapCount == 1 ? "gap" : "gaps")"
         case .nothingToKeep: "nothing was heard, nothing kept"
         case .hookFailed(let label): "hook failed (\(label))"
+        case .engineFailed(let reason): "meeting model failed — \(reason)"
         }
     }
 
@@ -160,8 +164,19 @@ final class MeetingCoordinator: ObservableObject {
                 audioFile = try SpoolAudioFile(url: handle.audioURL)
                 let transcriber = try await makeTranscriber(prefs.model)
                 self.transcriber = transcriber
-                try await transcriber.begin()
                 listenForLines(transcriber)
+                // Loading whisper takes ten-odd seconds; the tap opens now
+                // and the transcriber buffers what it is fed until ready.
+                let loading = Task { try await transcriber.begin() }
+                Task { [weak self] in
+                    do {
+                        try await loading.value
+                    } catch {
+                        guard let self else { return }
+                        onEvent?(.engineFailed(error.localizedDescription))
+                        stop()
+                    }
+                }
                 let chunks = try await source.start(tapping: app)
                 for await chunk in chunks {
                     guard !Task.isCancelled else { break }
