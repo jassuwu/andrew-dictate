@@ -5,9 +5,9 @@ import UniformTypeIdentifiers
 
 enum SettingsTab: String, CaseIterable, Identifiable {
     case dictation
+    case meetings
     case dictionary
     case history
-    case meetings
     case general
 
     var id: String { rawValue }
@@ -83,6 +83,13 @@ struct SettingsView: View {
                 dictationTab
             }
             Tab(
+                "meetings",
+                systemImage: "person.2.wave.2",
+                value: SettingsTab.meetings
+            ) {
+                meetingsTab
+            }
+            Tab(
                 "dictionary",
                 systemImage: "character.book.closed",
                 value: SettingsTab.dictionary
@@ -95,13 +102,6 @@ struct SettingsView: View {
                 value: SettingsTab.history
             ) {
                 historyTab
-            }
-            Tab(
-                "meetings",
-                systemImage: "person.2.wave.2",
-                value: SettingsTab.meetings
-            ) {
-                meetingsTab
             }
             Tab(
                 "general",
