@@ -43,7 +43,7 @@ final class OnboardingStateTests: XCTestCase {
         XCTAssertEqual(state.scope, .everything)
         XCTAssertTrue(state.dictationSelected)
         XCTAssertTrue(state.meetingsSelected)
-        XCTAssertEqual(state.jobs.downloadSize, "~1.1 gb")
+        XCTAssertEqual(state.jobs.downloadSize, "~3.3 gb")
     }
 
     func testBothJobsNeedAllFiveRows() {

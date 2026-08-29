@@ -484,7 +484,7 @@ struct OnboardingView: View {
                 ProgressView(value: bounded(meetingSetup.modelProgress))
                     .progressViewStyle(.linear)
                     .frame(width: 240)
-                Text("about 650 mb. carry on — this keeps going.")
+                Text("about 2.9 gb. carry on — this keeps going.")
                     .font(.caption)
                     .foregroundStyle(BrandUI.textSecondary)
             }

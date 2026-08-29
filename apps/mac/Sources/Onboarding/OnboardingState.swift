@@ -32,10 +32,10 @@ enum OnboardingScope: Equatable, Sendable {
 struct OnboardingJobs: Equatable, Sendable {
     /// SPEC §5 prices the two jobs on the button. The numbers are the
     /// downloads the click actually starts — parakeet for dictation, whisper
-    /// turbo for meetings — rounded the way a person would say them.
+    /// large-v3 for meetings — rounded the way a person would say them.
     static let dictationDownload = "~460 mb"
-    static let meetingsDownload = "~650 mb"
-    static let bothDownloads = "~1.1 gb"
+    static let meetingsDownload = "~2.9 gb"
+    static let bothDownloads = "~3.3 gb"
 
     var scope: OnboardingScope = .everything
     var dictation = true

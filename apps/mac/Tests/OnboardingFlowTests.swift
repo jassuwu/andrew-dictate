@@ -183,7 +183,7 @@ final class OnboardingFlowTests: XCTestCase {
         )
         XCTAssertEqual(
             OnboardingStep.hello.actionTitle(for: meetingsOnly),
-            "set up meeting recording (~650 mb)"
+            "set up meeting recording (~2.9 gb)"
         )
         XCTAssertEqual(
             OnboardingStep.permissions.title(for: meetingsOnly),
@@ -198,7 +198,7 @@ final class OnboardingFlowTests: XCTestCase {
             OnboardingStep.hello.actionTitle(
                 for: OnboardingJobs(dictation: true, meetings: true)
             ),
-            "set up andrew dictate (~1.1 gb)"
+            "set up andrew dictate (~3.3 gb)"
         )
         XCTAssertEqual(
             OnboardingStep.hello.actionTitle(
@@ -210,7 +210,7 @@ final class OnboardingFlowTests: XCTestCase {
             OnboardingStep.hello.actionTitle(
                 for: OnboardingJobs(dictation: false, meetings: true)
             ),
-            "set up andrew dictate (~650 mb)"
+            "set up andrew dictate (~2.9 gb)"
         )
         XCTAssertEqual(
             OnboardingStep.hello.actionTitle(
