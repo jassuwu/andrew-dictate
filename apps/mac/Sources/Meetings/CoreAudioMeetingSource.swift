@@ -48,7 +48,15 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     // MARK: - MeetingAudioSource
 
     func start(tapping app: RunningApp) async throws -> AsyncStream<MeetingAudioChunk> {
-        let targets = MeetingApps.tapBundleIDs(for: app)
+        // The app's processes, and ours: the probe tone (ADR 0021) is played
+        // by *this* process, and a tap scoped to zoom alone would only ever
+        // hear it if zoom happened to be talking in the same second. The
+        // cost is a third of a second of our own start sound at the head of
+        // every recording, which whisper ignores.
+        var targets = MeetingApps.tapBundleIDs(for: app)
+        if let me = Bundle.main.bundleIdentifier, !targets.contains(me) {
+            targets.append(me)
+        }
         let (stream, continuation) = AsyncStream<MeetingAudioChunk>.makeStream(
             bufferingPolicy: .unbounded)
         lock.withLock {
