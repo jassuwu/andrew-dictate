@@ -300,6 +300,82 @@ final class OnboardingStateTests: XCTestCase {
         XCTAssertTrue(state.autoFinishArmed)
     }
 
+    // MARK: - what the last card may claim
+
+    func testEveryRowReadyIsTheOnlyReadyVerdict() {
+        var state = bothJobs()
+        _ = state.consentToSetup()
+        state.updateMicrophoneStatus(.ready)
+        state.updateAccessibility(granted: true)
+        state.updateModelStatus(.ready)
+        state.updateSystemAudioStatus(.ready)
+        state.updateMeetingModelStatus(.ready)
+
+        XCTAssertEqual(state.verdict, .ready)
+        XCTAssertTrue(state.autoFinishArmed)
+    }
+
+    /// Grants in, bytes still arriving: a wait, not a failure. Closing the
+    /// window does not stop the download, so the card may say so.
+    func testGrantsInWithAModelComingDownIsADownloadingVerdict() {
+        var state = dictationOnly()
+        _ = state.consentToSetup()
+        state.updateMicrophoneStatus(.ready)
+        state.updateAccessibility(granted: true)
+        state.updateModelStatus(.pending)
+
+        XCTAssertEqual(state.verdict, .downloading)
+        XCTAssertFalse(state.autoFinishArmed)
+
+        state.updateModelStatus(.ready)
+        XCTAssertEqual(state.verdict, .ready)
+    }
+
+    func testTheMeetingModelEarnsTheSameDownloadingVerdict() {
+        var state = meetingsOnlyByChoice()
+        _ = state.consentToSetup()
+        state.updateMicrophoneStatus(.ready)
+        state.updateSystemAudioStatus(.ready)
+        state.updateMeetingModelStatus(.inProgress)
+
+        XCTAssertEqual(state.verdict, .downloading)
+    }
+
+    /// A missing permission is the one that means nothing is done — for
+    /// either job, and even with every model already on disk.
+    func testAMissingPermissionIsAlwaysIncomplete() {
+        var dictation = dictationOnly()
+        _ = dictation.consentToSetup()
+        dictation.updateMicrophoneStatus(.ready)
+        dictation.updateAccessibility(granted: false)
+        dictation.updateModelStatus(.ready)
+        XCTAssertEqual(dictation.verdict, .incomplete)
+
+        var meetings = meetingsOnlyByChoice()
+        _ = meetings.consentToSetup()
+        meetings.updateMicrophoneStatus(.ready)
+        meetings.updateSystemAudioStatus(.actionRequired)
+        meetings.updateMeetingModelStatus(.ready)
+        XCTAssertEqual(meetings.verdict, .incomplete)
+
+        var both = bothJobs()
+        _ = both.consentToSetup()
+        both.updateMicrophoneStatus(.actionRequired)
+        both.updateAccessibility(granted: true)
+        both.updateModelStatus(.ready)
+        both.updateSystemAudioStatus(.ready)
+        both.updateMeetingModelStatus(.ready)
+        XCTAssertEqual(both.verdict, .incomplete)
+    }
+
+    func testNoJobSelectedCanNeverBeReady() {
+        var state = OnboardingState()
+        XCTAssertTrue(state.setDictationSelected(false))
+        state.updateMicrophoneStatus(.ready)
+
+        XCTAssertEqual(state.verdict, .incomplete)
+    }
+
     /// The meeting model is a download too, so it earns the panel on its own.
     func testWhileYouWaitAppearsForAPendingMeetingModel() {
         var state = meetingsOnlyByChoice()

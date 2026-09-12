@@ -10,6 +10,19 @@ enum OnboardingRowStatus: Equatable, Sendable {
     case ready
 }
 
+/// What the last card can honestly claim right now. The card used to say
+/// "done ✓" over a denied permission, which is SPEC §4's forbidden shape — a
+/// failure wearing a success's face — one screen earlier than the rule was
+/// written for.
+enum OnboardingVerdict: Equatable, Sendable {
+    /// every row of every chosen job is ready
+    case ready
+    /// macos said yes to everything; a model is still coming down
+    case downloading
+    /// something is missing — nothing here is done
+    case incomplete
+}
+
 enum OnboardingCompletion: Equatable, Sendable {
     case pending
     case finished
@@ -108,28 +121,37 @@ struct OnboardingState: Equatable, Sendable {
     /// with nothing on it is not a finished setup — it is an unanswered
     /// question, and finishing on it would claim the app was ready to do
     /// something nobody asked it to do.
-    var autoFinishArmed: Bool {
+    ///
+    /// A permission is the only kind of missing row that means *nothing is
+    /// done*: a model still coming down is a wait, and closing the window
+    /// does not stop it.
+    var verdict: OnboardingVerdict {
         guard completion == .pending, dictationSelected || meetingsSelected
         else {
-            return false
+            return .incomplete
         }
+        var modelPending = false
         if dictationSelected {
             guard microphoneStatus == .ready,
-                  accessibilityStatus == .ready,
-                  modelStatus == .ready
+                  accessibilityStatus == .ready
             else {
-                return false
+                return .incomplete
             }
+            modelPending = modelPending || modelStatus != .ready
         }
         if meetingsSelected {
             guard microphoneStatus == .ready,
-                  systemAudioStatus == .ready,
-                  meetingModelStatus == .ready
+                  systemAudioStatus == .ready
             else {
-                return false
+                return .incomplete
             }
+            modelPending = modelPending || meetingModelStatus != .ready
         }
-        return true
+        return modelPending ? .downloading : .ready
+    }
+
+    var autoFinishArmed: Bool {
+        verdict == .ready
     }
 
     /// The ticks are a question asked once. After consent the downloads have
