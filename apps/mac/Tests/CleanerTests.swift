@@ -531,6 +531,19 @@ final class CleanerTests: XCTestCase {
         }
     }
 
+    /// the space between two dictations is added at the cursor, not here:
+    /// the cleaner's output is flush at both ends, and that flush string is
+    /// what dictations.jsonl keeps.
+    func testTheCleanerStillReturnsAFlushString() {
+        let cleaned = DeterministicCleaner().clean("second thing")
+
+        XCTAssertEqual(cleaned, "Second thing.")
+        XCTAssertEqual(
+            cleaned,
+            cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
     /// the whole pipeline, not one stage: a time, an amount, a version, a
     /// filename and an address are punctuation parakeet wrote itself, and
     /// the cleaner has no business re-spacing any of it. every one of these
