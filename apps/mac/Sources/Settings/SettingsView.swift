@@ -1,5 +1,4 @@
 import AppKit
-import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -1063,49 +1062,5 @@ private struct DictionaryCellEditor: View {
             return
         }
         onCommit(draft)
-    }
-}
-
-@MainActor
-private final class LoginItemController: ObservableObject {
-    @Published private(set) var isEnabled = false
-    @Published private(set) var message: String?
-
-    init() {
-        refresh()
-    }
-
-    func refresh() {
-        switch SMAppService.mainApp.status {
-        case .enabled:
-            isEnabled = true
-            message = nil
-        case .requiresApproval:
-            isEnabled = true
-            message = "approval is required in system settings"
-        case .notFound:
-            isEnabled = false
-            message = "launch at login is unavailable"
-        case .notRegistered:
-            isEnabled = false
-            message = nil
-        @unknown default:
-            isEnabled = false
-            message = nil
-        }
-    }
-
-    func setEnabled(_ enabled: Bool) {
-        do {
-            if enabled {
-                try SMAppService.mainApp.register()
-            } else {
-                try SMAppService.mainApp.unregister()
-            }
-            refresh()
-        } catch {
-            refresh()
-            message = "couldn’t update launch at login"
-        }
     }
 }
