@@ -259,11 +259,15 @@ struct SettingsView: View {
     }
 
     private var hotkeyRow: some View {
-        HStack(spacing: 10) {
-            Text("key")
-                .font(BrandUI.bodyFont.weight(.medium))
+        HStack(alignment: .top, spacing: 16) {
+            // hold, double-tap lock and esc all ship; until this line, the
+            // only way to find them was to do one by accident.
+            SettingsRowLabel(
+                "key",
+                explanation: HotkeyBinding.gestureExplanation
+            )
 
-            Spacer(minLength: 10)
+            Spacer(minLength: 8)
 
             // the chip is the control — it and a picker beside it showed the
             // same value twice.
@@ -285,6 +289,7 @@ struct SettingsView: View {
             .buttonStyle(.plain)
             .fixedSize()
             .accessibilityLabel("dictation key")
+            .accessibilityHint(HotkeyBinding.gestureExplanation)
         }
     }
 
