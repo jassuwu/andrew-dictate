@@ -15,6 +15,19 @@ final class CleanerTests: XCTestCase {
         )
     }
 
+    /// the user-visible half of ADR 0038: you taught it `iPhone` for exactly
+    /// one reason, and position zero is where the old pipeline overruled you.
+    func testATaughtWordKeepsItsSpellingAtTheStartOfALine() {
+        let cleaner = DeterministicCleaner(
+            entries: [DictionaryEntry(wrong: "iphone", right: "iPhone")]
+        )
+
+        XCTAssertEqual(
+            cleaner.clean("iphone battery is fine"),
+            "iPhone battery is fine."
+        )
+    }
+
     func testWordBoundariesProtectPartialMatches() {
         let cleaner = DeterministicCleaner(
             entries: [DictionaryEntry(wrong: "gpt", right: "GPT")]
@@ -436,7 +449,13 @@ final class CleanerTests: XCTestCase {
                     "john@cypher.io"
                 ),
                 ("123 hello", "123 hello"),
-                ("iPhone works", "IPhone works"),
+                // a capital past the first character is a spelling somebody
+                // chose. without one there is nothing to protect, so the
+                // sentence start still wins.
+                ("iPhone works", "iPhone works"),
+                ("macOS 26 is out", "macOS 26 is out"),
+                ("gRPC is fast", "gRPC is fast"),
+                ("iphone works", "Iphone works"),
             ]
         )
     }
