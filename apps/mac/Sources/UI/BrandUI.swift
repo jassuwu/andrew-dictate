@@ -41,8 +41,10 @@ enum BrandUI {
     static let cardBg = color(cardBgRGB)
     static let textPrimary = color(textPrimaryRGB)
     /// 0.70, not the old 0.55: over the worst backdrop — a white window
-    /// behind the glass — 0.55 captions land at 3.5:1, under AA.
-    static let textSecondary = textPrimary.opacity(0.70)
+    /// behind the glass — 0.55 captions land at 3.5:1, under AA. a named
+    /// number so BrandPaletteTests can hold the floor.
+    static let textSecondaryOpacity = 0.70
+    static let textSecondary = textPrimary.opacity(textSecondaryOpacity)
     static let goldPale = color(goldPaleRGB)
     static let gold = color(goldRGB)
     static let goldDeep = color(goldDeepRGB)
