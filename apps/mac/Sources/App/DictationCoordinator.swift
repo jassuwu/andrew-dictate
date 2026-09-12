@@ -1057,6 +1057,13 @@ final class DictationCoordinator: ObservableObject {
         }
 
         guard isPrewarmed else {
+            // read before the switch: `.notStarted` starts the download,
+            // which sets `.downloading(progress: 0)` synchronously and would
+            // turn the press that priced it into "0%".
+            let size = activeEngineVersion.approximateSize.dropFirst()
+            let notice = enginePreparationState.pressedEarlyNotice(
+                downloadSize: "about \(size)"
+            )
             switch enginePreparationState {
             case .notStarted:
                 requestEnginePreparation()
@@ -1072,6 +1079,12 @@ final class DictationCoordinator: ObservableObject {
             }
             if state != .prewarming {
                 setState(.prewarming)
+            }
+            // the ember breathing at bottom-centre is the only thing a
+            // download has ever said, and only the menu knew why. the press
+            // could not be honoured, so answer it.
+            if let notice {
+                flashNotice(notice)
             }
             return
         }
