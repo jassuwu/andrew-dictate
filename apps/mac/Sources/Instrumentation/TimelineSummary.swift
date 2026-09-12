@@ -125,9 +125,12 @@ extension TimelineSummary {
     }
 
     private var conditionsLine: String {
+        // every stage but the counted one belongs here: a stage missing from
+        // this list would drop its count silently.
         let exclusions = [
             UtteranceTimeline.CompletionStage.cancelled,
             .leftOnPasteboard,
+            .leftOnPasteboardSecure,
         ].compactMap { stage -> String? in
             guard let count = excluded[stage], count > 0 else {
                 return nil
@@ -147,6 +150,7 @@ extension TimelineSummary {
         switch stage {
         case .pasteVerified: "verified"
         case .leftOnPasteboard: "left on pasteboard"
+        case .leftOnPasteboardSecure: "secure field"
         case .cancelled: "cancelled"
         }
     }
