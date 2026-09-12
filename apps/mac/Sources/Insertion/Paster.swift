@@ -15,6 +15,24 @@ enum LeftOnPasteboardReason: Equatable, Sendable {
     case pasteboardUnavailable
 }
 
+/// What the paste did, and the instant it reached the target app.
+///
+/// `insertedAt` is stamped the moment the ⌘V key-down is posted, because that
+/// is when the words appear. Restoring the clipboard afterwards is
+/// housekeeping, and nobody waits for housekeeping.
+struct PasteOutcome: Sendable {
+    let result: PasteResult
+    let insertedAt: ContinuousClock.Instant
+
+    init(
+        result: PasteResult,
+        insertedAt: ContinuousClock.Instant = ContinuousClock.now
+    ) {
+        self.result = result
+        self.insertedAt = insertedAt
+    }
+}
+
 @MainActor
 final class Paster {
     private struct Snapshot: Sendable {
@@ -38,9 +56,8 @@ final class Paster {
     func paste(
         _ text: String,
         reasonForLeavingOnPasteboard: (() -> LeftOnPasteboardReason?)? = nil
-    ) async -> PasteResult {
+    ) async -> PasteOutcome {
         await acquirePasteTransaction()
-        defer { releasePasteTransaction() }
 
         let pasteboard = NSPasteboard.general
         var snapshot = Self.snapshot(of: pasteboard)
@@ -50,28 +67,39 @@ final class Paster {
             snapshot = nil
         }
 
+        // the transaction is released by hand on every path out of here, so
+        // a second dictation queues behind the real restore rather than
+        // behind the caller. miss one and the next paste waits forever.
         guard let ourChangeCount = Self.writeTranscript(text, to: pasteboard) else {
-            return .leftOnPasteboard(.pasteboardUnavailable)
+            releasePasteTransaction()
+            return PasteOutcome(result: .leftOnPasteboard(.pasteboardUnavailable))
         }
         if let reason = reasonForLeavingOnPasteboard?() {
-            return .leftOnPasteboard(reason)
+            releasePasteTransaction()
+            return PasteOutcome(result: .leftOnPasteboard(reason))
         }
         guard CGPreflightPostEventAccess() else {
-            return .leftOnPasteboard(.accessibilityUnavailable)
+            releasePasteTransaction()
+            return PasteOutcome(result: .leftOnPasteboard(.accessibilityUnavailable))
         }
         guard !Task.isCancelled else {
-            return .leftOnPasteboard(.cancelled)
+            releasePasteTransaction()
+            return PasteOutcome(result: .leftOnPasteboard(.cancelled))
         }
 
         let keyCode = keyCodeResolver.keyCodeForV()
         if let reason = reasonForLeavingOnPasteboard?() {
-            return .leftOnPasteboard(reason)
+            releasePasteTransaction()
+            return PasteOutcome(result: .leftOnPasteboard(reason))
         }
         guard Self.postPasteKey(keyCode, keyDown: true) else {
-            return .leftOnPasteboard(.shortcutUnavailable)
+            releasePasteTransaction()
+            return PasteOutcome(result: .leftOnPasteboard(.shortcutUnavailable))
         }
+        // the keystroke is posted: this is the instant the text lands.
+        let insertedAt = ContinuousClock.now
 
-        let restoreTask = Task.detached {
+        Task.detached { [weak self] in
             try? await Task.sleep(for: .milliseconds(10))
             await MainActor.run {
                 _ = Self.postPasteKey(keyCode, keyDown: false)
@@ -83,10 +111,10 @@ final class Paster {
                     expectedChangeCount: ourChangeCount,
                     transcript: text
                 )
+                self?.releasePasteTransaction()
             }
         }
-        await restoreTask.value
-        return .pasted
+        return PasteOutcome(result: .pasted, insertedAt: insertedAt)
     }
 
     private func acquirePasteTransaction() async {

@@ -1256,7 +1256,7 @@ final class DictationCoordinator: ObservableObject {
                 heard: transcript,
                 inserted: pasteTranscript
             )
-            let pasteResult = await paster.paste(
+            let outcome = await paster.paste(
                 pasteTranscript,
                 reasonForLeavingOnPasteboard: {
                     switch focusAnchor?.revalidationDecision()
@@ -1270,7 +1270,7 @@ final class DictationCoordinator: ObservableObject {
                     }
                 }
             )
-            if pasteResult != .leftOnPasteboard(
+            if outcome.result != .leftOnPasteboard(
                 .pasteboardUnavailable
             ) {
                 settings.recordDictatedTranscript(rawTranscript)
@@ -1279,10 +1279,12 @@ final class DictationCoordinator: ObservableObject {
                 return
             }
 
-            switch pasteResult {
+            switch outcome.result {
             case .pasted:
+                // the paste's own instant, not this one: paste() returns as
+                // soon as ⌘V is posted, and that is what "inserted" means.
                 completeTimeline(
-                    at: timelineClock.now,
+                    at: outcome.insertedAt,
                     stage: .pasteVerified
                 )
             case let .leftOnPasteboard(reason):
