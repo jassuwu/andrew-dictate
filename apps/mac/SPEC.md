@@ -51,7 +51,7 @@ no dock icon. menu-bar item: the brand badge → menu: fix a word…, record a m
 
 ## 5. onboarding (once, one app click)
 
-one fixed card introduces Andrew Dictate and has one consent action: "set up Andrew Dictate." nothing downloads and hotkeys remain detection-only before that click, and no later launch starts a download for a job that was not ticked.
+three fixed cards — what it is, the speech models, the permissions. the first has one consent action, "set up andrew dictate (~460 mb)", which starts the downloads; the last asks macOS. the dots jump, back goes back, nothing advances on its own. nothing downloads and hotkeys remain detection-only before that click, and no later launch starts a download for a job that was not ticked.
 
 the click starts the parakeet v2 download and warmup and prompts for accessibility; the microphone is asked for from its row. one live checklist shows microphone, accessibility, and speech-model status; download progress stays inline, denied permissions link to system settings, and model failures can retry.
 
@@ -59,7 +59,7 @@ pre-roll and dictionary configuration are omitted. defaults apply: fn for dictat
 
 **onboarding forks by job (ADR 0040, 2026-08-29).** the first card carries two check rows: `dictation · ~460 mb` ticked, `meeting recording · ~2.9 gb` offered unticked. the button prices what is ticked; ticking meetings adds its rows and its download, unticking dictation removes them. meeting rows in the checklist: `meeting model`, and `system audio` — proved, not asked, by tapping our own process while the start sound plays, which is what fires the real prompt (ADR 0021, one screen earlier). someone who unticked meetings and later presses `record a meeting` gets this window back filtered to the meeting rows, headed `set up meeting recording`. **a meetings-only setup is never nagged for accessibility**: the gate reads which jobs were chosen before it reads the permissions, because there is no hotkey to be dead and system audio is proved at every capture anyway.
 
-when all three rows are ready, the card says "ready — hold fn and speak." and closes automatically after a short confirmation. no account, no tour, no newsletter.
+when every row of every chosen job is ready the card says "ready", shows the key and the badge, and the button becomes "start dictating"; while a model is still coming down it stays "done"; when something is missing it says "close", because nothing is done. no account, no tour, no newsletter.
 
 **permissions are re-verified, never remembered (2026-08-13).** there is no "skip" button (ADR 0029, 2026-08-22): someone who launched the app launched it in order to set it up, and macOS already provides the exit — the window is closable. **closing is the better exit**, because it records nothing and setup returns next launch; the old link marked onboarding dismissed and silenced it for good. only "done" claims setup finished. whether the app can dictate is asked of the system at launch, at reopen, on wake and unlock, and when macOS reports a trust change. a working setup is never nagged again; a broken one gets the window back at launch or reopen, and mid-session revocation only badges the menu bar — stealing focus while you type is the sin this app exists to prevent. settings shows what's missing and routes here, because this is the only place that knows how to ask.
 
