@@ -136,6 +136,7 @@ targets:
       - Sources/Settings/SetupHealth.swift
       - Sources/Hotkey/HotkeyBinding.swift
       - Sources/Hotkey/TapLockDetector.swift
+      - Sources/Hotkey/TranscribingRepress.swift
       - Sources/Insertion/FocusAnchor.swift
       - Sources/Instrumentation/UtteranceTimeline.swift
       - Sources/Instrumentation/TimelineSummary.swift
