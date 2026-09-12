@@ -131,6 +131,7 @@ targets:
       - Sources/Onboarding/OnboardingState.swift
       - Sources/Onboarding/OnboardingFlow.swift
       - Sources/Permissions/SetupGate.swift
+      - Sources/Permissions/EnginePrewarmGate.swift
       - Sources/Settings/SetupHealth.swift
       - Sources/Hotkey/HotkeyBinding.swift
       - Sources/Hotkey/TapLockDetector.swift
