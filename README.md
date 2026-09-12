@@ -14,6 +14,8 @@ i built it because i wanted the wispr flow experience without the account, the s
 
 **hold `fn`, talk, let go.** the text lands where your cursor is.
 
+on a keyboard that isn't apple's, `fn` often never reaches the mac — settings › dictation has a key picker with right ⌥ and five others.
+
 the model is on your mac, so there's no server to wait for. you let go, it pastes. a dictionary fixes the words it keeps mishearing ("jason" → `json`), and `fix a word…` in the menu bar adds one from the last thing you said. spoken punctuation, emails, and numbers get written the way you'd type them. it never rewrites your words.
 
 **record a meeting** from the menu bar. your mic is you, the app you pick is them. when you stop, you get one markdown file with speakers split out. hindi or hinglish on their side comes out as english. no audio is kept. you start it and stop it yourself, it doesn't watch what's using your mic.
