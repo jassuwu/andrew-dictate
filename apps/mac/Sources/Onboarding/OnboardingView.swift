@@ -71,13 +71,26 @@ final class OnboardingWindowController:
         self.coordinator = coordinator
         self.scope = scope
 
+        // the folder the transcripts go in, made during setup so macOS asks
+        // for ~/Documents here rather than mid-save at the end of the first
+        // meeting. `folderName` is MeetingTranscriptFile's, so the path stays
+        // defined once.
+        let transcriptsFolder = coordinator.settings.meetingsFolder
+            .appendingPathComponent(
+                MeetingTranscriptFile.folderName,
+                isDirectory: true
+            )
+
         let resizer = OnboardingWindowResizer()
         let rootView = OnboardingView(
             coordinator: coordinator,
             scope: scope,
             meetingSetup: OnboardingMeetingSetup(
                 proveSystemAudio: proveSystemAudio,
-                prepareMeetingModel: prepareMeetingModel
+                prepareMeetingModel: prepareMeetingModel,
+                prepareMeetingsFolder: {
+                    OnboardingMeetingSetup.createFolder(at: transcriptsFolder)
+                }
             ),
             windowResizer: resizer
         )
@@ -825,6 +838,13 @@ struct OnboardingView: View {
                 systemAudioRow
                 rowDivider
                 meetingModelRow
+
+                // nothing new in the happy path: a folder that exists is not
+                // news, and only a refusal needs saying.
+                if meetingSetup.folderStatus == .actionRequired {
+                    rowDivider
+                    transcriptsFolderRow
+                }
             }
         }
         .frame(maxWidth: 330)
@@ -897,6 +917,21 @@ struct OnboardingView: View {
                         .font(.caption)
                 }
             }
+            .frame(maxWidth: 200, alignment: .trailing)
+        }
+    }
+
+    private var transcriptsFolderRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text("transcripts folder")
+                .foregroundStyle(BrandUI.textPrimary)
+
+            Spacer(minLength: 8)
+
+            rowNote(
+                "couldn't make the meetings folder — choose another in settings",
+                colour: BrandUI.attention
+            )
             .frame(maxWidth: 200, alignment: .trailing)
         }
     }
