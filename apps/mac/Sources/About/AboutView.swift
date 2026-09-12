@@ -48,6 +48,9 @@ struct AboutView: View {
         case checking
         case upToDate
         case newer(String, URL)
+        /// the bundle in /Applications is already the new one — brew swapped
+        /// it, and this process is the copy that was running at the time.
+        case alreadyInstalled(String)
         case unreachable
     }
 
@@ -236,6 +239,11 @@ struct AboutView: View {
                     upgradeInstruction
                 }
 
+            case let .alreadyInstalled(version):
+                Text("\(version) is already installed — quit and reopen to use it")
+                    .foregroundStyle(BrandUI.gold)
+                    .fixedSize(horizontal: false, vertical: true)
+
             case .unreachable:
                 Text("couldn't check — try again later.")
                     .foregroundStyle(BrandUI.textSecondary)
@@ -282,7 +290,26 @@ struct AboutView: View {
         }
     }
 
+    /// the upgrade may have already landed: brew replaces the bundle under a
+    /// running app, so ask the disk before asking github. costs one plist
+    /// read and no network.
+    private func noteAnyUpgradeOnDisk() {
+        guard let installed = UpdateCheck.installedVersion(
+            atBundle: Bundle.main.bundleURL
+        ),
+            UpdateCheck.isNewer(tag: installed, than: version)
+        else {
+            return
+        }
+        updateStatus = .alreadyInstalled(installed)
+    }
+
     private func checkForUpdates() {
+        noteAnyUpgradeOnDisk()
+        if case .alreadyInstalled = updateStatus {
+            return
+        }
+
         updateStatus = .checking
         Task {
             do {
