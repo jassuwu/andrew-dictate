@@ -5,7 +5,7 @@ struct UtteranceTimeline: Sendable {
     typealias Instant = ContinuousClock.Instant
 
     enum CompletionStage: String, Sendable {
-        case pasteVerified
+        case delivered
         case leftOnPasteboard
         case leftOnPasteboardSecure
         case cancelled
@@ -17,7 +17,7 @@ struct UtteranceTimeline: Sendable {
         /// other pasteboard hand-off reached you by another route and counts.
         var isKeepable: Bool {
             switch self {
-            case .pasteVerified, .leftOnPasteboard:
+            case .delivered, .leftOnPasteboard:
                 true
             case .leftOnPasteboardSecure, .cancelled:
                 false

@@ -7,7 +7,7 @@ final class TimelineSummaryTests: XCTestCase {
         keyUpToCompletion ms: Int,
         transcription: Int = 0,
         cleanup: Int = 0,
-        stage: UtteranceTimeline.CompletionStage = .pasteVerified
+        stage: UtteranceTimeline.CompletionStage = .delivered
     ) -> UtteranceTimeline {
         let keyUp = ContinuousClock.now
         return UtteranceTimeline(
@@ -23,7 +23,7 @@ final class TimelineSummaryTests: XCTestCase {
 
     // MARK: - the population
 
-    func testOnlyVerifiedPastesCountTowardsTheNumbers() {
+    func testOnlyDeliveredPastesCountTowardsTheNumbers() {
         let summary = TimelineSummary(timelines: [
             timeline(keyUpToCompletion: 100),
             timeline(keyUpToCompletion: 900, stage: .cancelled),
@@ -44,7 +44,7 @@ final class TimelineSummaryTests: XCTestCase {
 
         XCTAssertEqual(summary.excluded[.cancelled], 1)
         XCTAssertEqual(summary.excluded[.leftOnPasteboard], 2)
-        XCTAssertNil(summary.excluded[.pasteVerified])
+        XCTAssertNil(summary.excluded[.delivered])
     }
 
     func testSecureFieldRefusalsAreCountedAsTheirOwnExclusion() {
@@ -153,7 +153,7 @@ final class TimelineSummaryTests: XCTestCase {
 final class TimelineSummaryFormattingTests: XCTestCase {
     private func timeline(
         keyUpToCompletion ms: Int,
-        stage: UtteranceTimeline.CompletionStage = .pasteVerified
+        stage: UtteranceTimeline.CompletionStage = .delivered
     ) -> UtteranceTimeline {
         let keyUp = ContinuousClock.now
         return UtteranceTimeline(

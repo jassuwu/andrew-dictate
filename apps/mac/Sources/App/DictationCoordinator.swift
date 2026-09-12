@@ -1289,7 +1289,7 @@ final class DictationCoordinator: ObservableObject {
                 // soon as ⌘V is posted, and that is what "inserted" means.
                 completeTimeline(
                     at: outcome.insertedAt,
-                    stage: .pasteVerified
+                    stage: .delivered
                 )
             case let .leftOnPasteboard(reason):
                 completeTimeline(

@@ -9,7 +9,7 @@ final class UtteranceTimelineTests: XCTestCase {
             keyUp: keyDown.advanced(by: .milliseconds(1_012)),
             transcriptReady: keyDown.advanced(by: .milliseconds(1_212)),
             cleaned: keyDown.advanced(by: .milliseconds(1_215)),
-            completionStage: .pasteVerified,
+            completionStage: .delivered,
             completed: keyDown.advanced(by: .milliseconds(1_515))
         )
 
@@ -60,7 +60,7 @@ final class UtteranceTimelineTests: XCTestCase {
     /// pasteboard hand-off reached you and is worth keeping.
     func testOnlyTheStagesThatReachedYouAreKeepable() {
         XCTAssertTrue(
-            UtteranceTimeline.CompletionStage.pasteVerified.isKeepable
+            UtteranceTimeline.CompletionStage.delivered.isKeepable
         )
         XCTAssertTrue(
             UtteranceTimeline.CompletionStage.leftOnPasteboard.isKeepable

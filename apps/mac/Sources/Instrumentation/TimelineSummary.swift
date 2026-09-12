@@ -37,7 +37,7 @@ struct TimelineSummary: Equatable, Sendable {
     let cleanup: Distribution?
     let delivery: Distribution?
 
-    /// Only `pasteVerified` utterances count.
+    /// Only `delivered` utterances count.
     ///
     /// A cancelled utterance has no completion to measure to. One left on the
     /// pasteboard did not reach the cursor, so counting it would be claiming a
@@ -50,7 +50,7 @@ struct TimelineSummary: Equatable, Sendable {
         var excluded: [UtteranceTimeline.CompletionStage: Int] = [:]
 
         for timeline in timelines {
-            guard timeline.completionStage == .pasteVerified else {
+            guard timeline.completionStage == .delivered else {
                 excluded[timeline.completionStage, default: 0] += 1
                 continue
             }
@@ -148,7 +148,7 @@ extension TimelineSummary {
         of stage: UtteranceTimeline.CompletionStage
     ) -> String {
         switch stage {
-        case .pasteVerified: "verified"
+        case .delivered: "delivered"
         case .leftOnPasteboard: "left on pasteboard"
         case .leftOnPasteboardSecure: "secure field"
         case .cancelled: "cancelled"
