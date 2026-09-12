@@ -125,8 +125,8 @@ targets:
       - Sources/App/CaptureInterruptionNotice.swift
       - Sources/App/EnginePreparationState.swift
       - Sources/App/RemovalPlan.swift
-      - Sources/App/RetryBuffer.swift
       - Sources/App/RemovalViewModel.swift
+      - Sources/App/RetryBuffer.swift
       - Sources/HUD/WaveLevelShaper.swift
       - Sources/HUD/HUDLayoutEngine.swift
       - Sources/Settings/AppSettings.swift
