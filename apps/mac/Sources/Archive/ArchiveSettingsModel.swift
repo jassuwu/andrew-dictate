@@ -32,6 +32,28 @@ final class ArchiveSettingsModel: ObservableObject {
         }
     }
 
+    /// the sentence on the dialog that guards `delete all`. deletion unlinks
+    /// the file, so how much and how far back is the whole warning — and the
+    /// date is lowercased because every other string in this app is.
+    nonisolated static func wipeWarning(
+        count: Int,
+        oldest: Date?,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        guard count > 0, let oldest else {
+            return "this can’t be undone."
+        }
+
+        let day = oldest
+            .formatted(.dateTime.day().month(.abbreviated).locale(locale))
+            .lowercased()
+
+        if count == 1 {
+            return "1 dictation, from \(day). this can’t be undone."
+        }
+        return "\(count) dictations, back to \(day). this can’t be undone."
+    }
+
     func deleteEverything() {
         do {
             try archive.deleteAll()
