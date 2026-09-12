@@ -1,0 +1,159 @@
+import XCTest
+
+@MainActor
+final class DictionaryStoreTests: XCTestCase {
+    private var fileURL: URL!
+
+    override func setUp() {
+        super.setUp()
+        fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("dictionary.json")
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(
+            at: fileURL.deletingLastPathComponent()
+        )
+        super.tearDown()
+    }
+
+    // MARK: - import adds, and only replaces when you say so
+
+    func testMergeKeepsTheRowsYouHadAndAppendsTheNewOnes() {
+        let store = DictionaryStore(fileURL: fileURL)
+        store.add(DictionaryEntry(wrong: "darsh", right: "Darsh"))
+        store.add(DictionaryEntry(wrong: "jason", right: "JSON"))
+
+        let result = store.merge([
+            DictionaryEntry(wrong: "cypher d", right: "CypherD")
+        ])
+
+        XCTAssertEqual(result, DictionaryStore.MergeResult(added: 1, updated: 0))
+        XCTAssertEqual(
+            store.entries.map(\.wrong),
+            ["darsh", "jason", "cypher d"],
+            "new rows land in file order, behind the ones you taught it"
+        )
+    }
+
+    /// The merge key is the identity the substitution itself matches on, or a
+    /// merge could leave two rows that both fire on the same word.
+    func testAWrongSideDifferingOnlyInCaseOrSpacingUpdatesInPlace() {
+        let store = DictionaryStore(fileURL: fileURL)
+        store.add(DictionaryEntry(wrong: "darsh", right: "Darsh"))
+
+        let result = store.merge([
+            DictionaryEntry(wrong: "  DARSH ", right: "Darshan")
+        ])
+
+        XCTAssertEqual(result, DictionaryStore.MergeResult(added: 0, updated: 1))
+        XCTAssertEqual(store.entries.count, 1, "one row, not two that both fire")
+        XCTAssertEqual(store.entries.first?.wrong, "darsh", "your spelling stays")
+        XCTAssertEqual(store.entries.first?.right, "Darshan", "the file wins")
+    }
+
+    func testTheRowKeepsItsIdWhenTheFileCorrectsIt() {
+        let store = DictionaryStore(fileURL: fileURL)
+        let mine = DictionaryEntry(wrong: "darsh", right: "Darsh")
+        store.add(mine)
+
+        store.merge([DictionaryEntry(wrong: "darsh", right: "Darshan")])
+
+        XCTAssertEqual(store.entries.first?.id, mine.id)
+    }
+
+    func testTheSameFileTwiceAddsNothing() {
+        let store = DictionaryStore(fileURL: fileURL)
+        let file = [DictionaryEntry(wrong: "jason", right: "JSON")]
+        store.merge(file)
+
+        let again = store.merge(file)
+
+        XCTAssertEqual(again, DictionaryStore.MergeResult(added: 0, updated: 0))
+        XCTAssertEqual(store.entries.count, 1)
+    }
+
+    func testReplaceIsStillTheWholesaleThingTheButtonUsedToDo() {
+        let store = DictionaryStore(fileURL: fileURL)
+        store.add(DictionaryEntry(wrong: "darsh", right: "Darsh"))
+
+        XCTAssertTrue(
+            store.replace(with: [DictionaryEntry(wrong: "jason", right: "JSON")])
+        )
+        XCTAssertEqual(store.entries.map(\.wrong), ["jason"])
+    }
+
+    /// SPEC §4. An import that could not reach disk must not look like one
+    /// that landed — the words you had are still the words you have.
+    func testAnImportThatCannotReachDiskChangesNothing() throws {
+        try writeDictionary([DictionaryEntry(wrong: "darsh", right: "Darsh")])
+        let store = DictionaryStore(fileURL: fileURL)
+        try blockWrites()
+
+        XCTAssertFalse(
+            store.replace(with: [DictionaryEntry(wrong: "jason", right: "JSON")])
+        )
+        XCTAssertNil(
+            store.merge([DictionaryEntry(wrong: "jason", right: "JSON")])
+        )
+        XCTAssertEqual(store.entries.map(\.right), ["Darsh"])
+    }
+
+    func testAFileThatIsNotADictionaryIsRefusedWithASentence() throws {
+        let store = DictionaryStore(fileURL: fileURL)
+        let source = fileURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("notes.json")
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("hello".utf8).write(to: source)
+
+        XCTAssertNil(store.decodeEntries(from: source))
+        XCTAssertNotNil(store.lastFailure)
+        XCTAssertTrue(store.entries.isEmpty, "nothing was touched")
+    }
+
+    func testDecodingAFileDoesNotWriteAnything() throws {
+        let store = DictionaryStore(fileURL: fileURL)
+        let source = try writeSource([
+            DictionaryEntry(wrong: "jason", right: "JSON")
+        ])
+
+        XCTAssertEqual(store.decodeEntries(from: source)?.count, 1)
+        XCTAssertTrue(store.entries.isEmpty, "asking is not importing")
+    }
+
+    // MARK: - helpers
+
+    private func writeDictionary(_ entries: [DictionaryEntry]) throws {
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try JSONEncoder().encode(entries).write(to: fileURL)
+    }
+
+    private func writeSource(_ entries: [DictionaryEntry]) throws -> URL {
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let source = fileURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("source.json")
+        try JSONEncoder().encode(entries).write(to: source)
+        return source
+    }
+
+    /// A directory where the file needs to be: writes cannot succeed.
+    private func blockWrites() throws {
+        try? FileManager.default.removeItem(at: fileURL)
+        try FileManager.default.createDirectory(
+            at: fileURL,
+            withIntermediateDirectories: true
+        )
+    }
+}
