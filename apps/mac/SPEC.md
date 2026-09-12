@@ -42,7 +42,7 @@ hold fn ──▶ mic capture ──▶ key-up ──▶ engine (parakeet v2, pr
 
 one nonactivating, click-through `NSPanel` (borderless, floating, all-spaces), in two styles:
 
-- **bare — the lamp (2026-08-12).** a single gold line drawn in a canvas on a transparent panel: dim ember while prewarming, a wave whose amplitude and tungsten colour ride your voice while recording, then a cool-out that collapses it to a hot dot and fades. no capsule, no shadow — they would clip the bloom. **success is silent: the afterglow is the whole goodbye.** the earlier glass capsule with eleven bars, and the transcript flash that followed a paste, are both removed.
+- **bare — the lamp (2026-08-12).** a single gold line drawn in a canvas on a transparent panel: dim ember while prewarming for a key you already pressed (a launch-time warm-up shows nothing on screen and says `loading the speech model…` in the menu instead), a wave whose amplitude and tungsten colour ride your voice while recording, then a cool-out that collapses it to a hot dot and fades. no capsule, no shadow — they would clip the bloom. **success is silent: the afterglow is the whole goodbye.** the earlier glass capsule with eleven bars, and the transcript flash that followed a paste, are both removed.
 - **glass — the pill.** the exceptional-message style, and the only thing that ever speaks: `copied — secure field` · `copied — focus changed` · `couldn't transcribe` · `heard nothing` · `recording was lost` · `speech model failed — retrying` · `microphone access is off` · `no microphone available` · `thirty seconds left` · `five minutes — that's the cap. pasted what i had.`
 
 the rule: **a failed dictation must never look like a successful one.** anything that goes wrong cuts the afterglow short and says why.
