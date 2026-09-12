@@ -134,6 +134,11 @@ final class DictationCoordinator: ObservableObject {
     private var engineSwitchState: EngineSwitchState
     private var enginePreparationRequested: Bool
     private var settingsCancellables: Set<AnyCancellable> = []
+    /// One cleaner, kept. Its nineteen regexes — plus one per taught word —
+    /// compile on construction, and that used to happen on the main actor
+    /// between transcript and paste, growing with the dictionary. Rebuilt
+    /// only when the dictionary or the cleanup toggle changes.
+    private var cleaner = DeterministicCleaner(entries: [], fullCleanup: true)
     private var isApplyingPreRollSetting = false
     private var isApplyingEngineVersionSetting = false
     private var onboardingWindowController: OnboardingWindowController?
@@ -276,6 +281,22 @@ final class DictationCoordinator: ObservableObject {
                 self.replaceEngine(with: version)
             }
             .store(in: &settingsCancellables)
+
+        // one cleaner per dictionary-and-toggle, not one per dictation.
+        // CombineLatest seeds itself from both current values here, and the
+        // closure must use what it is handed: a @Published sink fires on
+        // willSet, so reading the store would hand back the old array.
+        Publishers.CombineLatest(
+            dictionaryStore.$entries,
+            settings.$cleanupEnabled
+        )
+        .sink { [weak self] entries, fullCleanup in
+            self?.cleaner = DeterministicCleaner(
+                entries: entries,
+                fullCleanup: fullCleanup
+            )
+        }
+        .store(in: &settingsCancellables)
 
         installSystemLifecycleObservers()
         wireMeetings()
@@ -1232,10 +1253,6 @@ final class DictationCoordinator: ObservableObject {
             let transcriptReady = timelineClock.now
             activeTimeline?.transcriptReady = transcriptReady
 
-            let cleaner = DeterministicCleaner(
-                entries: dictionaryStore.entries,
-                fullCleanup: settings.cleanupEnabled
-            )
             let rawTranscript = cleaner.clean(transcript)
             activeTimeline?.cleaned = timelineClock.now
             guard !rawTranscript.trimmingCharacters(

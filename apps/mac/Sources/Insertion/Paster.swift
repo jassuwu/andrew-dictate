@@ -118,7 +118,7 @@ final class Paster {
                 _ = Self.postPasteKey(keyCode, keyDown: false)
             }
             try? await Task.sleep(for: .milliseconds(290))
-            await MainActor.run {
+            await MainActor.run { [weak self] in
                 Self.restore(
                     snapshot,
                     expectedChangeCount: ourChangeCount,
