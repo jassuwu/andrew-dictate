@@ -32,7 +32,7 @@ hold fn ──▶ mic capture ──▶ key-up ──▶ engine (parakeet v2, pr
 ## 3. dictation
 
 - key-up → transcript → cleaner → **inserter**.
-- **insertion strategy (v1): transactional paste only.** snapshot pasteboard (all types), write plain text, synthetic cmd-V resolved for the active layout, verify change, restore only if `changeCount` still ours. AX selected-text insertion is v1.x.
+- **insertion strategy (v1): transactional paste only.** snapshot pasteboard (all types), write plain text, synthetic cmd-V resolved for the active layout, verify change, restore only if `changeCount` still ours. the transcript is marked `org.nspasteboard.TransientType` so clipboard managers do not keep a copy of it. AX selected-text insertion is v1.x.
 - **target safety:** frontmost bundle id + focused-element captured at key-up (aiming at the field you want while still talking is the normal thing to do); re-verified before paste. focus changed → don't paste; transcript stays on the clipboard + HUD shows "copied — focus changed."
 - **secure fields:** detected via AX subrole → never auto-insert; HUD offers explicit copy. a dictation refused for a secure field is never written to `dictations.jsonl`, and its clipboard copy is marked `org.nspasteboard.ConcealedType` so clipboard managers do not record it.
 - **what it keeps (ADR 0022, 0026):** every delivered dictation is written to `dictations.jsonl` in application support — raw + inserted text, time, engine, key-up→inserted — **on by default**, stated in onboarding, with the toggle and `delete all` in settings. cancelled dictations are not kept; there was no text. chmod 0600. this is a deliberate contrast with pre-roll's off-by-default: pre-roll opens a microphone, this keeps text already produced and already pasted.
