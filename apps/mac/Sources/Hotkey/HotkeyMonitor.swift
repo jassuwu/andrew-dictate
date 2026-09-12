@@ -149,7 +149,12 @@ final class HotkeyMonitor {
 
         let isEscape = event.keyCode == 53
         if isEscape, onEscape?() == true {
-            _ = detector.keyDown(isEscape: false)
+            // the coordinator already did the cancelling, so all that is
+            // left is clearing the detector. `keyDown(isEscape: false)`
+            // cannot do it: it deliberately no-ops while locked — that is
+            // what keeps ordinary typing from ending a locked capture — and
+            // would leave the next hold swallowed by a still-locked state.
+            _ = detector.reset()
             return
         }
         perform(detector.keyDown(isEscape: isEscape))
