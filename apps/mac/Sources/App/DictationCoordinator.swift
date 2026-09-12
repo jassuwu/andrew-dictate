@@ -174,7 +174,10 @@ final class DictationCoordinator: ObservableObject {
             activeVersion: settings.engineVersion
         )
         isOnboardingPresented = !settings.onboardingDismissed
-        enginePreparationRequested = settings.onboardingDismissed
+        enginePreparationRequested = EnginePrewarmGate.shouldPrewarmAtLaunch(
+            onboardingDismissed: settings.onboardingDismissed,
+            dictationWanted: settings.dictationWanted
+        )
         dictionaryStore = DictionaryStore()
         transcriptionEngine = ParakeetEngine(
             version: settings.engineVersion
@@ -265,6 +268,19 @@ final class DictationCoordinator: ObservableObject {
             }
             .store(in: &settingsCancellables)
 
+        // saying yes to dictation later should not cost a relaunch: the
+        // model arrives when the tick does.
+        settings.$dictationWanted
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] wanted in
+                guard wanted else {
+                    return
+                }
+                self?.requestEnginePreparation(asking: true)
+            }
+            .store(in: &settingsCancellables)
+
         settings.$engineVersion
             .dropFirst()
             .removeDuplicates()
@@ -293,6 +309,19 @@ final class DictationCoordinator: ObservableObject {
 
         if enginePreparationRequested {
             startPrewarming()
+        } else {
+            // `state` is born .prewarming and only a prewarm ever settles it,
+            // so a launch that loads nothing has to settle it here: a lamp
+            // breathing with no download behind it is the same lie as the
+            // download nobody asked for, wearing the opposite face.
+            state = .idle
+            hudViewModel.update(state: .idle)
+        }
+
+        // meetings need the microphone too, so this is not dictation's to
+        // gate — and after setup it is a status check, not an ask. before
+        // setup, onboarding is still the only surface that asks macOS.
+        if settings.onboardingDismissed {
             Task { @MainActor [weak self] in
                 _ = await self?.requestMicrophoneAccess()
             }
@@ -434,7 +463,10 @@ final class DictationCoordinator: ObservableObject {
             return
         }
         prepareProductiveWaitWork()
-        requestEnginePreparation()
+        // the view only calls this with dictation ticked, so the click is the
+        // ask — even for someone whose last setup was meetings only and whose
+        // stored flag still says no.
+        requestEnginePreparation(asking: true)
     }
 
     func onboardingWindowDidClose(
@@ -592,7 +624,15 @@ final class DictationCoordinator: ObservableObject {
         startEngineSwap(to: version)
     }
 
-    private func requestEnginePreparation() {
+    /// `asking` is the caller saying the user just asked for dictation: a
+    /// keypress, a consent click, a tick. The stored flag lags those by a
+    /// beat (`@Published` publishes in willSet), and consent is consent
+    /// whether or not the write has landed yet.
+    private func requestEnginePreparation(asking: Bool = false) {
+        // a job nobody ticked has no download, at launch or anywhere else.
+        guard asking || settings.dictationWanted else {
+            return
+        }
         enginePreparationRequested = true
         guard !isPrewarmed,
               enginePrewarmTask == nil,
@@ -1039,7 +1079,22 @@ final class DictationCoordinator: ObservableObject {
         guard isPrewarmed else {
             switch enginePreparationState {
             case .notStarted:
-                requestEnginePreparation()
+                // a mac set up for meetings only has no model and no menu
+                // row offering one, so this keypress is both the consent the
+                // launch stopped assuming and the only way back in. say what
+                // it costs, once — silence here would be a download behind
+                // your back by another route.
+                if !settings.dictationWanted {
+                    settings.dictationWanted = true
+                    flashNotice(
+                        """
+                        getting the speech model — \
+                        \(settings.engineVersion.approximateSize), once
+                        """,
+                        duration: 2
+                    )
+                }
+                requestEnginePreparation(asking: true)
             case .failed:
                 // pressing the key is a statement of intent, and a failed
                 // model download is usually a blip. try again, out loud —
