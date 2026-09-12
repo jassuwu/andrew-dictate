@@ -840,11 +840,19 @@ struct SettingsView: View {
     }
 }
 
+/// a decoded import, held between the panel closing and the answer to "add
+/// or replace?" — not one byte is written while this is set.
+private struct PendingImport {
+    let entries: [DictionaryEntry]
+    let existingCount: Int
+}
+
 private struct DictionaryEditor: View {
     @ObservedObject var store: DictionaryStore
 
     @State private var selection: Set<UUID> = []
     @State private var message: String?
+    @State private var pendingImport: PendingImport?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -941,6 +949,31 @@ private struct DictionaryEditor: View {
                     .foregroundStyle(BrandUI.gold)
             }
         }
+        .alert(
+            "add these to your dictionary, or replace it?",
+            isPresented: Binding(
+                get: { pendingImport != nil },
+                set: { presented in
+                    if !presented {
+                        pendingImport = nil
+                    }
+                }
+            ),
+            presenting: pendingImport
+        ) { pending in
+            Button("add to mine") { addImport(pending) }
+            Button("replace", role: .destructive) {
+                replaceWithImport(pending)
+            }
+            Button("cancel", role: .cancel) {}
+        } message: { pending in
+            Text(
+                """
+                the file has \(words(pending.entries.count)). you’ve taught \
+                andrew \(words(pending.existingCount)).
+                """
+            )
+        }
     }
 
     private func importDictionary() {
@@ -956,7 +989,10 @@ private struct DictionaryEditor: View {
             return
         }
 
-        guard store.importJSON(from: sourceURL) else {
+        // a second import must not wear the first one’s receipt.
+        message = nil
+
+        guard let imported = store.decodeEntries(from: sourceURL) else {
             // the store publishes the specific reason itself; this is only
             // the fallback for a failure it somehow didn’t record.
             message = store.lastFailure == nil
@@ -965,8 +1001,45 @@ private struct DictionaryEditor: View {
             return
         }
 
+        guard !store.entries.isEmpty else {
+            // nothing to lose, so nothing to ask.
+            guard store.replace(with: imported) else {
+                return
+            }
+            selection.removeAll()
+            message = "added \(words(imported.count))."
+            return
+        }
+
+        // nothing is written until the alert is answered: "import" is the one
+        // word on this row that does not sound like "delete everything".
+        pendingImport = PendingImport(
+            entries: imported,
+            existingCount: store.entries.count
+        )
+    }
+
+    private func addImport(_ pending: PendingImport) {
+        guard let result = store.merge(pending.entries) else {
+            return
+        }
         selection.removeAll()
-        message = nil
+        message = "added \(words(result.added))."
+    }
+
+    private func replaceWithImport(_ pending: PendingImport) {
+        let lost = pending.existingCount
+        guard store.replace(with: pending.entries) else {
+            return
+        }
+        selection.removeAll()
+        message = "replaced \(words(lost)) with \(pending.entries.count)."
+    }
+
+    /// "added 1 word.", not "added 1 words." — the deadpan voice stops being
+    /// one the moment it reads like a log line.
+    private func words(_ count: Int) -> String {
+        count == 1 ? "1 word" : "\(count) words"
     }
 
     private func exportDictionary() {
