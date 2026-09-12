@@ -973,7 +973,13 @@ final class DictationCoordinator: ObservableObject {
             setRecordingLocked(false)
             activeFocusAnchor = nil
             activeTimeline = nil
-            setState(.idle)
+            setState(.idle, fastHUDDismiss: true)
+            // they are still holding the key and still talking, and the
+            // whole sentence is gone. the one loss path that used to say
+            // nothing at all.
+            if let notice = CaptureInterruptionNotice.message(for: reason) {
+                flashNotice(notice, duration: 2)
+            }
         case .idle, .prewarming, .transcribing:
             break
         }
