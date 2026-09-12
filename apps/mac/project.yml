@@ -123,6 +123,7 @@ targets:
       - Sources/App/AppIdentity.swift
       - Sources/App/Capabilities.swift
       - Sources/App/CaptureInterruptionNotice.swift
+      - Sources/App/EnginePreparationState.swift
       - Sources/App/RemovalPlan.swift
       - Sources/App/RemovalViewModel.swift
       - Sources/HUD/WaveLevelShaper.swift

@@ -4,18 +4,6 @@ import Foundation
 import AppKit
 import AVFoundation
 
-enum EnginePreparationState: Equatable, Sendable {
-    case notStarted
-    case downloading(progress: Double)
-    case warmingUp
-    case ready
-    case failed
-
-    var isReady: Bool {
-        self == .ready
-    }
-}
-
 struct HotkeyDetection: Equatable, Sendable {
     let sequence: Int
 }
