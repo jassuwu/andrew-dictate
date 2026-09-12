@@ -65,6 +65,10 @@ final class Paster {
         reasonForLeavingOnPasteboard: (() -> LeftOnPasteboardReason?)? = nil
     ) async -> PasteOutcome {
         await acquirePasteTransaction()
+        // released by hand on every path out of here rather than by a defer:
+        // the success path hands it to the restore task, so a second
+        // dictation queues behind the real restore instead of behind the
+        // caller. miss one of the early returns and the next paste hangs.
 
         let pasteboard = NSPasteboard.general
         var snapshot = Self.snapshot(of: pasteboard)
@@ -79,9 +83,6 @@ final class Paster {
         // write. the later re-checks still catch a focus that moves since.
         let leaveBehindReason = reasonForLeavingOnPasteboard?()
 
-        // the transaction is released by hand on every path out of here, so
-        // a second dictation queues behind the real restore rather than
-        // behind the caller. miss one and the next paste waits forever.
         guard let writtenChangeCount = Self.writeTranscript(
             text,
             to: pasteboard,
