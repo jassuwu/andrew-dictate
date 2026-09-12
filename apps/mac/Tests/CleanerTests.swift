@@ -281,15 +281,18 @@ final class CleanerTests: XCTestCase {
                 ("one hundred and five", "105"),
                 ("nine hundred ninety nine", "999"),
                 ("one thousand", "1000"),
-                ("twelve thousand three hundred", "12300"),
-                ("one million", "1000000"),
+                ("ten thousand", "10,000"),
+                ("twelve thousand three hundred", "12,300"),
+                ("one million", "1,000,000"),
+                // a year is not a quantity — the grouping floor leaves it be
+                ("two thousand twenty six", "2026"),
                 (
                     "two million three hundred thousand five",
-                    "2300005"
+                    "2,300,005"
                 ),
                 (
                     "nine hundred ninety nine million nine hundred ninety nine thousand nine hundred ninety nine",
-                    "999999999"
+                    "999,999,999"
                 ),
             ]
         )
@@ -304,8 +307,9 @@ final class CleanerTests: XCTestCase {
                 ("zero dollars", "$0"),
                 (
                     "two million dollars",
-                    "$2000000"
+                    "$2,000,000"
                 ),
+                ("fifty thousand rupees", "₹50,000"),
                 ("five hundred rupees", "₹500"),
                 ("one rupee", "₹1"),
                 ("twenty five percent", "25%"),
@@ -489,6 +493,18 @@ final class CleanerTests: XCTestCase {
                 ("visit cypher.io/docs", "visit cypher.io/docs"),
                 ("", ""),
             ]
+        )
+    }
+
+    /// the pipeline proof for the grouping comma: PunctuationFinishing's
+    /// after-separator rule wants a letter next, and a digit is not one, so
+    /// nothing creeps in between the 50 and the 000.
+    func testAGroupedPriceKeepsItsCommaClosed() {
+        XCTAssertEqual(
+            DeterministicCleaner().clean(
+                "fifty thousand rupees is just ten percent"
+            ),
+            "₹50,000 is just 10%."
         )
     }
 
