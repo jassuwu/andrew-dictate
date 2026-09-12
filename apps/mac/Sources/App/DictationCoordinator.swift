@@ -322,7 +322,10 @@ final class DictationCoordinator: ObservableObject {
         }
 
         if enginePreparationRequested {
-            startPrewarming()
+            // at launch the model loads because the app is running, not
+            // because anybody reached for the key. the menu says so; the
+            // screen stays empty.
+            startPrewarming(presentsHUD: false)
             Task { @MainActor [weak self] in
                 _ = await self?.requestMicrophoneAccess()
             }
@@ -664,7 +667,8 @@ final class DictationCoordinator: ObservableObject {
         startPrewarming()
     }
 
-    private func startPrewarming() {
+    private func startPrewarming(presentsHUD: Bool = true) {
+        prewarmPresentsHUD = presentsHUD
         engineSwapTask?.cancel()
         engineSwapTask = nil
         enginePrewarmTask?.cancel()
@@ -1118,6 +1122,9 @@ final class DictationCoordinator: ObservableObject {
         }
 
         guard isPrewarmed else {
+            // the key is a statement of intent: from here the ember is an
+            // answer, so it may show even if the warm-up began at login.
+            prewarmPresentsHUD = true
             switch enginePreparationState {
             case .notStarted:
                 requestEnginePreparation()
@@ -1133,6 +1140,10 @@ final class DictationCoordinator: ObservableObject {
             }
             if state != .prewarming {
                 setState(.prewarming)
+            } else {
+                // already warming from launch, with nothing on screen —
+                // light it now rather than at the next state change.
+                synchronizeHUD()
             }
             return
         }
