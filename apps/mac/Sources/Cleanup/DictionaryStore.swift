@@ -69,6 +69,22 @@ final class DictionaryStore: ObservableObject {
             return false
         }
 
+        // emptying the right side of a working rule used to save, and the
+        // rule then deleted that word from every dictation afterwards.
+        // typing the wrong side first still saves — only the clearing case
+        // is refused.
+        let clearsAWorkingRule = !entries[index].right.isEmpty
+            && entry.right
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+        guard !clearsAWorkingRule else {
+            lastFailure = """
+                a word has to become something. remove the row to drop the \
+                rule.
+                """
+            return false
+        }
+
         entries[index] = entry
         return save()
     }

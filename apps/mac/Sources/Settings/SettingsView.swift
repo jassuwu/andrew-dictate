@@ -1179,7 +1179,9 @@ private struct DictionaryEditor: View {
 private struct DictionaryCellEditor: View {
     let value: String
     let prompt: String
-    let onCommit: (String) -> Void
+    /// false means the store refused the edit, and the cell has to say so by
+    /// going back to what is still on disk.
+    let onCommit: (String) -> Bool
 
     @State private var draft: String
     @FocusState private var isFocused: Bool
@@ -1187,7 +1189,7 @@ private struct DictionaryCellEditor: View {
     init(
         value: String,
         prompt: String,
-        onCommit: @escaping (String) -> Void
+        onCommit: @escaping (String) -> Bool
     ) {
         self.value = value
         self.prompt = prompt
@@ -1225,7 +1227,9 @@ private struct DictionaryCellEditor: View {
         guard draft != value else {
             return
         }
-        onCommit(draft)
+        if !onCommit(draft) {
+            draft = value
+        }
     }
 }
 
