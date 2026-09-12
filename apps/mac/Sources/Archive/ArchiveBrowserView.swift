@@ -16,17 +16,24 @@ struct ArchiveBrowserView: View {
                     .padding(.top, 14)
             }
 
-            if viewModel.items.isEmpty {
-                Text("nothing kept yet.")
-                    .font(BrandUI.bodyFont)
-                    .foregroundStyle(BrandUI.textSecondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if viewModel.filtered.isEmpty {
+                // a search that found nothing is not an empty archive, and
+                // must not read like one.
+                Text(
+                    viewModel.isSearching
+                        ? "nothing matches “\(viewModel.trimmedQuery)”."
+                        : "nothing kept yet."
+                )
+                .font(BrandUI.bodyFont)
+                .foregroundStyle(BrandUI.textSecondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(viewModel.items) { item in
+                        ForEach(viewModel.filtered) { item in
                             ArchiveRow(
                                 dictation: item,
+                                query: viewModel.trimmedQuery,
                                 fixAWord: { fixAWord(item.heard) },
                                 delete: { viewModel.delete(item) }
                             )
@@ -45,6 +52,9 @@ struct ArchiveBrowserView: View {
 
 private struct ArchiveRow: View {
     let dictation: Dictation
+    /// what the search field holds, already trimmed. empty when no search is
+    /// on, which is most of the time.
+    let query: String
     let fixAWord: () -> Void
     let delete: () -> Void
 
@@ -54,7 +64,7 @@ private struct ArchiveRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(dictation.inserted)
+                Text(highlighted(dictation.inserted))
                     .font(BrandUI.bodyFont)
                     .foregroundStyle(BrandUI.textPrimary)
                     .lineLimit(3)
@@ -69,9 +79,11 @@ private struct ArchiveRow: View {
                     )
                     // The raw text is only worth showing when the cleaner
                     // changed something; otherwise it is the same line twice.
-                    if dictation.heard != dictation.inserted {
-                        Text("heard “\(dictation.heard)”")
-                            .lineLimit(1)
+                    // While a search is on it is always shown, and shown
+                    // longer: the word being hunted for often lives only here.
+                    if isSearching || dictation.heard != dictation.inserted {
+                        Text(heardLine)
+                            .lineLimit(isSearching ? 2 : 1)
                     }
                 }
                 .font(.caption)
@@ -99,6 +111,47 @@ private struct ArchiveRow: View {
         .padding(.vertical, 9)
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
+    }
+
+    private var isSearching: Bool { !query.isEmpty }
+
+    private var heardLine: AttributedString {
+        var line = AttributedString("heard “")
+        line += highlighted(dictation.heard)
+        line += AttributedString("”")
+        return line
+    }
+
+    /// the matched run in gold: a hit you still have to hunt for on the line
+    /// is not much of a hit. matched the way the filter matches — case- and
+    /// diacritic-insensitive — or the highlight would miss what the list found.
+    private func highlighted(_ text: String) -> AttributedString {
+        var out = AttributedString(text)
+        guard isSearching else { return out }
+
+        var from = text.startIndex
+        while let found = text.range(
+            of: query,
+            options: [.caseInsensitive, .diacriticInsensitive],
+            range: from..<text.endIndex
+        ) {
+            if let lower = AttributedString.Index(found.lowerBound, within: out),
+               let upper = AttributedString.Index(found.upperBound, within: out) {
+                out[lower..<upper].mergeAttributes(Self.ink(BrandUI.gold))
+            }
+            from = found.upperBound
+        }
+        return out
+    }
+
+    // typed subscript rather than a key path: the key-path spelling trips a
+    // non-Sendable warning under strict concurrency (as in PipelineView).
+    private static func ink(_ color: Color) -> AttributeContainer {
+        var container = AttributeContainer()
+        container[
+            AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self
+        ] = color
+        return container
     }
 
     /// the archive keeping ADR 0030's promise: "wanting it again is what the
