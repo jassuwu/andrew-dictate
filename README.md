@@ -23,13 +23,14 @@ the model is on your mac, so there's no server to wait for. you let go, it paste
 ```sh
 brew install --cask jassuwu/tap/andrew-dictate
 xattr -dr com.apple.quarantine "/Applications/Andrew Dictate.app"
+open "/Applications/Andrew Dictate.app"
 ```
 
 or grab the dmg from [releases](https://github.com/jassuwu/andrew-dictate/releases).
 
 the `xattr` line is there because the build is unsigned. i haven't paid apple the $99 for a developer account yet, so macOS quarantines it. no terminal? open the app, let macOS refuse, then go to system settings › privacy & security and click `open anyway` — that button only shows up for about an hour after macOS blocks it.
 
-first launch asks which jobs you want. dictation is a ~460 mb download, meetings are ~2.9 gb. tick one or both.
+the last line opens it. there's no dock icon — a setup window comes up, and after that it lives as the gold badge in your menu bar. setup asks which jobs you want: dictation is a ~460 mb download, meetings are ~2.9 gb. tick one or both.
 
 ## update
 
