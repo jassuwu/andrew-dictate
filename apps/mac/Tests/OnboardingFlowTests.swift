@@ -80,6 +80,12 @@ final class OnboardingFlowTests: XCTestCase {
         ),
     ]
 
+    private static let everyVerdict: [OnboardingVerdict] = [
+        .ready,
+        .downloading,
+        .incomplete,
+    ]
+
     /// Length, not punctuation: "hold fn, talk, let go. the text lands where
     /// your cursor is." is two sentences and one idea. Seventy characters is
     /// about two lines in a window this narrow.
@@ -88,18 +94,24 @@ final class OnboardingFlowTests: XCTestCase {
             // the hello line names the bound key, so the longest binding
             // has to fit too — "right ⌥" is the one that tests the ceiling.
             for key in HotkeyBinding.supported.map(\.displayName) {
-                for step in OnboardingStep.allCases {
-                    let reason = step.reason(for: jobs, key: key)
-                    XCTAssertFalse(reason.isEmpty, "\(step) \(jobs)")
-                    XCTAssertLessThanOrEqual(
-                        reason.count,
-                        70,
-                        "\(step): \"\(reason)\" is long enough to be its own screen"
-                    )
-                    XCTAssertFalse(
-                        step.title(for: jobs).isEmpty,
-                        "\(step) \(jobs)"
-                    )
+                for verdict in Self.everyVerdict {
+                    for step in OnboardingStep.allCases {
+                        let reason = step.reason(
+                            for: jobs,
+                            key: key,
+                            verdict: verdict
+                        )
+                        XCTAssertFalse(reason.isEmpty, "\(step) \(jobs)")
+                        XCTAssertLessThanOrEqual(
+                            reason.count,
+                            70,
+                            "\(step): \"\(reason)\" is long enough to be its own screen"
+                        )
+                        XCTAssertFalse(
+                            step.title(for: jobs, verdict: verdict).isEmpty,
+                            "\(step) \(jobs)"
+                        )
+                    }
                 }
             }
         }
@@ -129,10 +141,16 @@ final class OnboardingFlowTests: XCTestCase {
                 34,
                 "\(jobs)"
             )
-            for step in [OnboardingStep.model, .permissions] {
-                let title = step.actionTitle(for: jobs)
-                XCTAssertFalse(title.isEmpty, "\(step)")
-                XCTAssertLessThanOrEqual(title.count, 24, "\(step)")
+            for verdict in Self.everyVerdict {
+                for step in [OnboardingStep.model, .permissions] {
+                    let title = step.actionTitle(for: jobs, verdict: verdict)
+                    XCTAssertFalse(title.isEmpty, "\(step) \(verdict)")
+                    XCTAssertLessThanOrEqual(
+                        title.count,
+                        24,
+                        "\(step) \(verdict)"
+                    )
+                }
             }
         }
     }
@@ -237,6 +255,84 @@ final class OnboardingFlowTests: XCTestCase {
             ),
             "set up andrew dictate",
             "nothing ticked is nothing to price"
+        )
+    }
+
+    // MARK: - the last card says what it can keep
+
+    /// "done" is a claim. A card with a permission missing has nothing to
+    /// claim, so it offers the exit instead.
+    func testTheLastButtonOnlyClaimsDoneWhenSomethingIsDone() {
+        let both = OnboardingJobs(dictation: true, meetings: true)
+        let meetingsOnly = OnboardingJobs(
+            scope: .meetingsOnly,
+            dictation: false,
+            meetings: true
+        )
+
+        XCTAssertEqual(
+            OnboardingStep.permissions.actionTitle(for: both, verdict: .ready),
+            "start dictating"
+        )
+        XCTAssertEqual(
+            OnboardingStep.permissions.actionTitle(
+                for: meetingsOnly,
+                verdict: .ready
+            ),
+            "done",
+            "a meetings-only setup is never told to hold a key"
+        )
+        XCTAssertEqual(
+            OnboardingStep.permissions.actionTitle(
+                for: both,
+                verdict: .downloading
+            ),
+            "done"
+        )
+        XCTAssertEqual(
+            OnboardingStep.permissions.actionTitle(
+                for: both,
+                verdict: .incomplete
+            ),
+            "close"
+        )
+    }
+
+    func testTheReadyCardIsTitledReadyAndSaysWhyItIsOver() {
+        let dictation = OnboardingJobs(dictation: true, meetings: false)
+        let meetingsOnly = OnboardingJobs(
+            scope: .meetingsOnly,
+            dictation: false,
+            meetings: true
+        )
+
+        XCTAssertEqual(
+            OnboardingStep.permissions.title(for: dictation, verdict: .ready),
+            "ready"
+        )
+        XCTAssertEqual(
+            OnboardingStep.permissions.title(
+                for: dictation,
+                verdict: .downloading
+            ),
+            "two permissions",
+            "a download is not an arrival"
+        )
+        XCTAssertEqual(
+            OnboardingStep.permissions.reason(
+                for: dictation,
+                key: "fn",
+                verdict: .ready
+            ),
+            "that's everything macos had to say yes to."
+        )
+        XCTAssertEqual(
+            OnboardingStep.permissions.reason(
+                for: meetingsOnly,
+                key: "fn",
+                verdict: .ready
+            ),
+            "that's everything. your mic is you, their app is them."
         )
     }
 }
