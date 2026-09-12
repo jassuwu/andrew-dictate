@@ -1,5 +1,31 @@
 import SwiftUI
 
+/// the leading half of every settings row: a title with one line under it.
+/// shared so a row with a control that isn't a toggle — the dictation key —
+/// sits on the same baseline grid and in the same type as its neighbours.
+struct SettingsRowLabel: View {
+    let title: String
+    let explanation: String
+
+    init(_ title: String, explanation: String) {
+        self.title = title
+        self.explanation = explanation
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(BrandUI.bodyFont.weight(.medium))
+                .foregroundStyle(BrandUI.textPrimary)
+
+            Text(explanation)
+                .font(BrandUI.bodyFont)
+                .foregroundStyle(BrandUI.textSecondary)
+                .lineLimit(1)
+        }
+    }
+}
+
 struct SettingsToggleRow: View {
     let title: String
     let explanation: String
@@ -17,16 +43,7 @@ struct SettingsToggleRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(BrandUI.bodyFont.weight(.medium))
-                    .foregroundStyle(BrandUI.textPrimary)
-
-                Text(explanation)
-                    .font(BrandUI.bodyFont)
-                    .foregroundStyle(BrandUI.textSecondary)
-                    .lineLimit(1)
-            }
+            SettingsRowLabel(title, explanation: explanation)
 
             Spacer(minLength: 8)
 
