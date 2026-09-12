@@ -102,6 +102,7 @@ targets:
         excludes:
           - PipelinePlaygroundView.swift
           - WordFixerView.swift
+      - Sources/Audio/CaptureCapWarning.swift
       - Sources/Audio/RingSplicer.swift
       - Sources/Audio/TapHealthMonitor.swift
       - Sources/Archive/Dictation.swift
