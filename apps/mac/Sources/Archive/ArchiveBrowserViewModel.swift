@@ -5,12 +5,15 @@ import Foundation
 ///
 /// ADR 0026 shipped `delete all` and said per-item deletion had to wait for
 /// something to delete *from*. This is that something, kept deliberately small:
-/// it lists and it deletes. What the accumulation surface eventually becomes —
-/// searchable, a stat line, a home for meeting recordings — is still open, and
-/// this does not try to answer it.
+/// it lists, it filters and it deletes. What the accumulation surface
+/// eventually becomes — a stat line, a home for meeting recordings — is still
+/// open, and this does not try to answer it.
 @MainActor
 final class ArchiveBrowserViewModel: ObservableObject {
     @Published private(set) var items: [Dictation] = []
+    /// What the field above the list holds. The list is filtered from it in
+    /// memory: an archive the user chose to keep needs no index to search.
+    @Published var query = ""
     /// nil while everything is fine. Otherwise a sentence to show verbatim.
     @Published private(set) var failure: String?
 
@@ -19,6 +22,27 @@ final class ArchiveBrowserViewModel: ObservableObject {
     init(archive: DictationArchive = DictationArchive()) {
         self.archive = archive
         reload()
+    }
+
+    /// Edges trimmed, so a stray space does not empty the list.
+    var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var isSearching: Bool { !trimmedQuery.isEmpty }
+
+    /// What the list shows. Both sides are matched: the misspelling you are
+    /// hunting for often exists only in the raw text.
+    /// `localizedStandardContains` is how Finder compares — case- and
+    /// diacritic-insensitive — and a substring scan over rows already in
+    /// memory is too fast to be worth debouncing.
+    var filtered: [Dictation] {
+        guard isSearching else { return items }
+        let needle = trimmedQuery
+        return items.filter {
+            $0.inserted.localizedStandardContains(needle)
+                || $0.heard.localizedStandardContains(needle)
+        }
     }
 
     func reload() {
