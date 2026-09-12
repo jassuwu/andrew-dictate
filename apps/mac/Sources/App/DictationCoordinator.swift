@@ -364,13 +364,7 @@ final class DictationCoordinator: ObservableObject {
             $0 != .speechModels
         }))
 
-        let app = Bundle.main.bundleURL
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        task.arguments = ["-n", app.path]
-        // A relaunch has to outlive us, so it is handed to `open` and we go.
-        try? task.run()
-        NSApp.terminate(nil)
+        AppRelaunch.now()
     }
 
     /// Ships in release (ADR 0025). A latency claim measured on a debug build
