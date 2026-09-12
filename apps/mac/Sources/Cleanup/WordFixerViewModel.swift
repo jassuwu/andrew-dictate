@@ -24,10 +24,28 @@ final class WordFixerViewModel: ObservableObject {
     @Published private(set) var failure: String?
 
     private let store: DictionaryStore
+    /// the mode the real pipeline is in, so the line you copy out of here is
+    /// the line saying it again would produce.
+    private let fullCleanup: Bool
 
-    init(transcript: String, store: DictionaryStore) {
+    init(
+        transcript: String,
+        store: DictionaryStore,
+        fullCleanup: Bool = true
+    ) {
         correction = TranscriptCorrection(transcript: transcript)
         self.store = store
+        self.fullCleanup = fullCleanup
+    }
+
+    /// The sentence that made you open this window, with the words you just
+    /// taught it. `correction.transcript` is what the engine heard and the
+    /// dictionary runs at the front of the cleaner, so one clean pass over it
+    /// *is* the corrected line — this is not a second pass over cleaned text,
+    /// which would capitalize and punctuate twice.
+    var fixedLine: String {
+        DeterministicCleaner(entries: store.entries, fullCleanup: fullCleanup)
+            .clean(correction.transcript)
     }
 
     var selectedPhrase: String? {
