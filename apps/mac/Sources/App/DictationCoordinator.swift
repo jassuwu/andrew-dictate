@@ -114,6 +114,8 @@ final class DictationCoordinator: ObservableObject {
     private var isRecordingLocked = false
     private var activeFocusAnchor: FocusAnchor?
     private var pipelineTask: Task<Void, Never>?
+    /// the start chime, held back 120 ms so a discarded capture can cancel it
+    private var startCueTask: Task<Void, Never>?
     private var pipelineGeneration = 0
     private var enginePrewarmTask: Task<Void, Never>?
     private var engineSwapTask: Task<Void, Never>?
@@ -1119,8 +1121,18 @@ final class DictationCoordinator: ObservableObject {
                 )
             }
             activeFocusAnchor = focusAnchor
-            if !isOnboardingPresented {
-                feedbackSounds.play(.start)
+            // the mic and the lamp start at key-down; only the chime waits,
+            // long enough to know the key is being held rather than caught.
+            // a brush of fn should make no sound at all.
+            startCueTask?.cancel()
+            startCueTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(120))
+                guard !Task.isCancelled,
+                      let self,
+                      !self.isOnboardingPresented else {
+                    return
+                }
+                self.feedbackSounds.play(.start)
             }
             setState(.recording)
         } catch {
@@ -1208,6 +1220,8 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func cancelRecording() {
+        // a discarded capture must not leave a chime in flight behind it
+        startCueTask?.cancel()
         guard state == .recording,
               let audioRecorder else {
             return
@@ -1217,7 +1231,8 @@ final class DictationCoordinator: ObservableObject {
         setRecordingLocked(false)
         activeFocusAnchor = nil
         activeTimeline = nil
-        setState(.idle)
+        // a brush of the key should read as a flicker, not a cut
+        setState(.idle, fastHUDDismiss: true)
     }
 
     private func recordFirstBuffer(
