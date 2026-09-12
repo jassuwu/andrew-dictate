@@ -5,6 +5,8 @@ struct UtteranceTimeline: Sendable {
     typealias Instant = ContinuousClock.Instant
 
     enum CompletionStage: String, Sendable {
+        /// The ⌘V was posted with focus still where we left it. Not a claim
+        /// that the target app took the text: nothing here checks that.
         case delivered
         case leftOnPasteboard
         case leftOnPasteboardSecure
