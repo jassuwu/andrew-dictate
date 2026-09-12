@@ -846,6 +846,24 @@ final class DictationCoordinator: ObservableObject {
             distributedNotificationObservers.append(observer)
         }
 
+        // a second copy just refused to run and quit (AndrewDictateApp): it
+        // cannot draw anything itself, so the copy that is running says where
+        // it is. 2 s, like the other pill that points somewhere — the 1.2 s
+        // default is not long enough to read a sentence.
+        let alreadyRunningObserver = distributedCenter.addObserver(
+            forName: .andrewDictateAlreadyRunning,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.flashNotice(
+                    "already running — it's in the menu bar",
+                    duration: 2
+                )
+            }
+        }
+        distributedNotificationObservers.append(alreadyRunningObserver)
+
         let trustObserver = distributedCenter.addObserver(
             forName: SystemPermissions.accessibilityChanged,
             object: nil,
