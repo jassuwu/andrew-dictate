@@ -99,6 +99,10 @@ extension HUDLayoutEngineTests {
             "locked — tap to end",
             "the microphone changed — say that again",
             "accessibility is off — the dictation key is dead",
+            "still finishing the last one",
+            "couldn't transcribe — tap to try again",
+            "speech model didn't download — finish setup",
+            "downloading the speech model — about 460 mb",
             "can't hear zoom — allow system audio recording in privacy settings",
         ] {
             XCTAssertEqual(
