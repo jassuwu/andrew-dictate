@@ -116,6 +116,14 @@ struct SpokenPunctuation: TranscriptTransform {
             }
         }
 
+        // no marker fired, so there is no symbol of ours to space: the
+        // punctuation in here is punctuation the speech model wrote, and
+        // re-spacing it splits "7 p.m." and "20,000". whitespace is already
+        // collapsed upstream and again in PunctuationFinishing.
+        guard result != transcript else {
+            return transcript
+        }
+
         // symbols dropped in without their spacing fixed would read worse
         // than the spoken words, so an unusable formatter voids the stage.
         guard let formatted = formatExtractedSymbols(result) else {
