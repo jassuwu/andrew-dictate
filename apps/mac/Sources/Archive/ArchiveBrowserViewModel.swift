@@ -24,6 +24,16 @@ final class ArchiveBrowserViewModel: ObservableObject {
         reload()
     }
 
+    /// Where the file is. A pane that can only say "couldn’t read what’s
+    /// kept." has to be able to point at the thing it could not read — and
+    /// read it from the archive, so a dev build names its own folder.
+    var archiveURL: URL { archive.fileURL }
+
+    var archivePath: String {
+        (archive.fileURL.path(percentEncoded: false) as NSString)
+            .abbreviatingWithTildeInPath
+    }
+
     /// Edges trimmed, so a stray space does not empty the list.
     var trimmedQuery: String {
         query.trimmingCharacters(in: .whitespacesAndNewlines)

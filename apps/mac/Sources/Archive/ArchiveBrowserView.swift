@@ -9,24 +9,35 @@ struct ArchiveBrowserView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let failure = viewModel.failure {
-                Text(failure)
-                    .font(.caption)
-                    .foregroundStyle(BrandUI.attention)
-                    .padding(.horizontal, 18)
-                    .padding(.top, 14)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(failure)
+                        .foregroundStyle(BrandUI.attention)
+                    // somewhere to go: the file it could not read.
+                    Text(viewModel.archivePath)
+                        .foregroundStyle(BrandUI.textSecondary)
+                        .textSelection(.enabled)
+                }
+                .font(.caption)
+                .padding(.horizontal, 18)
+                .padding(.top, 14)
             }
 
             if viewModel.filtered.isEmpty {
-                // a search that found nothing is not an empty archive, and
-                // must not read like one.
-                Text(
-                    viewModel.isSearching
-                        ? "nothing matches “\(viewModel.trimmedQuery)”."
-                        : "nothing kept yet."
-                )
-                .font(BrandUI.bodyFont)
-                .foregroundStyle(BrandUI.textSecondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // a failure already says why there is nothing to show; saying
+                // "nothing kept yet." under it would be a second answer, and
+                // the wrong one — an unreadable archive is not an empty one.
+                if viewModel.failure == nil {
+                    // and a search that found nothing is not an empty archive
+                    // either.
+                    Text(
+                        viewModel.isSearching
+                            ? "nothing matches “\(viewModel.trimmedQuery)”."
+                            : "nothing kept yet."
+                    )
+                    .font(BrandUI.bodyFont)
+                    .foregroundStyle(BrandUI.textSecondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
