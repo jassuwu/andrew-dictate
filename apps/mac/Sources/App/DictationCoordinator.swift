@@ -143,6 +143,9 @@ final class DictationCoordinator: ObservableObject {
     private var transcribingBeganAt: Date?
     private var feedbackGeneration: UInt64 = 0
     private var activeFeedbackGeneration: UInt64?
+    /// the cap ended this take, not the user's finger. the pill that says
+    /// so has to ride the paste, so the fact outlives the stop.
+    private var capForcedEnd = false
     private let timelineClock = ContinuousClock()
     private let timelineStore = UtteranceTimelineStore()
     private var timelineSequence: UInt64 = 0
@@ -966,14 +969,20 @@ final class DictationCoordinator: ObservableObject {
         flashNotice("thirty seconds left", duration: 2)
     }
 
-    /// the recorder stops itself at the ceiling and keeps what it heard.
-    /// the only thing missing is the user knowing why the wave went quiet.
+    /// the recorder sealed the mic at the ceiling, so the take is over
+    /// whether the finger knows it or not — end it and deliver the five
+    /// minutes. a lamp still saying "listening" over a sealed mic is
+    /// spec §4's forbidden shape: a failure wearing the success signal.
     private func handleCaptureCapReached() {
         guard state == .recording else {
             return
         }
 
-        flashNotice("five minutes — that's the cap")
+        capForcedEnd = true
+        endRecording()
+        // the key was never released. without this a hands-free lock reads
+        // the next press as the end of a take that is already finished.
+        hotkeyMonitor.reset()
     }
 
     private func handleCaptureInterruption() {
@@ -1040,6 +1049,7 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func beginRecording() {
+        capForcedEnd = false
         // ADR 0023: refused during a meeting, and it says why. you started
         // the recording, so a dead hotkey is not a mystery — but a silent
         // one would still be spec §4's forbidden shape.
@@ -1301,6 +1311,17 @@ final class DictationCoordinator: ObservableObject {
                     at: timelineClock.now,
                     stage: .pasteVerified
                 )
+                // success is silent, but a take the user did not end is
+                // not quite success: say what landed, after it lands. a
+                // pill flashed at 5:00 would be wiped by the paste's own
+                // return to idle.
+                if capForcedEnd {
+                    setState(.idle)
+                    await flashFeedback(
+                        "five minutes — that's the cap. pasted what i had.",
+                        duration: 2.4
+                    )
+                }
             case let .leftOnPasteboard(reason):
                 completeTimeline(
                     at: timelineClock.now,
