@@ -1236,7 +1236,17 @@ final class DictationCoordinator: ObservableObject {
                 entries: dictionaryStore.entries,
                 fullCleanup: settings.cleanupEnabled
             )
-            let rawTranscript = cleaner.clean(transcript)
+            // one read of the character at the caret, two decisions: is the
+            // sentence there still running (so no capital), and do the words
+            // need a space to stand apart from it. read off the held element,
+            // the same one the paste decision revalidates.
+            let characterAtCaret = focusAnchor?.characterBeforeCursor()
+            let rawTranscript = cleaner.clean(
+                transcript,
+                continuingASentence: continuesSentence(
+                    after: characterAtCaret
+                )
+            )
             activeTimeline?.cleaned = timelineClock.now
             guard !rawTranscript.trimmingCharacters(
                 in: .whitespacesAndNewlines
@@ -1250,12 +1260,9 @@ final class DictationCoordinator: ObservableObject {
                 return
             }
             // a second dictation into the same field must not weld itself
-            // to the first. the space is a delivery detail, read off the
-            // same held element the paste decision uses — the cleaner still
-            // renders a flush string and the archive still keeps it.
-            let joinsWhatIsThere = needsJoinSpace(
-                after: focusAnchor?.characterBeforeCursor()
-            )
+            // to the first. the space is a delivery detail — the cleaner
+            // still renders a flush string and the archive still keeps it.
+            let joinsWhatIsThere = needsJoinSpace(after: characterAtCaret)
             let pasteTranscript = joinsWhatIsThere
                 ? " " + rawTranscript
                 : rawTranscript

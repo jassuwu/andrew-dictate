@@ -53,6 +53,20 @@ private let openingOrWhitespace: Set<Character> = [
     "/", "-", "\u{2014}",
 ]
 
+/// the caret is standing inside a sentence that is still running: a word
+/// character, or a comma or semicolon it carries on after. a full stop, a
+/// bracket, a blank field or an app that refused the read all mean "this is
+/// the start of something", and the first word gets its capital as before.
+func continuesSentence(after previous: Character?) -> Bool {
+    guard let previous else {
+        return false
+    }
+    return previous.isLetter
+        || previous.isNumber
+        || previous == ","
+        || previous == ";"
+}
+
 func needsJoinSpace(after previous: Character?) -> Bool {
     // nothing to read — an empty field, a caret at offset zero, or an app
     // that refused the question — is never a reason to add a space.
