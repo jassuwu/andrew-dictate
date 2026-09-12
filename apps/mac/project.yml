@@ -125,6 +125,7 @@ targets:
       - Sources/App/Capabilities.swift
       - Sources/App/RemovalPlan.swift
       - Sources/App/RemovalViewModel.swift
+      - Sources/HUD/HUDFeedbackGate.swift
       - Sources/HUD/WaveLevelShaper.swift
       - Sources/UI/BrandUI.swift
       - Sources/HUD/HUDLayoutEngine.swift
