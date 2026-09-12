@@ -1503,6 +1503,17 @@ final class DictationCoordinator: ObservableObject {
         let stateToken = stateGeneration
         activeFeedbackGeneration = feedbackToken
         hudViewModel.showFeedback(message)
+        // the pill is a non-key, click-through panel, so voiceover never
+        // visits it. without this, a failed dictation and a successful one
+        // are the same silence to someone who cannot look.
+        NSAccessibility.post(
+            element: NSApp as Any,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: message,
+                .priority: NSAccessibilityPriorityLevel.high.rawValue,
+            ]
+        )
         synchronizeHUD()
 
         // a pill that wraps to two lines is two reads. measured here rather
