@@ -49,6 +49,10 @@ final class Paster {
         let items: [Item]
     }
 
+    static let concealedType = NSPasteboard.PasteboardType(
+        "org.nspasteboard.ConcealedType"
+    )
+
     private var isPasting = false
     private var pasteWaiters: [CheckedContinuation<Void, Never>] = []
     private let keyCodeResolver = PasteKeyCodeResolver()
@@ -67,16 +71,25 @@ final class Paster {
             snapshot = nil
         }
 
+        // asked once here, before anything is written: a password has to go
+        // onto the clipboard concealed, and that cannot be decided after the
+        // write. the later re-checks still catch a focus that moves since.
+        let leaveBehindReason = reasonForLeavingOnPasteboard?()
+
         // the transaction is released by hand on every path out of here, so
         // a second dictation queues behind the real restore rather than
         // behind the caller. miss one and the next paste waits forever.
-        guard let ourChangeCount = Self.writeTranscript(text, to: pasteboard) else {
+        guard let ourChangeCount = Self.writeTranscript(
+            text,
+            to: pasteboard,
+            concealed: leaveBehindReason == .secureField
+        ) else {
             releasePasteTransaction()
             return PasteOutcome(result: .leftOnPasteboard(.pasteboardUnavailable))
         }
-        if let reason = reasonForLeavingOnPasteboard?() {
+        if let leaveBehindReason {
             releasePasteTransaction()
-            return PasteOutcome(result: .leftOnPasteboard(reason))
+            return PasteOutcome(result: .leftOnPasteboard(leaveBehindReason))
         }
         guard CGPreflightPostEventAccess() else {
             releasePasteTransaction()
@@ -174,20 +187,39 @@ final class Paster {
         return Snapshot(changeCount: changeCount, items: items)
     }
 
+    /// `concealed` adds `org.nspasteboard.ConcealedType`, the convention
+    /// maccy, alfred and pastebot read as "do not record this one". the
+    /// transcript still pastes with ⌘V; it just stops being collected.
     private static func writeTranscript(
         _ text: String,
-        to pasteboard: NSPasteboard
+        to pasteboard: NSPasteboard,
+        concealed: Bool = false
     ) -> Int? {
-        pasteboard.clearContents()
+        prepare(pasteboard, concealed: concealed)
 
         if !pasteboard.setString(text, forType: .string) {
-            pasteboard.clearContents()
+            prepare(pasteboard, concealed: concealed)
             guard pasteboard.setString(text, forType: .string) else {
                 return nil
             }
         }
 
+        if concealed {
+            _ = pasteboard.setString("", forType: concealedType)
+        }
+
         return pasteboard.changeCount
+    }
+
+    private static func prepare(
+        _ pasteboard: NSPasteboard,
+        concealed: Bool
+    ) {
+        if concealed {
+            _ = pasteboard.declareTypes([.string, concealedType], owner: nil)
+        } else {
+            pasteboard.clearContents()
+        }
     }
 
     private static func postPasteKey(
