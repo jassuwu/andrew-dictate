@@ -80,6 +80,10 @@ jobs:
             codesign --force --deep -s "Andrew Dictate Signing" "$APP"
             rm -f /tmp/sign.p12
           else
+            # ad-hoc: the signature changes every build, so brew sees a new
+            # signer on upgrade and the "your approval carries over" copy in
+            # the readme, the site and the release notes stops being true.
+            # don't ship a release from this branch.
             echo "no signing cert secret — falling back to ad-hoc"
             codesign --force --deep -s - "$APP"
           fi
@@ -117,7 +121,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" "AndrewDictate-$VERSION.dmg" \
             --title "Andrew Dictate $VERSION" \
             --generate-notes --verify-tag \
-            --notes "install: \`brew install --cask jassuwu/tap/andrew-dictate\` then \`xattr -dr com.apple.quarantine \"/Applications/Andrew Dictate.app\"\` (unsigned build). sha256: $(cat dmg.sha256)"
+            --notes "install: \`brew install --cask jassuwu/tap/andrew-dictate\` then \`xattr -dr com.apple.quarantine \"/Applications/Andrew Dictate.app\"\`. update: \`brew upgrade --cask jassuwu/tap/andrew-dictate\` — no xattr needed, your approval carries over. sha256: $(cat dmg.sha256)"
 
       - name: bump tap cask
         if: env.PUBLISH == 'true'
