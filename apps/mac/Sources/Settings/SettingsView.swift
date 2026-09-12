@@ -366,7 +366,11 @@ struct SettingsView: View {
     // MARK: - dictionary
 
     private var dictionaryTab: some View {
-        DictionaryEditor(store: dictionaryStore)
+        DictionaryEditor(
+            store: dictionaryStore,
+            settings: settings,
+            dictations: browser.items
+        )
             .padding(.horizontal, 24)
             .padding(.top, 18)
             .padding(.bottom, 20)
@@ -849,13 +853,24 @@ private struct PendingImport {
 
 private struct DictionaryEditor: View {
     @ObservedObject var store: DictionaryStore
+    @ObservedObject var settings: AppSettings
+    /// handed in, never re-read: the history pane already holds them.
+    let dictations: [Dictation]
 
     @State private var selection: Set<UUID> = []
     @State private var message: String?
     @State private var pendingImport: PendingImport?
+    @State private var suggestions: [RecurringMishearings.Candidate] = []
+    @State private var drafts: [String: String] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            // nothing when there is nothing: an empty section above the
+            // table would be a row of chrome asking about no words.
+            if !suggestions.isEmpty {
+                suggestionSection
+            }
+
             Table(store.entries, selection: $selection) {
                 TableColumn("wrong") { entry in
                     DictionaryCellEditor(
@@ -974,6 +989,102 @@ private struct DictionaryEditor: View {
                 """
             )
         }
+        // on appear only. this reads every kept dictation, and it is not a
+        // thing to do on a keystroke.
+        .onAppear(perform: refreshSuggestions)
+    }
+
+    /// It asks rather than asserts: the app genuinely cannot tell "swiggy"
+    /// (right) from "kunur" (wrong), and nothing here is added for you.
+    private var suggestionSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            BrandSectionHeader("did it get these right?")
+
+            Text("words you said more than once that andrew doesn’t know. teach it the ones it got wrong.")
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ForEach(suggestions) { candidate in
+                suggestionRow(candidate)
+            }
+        }
+        .padding(.bottom, 6)
+    }
+
+    private func suggestionRow(
+        _ candidate: RecurringMishearings.Candidate
+    ) -> some View {
+        HStack(spacing: 8) {
+            Text("heard “\(candidate.heard)”")
+                .font(BrandUI.machineFont(size: 12))
+                .foregroundStyle(BrandUI.goldPale)
+
+            Text("· \(candidate.count) times")
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
+
+            TextField(
+                "what you meant",
+                text: Binding(
+                    get: { draft(for: candidate) },
+                    set: { drafts[candidate.heard] = $0 }
+                )
+            )
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 150)
+            .onSubmit { teach(candidate) }
+
+            Button("save") { teach(candidate) }
+                .buttonStyle(.plain)
+                .foregroundStyle(BrandUI.gold)
+                .disabled(
+                    draft(for: candidate)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty
+                )
+
+            Button("not a mistake") { dismiss(candidate) }
+                .buttonStyle(.plain)
+                .foregroundStyle(BrandUI.textSecondary)
+
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 12))
+    }
+
+    /// a word you spelled out loud near it is the answer you already gave —
+    /// the field opens with it.
+    private func draft(
+        for candidate: RecurringMishearings.Candidate
+    ) -> String {
+        drafts[candidate.heard] ?? candidate.spelledOut ?? ""
+    }
+
+    private func teach(_ candidate: RecurringMishearings.Candidate) {
+        let right = draft(for: candidate)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !right.isEmpty,
+              store.add(wrong: candidate.heard, right: right) else {
+            return
+        }
+        drafts[candidate.heard] = nil
+        suggestions.removeAll { $0.heard == candidate.heard }
+    }
+
+    private func dismiss(_ candidate: RecurringMishearings.Candidate) {
+        settings.dismissSuggestion(candidate.heard)
+        suggestions.removeAll { $0.heard == candidate.heard }
+    }
+
+    private func refreshSuggestions() {
+        suggestions = RecurringMishearings.scan(
+            dictations,
+            dictionary: store.entries,
+            dismissed: settings.dismissedSuggestions,
+            isSuspect: { RecurringMishearings.isSuspect($0) },
+            now: Date()
+        )
     }
 
     private func importDictionary() {
