@@ -79,6 +79,15 @@ struct AndrewDictateApp: App {
                 }
                 .disabled(coordinator.lastTranscript == nil)
 
+                // the second time-sensitive row, and it disappears on its
+                // own: the samples of the sentence the model threw on are
+                // still in memory for two minutes.
+                if coordinator.canRetryLastFailure {
+                    Button("try that again") {
+                        coordinator.retryLastFailure()
+                    }
+                }
+
                 // nothing starts a recording but the user, and the user
                 // names the app (ADR 0023, 0040). meeting apps first.
                 Menu("record a meeting") {
