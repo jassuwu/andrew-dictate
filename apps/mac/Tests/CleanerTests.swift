@@ -64,6 +64,39 @@ final class CleanerTests: XCTestCase {
         )
     }
 
+    /// The reorder, in one case. `NumberParser` used to turn "seven" into
+    /// "7" before the dictionary ever saw the word, so a teammate called
+    /// Sevan could be taught and the entry would never fire again.
+    func testAWordTheParsersWouldHaveEatenIsStillTeachable() {
+        let cleaner = DeterministicCleaner(
+            entries: [DictionaryEntry(wrong: "seven", right: "Sevan")]
+        )
+
+        XCTAssertEqual(
+            cleaner.clean("call seven about the deploy"),
+            "Call Sevan about the deploy."
+        )
+        XCTAssertEqual(
+            cleaner.clean("meet at seven"),
+            "Meet at Sevan.",
+            "flat wrong→right, as ADR 0024 said: it replaces every occurrence"
+        )
+    }
+
+    /// What "fix a word" opens on: the transforms before the dictionary and
+    /// no others, in both cleanup modes.
+    func testAsHeardStopsWhereTheDictionaryStarts() {
+        XCTAssertEqual(
+            DeterministicCleaner().asHeard("  call  seven about the deploy "),
+            "call seven about the deploy"
+        )
+        XCTAssertEqual(
+            DeterministicCleaner(fullCleanup: false)
+                .asHeard("call seven about the deploy"),
+            "call seven about the deploy"
+        )
+    }
+
     func testEmptyStringRemainsEmpty() {
         XCTAssertEqual(DeterministicCleaner().clean(""), "")
     }
