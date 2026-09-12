@@ -3,7 +3,7 @@ import XCTest
 final class RetryBufferTests: XCTestCase {
     private let armed = Date(timeIntervalSince1970: 1_000)
 
-    func testAnArmedBufferHandsTheSamesBack() {
+    func testAnArmedBufferHandsTheSamplesBack() {
         var buffer = RetryBuffer()
         buffer.arm(samples: [0.1, 0.2, 0.3], at: armed)
 

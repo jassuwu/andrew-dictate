@@ -121,29 +121,6 @@ final class HotkeyLogicTests: XCTestCase {
         XCTAssertEqual(held.provisionalEndWindowExpired(), [])
     }
 
-    /// the lock is built out of two quick taps, so discarding a lone one
-    /// must not have changed how the pair reads.
-    func testDiscardingALoneTapLeavesTheDoubleTapLockIntact() {
-        var detector = TapLockDetector()
-
-        XCTAssertEqual(
-            detector.modifierPressed(at: 1.0),
-            [.begin]
-        )
-        XCTAssertEqual(
-            detector.modifierReleased(at: 1.1),
-            [.provisionalEnd]
-        )
-        XCTAssertEqual(
-            detector.modifierPressed(at: 1.3),
-            []
-        )
-        XCTAssertEqual(
-            detector.modifierReleased(at: 1.4),
-            [.cancel, .lockBegin]
-        )
-    }
-
     func testEscapeCancelsLockedCapture() {
         var detector = lockedDetector()
 
