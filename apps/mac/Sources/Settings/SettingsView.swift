@@ -51,6 +51,8 @@ struct SettingsView: View {
     @State private var modelStoreMessage: String?
     @State private var showsRemoval = false
     @State private var timings: TimelineSummary?
+    /// lit for a quarter second every time the bound key is pressed.
+    @State private var keyChipLit = false
 
     /// `meetingsLoader` is left open on purpose: this pane knows how to draw
     /// the meetings folder, not where it is or how to read it.
@@ -275,7 +277,10 @@ struct SettingsView: View {
                 }
             } label: {
                 HStack(spacing: 5) {
-                    KeyChip(settings.dictationHotkey.displayName)
+                    KeyChip(
+                        settings.dictationHotkey.displayName,
+                        isActive: keyChipLit
+                    )
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(BrandUI.textSecondary)
@@ -285,6 +290,22 @@ struct SettingsView: View {
             .buttonStyle(.plain)
             .fixedSize()
             .accessibilityLabel("dictation key")
+        }
+        // the same press setup listens to. hold the key with this pane open
+        // and the chip answers, so "i hold fn and nothing happens" is a
+        // five-second self-diagnosis instead of a support thread.
+        .task(id: coordinator.hotkeyDetection) {
+            guard coordinator.hotkeyDetection != nil else {
+                return
+            }
+            keyChipLit = true
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+            } catch {
+                // a press that lands mid-pulse owns the chip from here.
+                return
+            }
+            keyChipLit = false
         }
     }
 
