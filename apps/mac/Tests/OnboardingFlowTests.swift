@@ -57,6 +57,14 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(flow.step, .hello)
     }
 
+    /// A revoked grant opens on the screen that is actually broken.
+    func testSetupCanOpenOnTheScreenThatIsBroken() {
+        let flow = OnboardingFlow(step: .permissions)
+
+        XCTAssertEqual(flow.step, .permissions)
+        XCTAssertFalse(flow.canGoForward)
+    }
+
     func testThePositionIsOneBasedSoItReadsAsTwoOfThree() {
         var flow = OnboardingFlow()
         XCTAssertEqual(flow.position.index, 1)
@@ -77,6 +85,11 @@ final class OnboardingFlowTests: XCTestCase {
             scope: .meetingsOnly,
             dictation: false,
             meetings: true
+        ),
+        OnboardingJobs(
+            scope: .permissionsOnly,
+            dictation: true,
+            meetings: false
         ),
     ]
 
@@ -225,6 +238,36 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(
             OnboardingStep.permissions.title(for: meetingsOnly),
             "two permissions"
+        )
+    }
+
+    /// Reopened because macOS dropped a grant, the card says so — it does
+    /// not introduce an app you have been using for weeks.
+    func testPermissionsOnlySaysWhichSwitchWentOff() {
+        let permissionsOnly = OnboardingJobs(
+            scope: .permissionsOnly,
+            dictation: true,
+            meetings: false
+        )
+
+        XCTAssertEqual(
+            OnboardingStep.permissions.title(for: permissionsOnly),
+            "say yes again"
+        )
+        XCTAssertEqual(
+            OnboardingStep.permissions.reason(
+                for: permissionsOnly,
+                key: "fn"
+            ),
+            "already set up — macos dropped a permission. nothing to download."
+        )
+        XCTAssertEqual(
+            OnboardingStep.permissions.title(
+                for: permissionsOnly,
+                verdict: .ready
+            ),
+            "ready",
+            "a grant that came back is an arrival like any other"
         )
     }
 

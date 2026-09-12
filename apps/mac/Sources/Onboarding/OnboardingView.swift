@@ -239,7 +239,7 @@ struct OnboardingView: View {
     @StateObject private var permissions: OnboardingPermissionModel
     @StateObject private var meetingSetup: OnboardingMeetingSetup
     @State private var onboarding: OnboardingState
-    @State private var flow = OnboardingFlow()
+    @State private var flow: OnboardingFlow
     @State private var keyTest = KeyTest()
 
     private let windowResizer: OnboardingWindowResizer
@@ -252,6 +252,13 @@ struct OnboardingView: View {
     ) {
         let permissions = OnboardingPermissionModel()
         var onboarding = OnboardingState(scope: scope)
+        if scope == .permissionsOnly {
+            // there is nothing here to consent to — the jobs were picked
+            // weeks ago and the models are on disk. Consenting is what makes
+            // the row read "open settings" instead of offering an "allow"
+            // macOS ignores for an app it already lists.
+            onboarding.consentToSetup()
+        }
         onboarding.updateMicrophoneStatus(
             Self.microphoneRowStatus(for: permissions.microphoneStatus)
         )
@@ -267,6 +274,13 @@ struct OnboardingView: View {
         _permissions = StateObject(wrappedValue: permissions)
         _meetingSetup = StateObject(wrappedValue: meetingSetup)
         _onboarding = State(initialValue: onboarding)
+        // built here rather than jumped to in onAppear, so the hello screen
+        // never flashes for a frame on the way to the broken row.
+        _flow = State(
+            initialValue: OnboardingFlow(
+                step: scope == .permissionsOnly ? .permissions : .hello
+            )
+        )
         self.windowResizer = windowResizer
     }
 
@@ -905,23 +919,25 @@ struct OnboardingView: View {
         ZStack {
             // Centred independently of the buttons, which are different widths
             // and would otherwise push the dots off-centre.
-            HStack(spacing: 7) {
-                ForEach(OnboardingStep.allCases) { step in
-                    Button {
-                        flow.jump(to: step)
-                    } label: {
-                        Circle()
-                            .fill(
-                                step == flow.step
-                                    ? BrandUI.gold
-                                    : BrandUI.textPrimary.opacity(0.22)
-                            )
-                            .frame(width: 6, height: 6)
-                            .contentShape(Rectangle())
-                            .padding(5)
+            if showsPager {
+                HStack(spacing: 7) {
+                    ForEach(OnboardingStep.allCases) { step in
+                        Button {
+                            flow.jump(to: step)
+                        } label: {
+                            Circle()
+                                .fill(
+                                    step == flow.step
+                                        ? BrandUI.gold
+                                        : BrandUI.textPrimary.opacity(0.22)
+                                )
+                                .frame(width: 6, height: 6)
+                                .contentShape(Rectangle())
+                                .padding(5)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(step.title(for: onboarding.jobs))
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(step.title(for: onboarding.jobs))
                 }
             }
 
@@ -938,8 +954,8 @@ struct OnboardingView: View {
                 .buttonStyle(.plain)
                 .font(.callout)
                 .foregroundStyle(BrandUI.textSecondary)
-                .opacity(flow.canGoBack ? 1 : 0)
-                .disabled(!flow.canGoBack)
+                .opacity(canGoBack ? 1 : 0)
+                .disabled(!canGoBack)
 
                 Spacer()
 
@@ -965,6 +981,17 @@ struct OnboardingView: View {
                 )
             }
         }
+    }
+
+    /// A reentry about one revoked switch has one screen: dots that walk you
+    /// to a welcome card and a `(~3.3 gb)` button are the thing this scope
+    /// exists to remove.
+    private var showsPager: Bool {
+        onboarding.scope != .permissionsOnly
+    }
+
+    private var canGoBack: Bool {
+        showsPager && flow.canGoBack
     }
 
     /// The glyph follows the word. A card offering "close" has finished

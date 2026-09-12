@@ -207,6 +207,37 @@ final class OnboardingStateTests: XCTestCase {
         XCTAssertTrue(state.meetingsSelected)
     }
 
+    // MARK: - a lost grant is one screen
+
+    /// The upgrade-day reentry asks for the two grants dictation needs and
+    /// nothing else: no jobs to pick, no meeting model, no price.
+    func testPermissionsOnlyAsksForTheTwoGrantsAndRefusesTheTicks() {
+        var state = OnboardingState(scope: .permissionsOnly)
+
+        XCTAssertTrue(state.dictationSelected)
+        XCTAssertFalse(state.meetingsSelected)
+        XCTAssertEqual(
+            state.jobs.permissions,
+            ["microphone", "accessibility"]
+        )
+
+        XCTAssertFalse(state.setMeetingsSelected(true))
+        XCTAssertFalse(state.setDictationSelected(false))
+        XCTAssertTrue(state.dictationSelected)
+        XCTAssertFalse(state.meetingsSelected)
+    }
+
+    /// Consent is given for that scope on arrival, which is what turns the
+    /// missing row into "open settings" instead of a dead "allow".
+    func testPermissionsOnlyConsentDemandsTheMissingSwitch() {
+        var state = OnboardingState(scope: .permissionsOnly)
+
+        XCTAssertTrue(state.consentToSetup())
+        state.updateAccessibility(granted: false)
+
+        XCTAssertEqual(state.accessibilityStatus, .actionRequired)
+    }
+
     func testMeetingsOnlyConsentDoesNotDemandAccessibility() {
         var state = OnboardingState(scope: .meetingsOnly)
 

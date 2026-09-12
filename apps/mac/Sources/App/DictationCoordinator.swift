@@ -421,11 +421,19 @@ final class DictationCoordinator: ObservableObject {
             isOnboardingPresented = false
             return
         }
-        presentOnboarding()
+        presentOnboarding(scope: reentryScope)
     }
 
-    func runOnboardingAgain(scope: OnboardingScope = .everything) {
-        presentOnboarding(scope: scope)
+    /// Someone who has been through setup and lost a grant is not a new user.
+    /// `needsPermissionAttention` is already exactly "set up, wants
+    /// dictation, cannot dictate", so all three doors back in — launch,
+    /// the menu's "finish setup", settings' — get the one-screen version.
+    private var reentryScope: OnboardingScope {
+        needsPermissionAttention ? .permissionsOnly : .everything
+    }
+
+    func runOnboardingAgain(scope: OnboardingScope? = nil) {
+        presentOnboarding(scope: scope ?? reentryScope)
     }
 
     /// `dictationWanted` is nil when this run of setup had no say in it —

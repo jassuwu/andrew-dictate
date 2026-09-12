@@ -43,9 +43,14 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
                 ? "the speech models"
                 : "the speech model"
         case .permissions:
-            verdict == .ready
-                ? "ready"
-                : Self.spelled(jobs.permissions.count)
+            if verdict == .ready {
+                "ready"
+            } else if jobs.scope == .permissionsOnly {
+                // not an introduction and not a count: one switch went off.
+                "say yes again"
+            } else {
+                Self.spelled(jobs.permissions.count)
+            }
         }
     }
 
@@ -75,6 +80,9 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
                 // closing is allowed to be the right answer here, so say so.
                 return "granted. the model is still coming down — closing won't stop it."
             case .incomplete:
+                if jobs.scope == .permissionsOnly {
+                    return "already set up — macos dropped a permission. nothing to download."
+                }
                 switch (jobs.dictation, jobs.meetings) {
                 case (true, true):
                     return "so it can hear you, type for you, and hear the meeting."
@@ -134,7 +142,13 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
 /// grant had worked, because the screen that would have told you was already
 /// gone.
 struct OnboardingFlow: Equatable, Sendable {
-    private(set) var step: OnboardingStep = .hello
+    private(set) var step: OnboardingStep
+
+    /// Setup can open on the screen that is actually broken: a returning user
+    /// who lost a grant has no jobs to pick and nothing to download.
+    init(step: OnboardingStep = .hello) {
+        self.step = step
+    }
 
     var canGoBack: Bool {
         step != .hello

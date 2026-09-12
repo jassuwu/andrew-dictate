@@ -34,9 +34,13 @@ enum OnboardingCompletion: Equatable, Sendable {
 /// `record a meeting` by someone who unticked meetings the first time: the
 /// job rows are gone, because the choice was already made by pressing record
 /// (ADR 0040, SPEC §5).
+/// `permissionsOnly` is the upgrade-day reentry: macOS dropped a grant from
+/// an install that has been working for weeks, so setup owes them one screen
+/// about the one switch — not the welcome, the job ticks and a price tag.
 enum OnboardingScope: Equatable, Sendable {
     case everything
     case meetingsOnly
+    case permissionsOnly
 }
 
 /// Which jobs this run of setup is for. Two jobs share one mic and one
