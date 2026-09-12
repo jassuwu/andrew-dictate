@@ -98,6 +98,7 @@ extension HUDLayoutEngineTests {
             "heard nothing",
             "locked — tap to end",
             "the microphone changed — say that again",
+            "accessibility is off — the dictation key is dead",
             "can't hear zoom — allow system audio recording in privacy settings",
         ] {
             XCTAssertEqual(
