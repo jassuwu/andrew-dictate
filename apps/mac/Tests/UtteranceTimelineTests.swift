@@ -54,4 +54,22 @@ final class UtteranceTimelineTests: XCTestCase {
             .milliseconds(40)
         )
     }
+
+    /// The archive's gate. A cancelled dictation produced no text and one
+    /// refused for a secure field was delivered nowhere; every other
+    /// pasteboard hand-off reached you and is worth keeping.
+    func testOnlyTheStagesThatReachedYouAreKeepable() {
+        XCTAssertTrue(
+            UtteranceTimeline.CompletionStage.pasteVerified.isKeepable
+        )
+        XCTAssertTrue(
+            UtteranceTimeline.CompletionStage.leftOnPasteboard.isKeepable
+        )
+        XCTAssertFalse(
+            UtteranceTimeline.CompletionStage.leftOnPasteboardSecure.isKeepable
+        )
+        XCTAssertFalse(
+            UtteranceTimeline.CompletionStage.cancelled.isKeepable
+        )
+    }
 }

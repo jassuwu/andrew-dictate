@@ -47,6 +47,17 @@ final class TimelineSummaryTests: XCTestCase {
         XCTAssertNil(summary.excluded[.pasteVerified])
     }
 
+    func testSecureFieldRefusalsAreCountedAsTheirOwnExclusion() {
+        let summary = TimelineSummary(timelines: [
+            timeline(keyUpToCompletion: 100),
+            timeline(keyUpToCompletion: 900, stage: .leftOnPasteboardSecure),
+        ])
+
+        XCTAssertEqual(summary.sampleSize, 1)
+        XCTAssertEqual(summary.excluded[.leftOnPasteboardSecure], 1)
+        XCTAssertNil(summary.excluded[.leftOnPasteboard])
+    }
+
     func testAnEmptySampleReportsNothingRatherThanZero() {
         let summary = TimelineSummary(timelines: [])
 
@@ -174,6 +185,17 @@ final class TimelineSummaryFormattingTests: XCTestCase {
 
         XCTAssertTrue(text.contains("cancelled"), text)
         XCTAssertTrue(text.contains("left on pasteboard"), text)
+    }
+
+    /// A stage missing from the exclusions list would drop its count without
+    /// failing to compile, so the conditions line has to be asserted on.
+    func testSecureFieldExclusionsAreNamedInTheConditionsLine() {
+        let text = TimelineSummary(timelines: [
+            timeline(keyUpToCompletion: 100),
+            timeline(keyUpToCompletion: 100, stage: .leftOnPasteboardSecure),
+        ]).formatted()
+
+        XCTAssertTrue(text.contains("1 secure field"), text)
     }
 
     func testNothingIsExcludedIsStatedExplicitly() {
