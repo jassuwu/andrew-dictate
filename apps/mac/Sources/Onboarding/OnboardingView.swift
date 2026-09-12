@@ -352,8 +352,13 @@ struct OnboardingView: View {
                     .padding(.bottom, 2)
             }
 
-            Text(flow.step.title(for: onboarding.jobs))
-                .font(.system(size: 22, weight: .semibold))
+            Text(
+                flow.step.title(
+                    for: onboarding.jobs,
+                    verdict: onboarding.verdict
+                )
+            )
+            .font(.system(size: 22, weight: .semibold))
 
             if flow.step == .hello, onboarding.scope == .everything {
                 Text("escape the keyboard.")
@@ -364,14 +369,15 @@ struct OnboardingView: View {
             Text(
                 flow.step.reason(
                     for: onboarding.jobs,
-                    key: settings.dictationHotkey.displayName
+                    key: settings.dictationHotkey.displayName,
+                    verdict: onboarding.verdict
                 )
             )
-                .font(BrandUI.bodyFont)
-                .foregroundStyle(BrandUI.textSecondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 330)
+            .font(BrandUI.bodyFont)
+            .foregroundStyle(BrandUI.textSecondary)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: 330)
 
             switch flow.step {
             case .hello:
@@ -383,7 +389,11 @@ struct OnboardingView: View {
                 }
                 .padding(.top, 10)
             case .permissions:
-                permissionRows.padding(.top, 14)
+                if onboarding.verdict == .ready {
+                    readyPanel.padding(.top, 20)
+                } else {
+                    permissionRows.padding(.top, 14)
+                }
             }
         }
         .frame(maxWidth: .infinity)
@@ -662,6 +672,47 @@ struct OnboardingView: View {
         keyTest.rearm()
     }
 
+    /// The arrival. Two things the user is about to need and cannot see: which
+    /// key, and where the app went — an `LSUIElement` app closing this window
+    /// leaves one badge on screen that no string has ever named. Both are
+    /// borrowed (the binding settings owns, the badge the menu bar draws), so
+    /// nothing here is a second success signal: the lamp's afterglow stays the
+    /// only one, and it has no dictation behind it yet.
+    ///
+    /// Shorter than the checklist it replaces — the window's height is fixed
+    /// on purpose, because it used to grow under the pointer.
+    @ViewBuilder
+    private var readyPanel: some View {
+        VStack(spacing: 14) {
+            if onboarding.dictationSelected {
+                HStack(spacing: 7) {
+                    Text("hold")
+                    KeyChip(settings.dictationHotkey.displayName)
+                    Text("· talk · let go")
+                }
+                .font(BrandUI.bodyFont)
+                .foregroundStyle(BrandUI.gold)
+            } else {
+                // meetings-only reaches this card too, and must never be told
+                // to hold a key it has no use for.
+                Text("pick “record a meeting” from that badge.")
+                    .font(BrandUI.bodyFont)
+                    .foregroundStyle(BrandUI.gold)
+            }
+
+            HStack(spacing: 8) {
+                Image("Badge")
+                    .resizable()
+                    .frame(width: 18, height: 18)
+                    .accessibilityHidden(true)
+                Text("this badge is andrew, up in your menu bar.")
+                    .foregroundStyle(BrandUI.textSecondary)
+            }
+            .font(.caption)
+        }
+        .frame(maxWidth: 330)
+    }
+
     /// One checklist, filtered by job: nothing here belongs to a job the user
     /// unticked, because a row you cannot need is a row you have to wonder
     /// about.
@@ -894,13 +945,14 @@ struct OnboardingView: View {
 
                 Button(action: performPrimaryAction) {
                     HStack(spacing: 5) {
-                        Text(flow.step.actionTitle(for: onboarding.jobs))
-                        Image(
-                            systemName: flow.canGoForward
-                                ? "chevron.right"
-                                : "checkmark"
+                        Text(
+                            flow.step.actionTitle(
+                                for: onboarding.jobs,
+                                verdict: onboarding.verdict
+                            )
                         )
-                        .font(.system(size: 10, weight: .semibold))
+                        Image(systemName: primaryGlyph)
+                            .font(.system(size: 10, weight: .semibold))
                     }
                 }
                 // the one prominent control on the surface gets the glass
@@ -913,6 +965,16 @@ struct OnboardingView: View {
                 )
             }
         }
+    }
+
+    /// The glyph follows the word. A card offering "close" has finished
+    /// nothing, so it must not wear a checkmark — SPEC §4's rule, one
+    /// screen earlier than it was written for.
+    private var primaryGlyph: String {
+        guard !flow.canGoForward else {
+            return "chevron.right"
+        }
+        return onboarding.verdict == .incomplete ? "xmark" : "checkmark"
     }
 
     private func performPrimaryAction() {
@@ -945,6 +1007,10 @@ struct OnboardingView: View {
             flow.advance()
 
         case .permissions:
+            // "finished" records the press that made it true. Never from an
+            // .onChange: it flips `completion`, which the verdict reads, so
+            // the ready card would erase itself one frame after arriving.
+            onboarding.finishAutomatically()
             coordinator.finishOnboarding(
                 dictationWanted: onboarding.scope == .everything
                     ? onboarding.dictationSelected
