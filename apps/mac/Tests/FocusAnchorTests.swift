@@ -71,18 +71,18 @@ final class FocusAnchorTests: XCTestCase {
     /// into "fix a word" must not be saved as "Cache."
     func testOnlyOurOwnBundleCountsAsOurOwnUI() {
         XCTAssertTrue(
-            pastesIntoOurOwnUI(target: "gg.jass.andrew", own: "gg.jass.andrew")
+            pastesIntoOurOwnUI(target: "gg.jass.dictate", own: "gg.jass.dictate")
         )
         XCTAssertFalse(
-            pastesIntoOurOwnUI(target: "example.editor", own: "gg.jass.andrew")
+            pastesIntoOurOwnUI(target: "example.editor", own: "gg.jass.dictate")
         )
     }
 
     /// A dev run and the test bundle can both have no bundle id, and neither
     /// is our window.
     func testAMissingBundleIdIsNeverOurOwnUI() {
-        XCTAssertFalse(pastesIntoOurOwnUI(target: nil, own: "gg.jass.andrew"))
-        XCTAssertFalse(pastesIntoOurOwnUI(target: "gg.jass.andrew", own: nil))
+        XCTAssertFalse(pastesIntoOurOwnUI(target: nil, own: "gg.jass.dictate"))
+        XCTAssertFalse(pastesIntoOurOwnUI(target: "gg.jass.dictate", own: nil))
         XCTAssertFalse(pastesIntoOurOwnUI(target: nil, own: nil))
     }
 
