@@ -259,9 +259,18 @@ struct SettingsView: View {
     }
 
     private var hotkeyRow: some View {
-        HStack(spacing: 10) {
-            Text("key")
-                .font(BrandUI.bodyFont.weight(.medium))
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("key")
+                    .font(BrandUI.bodyFont.weight(.medium))
+
+                // the ceiling is only a surprise if nobody said it: at five
+                // minutes the take ends itself and pastes what it had.
+                Text("one dictation tops out at five minutes.")
+                    .font(BrandUI.bodyFont)
+                    .foregroundStyle(BrandUI.textSecondary)
+                    .lineLimit(1)
+            }
 
             Spacer(minLength: 10)
 
