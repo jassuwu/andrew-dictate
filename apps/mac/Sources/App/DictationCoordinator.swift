@@ -256,6 +256,9 @@ final class DictationCoordinator: ObservableObject {
         recorder?.onCapReached = { [weak self] in
             self?.handleCaptureCapReached()
         }
+        recorder?.onCapApproaching = { [weak self] in
+            self?.handleCaptureCapApproaching()
+        }
 
         settings.$preRollEnabled
             .dropFirst()
@@ -935,6 +938,9 @@ final class DictationCoordinator: ObservableObject {
             recorder.onCapReached = { [weak self] in
                 self?.handleCaptureCapReached()
             }
+            recorder.onCapApproaching = { [weak self] in
+                self?.handleCaptureCapApproaching()
+            }
             audioRecorder = recorder
             hudViewModel.useRecorder(recorder)
             audioLogger.notice("audio recorder rebuilt on demand")
@@ -948,6 +954,16 @@ final class DictationCoordinator: ObservableObject {
             )
             return nil
         }
+    }
+
+    /// thirty seconds of runway. the wave comes back on its own when the
+    /// pill clears, so the lamp needs nothing here.
+    private func handleCaptureCapApproaching() {
+        guard state == .recording else {
+            return
+        }
+
+        flashNotice("thirty seconds left", duration: 2)
     }
 
     /// the recorder stops itself at the ceiling and keeps what it heard.
