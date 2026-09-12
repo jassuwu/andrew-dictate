@@ -164,6 +164,8 @@ final class DictationCoordinator: ObservableObject {
     private let meetingNotifier = MeetingNudgeNotifier()
     private var liveTranscriptPanel: LiveTranscriptPanel?
     private var meetingCancellables: Set<AnyCancellable> = []
+    /// A quit is waiting on a meeting's transcript to be written.
+    private var quitWaitingOnMeeting = false
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
     private var distributedNotificationObservers: [NSObjectProtocol] = []
 
@@ -1579,6 +1581,35 @@ extension DictationCoordinator {
         meetings.stop()
     }
 
+    /// A quit can arrive from the menu, from ⌘Q, or from brew asking the app
+    /// to go so it can replace the bundle under it (the cask's
+    /// `uninstall quit:`). A meeting recording is one of the two durable
+    /// nouns, so a quit that lands mid-meeting stops it first and waits for
+    /// the markdown — `finishQuitting()` answers when the transcript is
+    /// written, and the ceiling answers if whisper is still flushing.
+    func prepareToQuit() -> NSApplication.TerminateReply {
+        guard meetings.isRecording else {
+            return .terminateNow
+        }
+        quitWaitingOnMeeting = true
+        stopMeeting()
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(20))
+            self?.finishQuitting()
+        }
+        return .terminateLater
+    }
+
+    /// The transcript is on disk (or it never will be). Either way the quit
+    /// gets its answer once, and a second call is a no-op.
+    private func finishQuitting() {
+        guard quitWaitingOnMeeting else {
+            return
+        }
+        quitWaitingOnMeeting = false
+        NSApp.reply(toApplicationShouldTerminate: true)
+    }
+
     func toggleLiveTranscript() {
         let panel = liveTranscriptPanel ?? makeLiveTranscriptPanel()
         panel.toggle()
@@ -1640,6 +1671,10 @@ extension DictationCoordinator {
             meetingNotifier.ask(app: meetingAppName, quietFor: meetings.thresholds.quietNudgeAfter)
         case .saved, .nothingToKeep, .saveFailed, .engineFailed:
             liveTranscriptPanel?.dismissKeepingPreference()
+            // the transcript has landed, so a quit that was waiting on it
+            // can go through. the hook runs after this and may not finish;
+            // the file it was told about is already written.
+            finishQuitting()
         case .cannotHear, .gapBegan, .gapEnded, .writingItOut, .hookFailed:
             break
         }

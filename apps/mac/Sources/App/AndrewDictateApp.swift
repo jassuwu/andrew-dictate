@@ -7,6 +7,7 @@ import SwiftUI
 @MainActor
 final class AppLifecycleDelegate: NSObject, NSApplicationDelegate {
     var onReopen: (() -> Void)?
+    var onTerminate: (() -> NSApplication.TerminateReply)?
 
     func applicationShouldHandleReopen(
         _ sender: NSApplication,
@@ -14,6 +15,16 @@ final class AppLifecycleDelegate: NSObject, NSApplicationDelegate {
     ) -> Bool {
         onReopen?()
         return true
+    }
+
+    /// on upgrade day the quit does not come from the menu: brew asks the app
+    /// to go so it can replace the bundle under it. that request can land in
+    /// the middle of a meeting, so it goes through the coordinator, which
+    /// stops the recording and waits for the markdown before answering.
+    func applicationShouldTerminate(
+        _ sender: NSApplication
+    ) -> NSApplication.TerminateReply {
+        onTerminate?() ?? .terminateNow
     }
 }
 
@@ -153,6 +164,9 @@ struct AndrewDictateApp: App {
             .task {
                 lifecycleDelegate.onReopen = { [weak coordinator] in
                     coordinator?.handleReopen()
+                }
+                lifecycleDelegate.onTerminate = { [weak coordinator] in
+                    coordinator?.prepareToQuit() ?? .terminateNow
                 }
             }
         }
