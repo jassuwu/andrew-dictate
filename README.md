@@ -26,7 +26,7 @@ xattr -dr com.apple.quarantine "/Applications/Andrew Dictate.app"
 open "/Applications/Andrew Dictate.app"
 ```
 
-or grab the dmg from [releases](https://github.com/jassuwu/andrew-dictate/releases).
+or grab the dmg from [releases](https://github.com/jassuwu/andrew-dictate/releases). quit the running copy before you open a new one — two copies share one archive, and one meeting.
 
 the `xattr` line is there because the build is unsigned. i haven't paid apple the $99 for a developer account yet, so macOS quarantines it. no terminal? open the app, let macOS refuse, then go to system settings › privacy & security and click `open anyway` — that button only shows up for about an hour after macOS blocks it.
 
