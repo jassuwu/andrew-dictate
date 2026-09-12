@@ -1243,9 +1243,20 @@ final class DictationCoordinator: ObservableObject {
             let transcriptReady = timelineClock.now
             activeTimeline?.transcriptReady = transcriptReady
 
+            // a dictation aimed at our own window is a correction, not a
+            // sentence: dictate "cache" into the fixer's "what you meant"
+            // field and full cleanup would save it as "Cache." forever. the
+            // dictionary still runs — that is the ADR 0038 "cleanup off"
+            // path, not a new one. scoped per bundle, not per field, the
+            // same way CoreAudioMeetingSource treats our own bundle id: the
+            // fixer's field is the only dictation target we own.
             let cleaner = DeterministicCleaner(
                 entries: dictionaryStore.entries,
                 fullCleanup: settings.cleanupEnabled
+                    && !pastesIntoOurOwnUI(
+                        target: focusAnchor?.targetBundleIdentifier,
+                        own: Bundle.main.bundleIdentifier
+                    )
             )
             let cleanedTranscript = cleaner.clean(transcript)
             activeTimeline?.cleaned = timelineClock.now
