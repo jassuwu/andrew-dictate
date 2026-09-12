@@ -59,6 +59,14 @@ struct Capitalization: TranscriptTransform {
         at index: Int,
         in characters: [Character]
     ) -> Bool {
+        // "7 p.m. that means" — a dot after a single letter that already
+        // follows a dot closes an abbreviation, not a sentence. ADR 0018
+        // would rather miss a capital than shout one mid-line.
+        if index >= 2,
+           characters[index - 1].isLetter,
+           characters[index - 2] == "." {
+            return false
+        }
         guard index + 1 < characters.count else {
             return true
         }
