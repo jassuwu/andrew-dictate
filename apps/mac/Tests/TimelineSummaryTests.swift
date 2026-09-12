@@ -212,11 +212,11 @@ final class TimelineSummaryFormattingTests: XCTestCase {
         let text = TimelineSummary(timelines: []).formatted()
 
         XCTAssertFalse(text.contains("p50"), text)
-        XCTAssertTrue(text.lowercased().contains("no verified"), text)
+        XCTAssertTrue(text.lowercased().contains("no delivered"), text)
     }
 
     /// Caught in review: the empty-sample sentence was concatenated straight
-    /// onto the conditions line, producing "…summarise.n=0 verified pastes".
+    /// onto the conditions line, producing "…summarise.n=0 delivered".
     func testTheEmptySampleSentenceDoesNotRunIntoTheConditionsLine() {
         let lines = TimelineSummary(timelines: [])
             .formatted()

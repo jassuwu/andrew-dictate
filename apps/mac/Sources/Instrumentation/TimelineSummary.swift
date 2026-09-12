@@ -101,7 +101,7 @@ extension TimelineSummary {
     func formatted() -> String {
         guard sampleSize > 0 else {
             return """
-                no verified pastes recorded yet — nothing to summarise.
+                no delivered pastes recorded yet — nothing to summarise.
                 \(conditionsLine)
                 """
         }
@@ -141,7 +141,7 @@ extension TimelineSummary {
         let tail = exclusions.isEmpty
             ? "nothing excluded"
             : "excluded: " + exclusions.joined(separator: ", ")
-        return "n=\(sampleSize) verified pastes · \(tail)"
+        return "n=\(sampleSize) delivered · \(tail)"
     }
 
     private static func name(
