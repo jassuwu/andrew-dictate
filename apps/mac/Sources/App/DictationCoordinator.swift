@@ -64,6 +64,8 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var engineSwitchMessage: String?
     @Published private(set) var hotkeyDetection: HotkeyDetection?
     @Published private(set) var lastTranscript: String?
+    /// drives the menu's one time-sensitive row after a failed transcription
+    @Published private(set) var canRetryLastFailure = false
     /// re-read at launch, reopen, wake, unlock, and whenever the system says
     /// the trust table moved. a grant is a fact about now, not a fact we own.
     @Published private(set) var permissions = PermissionSnapshot(
@@ -121,6 +123,8 @@ final class DictationCoordinator: ObservableObject {
     private var pipelineTask: Task<Void, Never>?
     /// the start chime, held back 120 ms so a discarded capture can cancel it
     private var startCueTask: Task<Void, Never>?
+    private var retryBuffer = RetryBuffer()
+    private var retryExpiryTask: Task<Void, Never>?
     private var pipelineGeneration = 0
     private var enginePrewarmTask: Task<Void, Never>?
     private var engineSwapTask: Task<Void, Never>?
@@ -1075,6 +1079,13 @@ final class DictationCoordinator: ObservableObject {
             flashNotice("recording a meeting — stop it to dictate", duration: 2)
             return
         }
+        // the pill still says the last one failed and the samples are still
+        // here: this press means "that one", not "a new one". endRecording's
+        // state guard makes the eventual key release a no-op.
+        if activeFeedbackGeneration != nil, canRetryLastFailure {
+            retryLastFailure()
+            return
+        }
         if state == .transcribing {
             let elapsed = Date().timeIntervalSince(
                 transcribingBeganAt ?? .distantPast
@@ -1139,6 +1150,9 @@ final class DictationCoordinator: ObservableObject {
             return
         }
 
+        // a new take is the sentence you care about now; the lost one stops
+        // being offered.
+        clearRetry()
         timelineSequence &+= 1
         let timelineID = timelineSequence
         activeTimeline = UtteranceTimelineBuilder(
@@ -1327,8 +1341,10 @@ final class DictationCoordinator: ObservableObject {
                 activeTimeline = nil
                 // an accident is neither a success nor a failure. "heard
                 // nothing" is an answer, and a key nobody meant to press
-                // asked no question.
+                // asked no question. a retry holds no key at all (held is
+                // exactly zero), and it did ask.
                 if let held,
+                   held > .zero,
                    held < Duration.milliseconds(300) {
                     guard generation == pipelineGeneration,
                           state == .transcribing else {
@@ -1401,9 +1417,17 @@ final class DictationCoordinator: ObservableObject {
                 "transcription failed: \(error.localizedDescription, privacy: .public)"
             )
             activeTimeline = nil
+            guard generation == pipelineGeneration,
+                  state == .transcribing else {
+                return
+            }
+            // the samples are still in this frame. "say the whole thing
+            // again" is not a recourse for a paragraph, so keep them.
+            armRetry(samples)
             await reportPipelineFailure(
-                "couldn't transcribe",
-                generation: generation
+                "couldn't transcribe — tap to try again",
+                generation: generation,
+                duration: 4
             )
         }
     }
@@ -1413,7 +1437,8 @@ final class DictationCoordinator: ObservableObject {
     /// what went wrong in the same pill that carries "copied — …".
     private func reportPipelineFailure(
         _ message: String,
-        generation: Int
+        generation: Int,
+        duration: TimeInterval = 2.4
     ) async {
         guard generation == pipelineGeneration,
               state == .transcribing else {
@@ -1421,7 +1446,53 @@ final class DictationCoordinator: ObservableObject {
         }
 
         setState(.idle, fastHUDDismiss: true)
-        await flashFeedback(message)
+        await flashFeedback(message, duration: duration)
+    }
+
+    /// the failed dictation is still recoverable until the next one, and the
+    /// menu row plus the pill are the only two places that can say so.
+    private func armRetry(_ samples: [Float]) {
+        retryBuffer.arm(samples: samples, at: Date())
+        canRetryLastFailure = true
+        retryExpiryTask?.cancel()
+        retryExpiryTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(RetryBuffer.lifetime))
+            guard !Task.isCancelled else {
+                return
+            }
+            self?.clearRetry()
+        }
+    }
+
+    private func clearRetry() {
+        retryExpiryTask?.cancel()
+        retryExpiryTask = nil
+        retryBuffer.clear()
+        canRetryLastFailure = false
+    }
+
+    /// re-runs the samples that were thrown on, delivered wherever the
+    /// cursor is *now* — the failure may have sent them to another window.
+    func retryLastFailure() {
+        guard let samples = retryBuffer.take(at: Date()) else {
+            clearRetry()
+            return
+        }
+        clearRetry()
+
+        let now = timelineClock.now
+        timelineSequence &+= 1
+        var timeline = UtteranceTimelineBuilder(
+            id: timelineSequence,
+            keyDown: now
+        )
+        // held ≈ 0 rather than a fabricated hold: this row measures the
+        // retry, and nobody held a key for it.
+        timeline.micFirstBuffer = now
+        timeline.keyUp = now
+        activeTimeline = timeline
+        setState(.transcribing)
+        startPipeline(samples, focusAnchor: FocusAnchor.capture())
     }
 
     private func invalidatePipeline() {
