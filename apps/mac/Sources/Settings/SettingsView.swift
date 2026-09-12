@@ -48,6 +48,7 @@ struct SettingsView: View {
     @State private var historySegment: HistorySegment = .dictations
     @State private var installedModels: [InstalledModel] = []
     @State private var pendingModelRemoval: EngineVersion?
+    @State private var pendingArchiveWipe = false
     @State private var modelStoreMessage: String?
     @State private var showsRemoval = false
     @State private var timings: TimelineSummary?
@@ -177,6 +178,27 @@ struct SettingsView: View {
                     removeDownload(version)
                 },
                 secondaryButton: .cancel(Text("cancel"))
+            )
+        }
+        // the archive is the one thing here that does not come back: the file
+        // is unlinked, not trashed, so the wipe asks first.
+        .alert(
+            "delete everything you’ve dictated?",
+            isPresented: $pendingArchiveWipe
+        ) {
+            Button("delete all", role: .destructive) {
+                archive.deleteEverything()
+                browser.reload()
+            }
+            Button("cancel", role: .cancel) {}
+        } message: {
+            Text(
+                ArchiveSettingsModel.wipeWarning(
+                    count: browser.items.count,
+                    // reload() reverses to newest-first, so the last row is
+                    // the oldest thing in the file.
+                    oldest: browser.items.last?.startedAt
+                )
             )
         }
     }
@@ -435,8 +457,7 @@ struct SettingsView: View {
                 .foregroundStyle(BrandUI.textSecondary)
 
                 Button("delete all") {
-                    archive.deleteEverything()
-                    browser.reload()
+                    pendingArchiveWipe = true
                 }
                 .disabled(browser.items.isEmpty)
             }
