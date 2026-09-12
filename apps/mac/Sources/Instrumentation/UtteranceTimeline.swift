@@ -7,7 +7,22 @@ struct UtteranceTimeline: Sendable {
     enum CompletionStage: String, Sendable {
         case pasteVerified
         case leftOnPasteboard
+        case leftOnPasteboardSecure
         case cancelled
+
+        /// Whether a dictation that ended this way is a thing worth keeping.
+        ///
+        /// A cancelled one produced no text. One refused for a secure field
+        /// was delivered nowhere and is a password, not a dictation — every
+        /// other pasteboard hand-off reached you by another route and counts.
+        var isKeepable: Bool {
+            switch self {
+            case .pasteVerified, .leftOnPasteboard:
+                true
+            case .leftOnPasteboardSecure, .cancelled:
+                false
+            }
+        }
     }
 
     struct CancellationStages: Equatable, Sendable {
