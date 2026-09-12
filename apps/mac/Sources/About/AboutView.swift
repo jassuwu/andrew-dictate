@@ -18,7 +18,7 @@ final class AboutWindowController: NSWindowController {
         window.styleMask = [.titled, .closable, .fullSizeContentView]
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
-        let size = NSSize(width: 300, height: 300)
+        let size = NSSize(width: 300, height: 344)
         window.setContentSize(size)
         window.minSize = size
         window.maxSize = size
@@ -54,9 +54,14 @@ struct AboutView: View {
     @ObservedObject private var settings: AppSettings
     @State private var showsRecord = false
     @State private var versionCopied = false
+    @State private var upgradeCopied = false
     @State private var updateStatus: UpdateStatus = .idle
     private let version: String
     private let build: String
+    /// brew put it there, brew replaces it. a dmg user handed a `brew upgrade`
+    /// line would paste an error into their terminal, so they get sent to the
+    /// page the dmg is on instead.
+    private let installedByHomebrew: Bool
 
     init(
         bundle: Bundle = .main,
@@ -73,6 +78,9 @@ struct AboutView: View {
 
         version = shortVersion ?? "development"
         self.build = build ?? "development"
+        installedByHomebrew = FileManager.default.fileExists(
+            atPath: "/opt/homebrew/Caskroom/andrew-dictate"
+        )
     }
 
     var body: some View {
@@ -135,7 +143,7 @@ struct AboutView: View {
         .padding(.top, 30)
         .padding(.bottom, 18)
         .padding(.horizontal, 16)
-        .frame(width: 300, height: 300)
+        .frame(width: 300, height: 344)
         .brandGlassWindow()
         .preferredColorScheme(.dark)
     }
@@ -218,8 +226,15 @@ struct AboutView: View {
                     .foregroundStyle(BrandUI.textSecondary)
 
             case let .newer(version, page):
-                Link("\(version) is out — get it", destination: page)
-                    .foregroundStyle(BrandUI.gold)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 4) {
+                        Text("\(version) is out —")
+                            .foregroundStyle(BrandUI.gold)
+                        Link("what changed", destination: page)
+                            .foregroundStyle(BrandUI.textSecondary)
+                    }
+                    upgradeInstruction
+                }
 
             case .unreachable:
                 Text("couldn't check — try again later.")
@@ -227,6 +242,44 @@ struct AboutView: View {
             }
         }
         .font(.system(size: 11))
+    }
+
+    /// the command, not a tab: every copy was installed with one brew line,
+    /// so the update is one brew line — and it is the whole instruction,
+    /// because brew carries the gatekeeper approval and the permission grants
+    /// across. a github page would teach a dmg drag nobody here did.
+    @ViewBuilder
+    private var upgradeInstruction: some View {
+        if installedByHomebrew {
+            VStack(alignment: .leading, spacing: 2) {
+                Button {
+                    copyUpgradeCommand()
+                } label: {
+                    Text(
+                        upgradeCopied
+                            ? "copied — paste it in terminal"
+                            : UpdateCheck.upgradeCommand
+                    )
+                    .font(BrandUI.machineFont(size: 9.5))
+                    .foregroundStyle(BrandUI.goldPale)
+                    .multilineTextAlignment(.leading)
+                    // two lines are reserved either way, so the flash cannot
+                    // shuffle everything under it.
+                    .lineLimit(2, reservesSpace: true)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                .buttonStyle(.plain)
+                .help("click to copy")
+
+                Text("no xattr step — your permissions stay.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(BrandUI.textSecondary)
+            }
+        } else {
+            Text("the new dmg is on the release page.")
+                .font(.system(size: 10))
+                .foregroundStyle(BrandUI.textSecondary)
+        }
     }
 
     private func checkForUpdates() {
@@ -262,6 +315,17 @@ struct AboutView: View {
         Task {
             try? await Task.sleep(for: .seconds(1.2))
             versionCopied = false
+        }
+    }
+
+    private func copyUpgradeCommand() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(UpdateCheck.upgradeCommand, forType: .string)
+        upgradeCopied = true
+        Task {
+            try? await Task.sleep(for: .seconds(1.2))
+            upgradeCopied = false
         }
     }
 }
