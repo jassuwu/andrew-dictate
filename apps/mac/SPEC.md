@@ -55,7 +55,7 @@ one fixed card introduces Andrew Dictate and has one consent action: "set up And
 
 the click starts the parakeet v2 download and warmup, requests microphone access, and prompts for accessibility together. one live checklist shows microphone, accessibility, and speech-model status; download progress stays inline, denied permissions link to system settings, and model failures can retry.
 
-key, pre-roll, and dictionary configuration are omitted. defaults apply: fn for dictation, pre-roll off. settings owns every option.
+pre-roll and dictionary configuration are omitted. defaults apply: fn for dictation, pre-roll off. settings owns every option. the key is not configured here, it is *proved* here: screen two shows the bound key and asks for one press, and the key picker only appears once the shipped default has visibly failed to fire.
 
 **onboarding forks by job (ADR 0040, 2026-08-29).** the first card carries two check rows, both on: `dictation · ~460 mb` and `meeting recording · ~2.9 gb`; the button prices the total and unticking a job removes its rows and its download. meeting rows in the checklist: `meeting model`, and `system audio` — proved, not asked, by tapping our own process while the start sound plays, which is what fires the real prompt (ADR 0021, one screen earlier). someone who unticked meetings and later presses `record a meeting` gets this window back filtered to the meeting rows, headed `set up meeting recording`. **a meetings-only setup is never nagged for accessibility**: the gate reads which jobs were chosen before it reads the permissions, because there is no hotkey to be dead and system audio is proved at every capture anyway.
 
