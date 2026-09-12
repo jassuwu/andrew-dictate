@@ -193,6 +193,17 @@ jobs:
           export GIT_SSH_COMMAND="ssh -i ~/.ssh/tap_key -o IdentitiesOnly=yes"
           git clone git@github.com:jassuwu/homebrew-tap.git tap
           cd tap
+          # the caveats quote OnboardingJobs' two sizes and the sed below
+          # rewrites version and sha256 only, which is how the cask spent
+          # eight releases pricing the download at 450 MB. a warning, not a
+          # failure: by now the release is published, and a tap left unbumped
+          # would be worse than a stale sentence in another repo.
+          sed -n 's/.*Download = "\(.*\)"/\1/p' ../Sources/Onboarding/OnboardingState.swift \
+            | while IFS= read -r size; do
+                if ! grep -qF "$size" Casks/andrew-dictate.rb; then
+                  echo "::warning::cask caveats do not mention $size — reread them against OnboardingJobs"
+                fi
+              done
           sed -i '' "s/version \".*\"/version \"$VERSION\"/" Casks/andrew-dictate.rb
           sed -i '' "s/sha256 \".*\"/sha256 \"$SHA\"/" Casks/andrew-dictate.rb
           git config user.name "andrew-dictate release bot"
