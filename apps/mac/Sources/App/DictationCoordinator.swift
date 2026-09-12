@@ -1289,7 +1289,20 @@ final class DictationCoordinator: ObservableObject {
             guard !rawTranscript.trimmingCharacters(
                 in: .whitespacesAndNewlines
             ).isEmpty else {
+                let held = activeTimeline?.heldDuration
                 activeTimeline = nil
+                // an accident is neither a success nor a failure. "heard
+                // nothing" is an answer, and a key nobody meant to press
+                // asked no question.
+                if let held,
+                   held < Duration.milliseconds(300) {
+                    guard generation == pipelineGeneration,
+                          state == .transcribing else {
+                        return
+                    }
+                    setState(.idle, fastHUDDismiss: true)
+                    return
+                }
                 // silence must not wear the success afterglow.
                 await reportPipelineFailure(
                     "heard nothing",
