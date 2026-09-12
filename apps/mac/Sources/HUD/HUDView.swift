@@ -206,6 +206,10 @@ struct HUDView: View {
 
     private func textPill(_ message: String) -> some View {
         Text(message)
+            // the lamp phases already name themselves; the pill is the one
+            // that carries the words, so it needs the same identity.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(message)
             .font(Font(HUDLayoutEngine.primaryFont))
             .foregroundStyle(BrandUI.goldPale)
             .lineLimit(viewModel.layout.lineCount)
