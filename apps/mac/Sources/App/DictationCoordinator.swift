@@ -126,6 +126,8 @@ final class DictationCoordinator: ObservableObject {
     private var engineSwapTask: Task<Void, Never>?
     private var engineHealthTask: Task<Void, Never>?
     private var engineGeneration = 0
+    /// set only by `retryEnginePrewarm`, read once by the prewarm's catch
+    private var retryWasUserInitiated = false
     private var engineSwitchState: EngineSwitchState
     private var enginePreparationRequested: Bool
     private var settingsCancellables: Set<AnyCancellable> = []
@@ -456,6 +458,9 @@ final class DictationCoordinator: ObservableObject {
         guard enginePreparationState == .failed else {
             return
         }
+        // somebody asked for this one, so its outcome is owed an answer —
+        // an offline mac prewarming at launch is not.
+        retryWasUserInitiated = true
         requestEnginePreparation()
     }
 
@@ -639,6 +644,7 @@ final class DictationCoordinator: ObservableObject {
                 self.isPrewarmed = true
                 self.enginePreparationState = .ready
                 self.enginePrewarmTask = nil
+                self.retryWasUserInitiated = false
                 self.setState(.idle)
             } catch is CancellationError {
                 return
@@ -646,6 +652,8 @@ final class DictationCoordinator: ObservableObject {
                 guard generation == self.engineGeneration else {
                     return
                 }
+                let wasAsked = self.retryWasUserInitiated
+                self.retryWasUserInitiated = false
                 self.enginePrewarmTask = nil
                 self.enginePreparationState = .failed
                 self.engineLogger.error(
@@ -655,6 +663,15 @@ final class DictationCoordinator: ObservableObject {
                     """
                 )
                 self.setState(.idle)
+                // the retry announced itself ("speech model failed —
+                // retrying"); its failure must not be quieter than its
+                // beginning, or the key just stops answering.
+                if wasAsked {
+                    self.flashNotice(
+                        "speech model didn't download — finish setup",
+                        duration: 4
+                    )
+                }
             }
         }
     }
