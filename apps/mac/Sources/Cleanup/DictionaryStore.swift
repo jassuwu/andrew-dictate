@@ -186,8 +186,9 @@ final class DictionaryStore: ObservableObject {
     }
 
     /// trimmed and case-folded — the identity `DictionarySubstitutions`
-    /// matches on, so a merge can never leave two rows that both fire.
-    static func matchKey(_ wrong: String) -> String {
+    /// matches on, so a merge can never leave two rows that both fire, and
+    /// the suggestion scan can tell what you have already taught it.
+    nonisolated static func matchKey(_ wrong: String) -> String {
         wrong.trimmingCharacters(in: .whitespaces).lowercased()
     }
 
