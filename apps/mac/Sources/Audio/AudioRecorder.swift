@@ -48,12 +48,16 @@ final class AudioRecorder {
     // front from this number, so it is resident memory, not a soft limit.
     // past it capture seals and keeps the take instead of dropping it.
     private static let maximumUtteranceDuration = 5.0 * 60.0
+    // said out loud before the cap arrives, so the take ending under the
+    // user's finger is something they saw coming.
+    private static let capWarningLead = 30.0
     private static let conversionBufferCapacity: AVAudioFrameCount = 16_384
 
     private let engine: AVAudioEngine
     private let levelStorage: AudioLevelStorage
     private let firstBufferNotifier: AudioFirstBufferNotifier
     private let capNotifier: AudioCapNotifier
+    private let capApproachingNotifier: AudioCapNotifier
     private var inputFormat: AVAudioFormat
     private var captureStorage: AudioCaptureStorage
     private var hasInstalledTap = false
@@ -63,6 +67,7 @@ final class AudioRecorder {
     private(set) var isPreRollEnabled: Bool
     var onInterruption: (() -> Void)?
     var onCapReached: (() -> Void)?
+    var onCapApproaching: (() -> Void)?
 
     var currentLevel: Float {
         levelStorage.currentLevel
@@ -80,10 +85,12 @@ final class AudioRecorder {
         let levelStorage = AudioLevelStorage()
         let firstBufferNotifier = AudioFirstBufferNotifier()
         let capNotifier = AudioCapNotifier()
+        let capApproachingNotifier = AudioCapNotifier()
         let captureStorage = try Self.makeCaptureStorage(
             format: inputFormat,
             preRollEnabled: preRollEnabled,
-            capNotifier: capNotifier
+            capNotifier: capNotifier,
+            capApproachingNotifier: capApproachingNotifier
         )
 
         self.engine = engine
@@ -92,12 +99,16 @@ final class AudioRecorder {
         self.levelStorage = levelStorage
         self.firstBufferNotifier = firstBufferNotifier
         self.capNotifier = capNotifier
+        self.capApproachingNotifier = capApproachingNotifier
         isPreRollEnabled = preRollEnabled
 
         // armed once and left armed: the notifier outlives every storage
         // rebuild, so the hook keeps working after a device change.
         capNotifier.setCallback { [weak self] in
             self?.handleCapReached()
+        }
+        capApproachingNotifier.setCallback { [weak self] in
+            self?.handleCapApproaching()
         }
 
         installCaptureTap(
@@ -242,7 +253,8 @@ final class AudioRecorder {
     private static func makeCaptureStorage(
         format: AVAudioFormat,
         preRollEnabled: Bool,
-        capNotifier: AudioCapNotifier
+        capNotifier: AudioCapNotifier,
+        capApproachingNotifier: AudioCapNotifier
     ) throws -> AudioCaptureStorage {
         let tapFrameCapacity = AVAudioFrameCount(
             max(1_024, ceil(format.sampleRate * tapDuration))
@@ -262,8 +274,12 @@ final class AudioRecorder {
             frameCapacity: tapFrameCapacity,
             poolCount: poolCount,
             maximumFrameCount: maximumFrameCount,
+            capWarningLeadFrameCount: Int(
+                ceil(format.sampleRate * capWarningLead)
+            ),
             preRollFrameCapacity: preRollFrameCapacity,
-            capNotifier: capNotifier
+            capNotifier: capNotifier,
+            capApproachingNotifier: capApproachingNotifier
         )
     }
 
@@ -303,7 +319,8 @@ final class AudioRecorder {
         let newStorage = try Self.makeCaptureStorage(
             format: newInputFormat,
             preRollEnabled: preRollEnabled,
-            capNotifier: capNotifier
+            capNotifier: capNotifier,
+            capApproachingNotifier: capApproachingNotifier
         )
 
         engine.stop()
@@ -344,6 +361,16 @@ final class AudioRecorder {
         }
 
         onInterruption?()
+    }
+
+    private func handleCapApproaching() {
+        // a hop that lands after the take is over is about a finger that
+        // has already lifted; the countdown is news only while recording.
+        guard isRecording else {
+            return
+        }
+
+        onCapApproaching?()
     }
 
     private func handleCapReached() {
@@ -574,6 +601,7 @@ private final class AudioCaptureStorage: @unchecked Sendable {
     private let preRollBuffer: AVAudioPCMBuffer?
     private let preRollPrefixBuffer: AVAudioPCMBuffer?
     private let capNotifier: AudioCapNotifier
+    private let capApproachingNotifier: AudioCapNotifier
 
     private var captured: [AVAudioPCMBuffer] = []
     private var nextPoolIndex = 0
@@ -581,6 +609,7 @@ private final class AudioCaptureStorage: @unchecked Sendable {
     private var preRollPrefixFrameCount = 0
     private var isAcceptingAudio = false
     private var didReachCap = false
+    private var capWarning: CaptureCapWarning
     private var captureError: AudioRecorderError?
     private var ringSplicer: RingSplicer?
 
@@ -589,8 +618,10 @@ private final class AudioCaptureStorage: @unchecked Sendable {
         frameCapacity: AVAudioFrameCount,
         poolCount: Int,
         maximumFrameCount: Int,
+        capWarningLeadFrameCount: Int,
         preRollFrameCapacity: Int,
-        capNotifier: AudioCapNotifier
+        capNotifier: AudioCapNotifier,
+        capApproachingNotifier: AudioCapNotifier
     ) throws {
         var pool: [AVAudioPCMBuffer] = []
         pool.reserveCapacity(poolCount)
@@ -642,10 +673,15 @@ private final class AudioCaptureStorage: @unchecked Sendable {
 
         self.pool = pool
         self.maximumFrameCount = maximumFrameCount
+        capWarning = CaptureCapWarning(
+            maximumFrameCount: maximumFrameCount,
+            leadFrameCount: capWarningLeadFrameCount
+        )
         self.bytesPerFrame = bytesPerFrame
         self.preRollBuffer = preRollBuffer
         self.preRollPrefixBuffer = preRollPrefixBuffer
         self.capNotifier = capNotifier
+        self.capApproachingNotifier = capApproachingNotifier
         self.ringSplicer = ringSplicer
         captured.reserveCapacity(poolCount)
     }
@@ -659,6 +695,7 @@ private final class AudioCaptureStorage: @unchecked Sendable {
         utteranceFrameCount = 0
         preRollPrefixFrameCount = 0
         didReachCap = false
+        capWarning.reset()
         captureError = nil
 
         if let ringSplicer,
@@ -751,6 +788,11 @@ private final class AudioCaptureStorage: @unchecked Sendable {
         captured.append(destination)
         nextPoolIndex += 1
         utteranceFrameCount += sourceFrameCount
+
+        if capWarning.shouldWarn(at: utteranceFrameCount) {
+            // a leaf lock again, so firing under this one is safe.
+            capApproachingNotifier.notify()
+        }
         return true
     }
 
@@ -824,6 +866,7 @@ private final class AudioCaptureStorage: @unchecked Sendable {
         utteranceFrameCount = 0
         preRollPrefixFrameCount = 0
         didReachCap = false
+        capWarning.reset()
         captureError = nil
     }
 
