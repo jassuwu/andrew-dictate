@@ -14,6 +14,12 @@ enum UpdateCheck {
             + "andrew-dictate/releases/latest"
     )!
 
+    /// The one line that updates it. Every copy was installed with a brew
+    /// command, so the update is a brew command — and `brew upgrade` carries
+    /// the gatekeeper approval and the microphone / accessibility grants to
+    /// the new version, so there is no `xattr` line to run afterwards.
+    static let upgradeCommand = "brew upgrade --cask jassuwu/tap/andrew-dictate"
+
     /// `v0.8.0`-style tags against `CFBundleShortVersionString`. A tag that
     /// doesn't parse is never "newer" — a garbage response must not produce
     /// an upgrade prompt.

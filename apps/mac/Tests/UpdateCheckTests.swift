@@ -26,6 +26,15 @@ final class UpdateCheckTests: XCTestCase {
         XCTAssertFalse(UpdateCheck.isNewer(tag: "v0.7", than: "0.7.0"))
     }
 
+    /// the about window prints this for the user to paste, so a typo in the
+    /// tap name would land in a stranger's terminal rather than in a build.
+    func testTheUpgradeCommandIsExact() {
+        XCTAssertEqual(
+            UpdateCheck.upgradeCommand,
+            "brew upgrade --cask jassuwu/tap/andrew-dictate"
+        )
+    }
+
     /// a garbage response must never produce an upgrade prompt.
     func testUnparseableTagsAreNeverNewer() {
         XCTAssertFalse(UpdateCheck.isNewer(tag: "latest", than: "0.7.1"))
