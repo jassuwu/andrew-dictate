@@ -271,6 +271,43 @@ final class OnboardingFlowTests: XCTestCase {
         )
     }
 
+    /// Pressed `record a meeting ▸ zoom` and sat through the download: the
+    /// last button names the errand rather than saying "done" and dropping
+    /// it. While the model is still coming down there is nothing to promise.
+    func testTheLastButtonNamesTheMeetingYouAskedFor() {
+        var meetingsOnly = OnboardingJobs(
+            scope: .meetingsOnly,
+            dictation: false,
+            meetings: true
+        )
+
+        XCTAssertEqual(
+            OnboardingStep.permissions.actionTitle(
+                for: meetingsOnly,
+                verdict: .ready
+            ),
+            "done",
+            "no errand, no promise"
+        )
+
+        meetingsOnly.meetingApp = "zoom"
+        XCTAssertEqual(
+            OnboardingStep.permissions.actionTitle(
+                for: meetingsOnly,
+                verdict: .ready
+            ),
+            "record zoom"
+        )
+        XCTAssertEqual(
+            OnboardingStep.permissions.actionTitle(
+                for: meetingsOnly,
+                verdict: .downloading
+            ),
+            "done",
+            "a button must not promise a recording it cannot start"
+        )
+    }
+
     /// Nothing downloads before the click, so the click says what it will
     /// cost — and reprices the moment a tick changes.
     func testTheButtonPricesWhatTheClickWillDownload() {

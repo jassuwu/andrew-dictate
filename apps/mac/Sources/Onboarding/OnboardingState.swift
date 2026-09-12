@@ -57,6 +57,10 @@ struct OnboardingJobs: Equatable, Sendable {
     var scope: OnboardingScope = .everything
     var dictation = true
     var meetings = true
+    /// The app `record a meeting ▸ zoom` named, once its model has landed —
+    /// nil while the download runs, so the button never promises a click it
+    /// cannot keep.
+    var meetingApp: String?
 
     var anySelected: Bool {
         dictation || meetings
@@ -99,6 +103,7 @@ struct OnboardingState: Equatable, Sendable {
     private(set) var systemAudioStatus: OnboardingRowStatus = .pending
     private(set) var meetingModelStatus: OnboardingRowStatus = .pending
     private(set) var whileYouWaitVisible = false
+    private(set) var meetingErrandApp: String?
     private(set) var completion: OnboardingCompletion = .pending
 
     /// Dictation is what the app is for, so it opens ticked. Meetings are
@@ -117,7 +122,8 @@ struct OnboardingState: Equatable, Sendable {
         OnboardingJobs(
             scope: scope,
             dictation: dictationSelected,
-            meetings: meetingsSelected
+            meetings: meetingsSelected,
+            meetingApp: meetingModelStatus == .ready ? meetingErrandApp : nil
         )
     }
 
@@ -227,6 +233,10 @@ struct OnboardingState: Equatable, Sendable {
         _ status: OnboardingRowStatus
     ) {
         systemAudioStatus = status
+    }
+
+    mutating func updateMeetingErrand(app: String?) {
+        meetingErrandApp = app
     }
 
     mutating func updateMeetingModelStatus(

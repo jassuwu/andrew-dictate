@@ -1057,6 +1057,9 @@ struct OnboardingView: View {
     private func synchronizeMeetings() {
         onboarding.updateSystemAudioStatus(meetingSetup.systemAudioStatus)
         onboarding.updateMeetingModelStatus(meetingSetup.modelStatus)
+        // read here too, so the last button reprices the moment the meeting
+        // model lands rather than a screen later.
+        onboarding.updateMeetingErrand(app: coordinator.pendingMeetingAppName)
     }
 
     private func synchronizePermissions() {

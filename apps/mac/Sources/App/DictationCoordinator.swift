@@ -162,6 +162,9 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var meetingModelDownloads: [MeetingModel: Double] = [:]
     @Published private(set) var isLiveTranscriptShown = false
     private let meetingNotifier = MeetingNudgeNotifier()
+    /// the app `record a meeting ▸ zoom` named, held while setup runs. the
+    /// click already happened; setup is the detour, not a new question.
+    private var pendingMeetingApp: RunningApp?
     private var liveTranscriptPanel: LiveTranscriptPanel?
     private var meetingCancellables: Set<AnyCancellable> = []
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
@@ -439,11 +442,37 @@ final class DictationCoordinator: ObservableObject {
     /// `dictationWanted` is nil when this run of setup had no say in it —
     /// the meetings-only window must not un-set a dictation setup that was
     /// made on an earlier day.
+    ///
+    /// Last press of a meetings-only run: finish the errand that opened this
+    /// window. ADR 0023 says nothing starts a recording but the user naming
+    /// an app — they did that before the download, and honouring it is not
+    /// the app deciding on its own.
     func finishOnboarding(dictationWanted: Bool? = nil) {
         if let dictationWanted {
             settings.dictationWanted = dictationWanted
         }
+        // captured and cleared before the close, because closing the window
+        // is also how the errand is cancelled.
+        let errand = pendingMeetingApp
+        pendingMeetingApp = nil
         dismissOnboarding()
+
+        guard let errand else {
+            return
+        }
+        guard installedMeetingModels.contains(settings.meetingModel) else {
+            flashNotice("still downloading the meeting model", duration: 2)
+            return
+        }
+        guard MeetingApps.running().contains(where: { $0.pid == errand.pid })
+        else {
+            flashNotice(
+                "\(MeetingApps.displayName(errand)) isn't running any more",
+                duration: 2
+            )
+            return
+        }
+        startMeeting(errand)
     }
 
     /// "skip for now" and "we're done" both close the window. what neither
@@ -486,6 +515,9 @@ final class DictationCoordinator: ObservableObject {
         onboardingWindowController = nil
         isOnboardingPresented = false
         hotkeyMonitor.setDetectionOnly(false)
+        // walking away cancels the errand: nothing starts later out of
+        // nowhere.
+        pendingMeetingApp = nil
         synchronizeHUD()
     }
 
@@ -1615,12 +1647,18 @@ extension DictationCoordinator {
         meetings.app.map(MeetingApps.displayName) ?? ""
     }
 
+    /// What setup's last button should promise, when an errand is waiting.
+    var pendingMeetingAppName: String? {
+        pendingMeetingApp.map(MeetingApps.displayName)
+    }
+
     /// `record a meeting ▸ zoom`. the model is a download you may not have
     /// asked for yet: then this is the route back to the one surface that
     /// knows how to ask (SPEC §5).
     func startMeeting(_ app: RunningApp) {
         guard !meetings.isRecording else { return }
         guard installedMeetingModels.contains(settings.meetingModel) else {
+            pendingMeetingApp = app
             runOnboardingAgain(scope: .meetingsOnly)
             return
         }

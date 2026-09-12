@@ -207,6 +207,20 @@ final class OnboardingStateTests: XCTestCase {
         XCTAssertTrue(state.meetingsSelected)
     }
 
+    /// The errand only reaches the button once its model is on disk.
+    func testTheErrandIsOnlyOfferedOnceTheMeetingModelIsReady() {
+        var state = OnboardingState(scope: .meetingsOnly)
+        state.updateMeetingErrand(app: "zoom")
+
+        XCTAssertNil(state.jobs.meetingApp)
+
+        state.updateMeetingModelStatus(.ready)
+        XCTAssertEqual(state.jobs.meetingApp, "zoom")
+
+        state.updateMeetingErrand(app: nil)
+        XCTAssertNil(state.jobs.meetingApp)
+    }
+
     // MARK: - a lost grant is one screen
 
     /// The upgrade-day reentry asks for the two grants dictation needs and
