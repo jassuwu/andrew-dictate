@@ -122,7 +122,8 @@ final class ArchiveBrowserViewModelTests: XCTestCase {
     /// in the raw text — the row does not even show it unless the cleaner
     /// changed something.
     func testAWordOnlyTheRawTextHasIsStillFound() throws {
-        let model = ArchiveBrowserViewModel(archive: try seedTwoKubernetes())
+        let archive = try seedTwoKubernetes()
+        let model = ArchiveBrowserViewModel(archive: archive)
 
         model.query = "coober"
 
@@ -133,7 +134,8 @@ final class ArchiveBrowserViewModelTests: XCTestCase {
     }
 
     func testTheCleanedTextIsSearchedToo() throws {
-        let model = ArchiveBrowserViewModel(archive: try seedTwoKubernetes())
+        let archive = try seedTwoKubernetes()
+        let model = ArchiveBrowserViewModel(archive: archive)
 
         model.query = "kubernetes"
 
@@ -142,7 +144,8 @@ final class ArchiveBrowserViewModelTests: XCTestCase {
 
     /// Nobody types accents into a search field, or capitals on purpose.
     func testSearchIgnoresCaseAndAccents() throws {
-        let model = ArchiveBrowserViewModel(archive: try seedTwoKubernetes())
+        let archive = try seedTwoKubernetes()
+        let model = ArchiveBrowserViewModel(archive: archive)
 
         model.query = "CÖOBER"
 
@@ -152,7 +155,8 @@ final class ArchiveBrowserViewModelTests: XCTestCase {
     /// A field with nothing but a stray space in it is not a search, and must
     /// not hide the archive.
     func testABlankQueryLeavesTheWholeListNewestFirst() throws {
-        let model = ArchiveBrowserViewModel(archive: try seed(3))
+        let archive = try seed(3)
+        let model = ArchiveBrowserViewModel(archive: archive)
 
         model.query = "   "
 
@@ -166,7 +170,8 @@ final class ArchiveBrowserViewModelTests: XCTestCase {
     /// An empty result is a search that found nothing, not an empty archive —
     /// the pane says a different sentence for each.
     func testAQueryThatMatchesNothingIsStillASearch() throws {
-        let model = ArchiveBrowserViewModel(archive: try seed(3))
+        let archive = try seed(3)
+        let model = ArchiveBrowserViewModel(archive: archive)
 
         model.query = "kubernetes"
 
