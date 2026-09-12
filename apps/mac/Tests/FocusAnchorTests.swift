@@ -107,6 +107,32 @@ final class FocusAnchorTests: XCTestCase {
         }
     }
 
+    /// the same character answers the other question: a word character, or
+    /// a comma or semicolon, means the sentence at the caret is still
+    /// running and the first word keeps the case it was said in.
+    func testACaretInsideASentenceSaysSo() {
+        let continuing: [Character] = ["o", "O", "7", ",", ";", "é"]
+
+        for character in continuing {
+            XCTAssertTrue(
+                continuesSentence(after: character),
+                "after: \(character)"
+            )
+        }
+    }
+
+    func testAFinishedSentenceOrAnEmptyFieldStartsANewOne() {
+        let starting: [Character] = [".", "?", "!", ":", " ", "\n", ")", "\""]
+
+        for character in starting {
+            XCTAssertFalse(
+                continuesSentence(after: character),
+                "after: \(character)"
+            )
+        }
+        XCTAssertFalse(continuesSentence(after: nil))
+    }
+
     private func decision(
         currentApplication: FocusApplicationIdentity? = nil,
         hasFocusedElement: Bool = true,

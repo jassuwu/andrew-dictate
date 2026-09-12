@@ -437,6 +437,38 @@ final class CleanerTests: XCTestCase {
         )
     }
 
+    /// the caret was sitting after "the build failed because ", so the
+    /// utterance is the rest of that sentence — everything inside it still
+    /// starts sentences the way it always did.
+    func testCapitalizationContinuingASentenceTable() {
+        assertTransform(
+            Capitalization(continuingASentence: true),
+            cases: [
+                (
+                    "the linker ran out of memory",
+                    "the linker ran out of memory"
+                ),
+                ("hello. second", "hello. Second"),
+                ("hello\nsecond", "hello\nSecond"),
+                (
+                    "john@cypher.io is mine",
+                    "john@cypher.io is mine"
+                ),
+            ]
+        )
+    }
+
+    /// only the capital is held back: the words still get their full stop.
+    func testAContinuationStillGetsItsTerminalPeriod() {
+        XCTAssertEqual(
+            DeterministicCleaner().clean(
+                "the linker ran out of memory",
+                continuingASentence: true
+            ),
+            "the linker ran out of memory."
+        )
+    }
+
     func testPunctuationFinishingTable() {
         assertTransform(
             PunctuationFinishing(),
