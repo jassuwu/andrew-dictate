@@ -16,9 +16,12 @@ struct Capitalization: TranscriptTransform {
         var shouldCapitalize = !continuingASentence
 
         for (index, character) in characters.enumerated() {
-            // an address is not a sentence. capitalising the start of one
-            // gives you Jass@jass.gg, which is nobody's email.
-            if shouldCapitalize, isInsideAddress(at: index, in: characters) {
+            // an address is not a sentence, and a word that carries its own
+            // capital already has a spelling — Jass@jass.gg and IPhone are
+            // both nobody's (ADR 0038: a word you taught it is yours).
+            if shouldCapitalize,
+               isInsideAddress(at: index, in: characters)
+                   || hasIntentionalCasing(at: index, in: characters) {
                 output.append(character)
                 shouldCapitalize = false
                 continue
@@ -61,6 +64,25 @@ struct Capitalization: TranscriptTransform {
             cursor += 1
         }
         return AddressToken.isAddress(token)
+    }
+
+    /// a capital anywhere past the first character means the spelling was
+    /// chosen, not guessed: iPhone, macOS, gRPC. it only sees spellings that
+    /// carry one, so npm and ffmpeg still get capitalised at a sentence
+    /// start — that half stays open.
+    private func hasIntentionalCasing(
+        at index: Int,
+        in characters: [Character]
+    ) -> Bool {
+        var cursor = index + 1
+        while cursor < characters.count,
+              !characters[cursor].isWhitespace {
+            if characters[cursor].isUppercase {
+                return true
+            }
+            cursor += 1
+        }
+        return false
     }
 
     private func isTerminalPeriod(
