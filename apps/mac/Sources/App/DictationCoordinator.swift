@@ -75,7 +75,12 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var activeEngineVersion: EngineVersion
     @Published private(set) var engineSwitchMessage: String?
     @Published private(set) var hotkeyDetection: HotkeyDetection?
+    /// what actually reached the page, cleaned.
     @Published private(set) var lastTranscript: String?
+    /// the engine's own words, before any transform ran. this is what "fix a
+    /// word" opens on: an entry's `wrong` side has to be what parakeet
+    /// produced, or it never fires.
+    @Published private(set) var lastHeard: String?
     /// re-read at launch, reopen, wake, unlock, and whenever the system says
     /// the trust table moved. a grant is a fact about now, not a fact we own.
     @Published private(set) var permissions = PermissionSnapshot(
@@ -323,19 +328,25 @@ final class DictationCoordinator: ObservableObject {
         controller.present()
     }
 
-    /// The door ticket 011 chose. It hands over the *raw* transcript on
-    /// purpose: a dictionary entry's `wrong` side has to be what the engine
-    /// produced, and `lastTranscript` is already exactly that.
+    /// The door ticket 011 chose. It opens on `lastHeard` — the engine's
+    /// untouched words — because a dictionary entry's `wrong` side has to be
+    /// what the engine produced.
     func openWordFixer() {
-        guard let lastTranscript else {
+        guard let lastHeard else {
             return
         }
-        openWordFixer(for: lastTranscript)
+        openWordFixer(for: lastHeard)
     }
 
-    func openWordFixer(for transcript: String) {
+    /// `heard` from either door, run forward to the point the dictionary
+    /// reads it. Both doors then show the same words, and the word you point
+    /// at is the word an entry will match.
+    func openWordFixer(for heard: String) {
         let controller = WordFixerWindowController(
-            transcript: transcript,
+            transcript: DeterministicCleaner(
+                entries: dictionaryStore.entries,
+                fullCleanup: settings.cleanupEnabled
+            ).asHeard(heard),
             store: dictionaryStore
         )
         wordFixerWindowController = controller
@@ -1236,9 +1247,9 @@ final class DictationCoordinator: ObservableObject {
                 entries: dictionaryStore.entries,
                 fullCleanup: settings.cleanupEnabled
             )
-            let rawTranscript = cleaner.clean(transcript)
+            let cleanedTranscript = cleaner.clean(transcript)
             activeTimeline?.cleaned = timelineClock.now
-            guard !rawTranscript.trimmingCharacters(
+            guard !cleanedTranscript.trimmingCharacters(
                 in: .whitespacesAndNewlines
             ).isEmpty else {
                 activeTimeline = nil
@@ -1249,9 +1260,10 @@ final class DictationCoordinator: ObservableObject {
                 )
                 return
             }
-            let pasteTranscript = rawTranscript
+            let pasteTranscript = cleanedTranscript
 
-            lastTranscript = rawTranscript
+            lastTranscript = cleanedTranscript
+            lastHeard = transcript
             pendingArchiveText = (
                 heard: transcript,
                 inserted: pasteTranscript
@@ -1273,7 +1285,7 @@ final class DictationCoordinator: ObservableObject {
             if pasteResult != .leftOnPasteboard(
                 .pasteboardUnavailable
             ) {
-                settings.recordDictatedTranscript(rawTranscript)
+                settings.recordDictatedTranscript(cleanedTranscript)
             }
             guard generation == pipelineGeneration else {
                 return
