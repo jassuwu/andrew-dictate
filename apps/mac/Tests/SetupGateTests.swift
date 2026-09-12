@@ -98,3 +98,23 @@ extension SetupGateTests {
         )
     }
 }
+
+extension SetupGateTests {
+    /// the global key monitors are built at launch, which on a first run is
+    /// before anyone has granted anything — only the moment trust arrives
+    /// is worth rebuilding them.
+    func testOnlyANewGrantRebuildsTheHotkeyMonitors() {
+        XCTAssertTrue(
+            SetupGate.shouldReinstallHotkey(was: false, now: true)
+        )
+        XCTAssertFalse(
+            SetupGate.shouldReinstallHotkey(was: true, now: true)
+        )
+        XCTAssertFalse(
+            SetupGate.shouldReinstallHotkey(was: true, now: false)
+        )
+        XCTAssertFalse(
+            SetupGate.shouldReinstallHotkey(was: false, now: false)
+        )
+    }
+}
