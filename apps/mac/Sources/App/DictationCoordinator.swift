@@ -1290,7 +1290,9 @@ final class DictationCoordinator: ObservableObject {
             case let .leftOnPasteboard(reason):
                 completeTimeline(
                     at: timelineClock.now,
-                    stage: .leftOnPasteboard
+                    stage: reason == .secureField
+                        ? .leftOnPasteboardSecure
+                        : .leftOnPasteboard
                 )
                 setState(.idle)
                 await flashFeedback(
@@ -1370,13 +1372,14 @@ final class DictationCoordinator: ObservableObject {
     /// A dictation becomes a kept thing only once it has actually been
     /// delivered. A cancelled one produced no text, so there is nothing to
     /// keep; one left on the pasteboard reached you by another route and
-    /// still counts.
+    /// still counts — except the one refused for a secure field, which
+    /// reached nowhere and is a password.
     private func archive(
         _ timeline: UtteranceTimeline,
         stage: UtteranceTimeline.CompletionStage
     ) {
         guard settings.keepDictations,
-              stage != .cancelled,
+              stage.isKeepable,
               let text = pendingArchiveText else {
             return
         }
