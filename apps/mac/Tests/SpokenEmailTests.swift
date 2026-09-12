@@ -1,24 +1,25 @@
 import XCTest
 
 /// the whole path, not just the parser: an address has to survive
-/// capitalisation and punctuation finishing too.
+/// capitalisation and punctuation finishing too — and an utterance that
+/// ends on one ends there, with no full stop for mail to choke on.
 final class SpokenEmailTests: XCTestCase {
     private func cleaned(_ input: String) -> String {
         DeterministicCleaner(entries: []).clean(input)
     }
 
     func testSpokenDotBecomesAnAddress() {
-        XCTAssertEqual(cleaned("jass at jass dot gg"), "jass@jass.gg.")
+        XCTAssertEqual(cleaned("jass at jass dot gg"), "jass@jass.gg")
         XCTAssertEqual(
             cleaned("jazz at gmail dot com"),
-            "jazz@gmail.com."
+            "jazz@gmail.com"
         )
     }
 
     /// the speech model often renders a spoken "dot" as a real period, and
     /// shouts the tld: "jass at jass dot gg" arrives as "jass at jass. GG".
     func testPeriodAndShoutedTLDStillBecomeAnAddress() {
-        XCTAssertEqual(cleaned("jazz at jazz. GG"), "jazz@jazz.gg.")
+        XCTAssertEqual(cleaned("jazz at jazz. GG"), "jazz@jazz.gg")
         XCTAssertEqual(
             cleaned("send it to jazz at jazz. GG please"),
             "Send it to jazz@jazz.gg please."
@@ -26,7 +27,7 @@ final class SpokenEmailTests: XCTestCase {
     }
 
     func testAlreadyFormedDomainIsAccepted() {
-        XCTAssertEqual(cleaned("jazz at jazz.gg"), "jazz@jazz.gg.")
+        XCTAssertEqual(cleaned("jazz at jazz.gg"), "jazz@jazz.gg")
     }
 
     /// the dangerous half of accepting a bare period: a sentence break after

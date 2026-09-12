@@ -484,6 +484,9 @@ final class CleanerTests: XCTestCase {
                 ("10:30", "10:30."),
                 ("version 1.2", "version 1.2."),
                 ("50 %", "50%."),
+                // an utterance that ends on an address ends there
+                ("john@cypher.io", "john@cypher.io"),
+                ("visit cypher.io/docs", "visit cypher.io/docs"),
                 ("", ""),
             ]
         )
@@ -559,12 +562,14 @@ final class CleanerTests: XCTestCase {
                 "This is very, very important."
             ),
             (
+                // no full stop: mail refuses a recipient with a dot on the
+                // end, and the link 404s with one.
                 "um send it to john at cypher dot io",
-                "Um send it to john@cypher.io."
+                "Um send it to john@cypher.io"
             ),
             (
                 "visit cypher dot io slash docs",
-                "Visit cypher.io/docs."
+                "Visit cypher.io/docs"
             ),
             (
                 "the total is twenty five percent",
@@ -609,16 +614,53 @@ final class CleanerTests: XCTestCase {
 
         XCTAssertEqual(
             cleaner.clean("read more at anthropic dot com slash news"),
-            "Read more at anthropic.com/news."
+            "Read more at anthropic.com/news"
         )
         XCTAssertEqual(
             cleaner.clean("sign up at notion dot so"),
-            "Sign up at notion.so."
+            "Sign up at notion.so"
         )
         XCTAssertEqual(
             cleaner.clean("her email is sarah at gmail dot com"),
-            "Her email is sarah@gmail.com."
+            "Her email is sarah@gmail.com"
         )
+    }
+
+    /// an address, a clock time and a thousands separator all carry a dot or
+    /// a comma that is not sentence punctuation. four stages used to read
+    /// them as one; they now ask AddressToken the same question.
+    func testAnAddressATimeAndAPriceArriveIntact() {
+        let cleaner = DeterministicCleaner()
+        let cases = [
+            ("john at cypher dot io", "john@cypher.io"),
+            ("cypher dot io slash docs", "cypher.io/docs"),
+            ("go to seven dot com", "Go to seven.com"),
+            ("go to example.com", "Go to example.com"),
+            (
+                "send the invoice at five dot com",
+                "Send the invoice@five.com"
+            ),
+            (
+                "let's meet at 10:30 tomorrow",
+                "Let's meet at 10:30 tomorrow."
+            ),
+            ("it cost 3,500 dollars", "It cost 3,500 dollars."),
+            // and the prose that must not move
+            ("hello,world", "Hello, world."),
+            ("version 1.2", "Version 1.2."),
+            (
+                "i met him at home. great to see him",
+                "I met him at home. Great to see him."
+            ),
+        ]
+
+        for (input, expected) in cases {
+            XCTAssertEqual(
+                cleaner.clean(input),
+                expected,
+                "input: \(input)"
+            )
+        }
     }
 
     /// the space between two dictations is added at the cursor, not here:
@@ -651,7 +693,7 @@ final class CleanerTests: XCTestCase {
             ("the file is main.swift", "The file is main.swift."),
             (
                 "Check https://example.com/docs",
-                "Check https://example.com/docs."
+                "Check https://example.com/docs"
             ),
             (
                 "Send it to jass@jass.gg now",
