@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 /// the about window is a stamp, not a page: apple's own panel is 284×159
@@ -149,6 +150,19 @@ struct AboutView: View {
         .frame(width: 300, height: 344)
         .brandGlassWindow()
         .preferredColorScheme(.dark)
+        // brew can swap the bundle while this window sits open, so the line
+        // rechecks the disk when the window appears and whenever the app is
+        // brought forward. no network in either path.
+        .task {
+            noteAnyUpgradeOnDisk()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: NSApplication.didBecomeActiveNotification
+            )
+        ) { _ in
+            noteAnyUpgradeOnDisk()
+        }
     }
 
     /// one slot, two lines. the tagline is the screen; the lifetime word
@@ -240,9 +254,15 @@ struct AboutView: View {
                 }
 
             case let .alreadyInstalled(version):
-                Text("\(version) is already installed — quit and reopen to use it")
-                    .foregroundStyle(BrandUI.gold)
-                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    AppRelaunch.now()
+                } label: {
+                    Text("\(version) is installed — restart andrew")
+                        .foregroundStyle(BrandUI.gold)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .buttonStyle(.plain)
+                .help("quits andrew and opens it again")
 
             case .unreachable:
                 Text("couldn't check — try again later.")
