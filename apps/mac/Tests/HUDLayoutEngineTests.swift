@@ -111,6 +111,28 @@ extension HUDLayoutEngineTests {
         }
     }
 
+    /// the copied-instead pills grew a "⌘V to paste" tail. they are
+    /// instructions, so truncation would be worse than a long pill.
+    func testCopiedInsteadPillsStayOnOneLineOnASmallScreen() {
+        for message in [
+            "copied — secure field · ⌘V to paste",
+            "copied — focus changed · ⌘V to paste",
+            "copied — couldn't paste it · ⌘V to paste",
+            "the clipboard is busy — nothing was copied",
+        ] {
+            let layout = HUDLayoutEngine.layout(
+                for: .text(message),
+                screenWidth: 1_280
+            )
+
+            XCTAssertEqual(layout.lineCount, 1, message)
+            XCTAssertLessThan(
+                layout.size.width,
+                1_280 * HUDLayoutEngine.maximumScreenWidthFraction
+            )
+        }
+    }
+
     /// the longest thing the pill ever says only wraps on a small screen,
     /// and that is the case that earns the extra beat.
     func testTheLongestFailureWrapsOnASmallScreen() {
