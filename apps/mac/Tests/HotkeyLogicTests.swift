@@ -182,6 +182,17 @@ final class HotkeyLogicTests: XCTestCase {
         )
     }
 
+    /// the settings row draws this on one line at a fixed 800 px, so the
+    /// sentence has to stay lowercase, stay one sentence, and stay short
+    /// enough that a later edit cannot quietly truncate it to an ellipsis.
+    func testTheGestureSentenceStaysOneLowercaseLine() {
+        let sentence = HotkeyBinding.gestureExplanation
+
+        XCTAssertEqual(sentence, sentence.lowercased())
+        XCTAssertTrue(sentence.hasSuffix("."))
+        XCTAssertLessThanOrEqual(sentence.count, 90)
+    }
+
     private func lockedDetector() -> TapLockDetector {
         var detector = TapLockDetector()
         _ = detector.modifierPressed(at: 1.0)
