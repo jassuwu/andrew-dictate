@@ -1249,12 +1249,21 @@ final class DictationCoordinator: ObservableObject {
                 )
                 return
             }
-            let pasteTranscript = rawTranscript
+            // a second dictation into the same field must not weld itself
+            // to the first. the space is a delivery detail, read off the
+            // same held element the paste decision uses — the cleaner still
+            // renders a flush string and the archive still keeps it.
+            let joinsWhatIsThere = needsJoinSpace(
+                after: focusAnchor?.characterBeforeCursor()
+            )
+            let pasteTranscript = joinsWhatIsThere
+                ? " " + rawTranscript
+                : rawTranscript
 
             lastTranscript = rawTranscript
             pendingArchiveText = (
                 heard: transcript,
-                inserted: pasteTranscript
+                inserted: rawTranscript
             )
             let pasteResult = await paster.paste(
                 pasteTranscript,
