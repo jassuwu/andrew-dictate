@@ -1345,20 +1345,25 @@ final class DictationCoordinator: ObservableObject {
         activeTimeline = nil
     }
 
+    /// "copied" is a fact; the user needs the verb. the pill cannot be
+    /// clicked (it ignores mouse events), so the recovery has to be
+    /// something their hands can already do.
     private func feedbackMessage(
         for reason: LeftOnPasteboardReason
     ) -> String {
         switch reason {
         case .secureField:
-            "copied — secure field"
+            "copied — secure field · ⌘V to paste"
         case .focusChanged:
-            "copied — focus changed"
+            "copied — focus changed · ⌘V to paste"
         case .accessibilityUnavailable,
              .shortcutUnavailable,
              .cancelled:
-            "copied — paste unavailable"
+            "copied — couldn't paste it · ⌘V to paste"
         case .pasteboardUnavailable:
-            "couldn't copy transcript"
+            // the only one with no recovery to offer: the clipboard write
+            // itself failed, so there is nothing sitting there to paste.
+            "the clipboard is busy — nothing was copied"
         }
     }
 
