@@ -64,6 +64,17 @@ struct NumberParser: TranscriptTransform {
             case "percent", "percentage":
                 return "\(value)%"
             default:
+                // a bare small number is a word: "one of my keyboards", not
+                // "1 of my keyboards". parakeet already wrote it the way a
+                // person types it, so a numeral has to earn itself — a unit,
+                // a value of ten or more, or more than one spoken word.
+                // the same tokenizer parse() uses, so "two-ish" is two words.
+                let spokenWordCount = spokenNumber
+                    .split { $0.isWhitespace || $0 == "-" }
+                    .count
+                guard value >= 10 || spokenWordCount > 1 else {
+                    return nil
+                }
                 return String(value)
             }
         }
