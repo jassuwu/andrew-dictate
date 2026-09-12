@@ -54,4 +54,20 @@ final class UtteranceTimelineTests: XCTestCase {
             .milliseconds(40)
         )
     }
+
+    /// the empty-transcript branch reads this to tell a brush of the key
+    /// from a real attempt, and it has to be nil while the key is still down.
+    func testHeldDurationIsKnownOnlyAfterTheKeyComesUp() {
+        let keyDown = ContinuousClock.now
+        var builder = UtteranceTimelineBuilder(
+            id: 1,
+            keyDown: keyDown
+        )
+
+        XCTAssertNil(builder.heldDuration)
+
+        builder.keyUp = keyDown.advanced(by: .milliseconds(240))
+
+        XCTAssertEqual(builder.heldDuration, .milliseconds(240))
+    }
 }
