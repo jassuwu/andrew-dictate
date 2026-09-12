@@ -52,6 +52,9 @@ final class Paster {
     static let concealedType = NSPasteboard.PasteboardType(
         "org.nspasteboard.ConcealedType"
     )
+    static let transientType = NSPasteboard.PasteboardType(
+        "org.nspasteboard.TransientType"
+    )
 
     private var isPasting = false
     private var pasteWaiters: [CheckedContinuation<Void, Never>] = []
@@ -79,7 +82,7 @@ final class Paster {
         // the transaction is released by hand on every path out of here, so
         // a second dictation queues behind the real restore rather than
         // behind the caller. miss one and the next paste waits forever.
-        guard let ourChangeCount = Self.writeTranscript(
+        guard let writtenChangeCount = Self.writeTranscript(
             text,
             to: pasteboard,
             concealed: leaveBehindReason == .secureField
@@ -111,6 +114,13 @@ final class Paster {
         }
         // the keystroke is posted: this is the instant the text lands.
         let insertedAt = ContinuousClock.now
+
+        // the transcript is a relay, not a second archive: mark it transient
+        // so clipboard managers let it pass. only here, once the keystroke is
+        // actually out — every copy left behind for you to fetch by hand has
+        // returned above, and those do need to be collectable.
+        let ourChangeCount = Self.markTransient(pasteboard)
+            ?? writtenChangeCount
 
         Task.detached { [weak self] in
             try? await Task.sleep(for: .milliseconds(10))
@@ -190,7 +200,7 @@ final class Paster {
     /// `concealed` adds `org.nspasteboard.ConcealedType`, the convention
     /// maccy, alfred and pastebot read as "do not record this one". the
     /// transcript still pastes with ⌘V; it just stops being collected.
-    private static func writeTranscript(
+    static func writeTranscript(
         _ text: String,
         to pasteboard: NSPasteboard,
         concealed: Bool = false
@@ -206,6 +216,21 @@ final class Paster {
 
         if concealed {
             _ = pasteboard.setString("", forType: concealedType)
+        }
+
+        return pasteboard.changeCount
+    }
+
+    /// The org.nspasteboard convention — maccy, alfred, pastebot and clipmenu
+    /// read this type as "passing through" and decline to keep the item.
+    ///
+    /// An additive write to the item we just wrote, so the change count it
+    /// returns is still ours: the restore only fires while what is on the
+    /// clipboard is what we put there. nil means AppKit declined the type,
+    /// which costs nothing but the marker.
+    static func markTransient(_ pasteboard: NSPasteboard) -> Int? {
+        guard pasteboard.setString("", forType: transientType) else {
+            return nil
         }
 
         return pasteboard.changeCount
@@ -259,7 +284,10 @@ final class Paster {
         }
 
         guard pasteboard.writeObjects(restoredItems) else {
+            // the one path that strands the transcript on purpose. it is
+            // still a relay, so it still says so.
             _ = writeTranscript(transcript, to: pasteboard)
+            _ = markTransient(pasteboard)
             return
         }
     }
