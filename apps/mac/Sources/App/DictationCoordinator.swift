@@ -309,6 +309,25 @@ final class DictationCoordinator: ObservableObject {
                 self?.presentOnboardingIfNeeded()
             }
         }
+
+        // "fix a word…" is the menu's only time-sensitive action, and it used
+        // to be grey until this session's first dictation — while the words
+        // it wants sat in the archive the whole time. detached, because the
+        // read is disk and launch is not. the file on disk is the source of
+        // truth, so `keepDictations` does not gate the read: an empty or
+        // missing archive is the only case that stays disabled.
+        let archive = dictationArchive
+        Task.detached { [weak self] in
+            let newest = try? archive.latest()
+            await MainActor.run {
+                // a dictation that landed during the read wins: pointing the
+                // fixer back at yesterday's words would be silent and wrong.
+                guard let self, self.lastHeard == nil, let newest else {
+                    return
+                }
+                self.lastHeard = newest.heard
+            }
+        }
     }
 
     @discardableResult
