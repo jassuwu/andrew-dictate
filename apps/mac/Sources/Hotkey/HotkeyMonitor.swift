@@ -56,6 +56,20 @@ final class HotkeyMonitor {
         perform(detector.reset())
     }
 
+    /// a global monitor added while the app was untrusted never starts
+    /// hearing keys, so granting accessibility has to build new ones or fn
+    /// stays dead until the next launch. `binding` and `isDetectionOnly` are
+    /// deliberately untouched: a custom key and onboarding's detection-only
+    /// mode outlive the swap.
+    func reinstall() {
+        reset()
+        for monitor in monitors {
+            NSEvent.removeMonitor(monitor)
+        }
+        monitors.removeAll()
+        installMonitors()
+    }
+
     private func installMonitors() {
         if let monitor = NSEvent.addGlobalMonitorForEvents(
             matching: .flagsChanged,
