@@ -17,6 +17,7 @@ the domain model. one term, one meaning. if a word isn't here, it doesn't get us
 | **setup** | whether the app can dictate *right now*: both grants live, model ready. a fact about the present, re-asked; never a stored claim that it once succeeded. |
 | **pre-roll** | optional ~300ms rolling in-memory mic buffer (user toggle) so the first word is never clipped. discarded continuously; never written anywhere. |
 | **locked recording** | double-tap the dictation key to record hands-free; a single tap ends it and inserts as normal. |
+| **capture ceiling** | five minutes of one utterance. capture stops accepting frames; the take is kept and still inserted. |
 | **dictation** | one delivered utterance, kept: raw + inserted text, time, engine, key-up→inserted. your own speech. deleted only by you. |
 | **meeting recording** | a local recording of one named app plus your mic, from `record a meeting` to `stop`. holds other people's words, so it is its own noun with its own rules (ADR 0022). what survives is the transcript. |
 | **tap** | the Core Audio process tap on the app you named. its channel is *them*. proved alive by hearing the start sound; never asked. |
