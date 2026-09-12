@@ -366,7 +366,8 @@ final class DictationCoordinator: ObservableObject {
                 entries: dictionaryStore.entries,
                 fullCleanup: settings.cleanupEnabled
             ).asHeard(heard),
-            store: dictionaryStore
+            store: dictionaryStore,
+            fullCleanup: settings.cleanupEnabled
         )
         wordFixerWindowController = controller
         controller.present()

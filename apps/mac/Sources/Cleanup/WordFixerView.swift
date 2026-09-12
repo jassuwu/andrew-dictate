@@ -4,6 +4,8 @@ import SwiftUI
 struct WordFixerView: View {
     @ObservedObject var viewModel: WordFixerViewModel
 
+    @State private var lineCopied = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("what it heard")
@@ -71,14 +73,41 @@ struct WordFixerView: View {
                     .foregroundStyle(BrandUI.attention)
             }
 
-            Text("saved words are corrected from now on, everywhere.")
-                .font(.system(size: 11))
-                .foregroundStyle(BrandUI.textSecondary)
+            HStack(spacing: 12) {
+                // "from now on" left out the one dictation you came here
+                // about. no pill and no auto-paste: focus is long gone, so
+                // the button's own label is the whole receipt.
+                if !viewModel.saved.isEmpty {
+                    Button(action: copyFixedLine) {
+                        Text(lineCopied ? "copied" : "copy the fixed line")
+                            .font(.system(size: 11))
+                            .foregroundStyle(BrandUI.gold)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Text("saved words are corrected from now on, everywhere.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(BrandUI.textSecondary)
+            }
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .brandGlassWindow()
         .preferredColorScheme(.dark)
+    }
+
+    /// the same shape and the same 1.2 s as the about window's copy button,
+    /// so the app's two transient copy buttons behave identically.
+    private func copyFixedLine() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(viewModel.fixedLine, forType: .string)
+        lineCopied = true
+        Task {
+            try? await Task.sleep(for: .seconds(1.2))
+            lineCopied = false
+        }
     }
 
     private func isSelected(_ index: Int) -> Bool {
@@ -169,8 +198,16 @@ private struct WordFlow: Layout {
 
 @MainActor
 final class WordFixerWindowController: NSWindowController {
-    init(transcript: String, store: DictionaryStore) {
-        let viewModel = WordFixerViewModel(transcript: transcript, store: store)
+    init(
+        transcript: String,
+        store: DictionaryStore,
+        fullCleanup: Bool = true
+    ) {
+        let viewModel = WordFixerViewModel(
+            transcript: transcript,
+            store: store,
+            fullCleanup: fullCleanup
+        )
         let window = NSWindow(
             contentViewController: NSHostingController(
                 rootView: WordFixerView(viewModel: viewModel)
