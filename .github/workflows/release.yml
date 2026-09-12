@@ -158,7 +158,7 @@ jobs:
             echo
             echo '---'
             echo
-            echo "install: \`brew install --cask jassuwu/tap/andrew-dictate\` then \`xattr -dr com.apple.quarantine \"/Applications/Andrew Dictate.app\"\`"
+            echo "install: \`brew install --cask jassuwu/tap/andrew-dictate\`, then \`xattr -dr com.apple.quarantine \"/Applications/Andrew Dictate.app\"\`, then \`open \"/Applications/Andrew Dictate.app\"\`. no dock icon — look for the gold badge in your menu bar."
             echo
             echo "update: \`brew upgrade --cask jassuwu/tap/andrew-dictate\` — no xattr needed, your approval carries over"
             echo
