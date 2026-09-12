@@ -1256,6 +1256,10 @@ final class DictationCoordinator: ObservableObject {
                 heard: transcript,
                 inserted: pasteTranscript
             )
+            // hands-free means our own settings window may be in front of the
+            // app you dictated into. give the frontmost spot back before the
+            // ⌘V goes out, or the paste lands here and reads as focus theft.
+            _ = await focusAnchor?.yieldFocusBackToAnchor()
             let outcome = await paster.paste(
                 pasteTranscript,
                 reasonForLeavingOnPasteboard: {
