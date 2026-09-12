@@ -49,6 +49,7 @@ private struct ArchiveRow: View {
     let delete: () -> Void
 
     @State private var isHovering = false
+    @State private var copied = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -82,6 +83,12 @@ private struct ArchiveRow: View {
             // Actions appear on hover: a list of hundreds of rows should not
             // be a wall of buttons.
             HStack(spacing: 6) {
+                Button(action: copy) {
+                    // the label says it happened, in place. a pinned width
+                    // keeps the two buttons beside it from shifting.
+                    Text(copied ? "copied" : "copy")
+                        .frame(width: 44, alignment: .leading)
+                }
                 Button("fix a word", action: fixAWord)
                 Button("delete", action: delete)
             }
@@ -92,6 +99,21 @@ private struct ArchiveRow: View {
         .padding(.vertical, 9)
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
+    }
+
+    /// the archive keeping ADR 0030's promise: "wanting it again is what the
+    /// archive is for". the inserted text is the paragraph that went into the
+    /// wrong window, so that is the one that comes back — the raw text is what
+    /// `fix a word` already carries.
+    private func copy() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(dictation.inserted, forType: .string)
+        copied = true
+        Task {
+            try? await Task.sleep(for: .seconds(1.2))
+            copied = false
+        }
     }
 }
 
