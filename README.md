@@ -27,7 +27,7 @@ xattr -dr com.apple.quarantine "/Applications/Andrew Dictate.app"
 
 or grab the dmg from [releases](https://github.com/jassuwu/andrew-dictate/releases).
 
-the `xattr` line is there because the build is unsigned. i haven't paid apple the $99 for a developer account yet, so macOS quarantines it. right-click → open works too.
+the `xattr` line is there because the build is unsigned. i haven't paid apple the $99 for a developer account yet, so macOS quarantines it. no terminal? open the app, let macOS refuse, then go to system settings › privacy & security and click `open anyway` — that button only shows up for about an hour after macOS blocks it.
 
 first launch asks which jobs you want. dictation is a ~460 mb download, meetings are ~2.9 gb. tick one or both.
 
