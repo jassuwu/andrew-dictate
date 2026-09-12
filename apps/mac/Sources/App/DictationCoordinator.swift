@@ -1097,6 +1097,9 @@ final class DictationCoordinator: ObservableObject {
             id: timelineID,
             keyDown: timelineClock.now
         )
+        // the standby anchor. the one that decides the paste is taken at
+        // key-up; this is what stands in if AX hands back nothing then, or
+        // if by then the frontmost window is one of ours.
         let focusAnchor = FocusAnchor.capture()
 
         do {
@@ -1170,7 +1173,12 @@ final class DictationCoordinator: ObservableObject {
         do {
             activeTimeline?.keyUp = timelineClock.now
             let samples = try audioRecorder.stop()
-            let focusAnchor = activeFocusAnchor
+            // taken now rather than at key-down: the window worth protecting
+            // is key-up → paste, the ~600 ms when nobody is moving anything.
+            // key-down → paste spans the whole utterance, which is exactly
+            // when aiming at the field you actually want is normal.
+            let focusAnchor = FocusAnchor.captureUnlessOurs()
+                ?? activeFocusAnchor
             activeFocusAnchor = nil
             if !isOnboardingPresented {
                 feedbackSounds.play(.end)

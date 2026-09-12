@@ -92,6 +92,23 @@ struct FocusAnchor {
         )
     }
 
+    /// The anchor a dictation is judged against, taken at key-up.
+    ///
+    /// Our own window being frontmost is not an answer: a locked recording
+    /// that ended while settings, about or fix-a-word was open still means
+    /// the app you were talking into, so that case declines and the key-down
+    /// anchor stands.
+    static func captureUnlessOurs(
+        workspace: NSWorkspace = .shared
+    ) -> FocusAnchor? {
+        guard let anchor = capture(workspace: workspace),
+              anchor.application.bundleIdentifier != AppIdentity.bundleID else {
+            return nil
+        }
+
+        return anchor
+    }
+
     /// Gives the frontmost spot back to the anchored app if we are the ones
     /// standing in front of it, and waits for the swap to actually happen.
     ///
