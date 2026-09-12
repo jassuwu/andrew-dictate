@@ -65,14 +65,16 @@ final class HUDPanel: NSPanel {
     func dismiss(fast: Bool = false) {
         visibilityGeneration &+= 1
         let generation = visibilityGeneration
-        guard fast, isVisible else {
+        guard isVisible else {
             alphaValue = 1
             orderOut(nil)
             return
         }
 
+        // every pill leaves the way it arrived. the old non-fast path cut to
+        // nothing between two frames, which read as the message being eaten.
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.12
+            context.duration = fast ? 0.12 : 0.16
             context.timingFunction = CAMediaTimingFunction(
                 name: .easeOut
             )
