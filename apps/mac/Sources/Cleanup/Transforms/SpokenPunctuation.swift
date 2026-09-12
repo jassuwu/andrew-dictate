@@ -197,6 +197,13 @@ struct SpokenPunctuation: TranscriptTransform {
             ) else {
                 return nil
             }
+            // an address is one word: the dot in example.com and the one in
+            // john@cypher.io never take a space.
+            guard !AddressToken.isAddress(
+                AddressToken.enclosingToken(range, in: result)
+            ) else {
+                return nil
+            }
             return symbol + " "
         }
 

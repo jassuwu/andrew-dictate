@@ -46,8 +46,9 @@ struct Capitalization: TranscriptTransform {
         return output
     }
 
-    /// looks ahead over the token about to be capitalised: if it carries an
-    /// @ or a scheme, it is an address and its own spelling is the correct one.
+    /// looks ahead over the token about to be capitalised: if it is an
+    /// address, its own spelling is the correct one — and cypher.io/docs is
+    /// as much an address as john@cypher.io is.
     private func isInsideAddress(
         at index: Int,
         in characters: [Character]
@@ -59,9 +60,7 @@ struct Capitalization: TranscriptTransform {
             token.append(characters[cursor])
             cursor += 1
         }
-        return token.contains("@")
-            || token.contains("://")
-            || token.lowercased().hasPrefix("www.")
+        return AddressToken.isAddress(token)
     }
 
     private func isTerminalPeriod(

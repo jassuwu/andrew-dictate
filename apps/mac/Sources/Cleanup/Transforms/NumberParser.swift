@@ -53,6 +53,15 @@ struct NumberParser: TranscriptTransform {
             let value = parse(spokenNumber) else {
                 return nil
             }
+            // EmailParser and URLParser already ran, so spoken "seven dot
+            // com" is literal "seven.com" by now: a number word inside an
+            // address is part of the address. 7.com is nobody's site.
+            if let range = Range(match.range, in: transcript),
+               AddressToken.isAddress(
+                   AddressToken.enclosingToken(range, in: transcript)
+               ) {
+                return nil
+            }
             let suffix = transcript.substring(with: match.range(at: 2))?
                 .lowercased()
 

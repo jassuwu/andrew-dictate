@@ -56,7 +56,13 @@ struct PunctuationFinishing: TranscriptTransform {
                 result.insert(".", at: quoteIndex)
             }
         } else if let last = result.last, !isTerminal(last) {
-            result.append(".")
+            // a dictation that ends on a link ends on the link: the full
+            // stop becomes part of the url and 404s, and mail refuses an
+            // address with a dot on the end.
+            let tail = result.split { $0.isWhitespace }.last ?? ""
+            if !AddressToken.isAddress(String(tail)) {
+                result.append(".")
+            }
         }
         return result
     }
