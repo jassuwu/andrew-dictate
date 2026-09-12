@@ -67,6 +67,20 @@ final class DictationCoordinator: ObservableObject {
             }
         }
 
+        /// the panel's view of it: to the layout engine idle and recording
+        /// are both a wave, and the panel has to tell them apart.
+        var lamp: HUDLampState {
+            switch self {
+            case .idle:
+                .idle
+            case .prewarming:
+                .prewarming
+            case .recording:
+                .recording
+            case .transcribing:
+                .transcribing
+            }
+        }
     }
 
     @Published private(set) var state: State = .prewarming
@@ -121,6 +135,9 @@ final class DictationCoordinator: ObservableObject {
         }
     }
     private var isPrewarmed = false
+    /// whether the ember is an answer to something the user did. a
+    /// launch-time warm-up is not, and shows nothing (HUDPresentation).
+    private var prewarmPresentsHUD = true
     /// a double-tapped key leaves nothing to hold, so nothing to feel. the
     /// HUD has to carry the difference for as long as the capture runs.
     private var isRecordingLocked = false
@@ -1606,13 +1623,12 @@ final class DictationCoordinator: ObservableObject {
                 return
             }
 
-            if self.isOnboardingPresented {
-                panel.dismiss(fast: fastDismiss)
-                return
-            }
-
-            guard self.activeFeedbackGeneration != nil
-                    || self.state != .idle else {
+            guard HUDPresentation.shouldPresent(
+                state: self.state.lamp,
+                hasFeedback: self.activeFeedbackGeneration != nil,
+                isOnboarding: self.isOnboardingPresented,
+                prewarmPresentsHUD: self.prewarmPresentsHUD
+            ) else {
                 panel.dismiss(fast: fastDismiss)
                 return
             }
