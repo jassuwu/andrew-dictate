@@ -39,6 +39,8 @@ brew upgrade --cask jassuwu/tap/andrew-dictate
 
 that's it — you don't run the `xattr` line again. every release is signed with the same key, so homebrew carries your approval to the new version and your microphone and accessibility grants survive.
 
+brew swaps the app on disk, it can't restart it for you: quit andrew from the menu bar and open it again to be running the new one. the about window notices, and offers you the restart.
+
 ## where your words go
 
 nowhere. the app has two things that touch the network, and you trigger both.
