@@ -872,6 +872,7 @@ final class DictationCoordinator: ObservableObject {
     func refreshPermissions(
         moment: SetupCheckMoment
     ) -> SetupPresentation {
+        let hadAccessibility = permissions.accessibilityGranted
         let snapshot = SystemPermissions.snapshot()
         if snapshot != permissions {
             permissions = snapshot
@@ -887,11 +888,27 @@ final class DictationCoordinator: ObservableObject {
             }
         }
 
-        return SetupGate.presentation(
+        let presentation = SetupGate.presentation(
             onboardingDismissed: settings.onboardingDismissed,
             permissions: snapshot,
-            moment: moment
+            moment: moment,
+            dictationWanted: settings.dictationWanted
         )
+
+        // losing accessibility kills the global event monitor itself, so no
+        // key press is left to answer for it — unlike the mic, which gets
+        // caught at the point of use. the transition guard makes this fire
+        // once: the next notification already sees it gone.
+        if hadAccessibility,
+           !snapshot.accessibilityGranted,
+           presentation == .badgeOnly {
+            announcePermissionGap(
+                "accessibility is off — the dictation key is dead",
+                duration: 2.6
+            )
+        }
+
+        return presentation
     }
 
     /// the user double-clicked the app while it was already living in the
@@ -904,12 +921,15 @@ final class DictationCoordinator: ObservableObject {
     }
 
     /// says it where the user is already looking, without taking the screen.
-    private func announcePermissionGap(_ message: String) {
+    private func announcePermissionGap(
+        _ message: String,
+        duration: TimeInterval = 1.8
+    ) {
         guard state == .idle else {
             return
         }
 
-        flashNotice(message, duration: 1.8)
+        flashNotice(message, duration: duration)
     }
 
     private func flashNotice(
