@@ -1303,8 +1303,12 @@ final class DictationCoordinator: ObservableObject {
                     stage: .leftOnPasteboard
                 )
                 setState(.idle)
+                // 4 s, not the shared default: this pill is the only thing
+                // telling them their words are on the clipboard, and it is
+                // asking them to do something about it.
                 await flashFeedback(
-                    feedbackMessage(for: reason)
+                    feedbackMessage(for: reason),
+                    duration: 4
                 )
             }
         } catch is CancellationError {
