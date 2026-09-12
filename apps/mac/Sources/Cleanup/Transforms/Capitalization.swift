@@ -1,10 +1,19 @@
 import Foundation
 
 struct Capitalization: TranscriptTransform {
+    /// what the caret was sitting after. dictating into "the build failed
+    /// because " continues a sentence rather than starting one, and a
+    /// capital there is a shout in the middle of your own line.
+    private let continuingASentence: Bool
+
+    init(continuingASentence: Bool = false) {
+        self.continuingASentence = continuingASentence
+    }
+
     func apply(_ transcript: String) -> String {
         let characters = Array(transcript)
         var output = ""
-        var shouldCapitalize = true
+        var shouldCapitalize = !continuingASentence
 
         for (index, character) in characters.enumerated() {
             // an address is not a sentence. capitalising the start of one
