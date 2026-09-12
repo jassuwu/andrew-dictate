@@ -559,7 +559,11 @@ final class DictationCoordinator: ObservableObject {
         // of the first one had run is not worth tracking.
         if activeFeedbackGeneration != nil,
            let message = hudViewModel.feedbackMessage {
-            heldFeedback = (message, 1.2, Date())
+            heldFeedback = (
+                message: message,
+                duration: 1.2,
+                at: Date()
+            )
         }
         isOnboardingPresented = true
         hotkeyMonitor.setDetectionOnly(true)
@@ -1584,7 +1588,11 @@ final class DictationCoordinator: ObservableObject {
             isOnboardingPresented: isOnboardingPresented,
             heldFor: nil
         ) == .hold {
-            heldFeedback = (message, duration, Date())
+            heldFeedback = (
+                message: message,
+                duration: duration,
+                at: Date()
+            )
             return
         }
 
