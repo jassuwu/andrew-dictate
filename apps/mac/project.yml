@@ -128,8 +128,8 @@ targets:
       - Sources/HUD/HUDFeedbackGate.swift
       - Sources/HUD/HUDPresentation.swift
       - Sources/HUD/WaveLevelShaper.swift
-      - Sources/UI/BrandUI.swift
       - Sources/HUD/HUDLayoutEngine.swift
+      - Sources/UI/BrandUI.swift
       - Sources/Settings/AppSettings.swift
       - Sources/Settings/EngineSwitchState.swift
       - Sources/Onboarding/OnboardingState.swift
