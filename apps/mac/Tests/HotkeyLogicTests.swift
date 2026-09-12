@@ -105,6 +105,49 @@ final class HotkeyLogicTests: XCTestCase {
         )
     }
 
+    /// escape is consumed by the coordinator, which cancels the capture and
+    /// then hands the detector a reset. the hold two seconds later has to be
+    /// a whole capture, not a swallowed no-op.
+    func testTheHoldAfterEscapingALockedCaptureStillRecords() {
+        var detector = lockedDetector()
+
+        XCTAssertEqual(
+            detector.keyDown(isEscape: true),
+            [.lockCancel]
+        )
+        _ = detector.reset()
+
+        XCTAssertEqual(
+            detector.modifierPressed(at: 2.0),
+            [.begin]
+        )
+        XCTAssertEqual(
+            detector.modifierReleased(at: 2.6),
+            [.end]
+        )
+    }
+
+    func testTheHoldAfterEscapingAnOrdinaryHoldStillRecords() {
+        var detector = TapLockDetector()
+
+        XCTAssertEqual(
+            detector.modifierPressed(at: 1.0),
+            [.begin]
+        )
+        _ = detector.reset()
+
+        // the key is still physically down, so its release must not read as
+        // the end of a capture that was already thrown away.
+        XCTAssertEqual(
+            detector.modifierReleased(at: 1.2),
+            []
+        )
+        XCTAssertEqual(
+            detector.modifierPressed(at: 1.5),
+            [.begin]
+        )
+    }
+
     func testOrdinaryKeysAreIgnoredWhileLocked() {
         var detector = lockedDetector()
 
