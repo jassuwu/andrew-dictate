@@ -126,6 +126,43 @@ final class DictionaryStoreTests: XCTestCase {
         XCTAssertTrue(store.entries.isEmpty, "asking is not importing")
     }
 
+    // MARK: - a word can never become nothing
+
+    /// Clearing the right side of a working rule used to save, and the rule
+    /// then deleted that word from every dictation afterwards.
+    func testEmptyingTheRightSideOfAWorkingRuleIsRefused() {
+        let store = DictionaryStore(fileURL: fileURL)
+        let entry = DictionaryEntry(wrong: "darsh", right: "Darsh")
+        store.add(entry)
+
+        XCTAssertFalse(store.updateRight(id: entry.id, right: ""))
+        XCTAssertEqual(store.entries.first?.right, "Darsh")
+        XCTAssertEqual(
+            store.lastFailure,
+            "a word has to become something. remove the row to drop the rule."
+        )
+    }
+
+    func testAWhitespaceOnlyRightSideIsRefusedToo() {
+        let store = DictionaryStore(fileURL: fileURL)
+        let entry = DictionaryEntry(wrong: "darsh", right: "Darsh")
+        store.add(entry)
+
+        XCTAssertFalse(store.updateRight(id: entry.id, right: "   "))
+        XCTAssertEqual(store.entries.first?.right, "Darsh")
+    }
+
+    /// The + button's empty row, and typing the wrong side first.
+    func testAFreshRowStillSavesTheWrongSideOnItsOwn() {
+        let store = DictionaryStore(fileURL: fileURL)
+        let blank = DictionaryEntry(wrong: "", right: "")
+        store.add(blank)
+
+        XCTAssertTrue(store.updateWrong(id: blank.id, wrong: "darsh"))
+        XCTAssertEqual(store.entries.first?.wrong, "darsh")
+        XCTAssertEqual(store.entries.first?.right, "")
+    }
+
     // MARK: - helpers
 
     private func writeDictionary(_ entries: [DictionaryEntry]) throws {

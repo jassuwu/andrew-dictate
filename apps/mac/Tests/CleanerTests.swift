@@ -424,6 +424,25 @@ final class CleanerTests: XCTestCase {
         )
     }
 
+    /// A rule with nothing on its right side used to compile to an empty
+    /// replacement template and delete the word from every dictation. The
+    /// cleaner renders; it never removes (ADR 0020).
+    func testAnEntryWithNothingOnTheRightNeverDeletesAWord() {
+        let transform = DictionarySubstitutions(
+            entries: [
+                DictionaryEntry(wrong: "darsh", right: ""),
+                DictionaryEntry(wrong: "jason", right: "   "),
+            ]
+        )
+        assertTransform(
+            transform,
+            cases: [
+                ("darsh ships today", "darsh ships today"),
+                ("send the jason", "send the jason"),
+            ]
+        )
+    }
+
     func testCapitalizationTable() {
         assertTransform(
             Capitalization(),
