@@ -250,8 +250,8 @@ final class DictationCoordinator: ObservableObject {
         monitor.onEscape = { [weak self] in
             self?.handleEscape() ?? false
         }
-        recorder?.onInterruption = { [weak self] in
-            self?.handleCaptureInterruption()
+        recorder?.onInterruption = { [weak self] reason in
+            self?.handleCaptureInterruption(reason: reason)
         }
         recorder?.onCapReached = { [weak self] in
             self?.handleCaptureCapReached()
@@ -820,7 +820,9 @@ final class DictationCoordinator: ObservableObject {
                     notification.name == NSWorkspace.willSleepNotification
                 Task { @MainActor [weak self] in
                     if isSleep {
-                        self?.handleCaptureInterruption()
+                        self?.handleCaptureInterruption(
+                            reason: .systemPaused
+                        )
                     } else {
                         self?.handleSystemResume()
                     }
@@ -841,7 +843,9 @@ final class DictationCoordinator: ObservableObject {
                 let isLock = notification.name == lockedName
                 Task { @MainActor [weak self] in
                     if isLock {
-                        self?.handleCaptureInterruption()
+                        self?.handleCaptureInterruption(
+                            reason: .systemPaused
+                        )
                     } else {
                         self?.handleSystemResume()
                     }
@@ -929,8 +933,8 @@ final class DictationCoordinator: ObservableObject {
             let recorder = try AudioRecorder(
                 preRollEnabled: settings.preRollEnabled
             )
-            recorder.onInterruption = { [weak self] in
-                self?.handleCaptureInterruption()
+            recorder.onInterruption = { [weak self] reason in
+                self?.handleCaptureInterruption(reason: reason)
             }
             recorder.onCapReached = { [weak self] in
                 self?.handleCaptureCapReached()
@@ -960,7 +964,9 @@ final class DictationCoordinator: ObservableObject {
         flashNotice("five minutes — that's the cap")
     }
 
-    private func handleCaptureInterruption() {
+    private func handleCaptureInterruption(
+        reason: CaptureInterruption
+    ) {
         switch state {
         case .recording:
             audioRecorder?.cancel()
