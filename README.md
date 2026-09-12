@@ -31,6 +31,14 @@ the `xattr` line is there because the build is unsigned. i haven't paid apple th
 
 first launch asks which jobs you want. dictation is a ~460 mb download, meetings are ~2.9 gb. tick one or both.
 
+## update
+
+```sh
+brew upgrade --cask jassuwu/tap/andrew-dictate
+```
+
+that's it — you don't run the `xattr` line again. every release is signed with the same key, so homebrew carries your approval to the new version and your microphone and accessibility grants survive.
+
 ## where your words go
 
 nowhere. the app has two things that touch the network, and you trigger both.
@@ -47,7 +55,7 @@ it's about 17k lines of swift. read it.
 - apple silicon, macOS 26 or newer.
 - dictation is english by default. a multilingual model is one click away in settings.
 - meetings only write english. if you read hindi and want hindi, that's not here yet.
-- unsigned builds mean no auto-update. `check for updates` tells you, you install.
+- unsigned builds mean no auto-update. `check for updates` in the about window tells you when there's one; `brew upgrade` installs it, no `xattr` line needed.
 
 ## next
 
