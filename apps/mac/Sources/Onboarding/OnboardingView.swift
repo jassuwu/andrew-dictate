@@ -175,12 +175,62 @@ private final class OnboardingPermissionModel: ObservableObject {
     }
 }
 
+/// What the key test has to say, in one value.
+///
+/// `pickerShown` is sticky on purpose: once setup has offered another key,
+/// withdrawing the offer the moment it is taken would read as a glitch. One
+/// state change on the first bump, and no staged "let go" beat — detection-only
+/// mode returns early on release, so a second beat would be a timer pretending
+/// to watch the user.
+private struct KeyTest: Equatable {
+    var fired = false
+    var patienceSpent = false
+    var pickerShown = false
+    /// changing this re-arms the wait, which is how a freshly picked key gets
+    /// its own six seconds.
+    var armedAt = Date()
+
+    mutating func markFired() {
+        fired = true
+    }
+
+    mutating func spendPatience() {
+        patienceSpent = true
+        pickerShown = true
+    }
+
+    mutating func rearm() {
+        fired = false
+        patienceSpent = false
+        armedAt = Date()
+    }
+
+    func caption(for binding: HotkeyBinding) -> String {
+        if fired {
+            return "got it. that key works on this keyboard."
+        }
+        guard patienceSpent else {
+            return "press and hold it."
+        }
+        // the fn sentence is only true about fn: someone who rebound in
+        // settings and reran setup would be told a lie.
+        return binding == .fn
+            ? "nothing yet — fn only exists on apple keyboards. try another:"
+            : "nothing yet. try another key:"
+    }
+}
+
 struct OnboardingView: View {
     // Every screen is the same size. The window used to grow from 430 to 648
     // when setup began, moving itself under the pointer at the exact moment
     // the user was reaching for something.
     private static let windowWidth: CGFloat = 460
     private static let windowHeight: CGFloat = 430
+
+    /// How long setup waits for the key before offering another one. A
+    /// provisional number, like the dead-tap window: long enough that nobody
+    /// is accused of not trying, short enough to still be on this screen.
+    private static let keyTestPatience: TimeInterval = 6
 
     @Environment(\.controlActiveState) private var controlActiveState
 
@@ -190,6 +240,7 @@ struct OnboardingView: View {
     @StateObject private var meetingSetup: OnboardingMeetingSetup
     @State private var onboarding: OnboardingState
     @State private var flow = OnboardingFlow()
+    @State private var keyTest = KeyTest()
 
     private let windowResizer: OnboardingWindowResizer
 
@@ -250,6 +301,15 @@ struct OnboardingView: View {
         .onChange(of: coordinator.enginePreparationState) { _, _ in
             synchronizeEngine()
         }
+        // the press itself, published on every bump of the bound key. the
+        // window is key while setup is on screen, so the local monitor
+        // delivers it without accessibility being granted yet.
+        .onChange(of: coordinator.hotkeyDetection) { _, detection in
+            guard detection != nil else {
+                return
+            }
+            keyTest.markFired()
+        }
         .onChange(of: meetingSetup.systemAudioStatus) { _, _ in
             synchronizeMeetings()
         }
@@ -301,7 +361,12 @@ struct OnboardingView: View {
                     .foregroundStyle(BrandUI.gold)
             }
 
-            Text(flow.step.reason(for: onboarding.jobs))
+            Text(
+                flow.step.reason(
+                    for: onboarding.jobs,
+                    key: settings.dictationHotkey.displayName
+                )
+            )
                 .font(BrandUI.bodyFont)
                 .foregroundStyle(BrandUI.textSecondary)
                 .multilineTextAlignment(.center)
@@ -312,7 +377,11 @@ struct OnboardingView: View {
             case .hello:
                 jobRows.padding(.top, 14)
             case .model:
-                modelProgress.padding(.top, 10)
+                VStack(spacing: 18) {
+                    modelProgress
+                    keyTestBlock
+                }
+                .padding(.top, 10)
             case .permissions:
                 permissionRows.padding(.top, 14)
             }
@@ -501,6 +570,95 @@ struct OnboardingView: View {
                     .font(.caption)
             }
         }
+    }
+
+    /// Proof, not configuration. The key is the one part of dictation setup
+    /// cannot verify for you — fn does not exist on a Keychron, and the app
+    /// would otherwise say nothing about it ever again. So the press happens
+    /// here, while there is still a screen to answer on, and the picker
+    /// appears only after the shipped default has visibly failed to fire.
+    ///
+    /// A meetings-only setup has no key to prove, and before consent there is
+    /// nothing to prove it for.
+    @ViewBuilder
+    private var keyTestBlock: some View {
+        if onboarding.consented, onboarding.dictationSelected {
+            VStack(spacing: 6) {
+                BrandSectionHeader("your key")
+
+                HStack(alignment: .top, spacing: 9) {
+                    if keyTest.pickerShown {
+                        keyPicker
+                    } else {
+                        KeyChip(
+                            settings.dictationHotkey.displayName,
+                            isActive: keyTest.fired
+                        )
+                    }
+
+                    Text(
+                        keyTest.caption(for: settings.dictationHotkey)
+                    )
+                    .font(.caption)
+                    .foregroundStyle(
+                        keyTest.fired ? BrandUI.gold : BrandUI.textSecondary
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+
+                    Spacer(minLength: 0)
+                }
+                // the tallest state's height from the first render: the
+                // picker must not push the card around under the pointer.
+                .frame(height: 38, alignment: .top)
+            }
+            .frame(maxWidth: 330)
+            .task(id: keyTest.armedAt) {
+                do {
+                    try await Task.sleep(for: .seconds(Self.keyTestPatience))
+                } catch {
+                    return
+                }
+                guard !keyTest.fired else {
+                    return
+                }
+                keyTest.spendPatience()
+            }
+        }
+    }
+
+    /// The same menu settings owns (one key picker in the app, rendered
+    /// twice), so a pick here is the real rebind and not a setup-only draft.
+    private var keyPicker: some View {
+        Menu {
+            ForEach(HotkeyBinding.supported) { binding in
+                Button(binding.displayName) {
+                    rebindForKeyTest(to: binding)
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                KeyChip(
+                    settings.dictationHotkey.displayName,
+                    isActive: keyFired
+                )
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(BrandUI.textSecondary)
+            }
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .fixedSize()
+        .accessibilityLabel("dictation key")
+    }
+
+    private func rebindForKeyTest(to binding: HotkeyBinding) {
+        guard coordinator.rebindHotkey(to: binding) else {
+            return
+        }
+        // the new key gets its own six seconds; the picker stays, because
+        // taking the offer back the moment it was used would read as a bug.
+        keyTest.rearm()
     }
 
     /// One checklist, filtered by job: nothing here belongs to a job the user

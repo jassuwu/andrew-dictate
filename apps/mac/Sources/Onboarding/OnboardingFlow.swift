@@ -42,12 +42,14 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    func reason(for jobs: OnboardingJobs) -> String {
+    /// `key` is the binding as it stands, not the shipped default: someone who
+    /// rebound to right ⌥ must not be told to hold fn.
+    func reason(for jobs: OnboardingJobs, key: String) -> String {
         switch self {
         case .hello:
             jobs.scope == .meetingsOnly
                 ? "your mic is you, their app is them. one english transcript."
-                : "hold fn, talk, let go. the text lands where your cursor is."
+                : "hold \(key), talk, let go. the text lands where your cursor is."
         case .model:
             jobs.dictation && jobs.meetings
                 ? "they run on this mac, so nothing you say needs the internet."

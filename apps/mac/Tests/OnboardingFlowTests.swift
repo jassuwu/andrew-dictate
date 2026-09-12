@@ -85,20 +85,39 @@ final class OnboardingFlowTests: XCTestCase {
     /// about two lines in a window this narrow.
     func testEveryScreenSaysWhyBriefly() {
         for jobs in Self.everySelection {
-            for step in OnboardingStep.allCases {
-                let reason = step.reason(for: jobs)
-                XCTAssertFalse(reason.isEmpty, "\(step) \(jobs)")
-                XCTAssertLessThanOrEqual(
-                    reason.count,
-                    70,
-                    "\(step): \"\(reason)\" is long enough to be its own screen"
-                )
-                XCTAssertFalse(
-                    step.title(for: jobs).isEmpty,
-                    "\(step) \(jobs)"
-                )
+            // the hello line names the bound key, so the longest binding
+            // has to fit too — "right ⌥" is the one that tests the ceiling.
+            for key in HotkeyBinding.supported.map(\.displayName) {
+                for step in OnboardingStep.allCases {
+                    let reason = step.reason(for: jobs, key: key)
+                    XCTAssertFalse(reason.isEmpty, "\(step) \(jobs)")
+                    XCTAssertLessThanOrEqual(
+                        reason.count,
+                        70,
+                        "\(step): \"\(reason)\" is long enough to be its own screen"
+                    )
+                    XCTAssertFalse(
+                        step.title(for: jobs).isEmpty,
+                        "\(step) \(jobs)"
+                    )
+                }
             }
         }
+    }
+
+    /// The one line that ever said `fn` out loud now reads the binding, so
+    /// setup cannot tell you to hold a key you replaced.
+    func testTheFirstScreenNamesTheKeyYouActuallyHave() {
+        let jobs = OnboardingJobs(dictation: true, meetings: false)
+
+        XCTAssertEqual(
+            OnboardingStep.hello.reason(for: jobs, key: "fn"),
+            "hold fn, talk, let go. the text lands where your cursor is."
+        )
+        XCTAssertEqual(
+            OnboardingStep.hello.reason(for: jobs, key: "right ⌥"),
+            "hold right ⌥, talk, let go. the text lands where your cursor is."
+        )
     }
 
     /// The button on the first card carries a price, so it is allowed to be
