@@ -44,6 +44,24 @@ func focusRevalidationDecision(
     return .paste
 }
 
+/// characters a following word attaches to without a space of its own: an
+/// opening delimiter, a hyphen, a slash — or whitespace, where the gap is
+/// already there. anything else means the words are landing against
+/// something and need one.
+private let openingOrWhitespace: Set<Character> = [
+    "(", "[", "{", "<", "\"", "'", "\u{201C}", "\u{2018}",
+    "/", "-", "\u{2014}",
+]
+
+func needsJoinSpace(after previous: Character?) -> Bool {
+    // nothing to read — an empty field, a caret at offset zero, or an app
+    // that refused the question — is never a reason to add a space.
+    guard let previous, !previous.isWhitespace else {
+        return false
+    }
+    return !openingOrWhitespace.contains(previous)
+}
+
 @MainActor
 struct FocusAnchor {
     private let application: FocusApplicationIdentity
@@ -91,6 +109,74 @@ struct FocusAnchor {
                 isSecureTextField: Self.isSecureTextField(currentElement)
             )
         )
+    }
+
+    /// the one character the caret is sitting after, read off the element
+    /// this dictation was anchored to. it is looked at and dropped — never
+    /// stored, never archived, never sent anywhere.
+    func characterBeforeCursor() -> Character? {
+        guard let focusedElement else {
+            return nil
+        }
+        // this read sits on the key-up → paste path, so an app that has
+        // stopped answering costs 50 ms and no more.
+        _ = AXUIElementSetMessagingTimeout(focusedElement, 0.05)
+
+        guard let caret = Self.selectedTextRange(of: focusedElement),
+              caret.location > 0 else {
+            return nil
+        }
+        var precedingRange = CFRange(
+            location: caret.location - 1,
+            length: 1
+        )
+        guard let parameter = AXValueCreate(
+            .cfRange,
+            &precedingRange
+        ) else {
+            return nil
+        }
+
+        var value: CFTypeRef?
+        let error = AXUIElementCopyParameterizedAttributeValue(
+            focusedElement,
+            kAXStringForRangeParameterizedAttribute as CFString,
+            parameter,
+            &value
+        )
+
+        guard error == .success,
+              let text = value as? String else {
+            return nil
+        }
+        return text.last
+    }
+
+    private static func selectedTextRange(
+        of element: AXUIElement
+    ) -> CFRange? {
+        var value: CFTypeRef?
+        let error = AXUIElementCopyAttributeValue(
+            element,
+            kAXSelectedTextRangeAttribute as CFString,
+            &value
+        )
+
+        guard error == .success,
+              let value,
+              CFGetTypeID(value) == AXValueGetTypeID() else {
+            return nil
+        }
+
+        var range = CFRange()
+        guard AXValueGetValue(
+            (value as! AXValue),
+            .cfRange,
+            &range
+        ) else {
+            return nil
+        }
+        return range
     }
 
     private static func applicationIdentity(
