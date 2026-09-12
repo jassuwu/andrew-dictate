@@ -1,16 +1,22 @@
 import XCTest
 
 final class OnboardingStateTests: XCTestCase {
-    /// Both jobs are ticked out of the box, so a test about the dictation
-    /// half has to say so — otherwise it is testing both.
+    /// Dictation alone is the shipped default, so this is a bare state.
     private func dictationOnly() -> OnboardingState {
+        OnboardingState()
+    }
+
+    /// Meetings are offered, not assumed: a test about them has to tick the
+    /// row the way a user would.
+    private func bothJobs() -> OnboardingState {
         var state = OnboardingState()
-        XCTAssertTrue(state.setMeetingsSelected(false))
+        XCTAssertTrue(state.setMeetingsSelected(true))
         return state
     }
 
     private func meetingsOnlyByChoice() -> OnboardingState {
         var state = OnboardingState()
+        XCTAssertTrue(state.setMeetingsSelected(true))
         XCTAssertTrue(state.setDictationSelected(false))
         return state
     }
@@ -35,19 +41,33 @@ final class OnboardingStateTests: XCTestCase {
         XCTAssertEqual(state.accessibilityStatus, .actionRequired)
     }
 
-    // MARK: - both jobs are the default
+    // MARK: - dictation is the default; meetings are offered
 
-    func testBothJobsAreOnUntilSomebodySaysOtherwise() {
+    func testOnlyDictationIsOnUntilYouAskForMeetings() {
         let state = OnboardingState()
 
         XCTAssertEqual(state.scope, .everything)
+        XCTAssertTrue(state.dictationSelected)
+        XCTAssertFalse(state.meetingsSelected)
+        XCTAssertEqual(state.jobs.downloadSize, "~460 mb")
+        XCTAssertEqual(
+            state.jobs.permissions,
+            ["microphone", "accessibility"]
+        )
+    }
+
+    func testTickingMeetingsRestoresTheOldDefaultByteForByte() {
+        var state = OnboardingState()
+
+        XCTAssertTrue(state.setMeetingsSelected(true))
+
         XCTAssertTrue(state.dictationSelected)
         XCTAssertTrue(state.meetingsSelected)
         XCTAssertEqual(state.jobs.downloadSize, "~3.3 gb")
     }
 
     func testBothJobsNeedAllFiveRows() {
-        var state = OnboardingState()
+        var state = bothJobs()
         _ = state.consentToSetup()
         state.updateMicrophoneStatus(.ready)
         state.updateAccessibility(granted: true)
@@ -78,7 +98,7 @@ final class OnboardingStateTests: XCTestCase {
         ]
 
         for (name, drop) in drops {
-            var state = OnboardingState()
+            var state = bothJobs()
             state.updateMicrophoneStatus(.ready)
             state.updateAccessibility(granted: true)
             state.updateModelStatus(.ready)
@@ -150,7 +170,7 @@ final class OnboardingStateTests: XCTestCase {
     func testNoJobSelectedIsNeverArmed() {
         var state = OnboardingState()
         XCTAssertTrue(state.setDictationSelected(false))
-        XCTAssertTrue(state.setMeetingsSelected(false))
+        XCTAssertFalse(state.meetingsSelected)
 
         state.updateMicrophoneStatus(.ready)
         state.updateAccessibility(granted: true)
@@ -167,7 +187,6 @@ final class OnboardingStateTests: XCTestCase {
 
     func testTicksAreRefusedOnceSetupHasStarted() {
         var state = OnboardingState()
-        XCTAssertTrue(state.setMeetingsSelected(false))
         XCTAssertTrue(state.consentToSetup())
 
         XCTAssertFalse(state.setMeetingsSelected(true))

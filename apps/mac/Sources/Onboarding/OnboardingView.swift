@@ -389,8 +389,9 @@ struct OnboardingView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// Two jobs, both on, priced. Unticking one takes its rows and its
-    /// download out of setup — the fork is here and nowhere else (ADR 0040).
+    /// Two jobs, both priced; dictation on, meetings offered. Ticking or
+    /// unticking one adds or takes its rows and its download — the fork is
+    /// here and nowhere else (ADR 0040).
     /// In `meetingsOnly` there is nothing to choose: pressing `record a
     /// meeting` was the choice.
     @ViewBuilder

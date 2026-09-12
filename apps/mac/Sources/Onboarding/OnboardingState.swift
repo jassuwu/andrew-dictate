@@ -84,10 +84,16 @@ struct OnboardingState: Equatable, Sendable {
     private(set) var whileYouWaitVisible = false
     private(set) var completion: OnboardingCompletion = .pending
 
+    /// Dictation is what the app is for, so it opens ticked. Meetings are
+    /// offered, not assumed: the row was decided when it cost ~650 mb, and
+    /// whisper large-v3 turned that into 2.9 gb — six times what dictation
+    /// costs, quoted on the only button of the first screen to someone who
+    /// came to hold a key and talk. The row keeps its price where it is; one
+    /// click restores the old behaviour byte for byte.
     init(scope: OnboardingScope = .everything) {
         self.scope = scope
         dictationSelected = scope != .meetingsOnly
-        meetingsSelected = true
+        meetingsSelected = scope == .meetingsOnly
     }
 
     var jobs: OnboardingJobs {
