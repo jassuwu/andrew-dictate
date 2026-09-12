@@ -50,6 +50,12 @@ final class Paster {
             snapshot = nil
         }
 
+        // nobody will read the result of a cancelled paste, so writing the
+        // transcript would replace whatever the user had copied with a
+        // sentence they threw away, silently.
+        guard !Task.isCancelled else {
+            return .leftOnPasteboard(.cancelled)
+        }
         guard let ourChangeCount = Self.writeTranscript(text, to: pasteboard) else {
             return .leftOnPasteboard(.pasteboardUnavailable)
         }
@@ -60,6 +66,14 @@ final class Paster {
             return .leftOnPasteboard(.accessibilityUnavailable)
         }
         guard !Task.isCancelled else {
+            // cancelled after the write — the reason check makes
+            // accessibility round-trips, so that window is real. hand the
+            // clipboard back, since the caller swallows this result.
+            Self.restore(
+                snapshot,
+                expectedChangeCount: ourChangeCount,
+                transcript: text
+            )
             return .leftOnPasteboard(.cancelled)
         }
 
