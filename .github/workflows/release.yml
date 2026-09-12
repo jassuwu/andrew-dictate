@@ -124,6 +124,48 @@ jobs:
           fi
           echo "version smoke ok: $ACTUAL"
 
+      # three lines a person wrote, the commit log folded underneath, and the
+      # install block last. --generate-notes gave a compare link and nothing
+      # else, because the work lands as commits rather than pull requests.
+      - name: release notes
+        if: env.PUBLISH == 'true'
+        run: |
+          awk -v section="## $VERSION" '
+            $0 == section { inside = 1; next }
+            inside && /^## / { exit }
+            inside { print }
+          ' RELEASE_NOTES.md > notes.md
+
+          PREV="$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || echo "")"
+          if [ -n "$PREV" ]; then
+            CHANGES="$(git log --no-merges --reverse --pretty=%s "$PREV..$GITHUB_REF_NAME" \
+              | grep -E '^(feat|fix)(\(|:)' \
+              | sed -E 's/^feat[^:]*: /- new: /; s/^fix[^:]*: /- fixed: /' || true)"
+          else
+            CHANGES=""
+          fi
+          if [ -n "$CHANGES" ]; then
+            COUNT="$(printf '%s\n' "$CHANGES" | wc -l | tr -d ' ')"
+            {
+              echo "<details><summary>every change in $VERSION ($COUNT commits)</summary>"
+              echo
+              printf '%s\n' "$CHANGES"
+              echo "</details>"
+            } >> notes.md
+          fi
+
+          {
+            echo
+            echo '---'
+            echo
+            echo "install: \`brew install --cask jassuwu/tap/andrew-dictate\` then \`xattr -dr com.apple.quarantine \"/Applications/Andrew Dictate.app\"\`"
+            echo
+            echo "update: \`brew upgrade --cask jassuwu/tap/andrew-dictate\` — no xattr needed, your approval carries over"
+            echo
+            echo "sha256: $(cat dmg.sha256)"
+          } >> notes.md
+          cat notes.md
+
       - name: github release
         if: env.PUBLISH == 'true'
         env:
@@ -131,8 +173,8 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" "AndrewDictate-$VERSION.dmg" \
             --title "Andrew Dictate $VERSION" \
-            --generate-notes --verify-tag \
-            --notes "install: \`brew install --cask jassuwu/tap/andrew-dictate\` then \`xattr -dr com.apple.quarantine \"/Applications/Andrew Dictate.app\"\`. update: \`brew upgrade --cask jassuwu/tap/andrew-dictate\` — no xattr needed, your approval carries over. sha256: $(cat dmg.sha256)"
+            --verify-tag \
+            --notes-file notes.md
 
       - name: bump tap cask
         if: env.PUBLISH == 'true'
