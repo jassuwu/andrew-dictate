@@ -241,6 +241,10 @@ struct OnboardingView: View {
     @State private var onboarding: OnboardingState
     @State private var flow: OnboardingFlow
     @State private var keyTest = KeyTest()
+    @StateObject private var loginItem = LoginItemController()
+    /// the coda row's tick. seeded from macOS's answer on appear, applied
+    /// only by the last button.
+    @State private var launchAtLogin = true
 
     private let windowResizer: OnboardingWindowResizer
 
@@ -304,6 +308,10 @@ struct OnboardingView: View {
         .onAppear {
             permissions.refresh()
             synchronizeOnboarding()
+            // read from macOS rather than assumed: setup reopened from
+            // `record a meeting` should show the real state, not re-ask.
+            loginItem.refresh()
+            launchAtLogin = loginItem.isEnabled || loginItem.isUnregistered
             windowResizer.resize(to: Self.windowHeight, animated: false)
         }
         .onChange(of: permissions.microphoneStatus) { _, _ in
@@ -403,11 +411,21 @@ struct OnboardingView: View {
                 }
                 .padding(.top, 10)
             case .permissions:
-                if onboarding.verdict == .ready {
-                    readyPanel.padding(.top, 20)
-                } else {
-                    permissionRows.padding(.top, 14)
+                VStack(spacing: 0) {
+                    if onboarding.verdict == .ready {
+                        readyPanel
+                    } else {
+                        permissionRows
+                    }
+
+                    // below the checklist and behind a divider, because it is
+                    // a coda and not a fourth permission.
+                    if loginItem.isAvailable {
+                        rowDivider
+                        launchAtLoginRow
+                    }
                 }
+                .padding(.top, 14)
             }
         }
         .frame(maxWidth: .infinity)
@@ -456,24 +474,7 @@ struct OnboardingView: View {
     ) -> some View {
         Button(action: toggle) {
             HStack(spacing: 8) {
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(isOn ? BrandUI.gold : Color.clear)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .stroke(
-                                isOn
-                                    ? BrandUI.gold
-                                    : BrandUI.textPrimary.opacity(0.28),
-                                lineWidth: 1
-                            )
-                    }
-                    .overlay {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(BrandUI.windowBg)
-                            .opacity(isOn ? 1 : 0)
-                    }
-                    .frame(width: 16, height: 16)
+                checkbox(isOn: isOn)
 
                 Text(name)
                     .foregroundStyle(
@@ -491,6 +492,69 @@ struct OnboardingView: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? [.isSelected] : [])
+    }
+
+    private func checkbox(isOn: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(isOn ? BrandUI.gold : Color.clear)
+            .overlay {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .stroke(
+                        isOn
+                            ? BrandUI.gold
+                            : BrandUI.textPrimary.opacity(0.28),
+                        lineWidth: 1
+                    )
+            }
+            .overlay {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(BrandUI.windowBg)
+                    .opacity(isOn ? 1 : 0)
+            }
+            .frame(width: 16, height: 16)
+    }
+
+    /// `LSUIElement` is true: no dock icon, no window, so after a restart the
+    /// app is simply not running and the only symptom is the key doing
+    /// nothing — which feels exactly like a revoked permission. Ticked by
+    /// default, registered by the last button and by nothing else: closing
+    /// this window still records nothing (ADR 0029).
+    private var launchAtLoginRow: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Button {
+                launchAtLogin.toggle()
+            } label: {
+                HStack(spacing: 8) {
+                    checkbox(isOn: launchAtLogin)
+
+                    Text("start andrew dictate when you sign in")
+                        .foregroundStyle(
+                            launchAtLogin
+                                ? BrandUI.textPrimary
+                                : BrandUI.textSecondary
+                        )
+
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(launchAtLogin ? [.isSelected] : [])
+
+            Text("otherwise it isn't running after a restart.")
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
+                .padding(.leading, 24)
+
+            if let message = loginItem.message {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.textSecondary)
+                    .padding(.leading, 24)
+            }
+        }
+        .frame(maxWidth: 330)
     }
 
     /// One block per ticked job, labelled only when there are two of them —
@@ -1034,6 +1098,12 @@ struct OnboardingView: View {
             flow.advance()
 
         case .permissions:
+            // the tick lands here and nowhere else. A refusal must not hold
+            // the close hostage — the controller keeps the reason and the row
+            // prints it the next time this screen is on.
+            if loginItem.isAvailable, launchAtLogin != loginItem.isEnabled {
+                loginItem.setEnabled(launchAtLogin)
+            }
             // "finished" records the press that made it true. Never from an
             // .onChange: it flips `completion`, which the verdict reads, so
             // the ready card would erase itself one frame after arriving.
