@@ -9,8 +9,9 @@ enum MenuBarBrandIcon {
         needsAttention: Bool = false,
         isRecordingMeeting: Bool = false
     ) -> NSImage {
-        // a permission gap outranks every other state: without it the other
-        // states can never be reached anyway.
+        // a setup gap outranks every other state: a missing grant or a
+        // speech model that never downloaded means the other states can
+        // never be reached anyway.
         if needsAttention {
             return attentionBadge()
         }
@@ -46,7 +47,7 @@ enum MenuBarBrandIcon {
             let fallback = NSImage(
                 systemSymbolName: "exclamationmark.triangle.fill",
                 accessibilityDescription:
-                    "Andrew Dictate needs permission"
+                    "Andrew Dictate needs setup"
             ) ?? NSImage()
             fallback.isTemplate = true
             return fallback
@@ -70,7 +71,7 @@ enum MenuBarBrandIcon {
         }
         composed.isTemplate = false
         composed.accessibilityDescription =
-            "Andrew Dictate needs permission"
+            "Andrew Dictate needs setup"
         return composed
     }
 

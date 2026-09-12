@@ -58,4 +58,18 @@ enum SetupGate {
         }
         return moment == .launchOrReopen ? .present : .badgeOnly
     }
+
+    /// one definition of "setup is wrong", to match what settings already
+    /// reports (SetupHealth). deliberately not part of `presentation`: a
+    /// failed download badges the icon, it does not reopen the window.
+    static func needsAttention(
+        onboardingDismissed: Bool,
+        dictationWanted: Bool,
+        permissions: PermissionSnapshot,
+        speechModelFailed: Bool
+    ) -> Bool {
+        onboardingDismissed
+            && dictationWanted
+            && (!permissions.isDictationReady || speechModelFailed)
+    }
 }

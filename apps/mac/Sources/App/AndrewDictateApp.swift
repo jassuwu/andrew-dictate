@@ -113,7 +113,7 @@ struct AndrewDictateApp: App {
             // Zero rows when everything works, one click when it does not.
             // SPEC §5 makes settings the router; this is the shortcut for the
             // case where the user has no reason to go looking.
-            if coordinator.needsPermissionAttention {
+            if coordinator.needsAttention {
                 Button("finish setup") {
                     coordinator.runOnboardingAgain()
                 }
@@ -141,13 +141,13 @@ struct AndrewDictateApp: App {
             Image(
                 nsImage: MenuBarBrandIcon.image(
                     for: coordinator.state,
-                    needsAttention: coordinator.needsPermissionAttention,
+                    needsAttention: coordinator.needsAttention,
                     isRecordingMeeting: coordinator.meetings.isRecording
                 )
             )
             .accessibilityLabel(
-                coordinator.needsPermissionAttention
-                    ? "Andrew Dictate — permission needed"
+                coordinator.needsAttention
+                    ? "Andrew Dictate — setup needed"
                     : "Andrew Dictate"
             )
             .task {

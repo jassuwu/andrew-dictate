@@ -71,10 +71,15 @@ final class DictationCoordinator: ObservableObject {
         accessibilityGranted: false
     )
 
-    var needsPermissionAttention: Bool {
-        settings.onboardingDismissed
-            && settings.dictationWanted
-            && !permissions.isDictationReady
+    /// a missing grant and a download that never finished leave the app
+    /// equally unable to transcribe a word, so they wear the same dot.
+    var needsAttention: Bool {
+        SetupGate.needsAttention(
+            onboardingDismissed: settings.onboardingDismissed,
+            dictationWanted: settings.dictationWanted,
+            permissions: permissions,
+            speechModelFailed: enginePreparationState == .failed
+        )
     }
 
     let dictionaryStore: DictionaryStore
