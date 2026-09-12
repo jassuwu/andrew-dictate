@@ -37,7 +37,8 @@ final class MeetingsListModel: ObservableObject {
     var isSearching: Bool { !trimmedQuery.isEmpty }
 
     /// what the list shows. the app and the date are the only two things a
-    /// row says that anyone remembers — `zoom` or `sep 12` narrows the pile.
+    /// row says that anyone remembers, so `zoom` or the date exactly as the
+    /// row writes it — whatever locale that is — narrows the pile.
     var filtered: [MeetingSummary] {
         guard isSearching else { return items }
         let needle = trimmedQuery
