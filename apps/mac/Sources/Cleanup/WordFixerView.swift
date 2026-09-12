@@ -14,17 +14,31 @@ struct WordFixerView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(BrandUI.textSecondary)
 
-            WordFlow(spacing: 4) {
-                ForEach(viewModel.correction.spans) { span in
-                    WordChip(
-                        text: viewModel.saved[span.id] ?? span.text,
-                        isSaved: viewModel.saved[span.id] != nil,
-                        isSelected: isSelected(span.id)
-                    ) {
-                        viewModel.tap(span.id)
+            // only the chips scroll. a 200-word dictation used to lay the
+            // picker row and the footer out past the bottom edge, so you
+            // could see the word you wanted to fix and not reach the field
+            // that fixes it.
+            ScrollView {
+                WordFlow(spacing: 4) {
+                    ForEach(viewModel.correction.spans) { span in
+                        WordChip(
+                            text: viewModel.saved[span.id] ?? span.text,
+                            isSaved: viewModel.saved[span.id] != nil,
+                            isSelected: isSelected(span.id)
+                        ) {
+                            viewModel.tap(span.id)
+                        }
                     }
                 }
+                // a concrete width proposal, or the flow falls back to its
+                // hardcoded 480 and stops tracking a resized window.
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: .infinity,
+                alignment: .topLeading
+            )
 
             Divider().overlay(BrandUI.hairline)
 
@@ -56,8 +70,6 @@ struct WordFixerView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(BrandUI.attention)
             }
-
-            Spacer(minLength: 0)
 
             Text("saved words are corrected from now on, everywhere.")
                 .font(.system(size: 11))
@@ -166,7 +178,7 @@ final class WordFixerWindowController: NSWindowController {
         )
         window.title = "fix a word"
         window.styleMask = [.titled, .closable, .resizable]
-        window.setContentSize(NSSize(width: 520, height: 340))
+        window.setContentSize(NSSize(width: 520, height: 420))
         window.minSize = NSSize(width: 420, height: 280)
         window.isReleasedWhenClosed = false
         window.center()
