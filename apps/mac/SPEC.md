@@ -43,9 +43,9 @@ hold fn ──▶ mic capture ──▶ key-up ──▶ engine (parakeet v2, pr
 one nonactivating, click-through `NSPanel` (borderless, floating, all-spaces), in two styles:
 
 - **bare — the lamp (2026-08-12).** a single gold line drawn in a canvas on a transparent panel: dim ember while prewarming, a wave whose amplitude and tungsten colour ride your voice while recording, then a cool-out that collapses it to a hot dot and fades. no capsule, no shadow — they would clip the bloom. **success is silent: the afterglow is the whole goodbye.** the earlier glass capsule with eleven bars, and the transcript flash that followed a paste, are both removed.
-- **glass — the pill.** the exceptional-message style, and the only thing that ever speaks: `copied — secure field` · `copied — focus changed` · `couldn't transcribe` · `heard nothing` · `recording was lost` · `speech model failed — retrying` · `microphone access is off` · `no microphone available`.
+- **glass — the pill.** the exceptional-message style, and the only thing that ever speaks: `copied — secure field` · `copied — focus changed` · `couldn't transcribe` · `heard nothing` · `recording was lost` · `speech model failed — retrying` · `microphone access is off` · `no microphone available` · `the microphone changed — say that again`.
 
-the rule: **a failed dictation must never look like a successful one.** anything that goes wrong cuts the afterglow short and says why.
+the rule: **a failed dictation must never look like a successful one.** anything that goes wrong cuts the afterglow short and says why. the input device changing mid-take counts: airpods connecting discards the capture, so it is a loss path and speaks like one. sleep and screen-lock stay silent — nobody is there to read the pill.
 
 no dock icon. menu-bar item: the brand badge → menu: fix a word…, record a meeting ▸, settings, finish setup / run onboarding again, about, quit. a red dot on the badge means a permission is missing.
 
