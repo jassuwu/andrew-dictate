@@ -490,19 +490,30 @@ struct SettingsView: View {
 
                 Spacer(minLength: 8)
 
-                Text(keptCount)
-                    .font(.caption)
-                    .foregroundStyle(BrandUI.textSecondary)
+                // a count beside a failed read would be a number this pane
+                // cannot stand behind, so it offers the file instead.
+                if browser.failure == nil {
+                    Text(keptCount)
+                        .font(.caption)
+                        .foregroundStyle(BrandUI.textSecondary)
+                } else {
+                    Button("show in finder") {
+                        showInFinder(browser.archiveURL)
+                    }
+                }
 
                 Button("delete all") {
                     pendingArchiveWipe = true
                 }
-                .disabled(browser.items.isEmpty)
+                // an archive the app could not read is not one it may erase.
+                .disabled(browser.items.isEmpty || browser.failure != nil)
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 12)
 
-            if let failure = archive.failure {
+            // the list above already says this; twice in one pane reads like
+            // two different problems.
+            if browser.failure == nil, let failure = archive.failure {
                 Text(failure)
                     .font(.caption)
                     .foregroundStyle(BrandUI.attention)
