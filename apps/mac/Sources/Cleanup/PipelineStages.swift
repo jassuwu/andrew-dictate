@@ -23,8 +23,10 @@ enum PipelineStage: String, CaseIterable, Identifiable, Sendable {
         case .transcription:
             "parakeet turns what you said into words. on-device."
         case .deterministic:
-            "eight rules: punctuation you spoke, emails, numbers, "
-                + "your dictionary. it never rewrites your words."
+            """
+            eight rules: your dictionary, punctuation you spoke, emails, \
+            numbers. it never rewrites your words.
+            """
         }
     }
 
