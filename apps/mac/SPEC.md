@@ -53,7 +53,7 @@ no dock icon. menu-bar item: the brand badge → menu: fix a word…, record a m
 
 one fixed card introduces Andrew Dictate and has one consent action: "set up Andrew Dictate." nothing downloads and hotkeys remain detection-only before that click.
 
-the click starts the parakeet v2 download and warmup, requests microphone access, and prompts for accessibility together. one live checklist shows microphone, accessibility, and speech-model status; download progress stays inline, denied permissions link to system settings, and model failures can retry.
+the click starts the parakeet v2 download and warmup and prompts for accessibility; the microphone is asked for from its row. one live checklist shows microphone, accessibility, and speech-model status; download progress stays inline, denied permissions link to system settings, and model failures can retry.
 
 pre-roll and dictionary configuration are omitted. defaults apply: fn for dictation, pre-roll off. settings owns every option. the key is not configured here, it is *proved* here: screen two shows the bound key and asks for one press, and the key picker only appears once the shipped default has visibly failed to fire.
 
