@@ -51,7 +51,7 @@ no dock icon. menu-bar item: the brand badge → menu: fix a word…, record a m
 
 ## 5. onboarding (once, one app click)
 
-one fixed card introduces Andrew Dictate and has one consent action: "set up Andrew Dictate." nothing downloads and hotkeys remain detection-only before that click.
+one fixed card introduces Andrew Dictate and has one consent action: "set up Andrew Dictate." nothing downloads and hotkeys remain detection-only before that click, and no later launch starts a download for a job that was not ticked.
 
 the click starts the parakeet v2 download and warmup and prompts for accessibility; the microphone is asked for from its row. one live checklist shows microphone, accessibility, and speech-model status; download progress stays inline, denied permissions link to system settings, and model failures can retry.
 
