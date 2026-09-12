@@ -11,6 +11,9 @@ import Foundation
 @MainActor
 final class MeetingsListModel: ObservableObject {
     @Published private(set) var items: [MeetingSummary] = []
+    /// what the field above the list holds. the pile is filtered from it in
+    /// memory — the folder is the index.
+    @Published var query = ""
     /// nil while everything is fine. otherwise a sentence to show verbatim.
     @Published private(set) var failure: String?
 
@@ -24,6 +27,26 @@ final class MeetingsListModel: ObservableObject {
         self.fileManager = fileManager
         self.load = load
         reload()
+    }
+
+    /// edges trimmed, so a stray space does not empty the list.
+    var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var isSearching: Bool { !trimmedQuery.isEmpty }
+
+    /// what the list shows. the app and the date are the only two things a
+    /// row says that anyone remembers — `zoom` or `sep 12` narrows the pile.
+    var filtered: [MeetingSummary] {
+        guard isSearching else { return items }
+        let needle = trimmedQuery
+        return items.filter {
+            $0.app.localizedStandardContains(needle)
+                || $0.started
+                    .formatted(date: .abbreviated, time: .shortened)
+                    .localizedStandardContains(needle)
+        }
     }
 
     func reload() {

@@ -16,15 +16,21 @@ struct MeetingsBrowserView: View {
                     .padding(.top, 14)
             }
 
-            if viewModel.items.isEmpty {
-                Text("no meetings yet.")
-                    .font(BrandUI.bodyFont)
-                    .foregroundStyle(BrandUI.textSecondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if viewModel.filtered.isEmpty {
+                // a search that found nothing is not an empty folder, and
+                // must not read like one.
+                Text(
+                    viewModel.isSearching
+                        ? "nothing matches “\(viewModel.trimmedQuery)”."
+                        : "no meetings yet."
+                )
+                .font(BrandUI.bodyFont)
+                .foregroundStyle(BrandUI.textSecondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(viewModel.items) { meeting in
+                        ForEach(viewModel.filtered) { meeting in
                             MeetingRow(
                                 meeting: meeting,
                                 delete: { viewModel.delete(meeting) }
