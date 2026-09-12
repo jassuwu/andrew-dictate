@@ -669,6 +669,7 @@ struct OnboardingView: View {
             permissionRow(
                 "microphone",
                 status: onboarding.microphoneStatus,
+                note: "switch the microphone on for andrew dictate.",
                 allow: {
                     permissions.requestMicrophoneAccess {
                         await coordinator.requestMicrophoneAccess()
@@ -683,6 +684,7 @@ struct OnboardingView: View {
                 permissionRow(
                     "accessibility",
                     status: onboarding.accessibilityStatus,
+                    note: "find andrew dictate in the list and switch it on.",
                     allow: permissions.requestAccessibilityPrompt,
                     openSettings: permissions.openAccessibilitySettings
                 )
@@ -793,38 +795,44 @@ struct OnboardingView: View {
     /// Says what is true right now, in a word. The previous version showed
     /// three rows reading "pending" before consent had even been given, which
     /// reads as broken rather than waiting.
+    /// `note` is the sentence the pane cannot say for us: privacy settings
+    /// opens on a list, and which row to touch is the one thing the user is
+    /// left guessing. Only shown alongside "open settings" — a granted
+    /// permission has nothing to instruct.
     private func permissionRow(
         _ name: String,
         status: OnboardingRowStatus,
+        note: String? = nil,
         allow: @escaping () -> Void,
         openSettings: @escaping () -> Void
     ) -> some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(name)
                 .foregroundStyle(BrandUI.textPrimary)
 
             Spacer(minLength: 8)
 
-            switch status {
-            case .ready:
-                HStack(spacing: 5) {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .bold))
-                    Text("granted")
+            VStack(alignment: .trailing, spacing: 6) {
+                switch status {
+                case .ready:
+                    rowVerdict("granted")
+                case .actionRequired:
+                    Button("open settings", action: openSettings)
+                        .font(.caption)
+                    if let note {
+                        // default colour: a permission you have not given
+                        // yet is not a failure, and attention is for things
+                        // that went wrong.
+                        rowNote(note)
+                    }
+                case .inProgress:
+                    rowNote("asking…")
+                case .pending:
+                    Button("allow", action: allow)
+                        .font(.caption)
                 }
-                .font(.caption.weight(.medium))
-                .foregroundStyle(BrandUI.gold)
-            case .actionRequired:
-                Button("open settings", action: openSettings)
-                    .font(.caption)
-            case .inProgress:
-                Text("asking…")
-                    .font(.caption)
-                    .foregroundStyle(BrandUI.textSecondary)
-            case .pending:
-                Button("allow", action: allow)
-                    .font(.caption)
             }
+            .frame(maxWidth: 200, alignment: .trailing)
         }
     }
 
