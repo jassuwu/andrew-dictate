@@ -44,6 +44,33 @@ func focusRevalidationDecision(
     return .paste
 }
 
+enum FocusYieldDecision: Equatable, Sendable {
+    case activateAnchor(processIdentifier: Int32)
+    case leaveFrontmostAlone
+}
+
+/// Whether the frontmost spot has to be handed back before pasting.
+///
+/// A locked recording exists so your hands are free, and one of the things
+/// hands do is open our own settings, about or fix-a-word window. That makes
+/// us frontmost, which the revalidation above cannot tell from the user
+/// walking away — so a paste has to put the anchored app back in front
+/// first. Anything else is left exactly as it is: a genuine switch to a
+/// third app still lands on the clipboard, and an anchor that was our own
+/// window is already where it wants to be.
+func focusYieldDecision(
+    anchor: FocusApplicationIdentity,
+    frontmost: FocusApplicationIdentity?,
+    ownBundleIdentifier: String
+) -> FocusYieldDecision {
+    guard frontmost?.bundleIdentifier == ownBundleIdentifier,
+          anchor.bundleIdentifier != ownBundleIdentifier else {
+        return .leaveFrontmostAlone
+    }
+
+    return .activateAnchor(processIdentifier: anchor.processIdentifier)
+}
+
 @MainActor
 struct FocusAnchor {
     private let application: FocusApplicationIdentity
@@ -63,6 +90,45 @@ struct FocusAnchor {
             focusedElement: focusedElement,
             focusedElementWasSecure: isSecureTextField(focusedElement)
         )
+    }
+
+    /// Gives the frontmost spot back to the anchored app if we are the ones
+    /// standing in front of it, and waits for the swap to actually happen.
+    ///
+    /// It has to finish before the synthetic ⌘V is posted, because the
+    /// keystroke goes to whatever app is frontmost at that instant.
+    /// Activation is asynchronous and can be refused, so the wait is short
+    /// and a refusal returns false rather than hanging: revalidation then
+    /// reports a changed focus and the transcript stays on the clipboard,
+    /// which is today's behaviour.
+    func yieldFocusBackToAnchor(
+        workspace: NSWorkspace = .shared,
+        activate: (Int32) -> Bool = { processIdentifier in
+            NSRunningApplication(processIdentifier: processIdentifier)?
+                .activate(options: []) ?? false
+        }
+    ) async -> Bool {
+        let decision = focusYieldDecision(
+            anchor: application,
+            frontmost: Self.applicationIdentity(workspace: workspace),
+            ownBundleIdentifier: AppIdentity.bundleID
+        )
+        guard case let .activateAnchor(processIdentifier) = decision else {
+            return true
+        }
+        guard activate(processIdentifier) else {
+            return false
+        }
+
+        for _ in 0..<15 {
+            try? await Task.sleep(for: .milliseconds(20))
+            if workspace.frontmostApplication?.processIdentifier
+                == processIdentifier {
+                return true
+            }
+        }
+
+        return false
     }
 
     func revalidationDecision(
