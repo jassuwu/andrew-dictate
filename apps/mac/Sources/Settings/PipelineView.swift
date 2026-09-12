@@ -16,7 +16,7 @@ struct PipelineView: View {
         _run = StateObject(
             wrappedValue: PipelinePlaygroundViewModel(
                 entries: { store.entries },
-                input: coordinator.lastTranscript ?? PipelineSample.text
+                input: coordinator.lastHeard ?? PipelineSample.text
             )
         )
     }
@@ -30,7 +30,7 @@ struct PipelineView: View {
                 Spacer(minLength: 8)
 
                 Text(
-                    coordinator.lastTranscript == nil
+                    coordinator.lastHeard == nil
                         ? "a sample, until you dictate something."
                         : "your last dictation."
                 )
@@ -76,8 +76,10 @@ struct PipelineView: View {
         .onChange(of: settings.cleanupEnabled) { _, enabled in
             run.setDeterministicEnabled(enabled)
         }
-        .onChange(of: coordinator.lastTranscript) { _, transcript in
-            run.input = transcript ?? PipelineSample.text
+        // the heard text, not the pasted one: the playground cleans it
+        // itself, and feeding it cleaned text would show the same line twice.
+        .onChange(of: coordinator.lastHeard) { _, heard in
+            run.input = heard ?? PipelineSample.text
             run.recompute()
         }
     }

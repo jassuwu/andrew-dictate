@@ -77,7 +77,7 @@ struct AndrewDictateApp: App {
                 Button("fix a word…") {
                     coordinator.openWordFixer()
                 }
-                .disabled(coordinator.lastTranscript == nil)
+                .disabled(coordinator.lastHeard == nil)
 
                 // nothing starts a recording but the user, and the user
                 // names the app (ADR 0023, 0040). meeting apps first.
