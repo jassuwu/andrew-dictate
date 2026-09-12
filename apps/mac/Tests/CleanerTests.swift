@@ -172,6 +172,37 @@ final class CleanerTests: XCTestCase {
                     "email JOHN at Example dot COM now",
                     "email JOHN@Example.COM now"
                 ),
+                // "at" is how everyone names a website out loud, so an
+                // ordinary word on the left of it is a preposition, not a
+                // mailbox.
+                (
+                    "look at github dot com",
+                    "look at github dot com"
+                ),
+                (
+                    "the docs are at example dot com",
+                    "the docs are at example dot com"
+                ),
+                (
+                    "you can find it at cypher dot io",
+                    "you can find it at cypher dot io"
+                ),
+                (
+                    "he works at meta dot com now",
+                    "he works at meta dot com now"
+                ),
+                (
+                    "we host it at fly dot io",
+                    "we host it at fly dot io"
+                ),
+                (
+                    "sign up at notion dot so",
+                    "sign up at notion dot so"
+                ),
+                (
+                    "read more at anthropic dot com slash news",
+                    "read more at anthropic dot com slash news"
+                ),
                 ("john at localhost", "john at localhost"),
                 ("meet john at five", "meet john at five"),
                 (
@@ -536,6 +567,26 @@ final class CleanerTests: XCTestCase {
                 "input: \(input)"
             )
         }
+    }
+
+    /// the whole pipeline is the only place this shows: EmailParser has to
+    /// hand the sentence on, because only URLParser can turn "slash news"
+    /// into a path. swallow the span and the "at" becomes an @.
+    func testSayingAWebsiteOutLoudStaysAWebsite() {
+        let cleaner = DeterministicCleaner()
+
+        XCTAssertEqual(
+            cleaner.clean("read more at anthropic dot com slash news"),
+            "Read more at anthropic.com/news."
+        )
+        XCTAssertEqual(
+            cleaner.clean("sign up at notion dot so"),
+            "Sign up at notion.so."
+        )
+        XCTAssertEqual(
+            cleaner.clean("her email is sarah at gmail dot com"),
+            "Her email is sarah@gmail.com."
+        )
     }
 
     /// the space between two dictations is added at the cursor, not here:
