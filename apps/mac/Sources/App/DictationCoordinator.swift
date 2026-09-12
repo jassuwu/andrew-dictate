@@ -1481,9 +1481,13 @@ final class DictationCoordinator: ObservableObject {
         activeTimeline = nil
     }
 
+    /// 2.4 s, where it used to be 1.2: the pill springs in over 0.32 s and
+    /// then sits at bottom-centre while the reader's eyes are on their
+    /// cursor. the two call sites that ride this default are both failures,
+    /// and one of them ("copied — …") is an instruction.
     private func flashFeedback(
         _ message: String,
-        duration: TimeInterval = 1.2
+        duration: TimeInterval = 2.4
     ) async {
         feedbackGeneration += 1
         let feedbackToken = feedbackGeneration
@@ -1492,7 +1496,19 @@ final class DictationCoordinator: ObservableObject {
         hudViewModel.showFeedback(message)
         synchronizeHUD()
 
-        try? await Task.sleep(for: .seconds(duration))
+        // a pill that wraps to two lines is two reads. measured here rather
+        // than read off hudViewModel.layout, which synchronizeHUD only sets
+        // a run-loop turn later.
+        let screenWidth = hudPanelStorage?.presentationScreenWidth()
+            ?? NSScreen.main?.frame.width
+            ?? 1_440
+        let lineCount = HUDLayoutEngine.layout(
+            for: .text(message),
+            screenWidth: screenWidth
+        ).lineCount
+        try? await Task.sleep(
+            for: .seconds(duration + (lineCount == 2 ? 0.6 : 0))
+        )
         guard stateToken == stateGeneration,
               feedbackToken == feedbackGeneration,
               activeFeedbackGeneration == feedbackToken else {
