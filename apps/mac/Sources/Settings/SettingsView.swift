@@ -366,14 +366,24 @@ struct SettingsView: View {
     // MARK: - dictionary
 
     private var dictionaryTab: some View {
-        DictionaryEditor(
-            store: dictionaryStore,
-            settings: settings,
-            dictations: browser.items
-        )
-            .padding(.horizontal, 24)
-            .padding(.top, 18)
-            .padding(.bottom, 20)
+        VStack(alignment: .leading, spacing: 10) {
+            // the pane used to open with an unlabelled grid, so the two
+            // rules it already keeps — whole words, any capitalisation —
+            // were things you found out by being confused.
+            Text("when andrew hears the word on the left, it writes the one on the right. whole words only, capitals don’t matter — this still applies with cleanup off.")
+                .font(.system(size: 11))
+                .foregroundStyle(BrandUI.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            DictionaryEditor(
+                store: dictionaryStore,
+                settings: settings,
+                dictations: browser.items
+            )
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 18)
+        .padding(.bottom, 20)
     }
 
     // MARK: - history
