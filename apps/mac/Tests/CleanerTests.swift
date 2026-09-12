@@ -531,6 +531,72 @@ final class CleanerTests: XCTestCase {
         }
     }
 
+    /// the whole pipeline, not one stage: a time, an amount, a version, a
+    /// filename and an address are punctuation parakeet wrote itself, and
+    /// the cleaner has no business re-spacing any of it. every one of these
+    /// was split and shouted before the spoken-punctuation stage learned to
+    /// stand down.
+    func testTheModelsOwnPunctuationSurvivesTheWholePipeline() {
+        let cleaner = DeterministicCleaner()
+        let cases = [
+            ("7 p.m. tomorrow", "7 p.m. tomorrow."),
+            ("9 a.m. then", "9 a.m. then."),
+            ("1.5 GB", "1.5 GB."),
+            ("10:30", "10:30."),
+            ("meet at 8:30", "Meet at 8:30."),
+            ("20,000", "20,000."),
+            ("the file is main.swift", "The file is main.swift."),
+            (
+                "Check https://example.com/docs",
+                "Check https://example.com/docs."
+            ),
+            (
+                "Send it to jass@jass.gg now",
+                "Send it to jass@jass.gg now."
+            ),
+            ("the U.S. team", "The U.S. team."),
+        ]
+
+        for (input, expected) in cases {
+            XCTAssertEqual(
+                cleaner.clean(input),
+                expected,
+                "input: \(input)"
+            )
+        }
+    }
+
+    /// the other half of the same fix: when a marker *did* fire, the stage
+    /// still spaces its own symbols — and still leaves the model's alone.
+    func testSpokenMarkersStillPunctuateAndStillSpareTheDigits() {
+        let cleaner = DeterministicCleaner()
+        let cases = [
+            ("ship it comma then tell me", "Ship it, then tell me."),
+            ("hello comma world question mark", "Hello, world?"),
+            (
+                "he said open quote hello close quote to me",
+                "He said \"hello\" to me."
+            ),
+            ("para one new paragraph para two", "Para 1\n\nPara 2."),
+            (
+                "the price comma 20,000 rupees",
+                "The price, 20,000 rupees."
+            ),
+            (
+                "meet at 8:30 comma bring the 1.5 GB drive",
+                "Meet at 8:30, bring the 1.5 GB drive."
+            ),
+        ]
+
+        for (input, expected) in cases {
+            XCTAssertEqual(
+                cleaner.clean(input),
+                expected,
+                "input: \(input)"
+            )
+        }
+    }
+
     /// ADR 0019's order contract still bites, on a narrower case than it used
     /// to. `SelfCorrections` now only recognises a whole utterance that is
     /// exactly "scratch that" — so whether the trailing spoken "period" has
