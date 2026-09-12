@@ -27,8 +27,9 @@ struct TimelineSummary: Equatable, Sendable {
     /// of the things that were not successes.
     let excluded: [UtteranceTimeline.CompletionStage: Int]
 
-    /// key-up → inserted. The headline: the span a user actually waits, and
-    /// the one SPEC §7 targets at ≤450ms.
+    /// key-up → the ⌘V keystroke reaching the target app; the clipboard
+    /// restore that follows is not in it. The headline: the span a user
+    /// actually waits, and the one SPEC §7 targets at ≤450ms.
     let keyUpToCompletion: Distribution?
 
     /// The stages that span decomposes into.
