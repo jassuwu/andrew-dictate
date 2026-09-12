@@ -146,6 +146,13 @@ final class DictationCoordinator: ObservableObject {
     /// the cap ended this take, not the user's finger. the pill that says
     /// so has to ride the paste, so the fact outlives the stop.
     private var capForcedEnd = false
+    /// an exceptional message the setup window took the screen from. it is
+    /// owed, not spent: held until that window closes (HUDFeedbackGate).
+    private var heldFeedback: (
+        message: String,
+        duration: TimeInterval,
+        at: Date
+    )?
     private let timelineClock = ContinuousClock()
     private let timelineStore = UtteranceTimelineStore()
     private var timelineSequence: UInt64 = 0
@@ -452,7 +459,30 @@ final class DictationCoordinator: ObservableObject {
         onboardingWindowController = nil
         isOnboardingPresented = false
         hotkeyMonitor.setDetectionOnly(false)
-        synchronizeHUD()
+        flushHeldFeedback()
+    }
+
+    /// the pill the setup window swallowed, flashed at last — unless it has
+    /// aged out, in which case saying it now would be a non-sequitur.
+    private func flushHeldFeedback() {
+        guard let held = heldFeedback else {
+            synchronizeHUD()
+            return
+        }
+
+        switch HUDFeedbackGate.decide(
+            isOnboardingPresented: isOnboardingPresented,
+            heldFor: Date().timeIntervalSince(held.at)
+        ) {
+        case .flashNow:
+            heldFeedback = nil
+            flashNotice(held.message, duration: held.duration)
+        case .hold:
+            synchronizeHUD()
+        case .drop:
+            heldFeedback = nil
+            synchronizeHUD()
+        }
     }
 
     func requestMicrophoneAccess() async -> Bool {
@@ -503,6 +533,14 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func presentOnboarding(scope: OnboardingScope = .everything) {
+        // whatever the pill is saying right now is about to be taken off
+        // the screen mid-sentence. keep it rather than truncate it — it
+        // gets a whole default reading when it comes back, since how much
+        // of the first one had run is not worth tracking.
+        if activeFeedbackGeneration != nil,
+           let message = hudViewModel.feedbackMessage {
+            heldFeedback = (message, 1.2, Date())
+        }
         isOnboardingPresented = true
         hotkeyMonitor.setDetectionOnly(true)
         withHUDPanel { $0.dismiss() }
@@ -1363,6 +1401,7 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func invalidatePipeline() {
+        heldFeedback = nil
         setRecordingLocked(false)
         pipelineGeneration += 1
         pipelineTask?.cancel()
@@ -1510,6 +1549,17 @@ final class DictationCoordinator: ObservableObject {
         _ message: String,
         duration: TimeInterval = 1.2
     ) async {
+        // the setup window force-dismissed the panel, so the sleep-then-
+        // clear below would run against something nobody can see and the
+        // sentence would be lost for good. hold it; closing setup says it.
+        if HUDFeedbackGate.decide(
+            isOnboardingPresented: isOnboardingPresented,
+            heldFor: nil
+        ) == .hold {
+            heldFeedback = (message, duration, Date())
+            return
+        }
+
         feedbackGeneration += 1
         let feedbackToken = feedbackGeneration
         let stateToken = stateGeneration
@@ -1533,6 +1583,11 @@ final class DictationCoordinator: ObservableObject {
         _ newState: State,
         fastHUDDismiss: Bool = false
     ) {
+        if newState == .recording {
+            // they have moved on and are talking again; a held sentence
+            // about the last take would land on this one.
+            heldFeedback = nil
+        }
         stateGeneration += 1
         feedbackGeneration += 1
         activeFeedbackGeneration = nil
