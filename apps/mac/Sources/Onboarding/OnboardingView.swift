@@ -919,6 +919,12 @@ struct OnboardingView: View {
             // only the ticked ones — "nothing downloads before the click"
             // means nothing you didn't ask for downloads after it either.
             if onboarding.dictationSelected {
+                // macOS explains this ask better than any line on this card
+                // can, and answering it either way is what registers the app
+                // in privacy › accessibility — so "open settings" arrives at
+                // a list andrew dictate is actually in. Inside the dictation
+                // gate: a meetings-only setup is never asked (SPEC §5).
+                permissions.requestAccessibilityPrompt()
                 coordinator.beginOnboardingEnginePreparation()
             }
             if onboarding.meetingsSelected {
