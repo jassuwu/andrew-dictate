@@ -233,8 +233,15 @@ final class CleanerTests: XCTestCase {
         assertTransform(
             NumberParser(),
             cases: [
-                ("zero", "0"),
-                ("five", "5"),
+                // a bare count is a word — nobody types "1 of the".
+                ("zero", "zero"),
+                ("five", "five"),
+                ("one of my keyboards", "one of my keyboards"),
+                ("no one knows", "no one knows"),
+                ("one on one meeting", "one on one meeting"),
+                ("two-ish years", "two-ish years"),
+                ("a year or two", "a year or two"),
+                ("one-way", "one-way"),
                 ("nineteen", "19"),
                 ("twenty", "20"),
                 ("twenty five", "25"),
@@ -590,7 +597,10 @@ final class CleanerTests: XCTestCase {
                 "he said open quote hello close quote to me",
                 "He said \"hello\" to me."
             ),
-            ("para one new paragraph para two", "Para 1\n\nPara 2."),
+            (
+                "para one new paragraph para two",
+                "Para one\n\nPara two."
+            ),
             (
                 "the price comma 20,000 rupees",
                 "The price, 20,000 rupees."
