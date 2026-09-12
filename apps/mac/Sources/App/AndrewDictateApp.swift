@@ -78,6 +78,9 @@ struct AndrewDictateApp: App {
                     coordinator.openWordFixer()
                 }
                 .disabled(coordinator.lastHeard == nil)
+                // the only disabled case left is an empty archive, and a
+                // dead row with no sentence explains nothing.
+                .help("after your first dictation — this teaches andrew the word it got wrong.")
 
                 // nothing starts a recording but the user, and the user
                 // names the app (ADR 0023, 0040). meeting apps first.
