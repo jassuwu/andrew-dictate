@@ -97,6 +97,24 @@ final class CleanerTests: XCTestCase {
         )
     }
 
+    /// The mode a dictation aimed at our own window runs in. A correction is
+    /// a word: it gets no capital and no full stop, and a word you taught it
+    /// still applies.
+    func testCleanupOffLeavesACorrectiveWordAloneButStillSubstitutes() {
+        XCTAssertEqual(
+            DeterministicCleaner(entries: [], fullCleanup: false)
+                .clean("cache"),
+            "cache"
+        )
+        XCTAssertEqual(
+            DeterministicCleaner(
+                entries: [DictionaryEntry(wrong: "jason", right: "JSON")],
+                fullCleanup: false
+            ).clean("jason"),
+            "JSON"
+        )
+    }
+
     func testEmptyStringRemainsEmpty() {
         XCTAssertEqual(DeterministicCleaner().clean(""), "")
     }

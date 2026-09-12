@@ -65,6 +65,27 @@ final class FocusAnchorTests: XCTestCase {
         )
     }
 
+    // MARK: - our own window
+
+    /// The one destination that runs the dictionary alone: a word dictated
+    /// into "fix a word" must not be saved as "Cache."
+    func testOnlyOurOwnBundleCountsAsOurOwnUI() {
+        XCTAssertTrue(
+            pastesIntoOurOwnUI(target: "gg.jass.andrew", own: "gg.jass.andrew")
+        )
+        XCTAssertFalse(
+            pastesIntoOurOwnUI(target: "example.editor", own: "gg.jass.andrew")
+        )
+    }
+
+    /// A dev run and the test bundle can both have no bundle id, and neither
+    /// is our window.
+    func testAMissingBundleIdIsNeverOurOwnUI() {
+        XCTAssertFalse(pastesIntoOurOwnUI(target: nil, own: "gg.jass.andrew"))
+        XCTAssertFalse(pastesIntoOurOwnUI(target: "gg.jass.andrew", own: nil))
+        XCTAssertFalse(pastesIntoOurOwnUI(target: nil, own: nil))
+    }
+
     private func decision(
         currentApplication: FocusApplicationIdentity? = nil,
         hasFocusedElement: Bool = true,
