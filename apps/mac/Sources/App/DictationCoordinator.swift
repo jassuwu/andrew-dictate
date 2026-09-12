@@ -448,6 +448,12 @@ final class DictationCoordinator: ObservableObject {
         onboardingWindowController = nil
         isOnboardingPresented = false
         hotkeyMonitor.setDetectionOnly(false)
+        // anything granted in there was granted to onboarding's own
+        // checklist, not to us, so this is the moment to ask the system
+        // again — and it is what rebuilds the key monitors under a grant
+        // that arrived after launch. midSession, never launchOrReopen: a
+        // window must not reopen itself from inside its own close.
+        refreshPermissions(moment: .midSession)
         synchronizeHUD()
     }
 
