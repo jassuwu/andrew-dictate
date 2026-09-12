@@ -1054,8 +1054,20 @@ final class DictationCoordinator: ObservableObject {
             return
         }
         if state == .transcribing {
-            invalidatePipeline()
-            setState(.idle)
+            let elapsed = Date().timeIntervalSince(
+                transcribingBeganAt ?? .distantPast
+            )
+            switch TranscribingRepress.response(transcribingFor: elapsed) {
+            case .refuseAndSayWhy:
+                // the sentence is still on its way to the page. discarding
+                // it silently left no text, no pill and no history row —
+                // spec §4's forbidden shape, wearing nothing at all.
+                flashNotice("still finishing the last one", duration: 1.4)
+                return
+            case .dropAndRestart:
+                invalidatePipeline()
+                setState(.idle)
+            }
         }
 
         guard isPrewarmed else {
@@ -1159,8 +1171,8 @@ final class DictationCoordinator: ObservableObject {
             return
         }
 
-        invalidatePipeline()
-        setState(.idle)
+        // no discard of its own: a lock that starts mid-transcription is the
+        // same repress as any other, and beginRecording owns that decision.
         beginRecording()
 
         // only claim the lock if the capture took — a missing mic or a
