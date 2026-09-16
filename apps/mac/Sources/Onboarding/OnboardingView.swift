@@ -605,26 +605,38 @@ struct OnboardingView: View {
     private var dictationModelProgress: some View {
         switch coordinator.enginePreparationState {
         case let .downloading(progress):
-            VStack(spacing: 7) {
-                ProgressView(value: bounded(progress))
-                    .progressViewStyle(.linear)
-                    .frame(width: 240)
-                Text("about \(coordinator.settings.engineVersion.approximateSize.dropFirst()). carry on — this keeps going.")
+            // nothing is coming down when it is already here, so no bar and
+            // no size: a quoted 460 mb that never gets fetched is the same
+            // lie as the caption below, one beat earlier.
+            if coordinator.engineModelWasOnDisk {
+                Text("warming up…")
                     .font(.caption)
                     .foregroundStyle(BrandUI.textSecondary)
+            } else {
+                VStack(spacing: 7) {
+                    ProgressView(value: bounded(progress))
+                        .progressViewStyle(.linear)
+                        .frame(width: 240)
+                    Text("about \(coordinator.settings.engineVersion.approximateSize.dropFirst()). carry on — this keeps going.")
+                        .font(.caption)
+                        .foregroundStyle(BrandUI.textSecondary)
+                }
             }
         case .warmingUp:
             Text("warming up…")
                 .font(.caption)
                 .foregroundStyle(BrandUI.textSecondary)
         case .ready:
-            // The models live in FluidAudio's shared folder, not this app's, so
-            // another app on this mac may already have fetched them — or a
-            // previous install did. Saying nothing here would let the user
-            // assume a download happened and quietly took their bandwidth.
-            Text("found it already on this mac. nothing to download.")
-                .font(.caption)
-                .foregroundStyle(BrandUI.gold)
+            // Two different things end here: a real download, and a folder
+            // another install or another app had already filled. One line for
+            // both told whoever watched the bar fill that nothing came down.
+            Text(
+                OnboardingState.modelReadyCaption(
+                    wasOnDisk: coordinator.engineModelWasOnDisk
+                )
+            )
+            .font(.caption)
+            .foregroundStyle(BrandUI.gold)
         case .failed:
             VStack(spacing: 7) {
                 Text("that download didn't finish.")
