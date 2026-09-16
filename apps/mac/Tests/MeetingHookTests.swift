@@ -70,6 +70,24 @@ final class MeetingHookTests: XCTestCase {
         XCTAssertEqual(run.outcome.label, "exit 3")
     }
 
+    func testAHookThatNeverReadsStdinStillSucceeds() async throws {
+        let script = try write(script: "#!/bin/sh\nexec 0<&-\nsleep 0.2\nexit 0\n")
+        let run = await HookRunner(logURL: dir.appendingPathComponent("hooks.log"))
+            .run(executable: script, event: event())
+        XCTAssertEqual(run.outcome, .succeeded)
+    }
+
+    func testFeedingAHookThatAlreadyClosedStdinDoesNotKillTheApp() {
+        // `Process` closes our copy of the read end at spawn and a hook that
+        // exits before reading closes the other, so the write has no reader.
+        // Without a held reader that is SIGPIPE: the test process dies here
+        // rather than failing. Reaching the end is the assertion.
+        let pipe = Pipe()
+        let stdin = HookStdin(pipe)
+        try? pipe.fileHandleForReading.close()
+        stdin.feed(Data(repeating: 0x41, count: 400))
+    }
+
     func testAMissingExecutableCannotLaunch() async {
         let run = await HookRunner(logURL: dir.appendingPathComponent("hooks.log"))
             .run(executable: dir.appendingPathComponent("nope.sh"), event: event())

@@ -78,6 +78,8 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var lastTranscript: String?
     /// re-read at launch, reopen, wake, unlock, and whenever the system says
     /// the trust table moved. a grant is a fact about now, not a fact we own.
+    /// the hotkey monitors hang off this one funnel too — a path that wins
+    /// accessibility without coming through here leaves fn dead.
     @Published private(set) var permissions = PermissionSnapshot(
         microphoneGranted: false,
         accessibilityGranted: false
@@ -446,6 +448,12 @@ final class DictationCoordinator: ObservableObject {
         onboardingWindowController = nil
         isOnboardingPresented = false
         hotkeyMonitor.setDetectionOnly(false)
+        // anything granted in there was granted to onboarding's own
+        // checklist, not to us, so this is the moment to ask the system
+        // again — and it is what rebuilds the key monitors under a grant
+        // that arrived after launch. midSession, never launchOrReopen: a
+        // window must not reopen itself from inside its own close.
+        refreshPermissions(moment: .midSession)
         synchronizeHUD()
     }
 
@@ -869,6 +877,7 @@ final class DictationCoordinator: ObservableObject {
         moment: SetupCheckMoment
     ) -> SetupPresentation {
         let snapshot = SystemPermissions.snapshot()
+        let wasTrusted = permissions.accessibilityGranted
         if snapshot != permissions {
             permissions = snapshot
             if !snapshot.isDictationReady {
@@ -881,6 +890,16 @@ final class DictationCoordinator: ObservableObject {
                     """
                 )
             }
+        }
+
+        if SetupGate.shouldReinstallHotkey(
+            was: wasTrusted,
+            now: snapshot.accessibilityGranted
+        ) {
+            hotkeyMonitor.reinstall()
+            permissionLogger.notice(
+                "hotkey monitors reinstalled after trust change"
+            )
         }
 
         return SetupGate.presentation(

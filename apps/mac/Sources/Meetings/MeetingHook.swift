@@ -81,6 +81,37 @@ struct HookRun: Equatable, Codable, Sendable {
     let outcome: HookOutcome
 }
 
+/// The payload's road into the hook. `Process` closes our copy of the pipe's
+/// read end the moment the child is spawned, so a hook that exits, or closes
+/// stdin, before we get to write leaves the pipe with no reader at all — and
+/// writing to a pipe nobody reads is SIGPIPE, which kills the app, not the
+/// hook. Holding a read end of our own until the write is done means there is
+/// always a reader: the payload lands in the pipe's buffer, the hook takes it
+/// or does not, and it is thrown away when we let go.
+struct HookStdin: @unchecked Sendable {
+    private let writer: FileHandle
+    private let heldReader: Int32
+
+    init(_ pipe: Pipe) {
+        writer = pipe.fileHandleForWriting
+        heldReader = dup(pipe.fileHandleForReading.fileDescriptor)
+        // ours, not the hook's: it must not leak into the child.
+        _ = fcntl(heldReader, F_SETFD, FD_CLOEXEC)
+    }
+
+    /// Writes the lot, then closes so `cat` sees EOF.
+    func feed(_ payload: Data) {
+        try? writer.write(contentsOf: payload)
+        letGo()
+    }
+
+    /// Closes both ends without writing — the hook never launched.
+    func letGo() {
+        try? writer.close()
+        if heldReader >= 0 { Darwin.close(heldReader) }
+    }
+}
+
 /// Runs the one hook. No timeout, on purpose: a summariser talking to a local
 /// model may take minutes, and killing it would be the app deciding how long
 /// your script is allowed to take. Everything it prints lands in the log.
@@ -123,6 +154,7 @@ struct HookRunner: Sendable {
         process.standardInput = input
         process.standardOutput = output
         process.standardError = output
+        let stdin = HookStdin(input)
 
         // Drain stdout/stderr while the hook runs: a pipe holds 64 KB, and a
         // hook that prints more would block on write and never exit — with
@@ -140,16 +172,15 @@ struct HookRunner: Sendable {
                 try process.run()
             } catch {
                 process.terminationHandler = nil
+                stdin.letGo()
                 append(header + "could not launch \(executable.path): \(error.localizedDescription)\n=== exit — ===\n")
                 continuation.resume(returning: nil)
                 return
             }
             // Feed stdin on a background queue so a hook that never reads it
             // cannot stall us, then close so `cat` sees EOF.
-            let writer = input.fileHandleForWriting
             DispatchQueue.global(qos: .utility).async {
-                try? writer.write(contentsOf: payload)
-                try? writer.close()
+                stdin.feed(payload)
             }
         }
 

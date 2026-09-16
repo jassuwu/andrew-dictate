@@ -46,6 +46,12 @@ struct HotkeyBinding: Codable, Hashable, Identifiable, Sendable {
         .rightControl,
         .leftControl,
     ]
+
+    /// the whole gesture in one line, so the settings row and anything that
+    /// adopts it later cannot say it two ways. the words are the hud's own
+    /// — the pill says "locked — tap to end", so this says locks and end.
+    static let gestureExplanation =
+        "hold it and talk. double-tap locks it on hands-free, tap once to end. esc cancels."
 }
 
 extension UserDefaults {

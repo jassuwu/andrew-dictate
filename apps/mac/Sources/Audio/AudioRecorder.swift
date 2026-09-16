@@ -47,6 +47,9 @@ final class AudioRecorder {
     // one utterance is capped at 5 minutes. the buffer pool is allocated up
     // front from this number, so it is resident memory, not a soft limit.
     // past it capture seals and keeps the take instead of dropping it.
+    // "five minutes" is spelled out in three other places — readme's
+    // `## limits`, SPEC §3, and the pill "five minutes — that's the cap" —
+    // so tuning the number here means editing all three.
     private static let maximumUtteranceDuration = 5.0 * 60.0
     private static let conversionBufferCapacity: AVAudioFrameCount = 16_384
 
