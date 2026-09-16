@@ -753,7 +753,7 @@ struct OnboardingView: View {
             HStack(spacing: 4) {
                 KeyChip(
                     settings.dictationHotkey.displayName,
-                    isActive: keyFired
+                    isActive: keyTest.fired
                 )
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .semibold))
