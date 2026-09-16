@@ -78,13 +78,17 @@ struct MeetingSpool: Sendable {
     func noteAttempt(_ handle: Handle, manifest: Manifest) -> Manifest {
         var updated = manifest
         updated.attempts = (manifest.attempts ?? 0) + 1
-        guard let data = try? Self.encoder.encode(updated),
-              (try? data.write(to: handle.manifestURL, options: .atomic)) != nil
-        else {
+        guard let data = try? Self.encoder.encode(updated) else {
             return updated
         }
-        try? FileManager.default.setAttributes(
-            [.posixPermissions: 0o600], ofItemAtPath: handle.manifestURL.path)
+        do {
+            try data.write(to: handle.manifestURL, options: .atomic)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600], ofItemAtPath: handle.manifestURL.path)
+        } catch {
+            // A ledger that could not be written means one more try than
+            // intended, which is better than losing the spool over it.
+        }
         return updated
     }
 
