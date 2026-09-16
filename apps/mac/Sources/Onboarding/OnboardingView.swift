@@ -52,6 +52,9 @@ final class OnboardingWindowController:
     /// which jobs this window was built for; a different ask needs a
     /// different window.
     let scope: OnboardingScope
+    /// which screen it opens on. the flow lives inside the view, so a window
+    /// built for one errand cannot be reopened on another.
+    let openAt: OnboardingStep
 
     private weak var coordinator: DictationCoordinator?
 
@@ -62,6 +65,7 @@ final class OnboardingWindowController:
     init(
         coordinator: DictationCoordinator,
         scope: OnboardingScope = .everything,
+        openAt: OnboardingStep = .hello,
         proveSystemAudio: @escaping OnboardingMeetingSetup.SystemAudioProof =
             OnboardingMeetingSetup.stubbedSystemAudioProof,
         prepareMeetingModel:
@@ -70,11 +74,13 @@ final class OnboardingWindowController:
     ) {
         self.coordinator = coordinator
         self.scope = scope
+        self.openAt = openAt
 
         let resizer = OnboardingWindowResizer()
         let rootView = OnboardingView(
             coordinator: coordinator,
             scope: scope,
+            openAt: openAt,
             meetingSetup: OnboardingMeetingSetup(
                 proveSystemAudio: proveSystemAudio,
                 prepareMeetingModel: prepareMeetingModel
@@ -189,13 +195,18 @@ struct OnboardingView: View {
     @StateObject private var permissions: OnboardingPermissionModel
     @StateObject private var meetingSetup: OnboardingMeetingSetup
     @State private var onboarding: OnboardingState
-    @State private var flow = OnboardingFlow()
+    @State private var flow: OnboardingFlow
 
     private let windowResizer: OnboardingWindowResizer
+    /// `.hello` unless something went wrong and this window was reopened to
+    /// fix it. opening straight at a later screen means the consent that
+    /// screen assumes has to be given here instead.
+    private let openAt: OnboardingStep
 
     fileprivate init(
         coordinator: DictationCoordinator,
         scope: OnboardingScope,
+        openAt: OnboardingStep = .hello,
         meetingSetup: OnboardingMeetingSetup,
         windowResizer: OnboardingWindowResizer
     ) {
@@ -216,6 +227,8 @@ struct OnboardingView: View {
         _permissions = StateObject(wrappedValue: permissions)
         _meetingSetup = StateObject(wrappedValue: meetingSetup)
         _onboarding = State(initialValue: onboarding)
+        _flow = State(initialValue: OnboardingFlow(step: openAt))
+        self.openAt = openAt
         self.windowResizer = windowResizer
     }
 
@@ -238,6 +251,16 @@ struct OnboardingView: View {
         .animation(.easeInOut(duration: 0.2), value: flow.step)
         .onAppear {
             permissions.refresh()
+            // Skipping past `hello` skips the click that gives consent and
+            // starts the probe. Without it the system audio row would read
+            // "proved when you click" — a window opened to fix a failure,
+            // showing neither the failure nor its button.
+            if openAt != .hello {
+                onboarding.consentToSetup()
+                if onboarding.meetingsSelected {
+                    meetingSetup.begin()
+                }
+            }
             synchronizeOnboarding()
             windowResizer.resize(to: Self.windowHeight, animated: false)
         }

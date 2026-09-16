@@ -48,7 +48,9 @@ enum MeetingEvent: Equatable, Sendable {
     var hudText: String? {
         switch self {
         case .started(let app): "recording \(app)"
-        case .cannotHear(let app): "can't hear \(app) — allow system audio recording in privacy settings"
+        // it names the fix and hands you to the one surface allowed to ask
+        // for it, rather than naming a switch you then have to go and find.
+        case .cannotHear(let app): "can't hear \(app) — opening setup"
         case .gapBegan: "lost \(Self.themWord) — rebuilding"
         case .gapEnded: "hearing them again"
         case .nudge: nil

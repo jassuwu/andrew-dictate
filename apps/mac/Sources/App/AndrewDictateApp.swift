@@ -101,6 +101,15 @@ struct AndrewDictateApp: App {
                             .disabled(true)
                     }
                 }
+
+                // one row, and only while it is needed: the tap would not
+                // open, and the window that can fix it was closed.
+                if coordinator.meetingsNeedAttention {
+                    Button("fix system audio…") {
+                        coordinator.runOnboardingAgain(
+                            scope: .meetingsOnly, openAt: .permissions)
+                    }
+                }
             }
 
             Divider()

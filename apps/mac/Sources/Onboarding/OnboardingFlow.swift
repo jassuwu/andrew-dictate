@@ -99,7 +99,13 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
 /// grant had worked, because the screen that would have told you was already
 /// gone.
 struct OnboardingFlow: Equatable, Sendable {
-    private(set) var step: OnboardingStep = .hello
+    private(set) var step: OnboardingStep
+
+    /// setup starts at `hello`, except when it was reopened to fix one
+    /// named thing and the screen that fixes it is further in.
+    init(step: OnboardingStep = .hello) {
+        self.step = step
+    }
 
     var canGoBack: Bool {
         step != .hello

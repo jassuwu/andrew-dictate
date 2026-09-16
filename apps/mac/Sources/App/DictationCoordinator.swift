@@ -89,6 +89,11 @@ final class DictationCoordinator: ObservableObject {
             && !permissions.isDictationReady
     }
 
+    /// system audio is not part of `needsPermissionAttention` — that badge is
+    /// dictation's. this is meetings' own, set when a tap would not open and
+    /// cleared by the next meeting that starts.
+    @Published private(set) var meetingsNeedAttention = false
+
     let dictionaryStore: DictionaryStore
     let settings: AppSettings
 
@@ -395,8 +400,11 @@ final class DictationCoordinator: ObservableObject {
         presentOnboarding()
     }
 
-    func runOnboardingAgain(scope: OnboardingScope = .everything) {
-        presentOnboarding(scope: scope)
+    func runOnboardingAgain(
+        scope: OnboardingScope = .everything,
+        openAt: OnboardingStep = .hello
+    ) {
+        presentOnboarding(scope: scope, openAt: openAt)
     }
 
     /// `dictationWanted` is nil when this run of setup had no say in it —
@@ -496,15 +504,20 @@ final class DictationCoordinator: ObservableObject {
         await transcriptionEngine.unloadModels()
     }
 
-    private func presentOnboarding(scope: OnboardingScope = .everything) {
+    private func presentOnboarding(
+        scope: OnboardingScope = .everything,
+        openAt: OnboardingStep = .hello
+    ) {
         isOnboardingPresented = true
         hotkeyMonitor.setDetectionOnly(true)
         withHUDPanel { $0.dismiss() }
 
-        // a cached window keeps the scope it was built with; a different
-        // scope means a different window.
+        // a cached window keeps the scope it was built with, and the screen
+        // it was left on — the flow is state inside the view. a different
+        // errand means a different window.
         if let onboardingWindowController {
-            if onboardingWindowController.scope == scope {
+            if onboardingWindowController.scope == scope,
+               onboardingWindowController.openAt == openAt {
                 onboardingWindowController.present()
                 return
             }
@@ -515,6 +528,7 @@ final class DictationCoordinator: ObservableObject {
         let controller = OnboardingWindowController(
             coordinator: self,
             scope: scope,
+            openAt: openAt,
             proveSystemAudio: { await CoreAudioMeetingSource.proveSystemAudio() },
             prepareMeetingModel: { [weak self] progress in
                 await self?.prepareMeetingModel(progress: progress) ?? false
@@ -1646,6 +1660,7 @@ extension DictationCoordinator {
     private func handle(_ event: MeetingEvent) {
         switch event {
         case .started:
+            meetingsNeedAttention = false
             if LiveTranscriptPanel.wasOpenLastTime, !isLiveTranscriptShown {
                 toggleLiveTranscript()
             }
@@ -1653,14 +1668,21 @@ extension DictationCoordinator {
             meetingNotifier.ask(app: meetingAppName, quietFor: meetings.thresholds.quietNudgeAfter)
         case .saved, .nothingToKeep, .saveFailed, .engineFailed:
             liveTranscriptPanel?.dismissKeepingPreference()
-        case .cannotHear, .gapBegan, .gapEnded, .writingItOut, .hookFailed:
+        case .cannotHear:
+            // the pill cannot be clicked, so naming the switch was a dead
+            // end. this reopens the one surface allowed to ask for it, and
+            // leaves a way back in the menu for anyone who closes it.
+            meetingsNeedAttention = true
+            liveTranscriptPanel?.dismissKeepingPreference()
+            runOnboardingAgain(scope: .meetingsOnly, openAt: .permissions)
+        case .gapBegan, .gapEnded, .writingItOut, .hookFailed:
             break
         }
 
         if let text = event.hudText {
             let duration: TimeInterval
             switch event {
-            case .cannotHear, .hookFailed, .engineFailed, .saveFailed: duration = 4
+            case .hookFailed, .engineFailed, .saveFailed: duration = 4
             case .writingItOut: duration = 6
             default: duration = 2
             }
