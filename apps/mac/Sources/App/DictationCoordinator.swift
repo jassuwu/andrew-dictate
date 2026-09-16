@@ -1620,6 +1620,13 @@ final class DictationCoordinator: ObservableObject {
             let transcriptReady = timelineClock.now
             activeTimeline?.transcriptReady = transcriptReady
 
+            // one read of the text at the caret, two decisions: is the
+            // sentence there still running (so no capital), and do the words
+            // need a space to stand apart from it. read off the held element,
+            // the same one the paste decision revalidates.
+            let textAtCaret = focusAnchor?.textBeforeCursor()
+            let continuingASentence = continuesSentence(after: textAtCaret)
+
             // a dictation aimed at our own window is a correction, not a
             // sentence: dictate "cache" into the fixer's "what you meant"
             // field and full cleanup would save it as "Cache." forever. the
@@ -1636,8 +1643,8 @@ final class DictationCoordinator: ObservableObject {
                 ? DeterministicCleaner(
                     entries: dictionaryStore.entries,
                     fullCleanup: false
-                ).clean(transcript)
-                : cleaner.clean(transcript)
+                ).clean(transcript, continuingASentence: continuingASentence)
+                : cleaner.clean(transcript, continuingASentence: continuingASentence)
             activeTimeline?.cleaned = timelineClock.now
             guard !cleanedTranscript.trimmingCharacters(
                 in: .whitespacesAndNewlines
@@ -1665,13 +1672,19 @@ final class DictationCoordinator: ObservableObject {
                 )
                 return
             }
-            let pasteTranscript = cleanedTranscript
+            // a second dictation into the same field must not weld itself
+            // to the first. the space is a delivery detail — the cleaner
+            // still renders a flush string and the archive still keeps it.
+            let joinsWhatIsThere = needsJoinSpace(after: textAtCaret?.last)
+            let pasteTranscript = joinsWhatIsThere
+                ? " " + cleanedTranscript
+                : cleanedTranscript
 
             lastTranscript = cleanedTranscript
             lastHeard = transcript
             pendingArchiveText = (
                 heard: transcript,
-                inserted: pasteTranscript
+                inserted: cleanedTranscript
             )
             // hands-free means our own settings window may be in front of the
             // app you dictated into. give the frontmost spot back before the

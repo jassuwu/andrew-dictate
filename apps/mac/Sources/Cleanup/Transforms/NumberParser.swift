@@ -53,20 +53,62 @@ struct NumberParser: TranscriptTransform {
             let value = parse(spokenNumber) else {
                 return nil
             }
+            // EmailParser and URLParser already ran, so spoken "seven dot
+            // com" is literal "seven.com" by now: a number word inside an
+            // address is part of the address. 7.com is nobody's site.
+            if let range = Range(match.range, in: transcript),
+               AddressToken.isAddress(
+                   AddressToken.enclosingToken(range, in: transcript)
+               ) {
+                return nil
+            }
             let suffix = transcript.substring(with: match.range(at: 2))?
                 .lowercased()
 
             switch suffix {
             case "dollar", "dollars":
-                return "$\(value)"
+                return "$\(grouped(value))"
             case "rupee", "rupees":
-                return "₹\(value)"
+                return "₹\(grouped(value))"
             case "percent", "percentage":
-                return "\(value)%"
+                return "\(grouped(value))%"
             default:
-                return String(value)
+                // a bare small number is a word: "one of my keyboards", not
+                // "1 of my keyboards". parakeet already wrote it the way a
+                // person types it, so a numeral has to earn itself — a unit,
+                // a value of ten or more, or more than one spoken word.
+                // the same tokenizer parse() uses, so "two-ish" is two words.
+                let spokenWordCount = spokenNumber
+                    .split { $0.isWhitespace || $0 == "-" }
+                    .count
+                guard value >= 10 || spokenWordCount > 1 else {
+                    return nil
+                }
+                return grouped(value)
             }
         }
+    }
+
+    /// 10,000 and up. the floor is not taste: parse() already reads "two
+    /// thousand twenty six" as 2026, and grouping from 1000 up would print
+    /// that year as "2,026". lowering it re-opens exactly that.
+    private static let groupingFloor = 10_000
+
+    /// hand-rolled, no NumberFormatter and no Locale: the cleaner is a pure
+    /// function and has to write the same text on every mac.
+    private func grouped(_ value: Int) -> String {
+        let digits = String(value)
+        guard value >= Self.groupingFloor else {
+            return digits
+        }
+        var output = ""
+        for (offset, digit) in digits.enumerated() {
+            if offset > 0, (digits.count - offset) % 3 == 0 {
+                output.append(",")
+            }
+            output.append(digit)
+        }
+        return output
     }
 
     private func parse(_ spokenNumber: String) -> Int? {

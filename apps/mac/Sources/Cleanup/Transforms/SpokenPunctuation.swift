@@ -39,8 +39,11 @@ struct SpokenPunctuation: TranscriptTransform {
     private static let aroundLineBreak = CleanupRegex.compile(
         "[ \\t]*\\n[ \\t]*"
     )
+    // no \p{N} in the lookahead, the same narrowing PunctuationFinishing
+    // already made: a digit after a separator is "1.5", "8:30", "20,000",
+    // never a new word that needs a space.
     private static let afterPunctuation = CleanupRegex.compile(
-        "([,.;:!?])(?=[\\p{L}\\p{N}\"])"
+        "([,.;:!?])(?=[\\p{L}\"])"
     )
 
     private let markers: [Marker] = [
@@ -118,6 +121,14 @@ struct SpokenPunctuation: TranscriptTransform {
             }
         }
 
+        // no marker fired, so there is no symbol of ours to space: the
+        // punctuation in here is punctuation the speech model wrote, and
+        // re-spacing it splits "7 p.m." and "20,000". whitespace is already
+        // collapsed upstream and again in PunctuationFinishing.
+        guard result != transcript else {
+            return transcript
+        }
+
         // symbols dropped in without their spacing fixed would read worse
         // than the spoken words, so an unusable formatter voids the stage.
         guard let formatted = formatExtractedSymbols(result) else {
@@ -176,14 +187,49 @@ struct SpokenPunctuation: TranscriptTransform {
             range: result.fullNSRange,
             withTemplate: "\n"
         )
-        result = afterPunctuation.stringByReplacingMatches(
-            in: result,
-            range: result.fullNSRange,
-            withTemplate: "$1 "
-        )
+        result = afterPunctuation.replacingMatches(in: result) { match in
+            guard let range = Range(match.range, in: result),
+                  let symbol = result.substring(with: match.range) else {
+                return nil
+            }
+            guard !isAbbreviationDot(
+                symbol,
+                at: range.lowerBound,
+                in: result
+            ) else {
+                return nil
+            }
+            // an address is one word: the dot in example.com and the one in
+            // john@cypher.io never take a space.
+            guard !AddressToken.isAddress(
+                AddressToken.enclosingToken(range, in: result)
+            ) else {
+                return nil
+            }
+            return symbol + " "
+        }
 
         return normalizeQuoteSpacing(result)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// a dot after a single letter that itself follows a dot is an
+    /// abbreviation, not a sentence: "7 p.m.", "e.g.", "the U.S. team". a
+    /// space there cuts the word in half and shouts the next one.
+    private func isAbbreviationDot(
+        _ symbol: String,
+        at index: String.Index,
+        in text: String
+    ) -> Bool {
+        guard symbol == ".", index > text.startIndex else {
+            return false
+        }
+        let letterIndex = text.index(before: index)
+        guard text[letterIndex].isLetter,
+              letterIndex > text.startIndex else {
+            return false
+        }
+        return text[text.index(before: letterIndex)] == "."
     }
 
     private func normalizeQuoteSpacing(_ input: String) -> String {
