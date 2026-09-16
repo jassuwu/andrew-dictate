@@ -115,6 +115,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" "AndrewDictate-$VERSION.dmg" \
+            ../../reel/andrew-dictate-launch.mp4 \
             --title "Andrew Dictate $VERSION" \
             --generate-notes --verify-tag \
             --notes "install: \`brew install --cask jassuwu/tap/andrew-dictate\` then \`xattr -dr com.apple.quarantine \"/Applications/Andrew Dictate.app\"\` (unsigned build). sha256: $(cat dmg.sha256)"
