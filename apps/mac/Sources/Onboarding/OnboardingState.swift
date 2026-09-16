@@ -164,6 +164,16 @@ struct OnboardingState: Equatable, Sendable {
         verdict == .ready
     }
 
+    /// The models live in FluidAudio's shared folder, not this app's, so one
+    /// user watches ~460 mb arrive and the next finds it already there. The
+    /// row ends gold either way; the sentence is the only thing that knows
+    /// which of the two just happened.
+    static func modelReadyCaption(wasOnDisk: Bool) -> String {
+        wasOnDisk
+            ? "already on this mac. nothing to download."
+            : "downloaded. it stays on this mac."
+    }
+
     /// The ticks are a question asked once. After consent the downloads have
     /// started and the permissions have been asked for, so unticking a job
     /// would be undoing something that already happened; setup answers no
