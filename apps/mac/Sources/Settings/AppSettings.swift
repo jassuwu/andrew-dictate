@@ -307,7 +307,10 @@ final class AppSettings: ObservableObject {
 
     private let userDefaults: UserDefaults
 
-    init(userDefaults: UserDefaults = .standard) {
+    init(
+        userDefaults: UserDefaults = .standard,
+        unpickedMeetingsFolder: URL = AppSettings.unpickedMeetingsFolder()
+    ) {
         self.userDefaults = userDefaults
         onboardingDismissed = userDefaults.bool(
             forKey: Self.onboardingDismissedKey
@@ -350,7 +353,7 @@ final class AppSettings: ObservableObject {
         let pickedMeetingsFolder = userDefaults
             .string(forKey: Self.meetingsFolderKey)
             .map { URL(fileURLWithPath: $0, isDirectory: true) }
-        meetingsFolder = pickedMeetingsFolder ?? Self.unpickedMeetingsFolder()
+        meetingsFolder = pickedMeetingsFolder ?? unpickedMeetingsFolder
         meetingHook = userDefaults
             .string(forKey: Self.meetingHookKey)
             .map { URL(fileURLWithPath: $0) }
