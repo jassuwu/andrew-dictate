@@ -172,6 +172,15 @@ final class DictionaryStore: ObservableObject {
         var updated = 0
 
         for entry in imported {
+            // the same refusal the table makes: a rule that becomes nothing
+            // is a rule that can never fire, and a file someone sent you
+            // does not get to empty a word you taught it.
+            guard !entry.right
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty else {
+                continue
+            }
+
             let key = Self.matchKey(entry.wrong)
             guard let index = entries.firstIndex(where: {
                 Self.matchKey($0.wrong) == key
