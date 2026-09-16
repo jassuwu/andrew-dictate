@@ -18,6 +18,15 @@ const compare = [
   { row: "platforms", ours: "macOS, apple silicon", theirs: "mac, windows, iphone, android", src: "https://wisprflow.ai/", them: true },
 ];
 
+// every pair here is pinned by a test — CleanerTests.swift and
+// SpokenEmailTests.swift carry a sync comment pointing back at this file, so
+// the page can only ever claim what the cleaner actually does.
+const rendered = [
+  { heard: "hello comma how are you question mark", pasted: "Hello, how are you?" },
+  { heard: "ping me at support at acme dot io tomorrow", pasted: "Ping me at support@acme.io tomorrow." },
+  { heard: "um, I uh think erm, this uhm works", pasted: "Um, I uh think erm, this uhm works." },
+];
+
 const description =
   "free, local dictation and meeting transcripts for macOS. hold fn, talk, let go. the speech models run on your mac. alpha, and honest about it.";
 ---
@@ -112,6 +121,44 @@ const description =
           </p>
           <p class="mt-4 font-mono text-[11.5px] leading-[1.8] tracking-[0.02em] text-[#f2ede0]/40">
             ~2.9 gb · no audio kept · you start it, you stop it
+          </p>
+        </div>
+      </section>
+
+      <section class="mt-10">
+        <h2 class="text-[17px] font-semibold tracking-[-0.01em] text-[#f2ede0]">
+          what it does to what you said
+        </h2>
+
+        <div class="mt-6 rounded-xl border border-[#f2ede0]/[0.08] bg-[#f2ede0]/[0.025] p-5">
+          <div class="hidden grid-cols-[1fr_1.5rem_1fr] gap-x-3 border-b border-[#f2ede0]/10 pb-2 sm:grid">
+            <span class="font-mono text-[11px] tracking-[0.1em] text-[#f2ede0]/40">heard</span>
+            <span></span>
+            <span class="font-mono text-[11px] tracking-[0.1em] text-[#e5be62]/70">pasted</span>
+          </div>
+
+          <div class="divide-y divide-[#f2ede0]/[0.07]">
+            {
+              rendered.map((r) => (
+                <div class="grid gap-x-3 py-3.5 sm:grid-cols-[1fr_1.5rem_1fr]">
+                  <p class="font-mono text-[14px] leading-[1.6] text-[#f2ede0]/55">
+                    <span class="mr-2 text-[10px] tracking-[0.1em] text-[#f2ede0]/40 sm:hidden">heard</span>
+                    {r.heard}
+                  </p>
+                  <span aria-hidden="true" class="hidden text-center font-mono text-[14px] leading-[1.6] text-[#f2ede0]/30 sm:block">
+                    →
+                  </span>
+                  <p class="mt-1.5 font-mono text-[14px] leading-[1.6] text-[#f2ede0] sm:mt-0">
+                    <span class="mr-2 text-[10px] tracking-[0.1em] text-[#e5be62]/70 sm:hidden">pasted</span>
+                    {r.pasted}
+                  </p>
+                </div>
+              ))
+            }
+          </div>
+
+          <p class="mt-4 text-[14px] leading-[1.7] text-[#f2ede0]/60">
+            no model rewrote that. it's the same words, written down.
           </p>
         </div>
       </section>
