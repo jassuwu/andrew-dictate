@@ -27,6 +27,11 @@ const rendered = [
   { heard: "um, I uh think erm, this uhm works", pasted: "Um, I uh think erm, this uhm works." },
 ];
 
+// slack, x and imessage will not resolve a relative og:image — astro.config.mjs
+// sets `site`, and a missing key fails the build here rather than shipping quietly.
+const canonical = new URL("/", Astro.site).href;
+const ogImage = new URL("/og.png", Astro.site).href;
+
 const description =
   "free, local dictation and meeting transcripts for macOS. hold fn, talk, let go. the speech models run on your mac. alpha, and honest about it.";
 ---
@@ -38,10 +43,14 @@ const description =
     <title>andrew dictate — escape the keyboard.</title>
     <meta name="description" content={description} />
     <link rel="icon" href="/favicon.png" />
+    <link rel="canonical" href={canonical} />
     <meta property="og:title" content="andrew dictate" />
     <meta property="og:description" content={description} />
-    <meta property="og:image" content="/og.png" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImage} />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content={ogImage} />
   </head>
 
   <body class="bg-[#0c0c0e] text-[#f2ede0] antialiased">
