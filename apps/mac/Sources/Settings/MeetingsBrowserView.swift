@@ -2,7 +2,9 @@ import AppKit
 import SwiftUI
 
 /// the meetings half of history. the same row idiom as dictations: the facts
-/// on the left, the two things you came for revealed on hover.
+/// on the left, and on hover the three things you came for — open, show in
+/// finder, delete. a double-click on the row opens it too, the way every other
+/// mac list of documents behaves.
 struct MeetingsBrowserView: View {
     @ObservedObject var viewModel: MeetingsListModel
 
@@ -85,6 +87,8 @@ private struct MeetingRow: View {
             // actions appear on hover: a list that grows for years should
             // not be a wall of buttons.
             HStack(spacing: 6) {
+                Button("open", action: open)
+                    .help("open the transcript")
                 Button("show in finder") {
                     NSWorkspace.shared.activateFileViewerSelecting(
                         [meeting.fileURL]
@@ -98,7 +102,25 @@ private struct MeetingRow: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 9)
         .contentShape(Rectangle())
+        .onTapGesture(count: 2, perform: open)
         .onHover { isHovering = $0 }
+    }
+
+    /// the file *is* the artifact (ADR 0040), so this hands it to whatever
+    /// markdown app the user already has — there is no reader of our own to
+    /// keep. a file renamed since the folder was read reveals where it was,
+    /// rather than being a click that does nothing.
+    private func open() {
+        guard !NSWorkspace.shared.open(meeting.fileURL) else { return }
+
+        let stillThere = FileManager.default.fileExists(
+            atPath: meeting.fileURL.path(percentEncoded: false)
+        )
+        NSWorkspace.shared.activateFileViewerSelecting([
+            stillThere
+                ? meeting.fileURL
+                : meeting.fileURL.deletingLastPathComponent()
+        ])
     }
 
     private var separator: some View {
