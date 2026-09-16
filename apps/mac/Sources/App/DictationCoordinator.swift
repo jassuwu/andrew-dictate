@@ -72,6 +72,10 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var state: State = .prewarming
     @Published private(set) var enginePreparationState:
         EnginePreparationState = .notStarted
+    /// sampled once, before the download starts: `.ready` is reached the same
+    /// way whether 460 mb came down or the folder was already full, and setup
+    /// has to say which of the two the user just lived through.
+    @Published private(set) var engineModelWasOnDisk = false
     @Published private(set) var activeEngineVersion: EngineVersion
     @Published private(set) var engineSwitchMessage: String?
     @Published private(set) var hotkeyDetection: HotkeyDetection?
@@ -692,6 +696,9 @@ final class DictationCoordinator: ObservableObject {
         let version = activeEngineVersion
         isPrewarmed = false
         engineSwitchMessage = nil
+        // asked before a byte moves, so the answer cannot be fooled by how
+        // the progress callbacks happen to land.
+        engineModelWasOnDisk = ModelStore.isOnDisk(version)
         enginePreparationState = .downloading(progress: 0)
         setState(.prewarming)
 
@@ -768,6 +775,7 @@ final class DictationCoordinator: ObservableObject {
         }
 
         let currentVersion = engineSwitchState.activeVersion
+        engineModelWasOnDisk = ModelStore.isOnDisk(version)
         enginePreparationState = .downloading(progress: 0)
         engineSwitchMessage = nil
         engineLogger.notice(
