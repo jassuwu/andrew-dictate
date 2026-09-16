@@ -986,7 +986,9 @@ private struct DictionaryEditor: View {
             ),
             presenting: pendingImport
         ) { pending in
+            // ⏎ adds. the safe answer is the one your hands already have.
             Button("add to mine") { addImport(pending) }
+                .keyboardShortcut(.defaultAction)
             Button("replace", role: .destructive) {
                 replaceWithImport(pending)
             }
