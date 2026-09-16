@@ -427,19 +427,31 @@ private enum CoreAudioProperties {
     }
 
     /// The HAL's object for a running process, by bundle id. Nothing is
-    /// running under that id → no object.
+    /// running under that id → no object. there is no bundle-id lookup in
+    /// the HAL: walk its process list and read each object's bundle id.
     static func processObject(for bundleID: String) -> AudioObjectID? {
-        var address = address(kAudioHardwarePropertyTranslateBundleIDToProcessObject)
-        var identifier = bundleID as CFString
-        var object = AudioObjectID(0)
-        var size = UInt32(MemoryLayout<AudioObjectID>.size)
-        let status = withUnsafeMutablePointer(to: &identifier) { qualifier in
-            AudioObjectGetPropertyData(
-                AudioObjectID(kAudioObjectSystemObject), &address,
-                UInt32(MemoryLayout<CFString>.size), qualifier, &size, &object)
+        var address = address(kAudioHardwarePropertyProcessObjectList)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size
+        ) == noErr, size > 0 else { return nil }
+        var objects = [AudioObjectID](
+            repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &objects
+        ) == noErr else { return nil }
+        return objects.first { processBundleID($0) == bundleID }
+    }
+
+    private static func processBundleID(_ process: AudioObjectID) -> String? {
+        var address = address(kAudioProcessPropertyBundleID)
+        var value: CFString? = nil
+        var size = UInt32(MemoryLayout<CFString?>.size)
+        let status = withUnsafeMutablePointer(to: &value) {
+            AudioObjectGetPropertyData(process, &address, 0, nil, &size, $0)
         }
-        guard status == noErr, object != 0 else { return nil }
-        return object
+        guard status == noErr, let value else { return nil }
+        return value as String
     }
 
     static func isRunningOutput(_ process: AudioObjectID) -> Bool? {
