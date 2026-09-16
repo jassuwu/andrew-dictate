@@ -1633,6 +1633,13 @@ extension DictationCoordinator {
         meetingNotifier.onStop = { [weak self] in
             self?.stopMeeting()
         }
+        // transcripts written before the app started locking them down are
+        // still 0644 — other people's words, readable by every account on
+        // the machine. repaired once, off the main thread.
+        let folder = settings.meetingsFolder
+        Task.detached(priority: .utility) {
+            MeetingTranscriptFile.lockDown(in: folder)
+        }
         meetings.recoverOrphans()
     }
 

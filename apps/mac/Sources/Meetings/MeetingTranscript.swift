@@ -138,6 +138,14 @@ enum MeetingTranscriptFile {
         return lines.joined(separator: "\n")
     }
 
+    /// The file is chmod 0600 and the two folders the app makes for it 0700.
+    /// It holds other people's words, and the default 0644 would make that
+    /// readable by every other account on the machine — the same rule the
+    /// dictation archive, the spool and its audio already carry.
+    ///
+    /// Every permission call here is `try?` on purpose: a volume without
+    /// POSIX modes must not turn a transcript that is already on disk into a
+    /// `.saveFailed` and a spool the next launch writes out twice.
     @discardableResult
     static func write(
         _ transcript: MeetingTranscript,
@@ -148,12 +156,45 @@ enum MeetingTranscriptFile {
         let url = fileURL(
             in: parent, started: transcript.started, app: transcript.app,
             fileManager: fileManager, timeZone: timeZone)
+        let month = url.deletingLastPathComponent()
         try fileManager.createDirectory(
-            at: url.deletingLastPathComponent(),
-            withIntermediateDirectories: true)
+            at: month,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
         try markdown(transcript, timeZone: timeZone)
             .write(to: url, atomically: true, encoding: .utf8)
+        try? fileManager.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: url.path)
+        // `createDirectory` only dresses the folders it had to make, so the
+        // two the app owns are set every time. never `parent`: that one is
+        // the user's, and they picked it.
+        for folder in [month, month.deletingLastPathComponent()] {
+            try? fileManager.setAttributes(
+                [.posixPermissions: 0o700], ofItemAtPath: folder.path)
+        }
         return url
+    }
+
+    /// The transcripts already on disk, written before the app locked them
+    /// down. Run once at launch; a file it cannot touch is left as it is.
+    static func lockDown(in parent: URL, fileManager: FileManager = .default) {
+        let folder = parent.appendingPathComponent(folderName, isDirectory: true)
+        guard let enumerator = fileManager.enumerator(atPath: folder.path) else {
+            return
+        }
+        try? fileManager.setAttributes(
+            [.posixPermissions: 0o700], ofItemAtPath: folder.path)
+        for case let relative as String in enumerator where !relative.hasPrefix(".") {
+            let url = folder.appendingPathComponent(relative, isDirectory: false)
+            if relative.hasSuffix(".md") {
+                try? fileManager.setAttributes(
+                    [.posixPermissions: 0o600], ofItemAtPath: url.path)
+            } else if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?
+                .isDirectory == true {
+                try? fileManager.setAttributes(
+                    [.posixPermissions: 0o700], ofItemAtPath: url.path)
+            }
+        }
     }
 
     // MARK: - reading back
