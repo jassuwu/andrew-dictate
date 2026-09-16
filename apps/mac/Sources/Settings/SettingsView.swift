@@ -61,8 +61,13 @@ struct SettingsView: View {
         let settings = coordinator.settings
 
         _coordinator = ObservedObject(wrappedValue: coordinator)
+        let spool = MeetingSpool()
         _meetings = StateObject(
-            wrappedValue: MeetingsListModel(load: meetingsLoader)
+            wrappedValue: MeetingsListModel(
+                setAsideFolder: spool.unreadableFolder,
+                countSetAside: { spool.unreadableCount() },
+                load: meetingsLoader
+            )
         )
         _settings = ObservedObject(wrappedValue: settings)
         _dictionaryStore = ObservedObject(
