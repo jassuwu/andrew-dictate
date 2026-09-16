@@ -1,12 +1,14 @@
 import AppKit
 
-// og image compositor: dark bg + the badge (from icon_1024.png) + type.
+// og image compositor: dark bg + the badge (from badge_1024.png) + type.
 // rendered at 2x (2400x1260) because that is what the site ships, into an
 // explicit bitmap so a retina display cannot double it again.
 // the type roles match the app (ADR 0037): paper for the name, machine
 // (Ioskeley Mono) for the tagline and the facts line.
 let art = FileManager.default.currentDirectoryPath
-guard let badge = NSImage(contentsOfFile: art + "/icon_1024.png") else { fatalError("no icon_1024") }
+// the badge alone, never icon_1024.png: that one carries apple's icon-grid
+// padding (process-icon.swift), and a poster is not an icon slot.
+guard let badge = NSImage(contentsOfFile: art + "/badge_1024.png") else { fatalError("no badge_1024") }
 
 let monoURL = URL(fileURLWithPath: art + "/../Sources/Resources/Fonts/IoskeleyMono-Regular.ttf")
 CTFontManagerRegisterFontsForURL(monoURL as CFURL, .process, nil)
