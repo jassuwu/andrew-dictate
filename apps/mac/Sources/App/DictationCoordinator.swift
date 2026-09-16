@@ -136,6 +136,11 @@ final class DictationCoordinator: ObservableObject {
     private var engineSwitchState: EngineSwitchState
     private var enginePreparationRequested: Bool
     private var settingsCancellables: Set<AnyCancellable> = []
+    /// One cleaner, kept. Its nineteen regexes — plus one per taught word —
+    /// compile on construction, and that used to happen on the main actor
+    /// between transcript and paste, growing with the dictionary. Rebuilt
+    /// only when the dictionary or the cleanup toggle changes.
+    private var cleaner = DeterministicCleaner(entries: [], fullCleanup: true)
     private var isApplyingPreRollSetting = false
     private var isApplyingEngineVersionSetting = false
     private var onboardingWindowController: OnboardingWindowController?
@@ -278,6 +283,22 @@ final class DictationCoordinator: ObservableObject {
                 self.replaceEngine(with: version)
             }
             .store(in: &settingsCancellables)
+
+        // one cleaner per dictionary-and-toggle, not one per dictation.
+        // CombineLatest seeds itself from both current values here, and the
+        // closure must use what it is handed: a @Published sink fires on
+        // willSet, so reading the store would hand back the old array.
+        Publishers.CombineLatest(
+            dictionaryStore.$entries,
+            settings.$cleanupEnabled
+        )
+        .sink { [weak self] entries, fullCleanup in
+            self?.cleaner = DeterministicCleaner(
+                entries: entries,
+                fullCleanup: fullCleanup
+            )
+        }
+        .store(in: &settingsCancellables)
 
         installSystemLifecycleObservers()
         wireMeetings()
@@ -1095,6 +1116,9 @@ final class DictationCoordinator: ObservableObject {
             id: timelineID,
             keyDown: timelineClock.now
         )
+        // the standby anchor. the one that decides the paste is taken at
+        // key-up; this is what stands in if AX hands back nothing then, or
+        // if by then the frontmost window is one of ours.
         let focusAnchor = FocusAnchor.capture()
 
         do {
@@ -1168,7 +1192,12 @@ final class DictationCoordinator: ObservableObject {
         do {
             activeTimeline?.keyUp = timelineClock.now
             let samples = try audioRecorder.stop()
-            let focusAnchor = activeFocusAnchor
+            // taken now rather than at key-down: the window worth protecting
+            // is key-up → paste, the ~600 ms when nobody is moving anything.
+            // key-down → paste spans the whole utterance, which is exactly
+            // when aiming at the field you actually want is normal.
+            let focusAnchor = FocusAnchor.captureUnlessOurs()
+                ?? activeFocusAnchor
             activeFocusAnchor = nil
             if !isOnboardingPresented {
                 feedbackSounds.play(.end)
@@ -1251,10 +1280,6 @@ final class DictationCoordinator: ObservableObject {
             let transcriptReady = timelineClock.now
             activeTimeline?.transcriptReady = transcriptReady
 
-            let cleaner = DeterministicCleaner(
-                entries: dictionaryStore.entries,
-                fullCleanup: settings.cleanupEnabled
-            )
             let rawTranscript = cleaner.clean(transcript)
             activeTimeline?.cleaned = timelineClock.now
             guard !rawTranscript.trimmingCharacters(
@@ -1275,7 +1300,11 @@ final class DictationCoordinator: ObservableObject {
                 heard: transcript,
                 inserted: pasteTranscript
             )
-            let pasteResult = await paster.paste(
+            // hands-free means our own settings window may be in front of the
+            // app you dictated into. give the frontmost spot back before the
+            // ⌘V goes out, or the paste lands here and reads as focus theft.
+            _ = await focusAnchor?.yieldFocusBackToAnchor()
+            let outcome = await paster.paste(
                 pasteTranscript,
                 reasonForLeavingOnPasteboard: {
                     switch focusAnchor?.revalidationDecision()
@@ -1289,7 +1318,7 @@ final class DictationCoordinator: ObservableObject {
                     }
                 }
             )
-            if pasteResult != .leftOnPasteboard(
+            if outcome.result != .leftOnPasteboard(
                 .pasteboardUnavailable
             ) {
                 settings.recordDictatedTranscript(rawTranscript)
@@ -1298,16 +1327,20 @@ final class DictationCoordinator: ObservableObject {
                 return
             }
 
-            switch pasteResult {
+            switch outcome.result {
             case .pasted:
+                // the paste's own instant, not this one: paste() returns as
+                // soon as ⌘V is posted, and that is what "inserted" means.
                 completeTimeline(
-                    at: timelineClock.now,
-                    stage: .pasteVerified
+                    at: outcome.insertedAt,
+                    stage: .delivered
                 )
             case let .leftOnPasteboard(reason):
                 completeTimeline(
                     at: timelineClock.now,
-                    stage: .leftOnPasteboard
+                    stage: reason == .secureField
+                        ? .leftOnPasteboardSecure
+                        : .leftOnPasteboard
                 )
                 setState(.idle)
                 await flashFeedback(
@@ -1387,13 +1420,14 @@ final class DictationCoordinator: ObservableObject {
     /// A dictation becomes a kept thing only once it has actually been
     /// delivered. A cancelled one produced no text, so there is nothing to
     /// keep; one left on the pasteboard reached you by another route and
-    /// still counts.
+    /// still counts — except the one refused for a secure field, which
+    /// reached nowhere and is a password.
     private func archive(
         _ timeline: UtteranceTimeline,
         stage: UtteranceTimeline.CompletionStage
     ) {
         guard settings.keepDictations,
-              stage != .cancelled,
+              stage.isKeepable,
               let text = pendingArchiveText else {
             return
         }

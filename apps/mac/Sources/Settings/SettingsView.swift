@@ -800,12 +800,14 @@ struct SettingsView: View {
 
     private var sampleLine: String {
         guard let timings, timings.sampleSize > 0 else {
-            return "no verified pastes measured yet — dictate something."
+            return "no delivered pastes measured yet — dictate something."
         }
-        return timings.sampleSize == 1
-            ? "measured over 1 verified paste on this mac."
-            : "measured over \(timings.sampleSize) verified pastes "
-                + "on this mac."
+        if timings.sampleSize == 1 {
+            return "measured over 1 delivered paste on this mac."
+        }
+        return """
+            measured over \(timings.sampleSize) delivered pastes on this mac.
+            """
     }
 
     private func milliseconds(_ duration: Duration?) -> String {

@@ -135,6 +135,11 @@ targets:
       - Sources/Hotkey/HotkeyBinding.swift
       - Sources/Hotkey/TapLockDetector.swift
       - Sources/Insertion/FocusAnchor.swift
+      # the pasteboard write is asserted on a private pasteboard; no test
+      # here posts a keystroke. the key-code resolver comes along because
+      # Paster holds one.
+      - Sources/Insertion/Paster.swift
+      - Sources/Insertion/PasteKeyCodeResolver.swift
       - Sources/Instrumentation/UtteranceTimeline.swift
       - Sources/Instrumentation/TimelineSummary.swift
     settings:

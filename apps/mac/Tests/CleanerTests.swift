@@ -552,6 +552,30 @@ final class CleanerTests: XCTestCase {
         XCTAssertNotEqual(capitalizationFirst, punctuationFirst)
     }
 
+    /// The property the coordinator's one kept cleaner depends on: the
+    /// transforms hold nothing but `let`s, so a reused cleaner cannot drift
+    /// from a freshly built one no matter how many transcripts it has seen.
+    func testOneCleanerReusedAcrossTranscriptsMatchesFreshConstruction() {
+        let entries = [
+            DictionaryEntry(wrong: "gpt", right: "GPT"),
+            DictionaryEntry(wrong: "iphone", right: "iPhone"),
+        ]
+        let transcripts = [
+            "use gpt on my iphone comma please",
+            "twenty three new line send it to me at jass at jass dot gg",
+            "it works question mark",
+        ]
+        let reused = DeterministicCleaner(entries: entries)
+
+        for transcript in transcripts {
+            XCTAssertEqual(
+                reused.clean(transcript),
+                DeterministicCleaner(entries: entries).clean(transcript),
+                "transcript: \(transcript)"
+            )
+        }
+    }
+
     private func assertTransform(
         _ transform: any TranscriptTransform,
         cases: [(String, String)],

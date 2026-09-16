@@ -5,9 +5,26 @@ struct UtteranceTimeline: Sendable {
     typealias Instant = ContinuousClock.Instant
 
     enum CompletionStage: String, Sendable {
-        case pasteVerified
+        /// The ⌘V was posted with focus still where we left it. Not a claim
+        /// that the target app took the text: nothing here checks that.
+        case delivered
         case leftOnPasteboard
+        case leftOnPasteboardSecure
         case cancelled
+
+        /// Whether a dictation that ended this way is a thing worth keeping.
+        ///
+        /// A cancelled one produced no text. One refused for a secure field
+        /// was delivered nowhere and is a password, not a dictation — every
+        /// other pasteboard hand-off reached you by another route and counts.
+        var isKeepable: Bool {
+            switch self {
+            case .delivered, .leftOnPasteboard:
+                true
+            case .leftOnPasteboardSecure, .cancelled:
+                false
+            }
+        }
     }
 
     struct CancellationStages: Equatable, Sendable {

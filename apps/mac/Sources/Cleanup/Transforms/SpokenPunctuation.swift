@@ -26,8 +26,10 @@ struct SpokenPunctuation: TranscriptTransform {
         }
     }
 
-    // hoisted out of formatExtractedSymbols: it runs on every utterance,
-    // so the patterns are compiled once, not per transcript.
+    // hoisted out of formatExtractedSymbols: it runs on every utterance, so
+    // these four are compiled once for the whole process. the markers below
+    // are compiled once per cleaner — which is why the coordinator keeps one
+    // instead of building a fresh one per dictation.
     private static let beforePunctuation = CleanupRegex.compile(
         "[ \\t]+([,.;:!?])"
     )

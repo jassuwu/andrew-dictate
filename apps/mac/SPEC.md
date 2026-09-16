@@ -32,9 +32,9 @@ hold fn ──▶ mic capture ──▶ key-up ──▶ engine (parakeet v2, pr
 ## 3. dictation
 
 - key-up → transcript → cleaner → **inserter**.
-- **insertion strategy (v1): transactional paste only.** snapshot pasteboard (all types), write plain text, synthetic cmd-V resolved for the active layout, verify change, restore only if `changeCount` still ours. AX selected-text insertion is v1.x.
-- **target safety:** frontmost bundle id + focused-element captured at key-down; re-verified before paste. focus changed → don't paste; transcript stays on the clipboard + HUD shows "copied — focus changed."
-- **secure fields:** detected via AX subrole → never auto-insert; HUD offers explicit copy.
+- **insertion strategy (v1): transactional paste only.** snapshot pasteboard (all types), write plain text, synthetic cmd-V resolved for the active layout, verify change, restore only if `changeCount` still ours. the transcript is marked `org.nspasteboard.TransientType` so clipboard managers do not keep a copy of it. AX selected-text insertion is v1.x.
+- **target safety:** frontmost bundle id + focused-element captured at key-up (aiming at the field you want while still talking is the normal thing to do); re-verified before paste. focus changed → don't paste; transcript stays on the clipboard + HUD shows "copied — focus changed."
+- **secure fields:** detected via AX subrole → never auto-insert; HUD offers explicit copy. a dictation refused for a secure field is never written to `dictations.jsonl`, and its clipboard copy is marked `org.nspasteboard.ConcealedType` so clipboard managers do not record it.
 - **what it keeps (ADR 0022, 0026):** every delivered dictation is written to `dictations.jsonl` in application support — raw + inserted text, time, engine, key-up→inserted — **on by default**, stated in onboarding, with the toggle and `delete all` in settings. cancelled dictations are not kept; there was no text. chmod 0600. this is a deliberate contrast with pre-roll's off-by-default: pre-roll opens a microphone, this keeps text already produced and already pasted.
 - **ceiling:** capture stops itself at five minutes and keeps what it heard; the pill says `five minutes — that's the cap`. **esc** cancels anything in flight — nothing pasted, nothing kept.
 - **escape hatch:** ~~"copy last" in the menu~~ **removed 2026-08-22 (ADR 0030).** it was justified as the way out when a paste fails — but a failed paste *already* leaves the text on the clipboard ("copied — secure field", "copied — focus changed"), so the hatch was covering a hole that was already covered. wanting it again is what the archive is for. the raw transcript is still held, and still feeds "fix a word…" — which is the one action the menu keeps, because it is the only one that is time-sensitive.
@@ -74,9 +74,9 @@ two rules, both learned the hard way: options that appear on more than one scree
 
 every utterance logs its stage timestamps locally (debug menu to dump):
 
-`keyDown → micFirstBuffer → keyUp → transcriptReady → cleaned → pasteVerified`
+`keyDown → micFirstBuffer → keyUp → transcriptReady → cleaned → delivered`
 
-working targets, not commitments: key-up → transcript ≤ 250ms, key-up → inserted ≤ 450ms (base M4, warm, p50). **the published quantity is key-up → inserted** — key-up → transcript would flatter us by excluding the span the claim is about (ADR 0025). "copy timings" ships in **release**: it prints p50/p95/max over verified pastes only, with the sample size, the exclusions, and the machine/chip/os/engine/build it was measured on, above the per-utterance table it came from. anyone can produce that number on their own mac from their own speech, which is the point — it replaces the standalone bench harness rather than deferring it. **no competitor benchmark is published**: the only figure that exists anywhere is a rival founder's estimate, and a claim resting on that is not evidence.
+working targets, not commitments: key-up → transcript ≤ 250ms, key-up → inserted ≤ 450ms (base M4, warm, p50). **the published quantity is key-up → inserted** — measured to the ⌘V keystroke reaching the target app, not to the clipboard restore that follows it; key-up → transcript would flatter us by excluding the span the claim is about (ADR 0025). "copy timings" ships in **release**: it prints p50/p95/max over delivered pastes only, with the sample size, the exclusions, and the machine/chip/os/engine/build it was measured on, above the per-utterance table it came from. anyone can produce that number on their own mac from their own speech, which is the point — it replaces the standalone bench harness rather than deferring it. **no competitor benchmark is published**: the only figure that exists anywhere is a rival founder's estimate, and a claim resting on that is not evidence.
 
 ## 8. distribution
 

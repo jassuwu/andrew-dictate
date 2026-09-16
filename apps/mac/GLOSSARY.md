@@ -11,6 +11,7 @@ the domain model. one term, one meaning. if a word isn't here, it doesn't get us
 | **lamp** | the bare gold line the hud draws while prewarming, recording, and cooling. its afterglow is the success signal, which is why failure must cut it short. |
 | **pill** | the glass hud style. carries every exceptional message and nothing else — if the pill is showing, something needs saying. |
 | **inserter** | puts a transcript into the frontmost app (paste-based, transactional, clipboard-restoring). the sole consumer of a transcript. |
+| **delivered** | a dictation whose ⌘V was posted with focus still where we left it. the only completion that counts toward the published latency; the app does not claim the target app accepted the text. |
 | **hud** | the single floating panel (nonactivating NSPanel). shows recording state and results. the only persistent ui. |
 | **prewarm** | loading + compiling the engine at launch so the hotkey path never touches model loading. |
 | **onboarding** | the only place that asks macOS for permissions. first run: two grants + model download, ending with a working hotkey — and it returns whenever the app can no longer do its job. |
