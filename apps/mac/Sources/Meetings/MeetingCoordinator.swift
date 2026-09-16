@@ -106,6 +106,22 @@ final class MeetingCoordinator: ObservableObject {
     private var linesTask: Task<Void, Never>?
     private var nudgePending = false
     private var isRebuilding = false
+    /// Every health check in here is driven by a chunk arriving, so a tap
+    /// that stops calling back altogether — the mac slept, the screen
+    /// locked, the driver died — freezes the clock instead of failing. These
+    /// two are the wall the meeting is measured against when that happens.
+    private var startedOn: ContinuousClock.Instant?
+    private var lastChunkArrived: ContinuousClock.Instant?
+    private var watchdogTask: Task<Void, Never>?
+    /// injected so a test can move the wall without waiting on it.
+    private let now: @Sendable () -> ContinuousClock.Instant
+
+    /// A system event has already proven something happened, so this may be
+    /// short: five seconds of a tap that has not called back is a dead tap.
+    private static let silentTapOnWaking = Duration.seconds(5)
+    /// Unprompted, nothing has proven anything — so the watchdog waits the
+    /// full silence timeout before it says the same thing.
+    private static let watchdogInterval = Duration.seconds(10)
 
     init(
         source: any MeetingAudioSource,
@@ -114,6 +130,7 @@ final class MeetingCoordinator: ObservableObject {
         spool: MeetingSpool = MeetingSpool(),
         hookRunner: HookRunner = HookRunner(logURL: HookRunner.defaultLogURL),
         thresholds: MeetingThresholds = .provisional,
+        now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now },
         preferences: @escaping @MainActor () -> MeetingPreferences
     ) {
         self.source = source
@@ -122,6 +139,7 @@ final class MeetingCoordinator: ObservableObject {
         self.spool = spool
         self.hookRunner = hookRunner
         self.thresholds = thresholds
+        self.now = now
         self.preferences = preferences
         session = MeetingSession(quietNudgeAfter: thresholds.quietNudgeAfter)
         health = Self.freshMonitor(thresholds)
@@ -148,7 +166,10 @@ final class MeetingCoordinator: ObservableObject {
         elapsed = .zero
         liveLines = []
         startedAt = Date()
+        startedOn = now()
+        lastChunkArrived = now()
         nudgePending = false
+        startWatchdog()
         publish()
 
         let appName = MeetingApps.displayName(app)
@@ -219,12 +240,18 @@ final class MeetingCoordinator: ObservableObject {
         captureTask = nil
         linesTask?.cancel()
         linesTask = nil
+        watchdogTask?.cancel()
+        watchdogTask = nil
         let appName = MeetingApps.displayName(app)
 
         Task { [weak self] in
             guard let self else { return }
             await source.stop()
-            let recording = session.finish(at: elapsed)
+            // A tap that never came back leaves an open gap; closing it at
+            // the wall makes the file cover the whole call instead of
+            // stopping where the audio did.
+            let recording = session.finish(at: max(elapsed, wallElapsed))
+            startedOn = nil
             publish()
 
             guard let recording, let handle else {
@@ -256,12 +283,61 @@ final class MeetingCoordinator: ObservableObject {
         captureTask = nil
         linesTask?.cancel()
         linesTask = nil
+        watchdogTask?.cancel()
+        watchdogTask = nil
+        startedOn = nil
         transcriber = nil
         audioFile = nil
         handle = nil
         Task { [source] in await source.stop() }
         _ = session.finish(at: elapsed)
         publish()
+    }
+
+    // MARK: - the tap that stopped calling back
+
+    /// Called when the mac wakes or the screen unlocks. `TapHealthMonitor`
+    /// only ever hears about a tap that is still delivering buffers, so a
+    /// sleep — which stops the callback outright — looks like nothing at all
+    /// from inside `ingest`. The wall clock is the only witness: if nothing
+    /// has arrived for five seconds across a system event, the tap is gone
+    /// and this takes the same route a zero-sample buffer would (SPEC §11).
+    func probeTapIsAlive() {
+        noteTheTapStoppedCallingBack(after: Self.silentTapOnWaking)
+    }
+
+    /// The machine never slept; the IOProc died anyway (a driver panic, a
+    /// device yanked). Nothing will wake us for that, so a timer asks.
+    private func startWatchdog() {
+        watchdogTask?.cancel()
+        watchdogTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: MeetingCoordinator.watchdogInterval)
+                guard let self, !Task.isCancelled else { return }
+                noteTheTapStoppedCallingBack(after: thresholds.silenceTimeout)
+            }
+        }
+    }
+
+    private func noteTheTapStoppedCallingBack(after limit: Duration) {
+        guard session.state == .recording, let lastChunkArrived else { return }
+        guard now() - lastChunkArrived >= limit else { return }
+
+        // The gap begins where the audio stopped, not where the wall is now
+        // — then the clock catches up, so the menu stops counting a meeting
+        // in frames that no longer arrive.
+        session.tapWentSilent(at: elapsed)
+        elapsed = max(elapsed, wallElapsed)
+        publish()
+        onEvent?(.gapBegan)
+        rebuildTap()
+    }
+
+    /// How long the meeting has actually been going. Audio time is a frame
+    /// count and frames stop existing when the tap does.
+    private var wallElapsed: Duration {
+        guard let startedOn else { return elapsed }
+        return now() - startedOn
     }
 
     /// The nudge asked; the user said yes.
@@ -289,6 +365,7 @@ final class MeetingCoordinator: ObservableObject {
 
     private func ingest(_ chunk: MeetingAudioChunk) async {
         elapsed = chunk.at + chunk.duration
+        lastChunkArrived = now()
         if let audioFile {
             try? await audioFile.append(chunk)
         }
