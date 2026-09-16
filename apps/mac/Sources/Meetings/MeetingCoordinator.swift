@@ -390,7 +390,12 @@ final class MeetingCoordinator: ObservableObject {
             }
             session.tapRecovered(at: elapsed)
             if wasRebuilding { onEvent?(.gapEnded); publish() }
-            if elapsed >= probeUntil {
+            // A working tap is not the same thing as a room with people
+            // talking in it: the verdict stays `.capturing` through every
+            // pause. Only a chunk with sound in it, and only past the probe
+            // window, moves the quiet clock — otherwise silence resets the
+            // clock that is meant to be measuring it.
+            if chunk.themRMS > thresholds.silenceFloor, elapsed > probeUntil {
                 session.heardAudio(at: elapsed)
                 nudgePending = false
             }
@@ -429,12 +434,12 @@ final class MeetingCoordinator: ObservableObject {
             guard let self else { return }
             defer { isRebuilding = false }
             do {
+                // Set before the rebuild, not after: the tone can be heard
+                // the instant the tap is back.
+                probeUntil = elapsed + thresholds.probeTimeout
                 try await source.rebuild()
                 // A rebuilt tap must hear something before it is trusted
                 // again; a rebuild that produces silence is just a new gap.
-                // What it hears first is our own tone, so the quiet clock
-                // looks away for as long as that tone lasts.
-                probeUntil = elapsed + thresholds.probeTimeout
             } catch {
                 logger.error("tap rebuild failed: \(error.localizedDescription, privacy: .public)")
                 session.rebuildFailed()
