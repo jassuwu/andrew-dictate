@@ -18,16 +18,6 @@ enum PipelineStage: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    var summary: String {
-        switch self {
-        case .transcription:
-            "parakeet turns what you said into words. on-device."
-        case .deterministic:
-            "eight rules: punctuation you spoke, emails, numbers, "
-                + "your dictionary. it never rewrites your words."
-        }
-    }
-
     /// the stage cannot be switched off. transcription *is* the app.
     /// cleanup got its switch in ADR 0038 — off still runs the dictionary,
     /// so switching it off can't break a word you taught it.
@@ -84,4 +74,11 @@ enum PipelineSample {
     static let text =
         "send it to jass at jass dot gg comma and say we shipped "
             + "five hundred dollars of credits period"
+
+    /// the markers, read out of the transform itself: the line settings
+    /// prints can only ever name the phrases the cleaner listens for.
+    static let spokenMarkerLine =
+        "say them and they appear: "
+            + SpokenPunctuation.spokenMarkers.joined(separator: " · ")
+            + "."
 }
