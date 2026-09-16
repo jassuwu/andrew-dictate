@@ -109,6 +109,15 @@ final class DictationCoordinator: ObservableObject {
         )
     }
 
+    /// the narrower question the re-entry scope asks: set up, wants dictation,
+    /// and a grant is what is missing. a failed download wears the same dot
+    /// but goes back through the whole checklist, model row included.
+    var needsPermissionAttention: Bool {
+        settings.onboardingDismissed
+            && settings.dictationWanted
+            && !permissions.isDictationReady
+    }
+
     let dictionaryStore: DictionaryStore
     let settings: AppSettings
 
