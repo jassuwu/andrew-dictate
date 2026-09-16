@@ -28,6 +28,7 @@ final class CleanerTests: XCTestCase {
     func testFillersAreLeftWhereYouSaidThem() {
         let cleaner = DeterministicCleaner()
 
+        // also printed on dictate.jass.gg — apps/site/src/pages/index.astro
         XCTAssertEqual(
             cleaner.clean("um, I uh think erm, this uhm works"),
             "Um, I uh think erm, this uhm works."
@@ -431,6 +432,7 @@ final class CleanerTests: XCTestCase {
     }
 
     func testADRExampleSpokenPunctuationPipeline() {
+        // also printed on dictate.jass.gg — apps/site/src/pages/index.astro
         XCTAssertEqual(
             DeterministicCleaner().clean(
                 "hello comma how are you question mark"
