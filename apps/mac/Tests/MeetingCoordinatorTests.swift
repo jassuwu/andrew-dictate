@@ -305,6 +305,32 @@ final class MeetingCoordinatorTests: XCTestCase {
         XCTAssertEqual(spool.orphans().count, 0)
     }
 
+    /// The call ended, the tab stopped playing, nobody said anything for
+    /// minutes: the file must come back whole. A gap means audio was lost,
+    /// and once it means "it was quiet" it means nothing at all.
+    func testAQuietRoomIsNotRecordedAsDamage() async throws {
+        let c = coordinator()
+        source.playing = false
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+
+        await beQuiet(from: 5, through: 40)
+
+        XCTAssertFalse(events.contains(.gapBegan), "\(events)")
+        XCTAssertEqual(source.rebuilds, 0)
+        XCTAssertEqual(c.state, .recording)
+
+        c.stop()
+        await settle(for: 1.0)
+
+        let saved = try XCTUnwrap(
+            MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).first)
+        XCTAssertTrue(saved.complete)
+        XCTAssertEqual(saved.gapCount, 0)
+    }
+
     /// The banner is the only surface that waits until you are back at the
     /// mac, so it names the file rather than congratulating itself.
     func testTheSavedBannerNamesTheFile() {
@@ -418,6 +444,12 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
         guard let tone = toneOnRebuild else { return }
         send(MeetingAudioChunk(you: tone.you, them: tone.them, at: nextAt))
     }
+
+    /// What the tapped app says about its own output. `nil` is "cannot
+    /// tell", which is what the real source returns for a helper process.
+    var playing: Bool?
+
+    func tappedAppIsPlaying() -> Bool? { playing }
 
     func stop() async { continuation?.finish() }
 
