@@ -224,9 +224,9 @@ final class MeetingCoordinatorTests: XCTestCase {
         XCTAssertEqual(c.state, .recording)
         XCTAssertEqual(c.elapsed, .seconds(1_083))
 
-        // the lid closes at 00:18:03; forty minutes later the mac wakes and
-        // asks the tap whether it is still there.
-        clock.advance(by: .seconds(2_415))
+        // the lid closes at 00:18:03; forty minutes later the mac wakes at
+        // 00:58:18 by the wall and asks the tap whether it is still there.
+        clock.advance(by: .seconds(3_498))
         c.probeTapIsAlive()
         await settle()
 
