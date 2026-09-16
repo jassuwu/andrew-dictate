@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="apps/mac/art/icon_1024.png" width="140" alt="Andrew Dictate" />
+  <img src="apps/mac/art/badge_1024.png" width="140" alt="Andrew Dictate" />
 </p>
 
 <h1 align="center">andrew dictate</h1>
