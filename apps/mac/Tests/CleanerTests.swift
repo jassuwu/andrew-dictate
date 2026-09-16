@@ -144,6 +144,43 @@ final class CleanerTests: XCTestCase {
         )
     }
 
+    /// settings prints this list under the pipeline, read straight out of
+    /// the transform — so every name on it has to still produce its mark,
+    /// and a marker nobody proved cannot quietly join the list.
+    func testEverySpokenMarkerOnTheSettingsListStillWorks() {
+        let proof: [String: (spoken: String, written: String)] = [
+            "new paragraph": ("one new paragraph two", "one\n\ntwo"),
+            "new line": ("one new line two", "one\ntwo"),
+            "comma": ("one comma two", "one, two"),
+            "period": ("one period two", "one. two"),
+            "full stop": ("one full stop two", "one. two"),
+            "question mark": ("one question mark two", "one? two"),
+            "exclamation mark": ("one exclamation mark two", "one! two"),
+            "colon": ("one colon two", "one: two"),
+            "semicolon": ("one semicolon two", "one; two"),
+            "open quote": ("say open quote one", "say \"one"),
+            "close quote": (
+                "say open quote one close quote",
+                "say \"one\""
+            ),
+        ]
+
+        XCTAssertEqual(SpokenPunctuation.spokenMarkers.count, 11)
+
+        for marker in SpokenPunctuation.spokenMarkers {
+            guard let proven = proof[marker] else {
+                XCTFail("the list names \(marker) and nothing proves it")
+                continue
+            }
+            XCTAssertTrue(proven.spoken.contains(marker), marker)
+            XCTAssertEqual(
+                SpokenPunctuation().apply(proven.spoken),
+                proven.written,
+                marker
+            )
+        }
+    }
+
     func testEmailParserTable() {
         assertTransform(
             EmailParser(),
