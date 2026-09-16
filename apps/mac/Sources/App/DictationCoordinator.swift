@@ -179,6 +179,8 @@ final class DictationCoordinator: ObservableObject {
     private var pendingMeetingApp: RunningApp?
     private var liveTranscriptPanel: LiveTranscriptPanel?
     private var meetingCancellables: Set<AnyCancellable> = []
+    /// A quit is waiting on a meeting's transcript to be written.
+    private var quitWaitingOnMeeting = false
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
     private var distributedNotificationObservers: [NSObjectProtocol] = []
 
@@ -422,13 +424,7 @@ final class DictationCoordinator: ObservableObject {
             $0 != .speechModels
         }))
 
-        let app = Bundle.main.bundleURL
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        task.arguments = ["-n", app.path]
-        // A relaunch has to outlive us, so it is handed to `open` and we go.
-        try? task.run()
-        NSApp.terminate(nil)
+        AppRelaunch.now()
     }
 
     /// Ships in release (ADR 0025). A latency claim measured on a debug build
@@ -987,6 +983,24 @@ final class DictationCoordinator: ObservableObject {
             }
             distributedNotificationObservers.append(observer)
         }
+
+        // a second copy just refused to run and quit (AndrewDictateApp): it
+        // cannot draw anything itself, so the copy that is running says where
+        // it is. 2 s, like the other pill that points somewhere — the 1.2 s
+        // default is not long enough to read a sentence.
+        let alreadyRunningObserver = distributedCenter.addObserver(
+            forName: .andrewDictateAlreadyRunning,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.flashNotice(
+                    "already running — it's in the menu bar",
+                    duration: 2
+                )
+            }
+        }
+        distributedNotificationObservers.append(alreadyRunningObserver)
 
         let trustObserver = distributedCenter.addObserver(
             forName: SystemPermissions.accessibilityChanged,
@@ -1943,6 +1957,35 @@ extension DictationCoordinator {
         meetings.stop()
     }
 
+    /// A quit can arrive from the menu, from ⌘Q, or from brew asking the app
+    /// to go so it can replace the bundle under it (the cask's
+    /// `uninstall quit:`). A meeting recording is one of the two durable
+    /// nouns, so a quit that lands mid-meeting stops it first and waits for
+    /// the markdown — `finishQuitting()` answers when the transcript is
+    /// written, and the ceiling answers if whisper is still flushing.
+    func prepareToQuit() -> NSApplication.TerminateReply {
+        guard meetings.isRecording else {
+            return .terminateNow
+        }
+        quitWaitingOnMeeting = true
+        stopMeeting()
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(20))
+            self?.finishQuitting()
+        }
+        return .terminateLater
+    }
+
+    /// The transcript is on disk (or it never will be). Either way the quit
+    /// gets its answer once, and a second call is a no-op.
+    private func finishQuitting() {
+        guard quitWaitingOnMeeting else {
+            return
+        }
+        quitWaitingOnMeeting = false
+        NSApp.reply(toApplicationShouldTerminate: true)
+    }
+
     func toggleLiveTranscript() {
         let panel = liveTranscriptPanel ?? makeLiveTranscriptPanel()
         panel.toggle()
@@ -2004,6 +2047,10 @@ extension DictationCoordinator {
             meetingNotifier.ask(app: meetingAppName, quietFor: meetings.thresholds.quietNudgeAfter)
         case .saved, .nothingToKeep, .saveFailed, .engineFailed:
             liveTranscriptPanel?.dismissKeepingPreference()
+            // the transcript has landed, so a quit that was waiting on it
+            // can go through. the hook runs after this and may not finish;
+            // the file it was told about is already written.
+            finishQuitting()
         case .cannotHear, .gapBegan, .gapEnded, .writingItOut, .hookFailed:
             break
         }

@@ -25,13 +25,24 @@ the model is on your mac, so there's no server to wait for. you let go, it paste
 ```sh
 brew install --cask jassuwu/tap/andrew-dictate
 xattr -dr com.apple.quarantine "/Applications/Andrew Dictate.app"
+open "/Applications/Andrew Dictate.app"
 ```
 
-or grab the dmg from [releases](https://github.com/jassuwu/andrew-dictate/releases).
+or grab the dmg from [releases](https://github.com/jassuwu/andrew-dictate/releases). quit the running copy before you open a new one — two copies share one archive, and one meeting.
 
-the `xattr` line is there because the build is unsigned. i haven't paid apple the $99 for a developer account yet, so macOS quarantines it. right-click → open works too.
+the `xattr` line is there because the build is unsigned. i haven't paid apple the $99 for a developer account yet, so macOS quarantines it. no terminal? open the app, let macOS refuse, then go to system settings › privacy & security and click `open anyway` — that button only shows up for about an hour after macOS blocks it.
 
-first launch asks which jobs you want. dictation (~460 mb) is ticked; meeting recording (~2.9 gb) is there to tick if you want it.
+the last line opens it. there's no dock icon — a setup window comes up, and after that it lives as the gold badge in your menu bar. setup asks which jobs you want: dictation (~460 mb) is ticked; meeting recording (~2.9 gb) is there to tick if you want it.
+
+## update
+
+```sh
+brew upgrade --cask jassuwu/tap/andrew-dictate
+```
+
+that's it — you don't run the `xattr` line again. every release is signed with the same key, so homebrew carries your approval to the new version and your microphone and accessibility grants survive.
+
+brew swaps the app on disk, it can't restart it for you: quit andrew from the menu bar and open it again to be running the new one. the about window notices, and offers you the restart.
 
 ## where your words go
 
@@ -50,7 +61,7 @@ it's about 17k lines of swift. read it.
 - dictation is english by default. a multilingual model is one click away in settings.
 - meetings only write english. if you read hindi and want hindi, that's not here yet.
 - one dictation stops at five minutes. it keeps what it heard and pastes it — it just stops listening.
-- unsigned builds mean no auto-update. `check for updates` tells you, you install.
+- unsigned builds mean no auto-update. `check for updates` in the about window tells you when there's one; `brew upgrade` installs it, no `xattr` line needed.
 
 ## next
 

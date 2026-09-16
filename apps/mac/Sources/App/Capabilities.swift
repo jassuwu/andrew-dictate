@@ -30,18 +30,27 @@ struct Capabilities: Equatable, Sendable {
     /// released app has no reason to talk about itself.
     let announcesItself: Bool
 
+    /// Quit rather than become a second copy. **Release only** — one archive,
+    /// one spool, one pasteboard: a second instance sweeps the first one's
+    /// live meeting spool as an orphan and deletes it mid-recording. The
+    /// development build relaunches itself, and a guard would shoot its own
+    /// relaunch down before it drew a badge.
+    let refusesASecondInstance: Bool
+
     static let release = Capabilities(
         canUninstall: true,
         canResetInPlace: false,
         canCopyTimings: true,
-        announcesItself: false
+        announcesItself: false,
+        refusesASecondInstance: true
     )
 
     static let development = Capabilities(
         canUninstall: true,
         canResetInPlace: true,
         canCopyTimings: true,
-        announcesItself: true
+        announcesItself: true,
+        refusesASecondInstance: false
     )
 
     static var current: Capabilities {

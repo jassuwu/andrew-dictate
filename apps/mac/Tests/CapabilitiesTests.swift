@@ -26,6 +26,14 @@ final class CapabilitiesTests: XCTestCase {
         XCTAssertTrue(Capabilities.development.announcesItself)
     }
 
+    /// a second copy adopts the live meeting spool as an orphan and deletes
+    /// it out from under the copy that is recording. the dev build is exempt
+    /// because it relaunches itself.
+    func testOnlyTheReleaseBuildRefusesASecondInstance() {
+        XCTAssertTrue(Capabilities.release.refusesASecondInstance)
+        XCTAssertFalse(Capabilities.development.refusesASecondInstance)
+    }
+
     func testTheReleaseBuildNeverGetsDevelopmentCapabilities() {
         // Belt and braces: if `current` ever resolved the wrong way, the
         // release app would ship a one-click wipe of a stranger's archive.
@@ -35,7 +43,8 @@ final class CapabilitiesTests: XCTestCase {
                 canUninstall: true,
                 canResetInPlace: false,
                 canCopyTimings: true,
-                announcesItself: false
+                announcesItself: false,
+                refusesASecondInstance: true
             )
         )
     }

@@ -3,7 +3,7 @@ import "../styles/global.css";
 
 const install = "brew install --cask jassuwu/tap/andrew-dictate";
 const unquarantine =
-  'xattr -dr com.apple.quarantine "/Applications/Andrew Dictate.app"';
+  'xattr -dr com.apple.quarantine "/Applications/Andrew Dictate.app"\nopen "/Applications/Andrew Dictate.app"';
 
 const compare = [
   { row: "price", ours: "free, forever", theirs: "free tier capped, pro $15/mo", src: "https://wisprflow.ai/pricing" },
@@ -130,19 +130,31 @@ const description =
           apple silicon · macOS 26 · free forever · MIT
         </p>
 
+        <p class="mt-5 text-[14px] leading-[1.7] text-[#f2ede0]/60">
+          updating later is the same command with <span class="font-mono text-[13px]">upgrade</span> instead of <span class="font-mono text-[13px]">install</span>. you won't need the line below again.
+        </p>
+
         <div class="mt-7">
           <p class="text-[14px] leading-[1.7] text-[#f2ede0]/60">
             the build is unsigned, because i haven't paid apple the $99 for a
-            developer membership. so the first launch needs right-click → open, or
-            this once:
+            developer membership. so it needs this once, and never again:
           </p>
           <button
             data-cmd={unquarantine}
             class="copy mt-3 flex w-full items-start justify-between gap-4 rounded-lg border border-[#f2ede0]/[0.07] bg-[#f2ede0]/[0.02] px-4 py-3 text-left font-mono text-[11.5px] leading-[1.6] text-[#e5be62]/90 transition hover:border-[#e5be62]/30 sm:text-[12px]"
           >
-            <span>{unquarantine}</span>
+            <span class="whitespace-pre-line">{unquarantine}</span>
             <span class="hint shrink-0 text-[11px] text-[#f2ede0]/45" aria-live="polite">copy</span>
           </button>
+          <p class="mt-3 text-[14px] leading-[1.7] text-[#f2ede0]/60">
+            the second line opens it. there's no dock icon — a setup window comes
+            up, and after that it lives as the gold badge in your menu bar.
+          </p>
+          <p class="mt-3 font-mono text-[12px] leading-[1.7] tracking-[0.02em] text-[#f2ede0]/45">
+            no terminal? open the app, let macOS refuse, then click open anyway in
+            system settings › privacy & security. that button is only there for
+            about an hour.
+          </p>
         </div>
       </section>
 

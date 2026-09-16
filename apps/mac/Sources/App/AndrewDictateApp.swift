@@ -1,12 +1,23 @@
 import AppKit
 import SwiftUI
 
+extension Notification.Name {
+    /// Posted by a second copy on its way out, so the copy already living in
+    /// the menu bar can say where it is. The bundle id is interpolated
+    /// because this is a machine-wide bus: the development build and the
+    /// release build must not answer each other.
+    static let andrewDictateAlreadyRunning = Notification.Name(
+        "\(AppIdentity.bundleID).alreadyRunning"
+    )
+}
+
 /// a menu-bar app is never "opened" twice — double-clicking it in
 /// /Applications sends a reopen to the instance already running. that is the
 /// user coming back to us, and the moment to re-verify what we're allowed to do.
 @MainActor
 final class AppLifecycleDelegate: NSObject, NSApplicationDelegate {
     var onReopen: (() -> Void)?
+    var onTerminate: (() -> NSApplication.TerminateReply)?
 
     func applicationShouldHandleReopen(
         _ sender: NSApplication,
@@ -14,6 +25,47 @@ final class AppLifecycleDelegate: NSObject, NSApplicationDelegate {
     ) -> Bool {
         onReopen?()
         return true
+    }
+
+    /// One archive, one spool, one pasteboard. A second copy — the dmg you
+    /// opened to see what changed, still running from /Volumes — sweeps the
+    /// live meeting spool as an orphan and deletes it out from under the copy
+    /// recording into it. `willFinish`, not `didFinish`: the coordinator that
+    /// opens the archive, installs the monitors and sweeps the spool is built
+    /// when the scene body first runs, so there is nothing here to unwind.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        guard Capabilities.current.refusesASecondInstance,
+              let other = Self.otherRunningCopy()
+        else {
+            return
+        }
+        // it cannot say anything itself — it is about to be gone — so the
+        // copy that is running draws the pill.
+        DistributedNotificationCenter.default().postNotificationName(
+            .andrewDictateAlreadyRunning,
+            object: nil,
+            deliverImmediately: true
+        )
+        _ = other.activate()
+        exit(0)
+    }
+
+    /// A copy of this app that is neither this process nor already gone.
+    private static func otherRunningCopy() -> NSRunningApplication? {
+        let mine = ProcessInfo.processInfo.processIdentifier
+        return NSRunningApplication
+            .runningApplications(withBundleIdentifier: AppIdentity.bundleID)
+            .first { $0.processIdentifier != mine && !$0.isTerminated }
+    }
+
+    /// on upgrade day the quit does not come from the menu: brew asks the app
+    /// to go so it can replace the bundle under it. that request can land in
+    /// the middle of a meeting, so it goes through the coordinator, which
+    /// stops the recording and waits for the markdown before answering.
+    func applicationShouldTerminate(
+        _ sender: NSApplication
+    ) -> NSApplication.TerminateReply {
+        onTerminate?() ?? .terminateNow
     }
 }
 
@@ -162,6 +214,9 @@ struct AndrewDictateApp: App {
             .task {
                 lifecycleDelegate.onReopen = { [weak coordinator] in
                     coordinator?.handleReopen()
+                }
+                lifecycleDelegate.onTerminate = { [weak coordinator] in
+                    coordinator?.prepareToQuit() ?? .terminateNow
                 }
             }
         }
