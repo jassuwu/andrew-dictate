@@ -26,19 +26,15 @@ enum MenuBarBrandIcon {
         }
 
         switch state {
-        case .transcribing:
-            if let hourglass = NSImage(
-                systemSymbolName: "hourglass",
-                accessibilityDescription: "Transcribing"
-            ) {
-                hourglass.isTemplate = true
-                return hourglass
-            }
-            return badge(recording: false)
         case .recording:
             return badge(recording: true)
+        // transcribing draws the quiet badge on purpose. the lamp's cool phase
+        // owns the wait and the menu already says "writing it out…" (ADR 0017);
+        // a narrower template glyph here only shoved the clock sideways and
+        // back, seventy times a day.
         case .idle,
-             .prewarming:
+             .prewarming,
+             .transcribing:
             return badge(recording: false)
         }
     }
