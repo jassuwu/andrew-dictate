@@ -104,7 +104,8 @@ const description =
           <p class="mt-2 text-[14px] leading-[1.7] text-[#f2ede0]/65">
             hold <kbd>fn</kbd>, talk, let go. the text lands where your cursor is.
           </p>
-          <p class="mt-4 font-mono text-[11.5px] leading-[1.8] tracking-[0.02em] text-[#f2ede0]/40">
+          <!-- small-type floor on #0c0c0e: under 13px /65, 13px and up /55 -->
+          <p class="mt-4 font-mono text-[11.5px] leading-[1.8] tracking-[0.02em] text-[#f2ede0]/65">
             ~460 mb · english, or 25 languages · a dictionary for the words it mishears
           </p>
         </div>
@@ -128,7 +129,7 @@ const description =
             pick the app from the menu bar. press stop and you have one markdown
             file, speakers split out, everything in english.
           </p>
-          <p class="mt-4 font-mono text-[11.5px] leading-[1.8] tracking-[0.02em] text-[#f2ede0]/40">
+          <p class="mt-4 font-mono text-[11.5px] leading-[1.8] tracking-[0.02em] text-[#f2ede0]/65">
             ~2.9 gb · no audio kept · you start it, you stop it
           </p>
         </div>
@@ -141,9 +142,9 @@ const description =
 
         <div class="mt-6 rounded-xl border border-[#f2ede0]/[0.08] bg-[#f2ede0]/[0.025] p-5">
           <div class="hidden grid-cols-[1fr_1.5rem_1fr] gap-x-3 border-b border-[#f2ede0]/10 pb-2 sm:grid">
-            <span class="font-mono text-[11px] tracking-[0.1em] text-[#f2ede0]/40">heard</span>
+            <span class="font-mono text-[11px] tracking-[0.1em] text-[#f2ede0]/65">heard</span>
             <span></span>
-            <span class="font-mono text-[11px] tracking-[0.1em] text-[#e5be62]/70">pasted</span>
+            <span class="font-mono text-[11px] tracking-[0.1em] text-[#e5be62]/80">pasted</span>
           </div>
 
           <div class="divide-y divide-[#f2ede0]/[0.07]">
@@ -151,14 +152,14 @@ const description =
               rendered.map((r) => (
                 <div class="grid gap-x-3 py-3.5 sm:grid-cols-[1fr_1.5rem_1fr]">
                   <p class="font-mono text-[14px] leading-[1.6] text-[#f2ede0]/55">
-                    <span class="mr-2 text-[10px] tracking-[0.1em] text-[#f2ede0]/40 sm:hidden">heard</span>
+                    <span class="mr-2 text-[10px] tracking-[0.1em] text-[#f2ede0]/65 sm:hidden">heard</span>
                     {r.heard}
                   </p>
-                  <span aria-hidden="true" class="hidden text-center font-mono text-[14px] leading-[1.6] text-[#f2ede0]/30 sm:block">
+                  <span aria-hidden="true" class="hidden text-center font-mono text-[14px] leading-[1.6] text-[#f2ede0]/55 sm:block">
                     →
                   </span>
                   <p class="mt-1.5 font-mono text-[14px] leading-[1.6] text-[#f2ede0] sm:mt-0">
-                    <span class="mr-2 text-[10px] tracking-[0.1em] text-[#e5be62]/70 sm:hidden">pasted</span>
+                    <span class="mr-2 text-[10px] tracking-[0.1em] text-[#e5be62]/80 sm:hidden">pasted</span>
                     {r.pasted}
                   </p>
                 </div>
@@ -178,10 +179,10 @@ const description =
           class="copy flex w-full items-start justify-between gap-4 rounded-lg border border-[#f2ede0]/10 bg-[#1f1f24] px-4 py-3 text-left font-mono text-[12px] leading-[1.6] text-[#f9e9a8] transition hover:border-[#e5be62]/40 sm:text-[13px]"
         >
           <span>{install}</span>
-          <span class="hint shrink-0 text-[11px] text-[#f2ede0]/55" aria-live="polite">copy</span>
+          <span class="hint shrink-0 text-[11px] text-[#f2ede0]/65" aria-live="polite">copy</span>
         </button>
 
-        <p class="mt-3 font-mono text-[12px] tracking-[0.02em] text-[#f2ede0]/45">
+        <p class="mt-3 font-mono text-[12px] tracking-[0.02em] text-[#f2ede0]/65">
           apple silicon · macOS 26 · free forever · MIT
         </p>
 
@@ -196,7 +197,7 @@ const description =
             class="copy mt-3 flex w-full items-start justify-between gap-4 rounded-lg border border-[#f2ede0]/[0.07] bg-[#f2ede0]/[0.02] px-4 py-3 text-left font-mono text-[11.5px] leading-[1.6] text-[#e5be62]/90 transition hover:border-[#e5be62]/30 sm:text-[12px]"
           >
             <span>{unquarantine}</span>
-            <span class="hint shrink-0 text-[11px] text-[#f2ede0]/45" aria-live="polite">copy</span>
+            <span class="hint shrink-0 text-[11px] text-[#f2ede0]/65" aria-live="polite">copy</span>
           </button>
         </div>
       </section>
@@ -218,14 +219,14 @@ const description =
         <div class="mt-6 hidden grid-cols-[7.5rem_1fr_1fr] gap-x-5 border-b border-[#f2ede0]/10 pb-2 sm:grid">
           <span></span>
           <span class="font-mono text-[11px] tracking-[0.1em] text-[#e5be62]">andrew dictate</span>
-          <span class="font-mono text-[11px] tracking-[0.1em] text-[#f2ede0]/40">wispr flow</span>
+          <span class="font-mono text-[11px] tracking-[0.1em] text-[#f2ede0]/65">wispr flow</span>
         </div>
 
         <dl class="divide-y divide-[#f2ede0]/[0.07]">
           {
             compare.map((c) => (
               <div class="grid gap-x-5 py-3.5 sm:grid-cols-[7.5rem_1fr_1fr]">
-                <dt class="text-[13px] text-[#f2ede0]/40 sm:text-[14px]">{c.row}</dt>
+                <dt class="text-[13px] text-[#f2ede0]/55 sm:text-[14px]">{c.row}</dt>
 
                 <dd
                   class:list={[
@@ -233,14 +234,14 @@ const description =
                     c.them ? "text-[#f2ede0]/55" : "text-[#f9e9a8]",
                   ]}
                 >
-                  <span class="mr-2 font-mono text-[10px] tracking-[0.1em] text-[#e5be62]/60 sm:hidden">
+                  <span class="mr-2 font-mono text-[10px] tracking-[0.1em] text-[#e5be62]/80 sm:hidden">
                     ours
                   </span>
                   {c.ours}
                 </dd>
 
                 <dd class="mt-1 text-[14px] leading-[1.6] text-[#f2ede0]/55 sm:mt-0">
-                  <span class="mr-2 font-mono text-[10px] tracking-[0.1em] text-[#f2ede0]/30 sm:hidden">
+                  <span class="mr-2 font-mono text-[10px] tracking-[0.1em] text-[#f2ede0]/65 sm:hidden">
                     theirs
                   </span>
                   {c.src ? (
