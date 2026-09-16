@@ -65,7 +65,7 @@ final class MeetingSpoolTests: XCTestCase {
 
     func testAnAttemptIsWrittenDownAndSurvivesARelaunch() throws {
         let handle = try spool.begin(manifest())
-        FileManager.default.createFile(atPath: handle.audioURL.path, contents: Data([1]))
+        try Data([0]).write(to: handle.audioURL)
 
         XCTAssertEqual(spool.noteAttempt(handle, manifest: manifest()).attempts, 1)
         XCTAssertEqual(spool.orphans().first?.manifest.attempts, 1)
@@ -77,7 +77,7 @@ final class MeetingSpoolTests: XCTestCase {
     /// sweeping one would be losing an hour of someone else's words.
     func testAManifestWithoutTheLedgerStillReads() throws {
         let handle = try spool.begin(manifest())
-        FileManager.default.createFile(atPath: handle.audioURL.path, contents: Data([1]))
+        try Data([0]).write(to: handle.audioURL)
         let old = """
         {"app":"zoom","engine":"whisper-large-v3-turbo",\
         "model":"whisperLargeV3Turbo","started":"2026-08-29T08:26:40Z"}
@@ -91,7 +91,7 @@ final class MeetingSpoolTests: XCTestCase {
     /// Kept, never deleted, and never offered to the transcriber again.
     func testASetAsideSpoolIsNoLongerAnOrphan() throws {
         let handle = try spool.begin(manifest())
-        FileManager.default.createFile(atPath: handle.audioURL.path, contents: Data([1]))
+        try Data([0]).write(to: handle.audioURL)
         XCTAssertEqual(spool.orphans().count, 1)
 
         spool.setAside(handle)
