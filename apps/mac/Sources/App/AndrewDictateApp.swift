@@ -70,6 +70,15 @@ struct AndrewDictateApp: App {
                     coordinator.toggleLiveTranscript()
                 }
             } else {
+                // a meeting leaves one file and no other trace on screen.
+                // for ten minutes it is the thing you came back for; after
+                // that the menu is the hand it was.
+                if coordinator.showsLastMeetingRow {
+                    Button("show last meeting in finder") {
+                        coordinator.revealLastMeeting()
+                    }
+                }
+
                 // The only action here that is time-sensitive: you just
                 // watched it mishear a name. Everything else the app can do
                 // is configuration or curiosity, and lives in settings

@@ -94,6 +94,26 @@ final class DictationCoordinator: ObservableObject {
     /// cleared by the next meeting that starts.
     @Published private(set) var meetingsNeedAttention = false
 
+    /// the meeting that just ended, for as long as it is the thing you came
+    /// back to the menu for.
+    @Published private(set) var lastMeeting: MeetingSummary?
+    @Published private(set) var lastMeetingSavedAt: Date?
+
+    private static let lastMeetingRowLasts: TimeInterval = 600
+
+    /// ten minutes, then the menu is the hand it was. not gated on the
+    /// notification permission: a denied prompt is exactly when this row is
+    /// the only route to the file.
+    var showsLastMeetingRow: Bool {
+        guard lastMeeting != nil, let lastMeetingSavedAt else { return false }
+        return Date().timeIntervalSince(lastMeetingSavedAt) < Self.lastMeetingRowLasts
+    }
+
+    func revealLastMeeting() {
+        guard let lastMeeting else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([lastMeeting.fileURL])
+    }
+
     let dictionaryStore: DictionaryStore
     let settings: AppSettings
 
@@ -1647,6 +1667,9 @@ extension DictationCoordinator {
         meetingNotifier.onStop = { [weak self] in
             self?.stopMeeting()
         }
+        meetingNotifier.onShowFile = { url in
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
         // transcripts written before the app started locking them down are
         // still 0644 — other people's words, readable by every account on
         // the machine. repaired once, off the main thread.
@@ -1666,7 +1689,17 @@ extension DictationCoordinator {
             }
         case .nudge:
             meetingNotifier.ask(app: meetingAppName, quietFor: meetings.thresholds.quietNudgeAfter)
-        case .saved, .nothingToKeep, .saveFailed, .engineFailed:
+        case .saved(let summary):
+            liveTranscriptPanel?.dismissKeepingPreference()
+            // the file *is* the feature, and the pill that names it is gone
+            // in two seconds — often before you are back at the mac.
+            lastMeeting = summary
+            lastMeetingSavedAt = Date()
+            meetingNotifier.saved(summary)
+        case .saveFailed:
+            liveTranscriptPanel?.dismissKeepingPreference()
+            meetingNotifier.saveFailed()
+        case .nothingToKeep, .engineFailed:
             liveTranscriptPanel?.dismissKeepingPreference()
         case .cannotHear:
             // the pill cannot be clicked, so naming the switch was a dead
