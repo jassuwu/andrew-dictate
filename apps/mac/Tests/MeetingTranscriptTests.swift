@@ -167,7 +167,48 @@ final class MeetingTranscriptTests: XCTestCase {
                 in: parent.appendingPathComponent("nope")).count, 0)
     }
 
+    // MARK: - who can read it
+
+    /// The one file that holds other people's words was the one file left at
+    /// the OS default. Both nouns agree now.
+    func testTheTranscriptIsNotReadableByOtherUsers() throws {
+        let url = try MeetingTranscriptFile.write(
+            MeetingTranscript(
+                app: "zoom", started: started(), duration: .seconds(61),
+                engine: "e", gaps: [], recovered: false, turns: []),
+            in: parent, timeZone: tz)
+
+        XCTAssertEqual(permissions(of: url), 0o600)
+        XCTAssertEqual(permissions(of: url.deletingLastPathComponent()), 0o700)
+        XCTAssertEqual(
+            permissions(of: parent.appendingPathComponent("meetings", isDirectory: true)),
+            0o700)
+    }
+
+    func testLockDownRepairsTranscriptsAlreadyOnDisk() throws {
+        let month = parent.appendingPathComponent("meetings/2026-08", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: month, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o755])
+        let old = month.appendingPathComponent("2026-08-29-1717-arc.md")
+        try "---\napp: arc\n---\n".write(to: old, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o644], ofItemAtPath: old.path)
+
+        MeetingTranscriptFile.lockDown(in: parent)
+
+        XCTAssertEqual(permissions(of: old), 0o600)
+        XCTAssertEqual(permissions(of: month), 0o700)
+        XCTAssertEqual(
+            permissions(of: parent.appendingPathComponent("meetings", isDirectory: true)),
+            0o700)
+    }
+
     // MARK: -
+
+    private func permissions(of url: URL) -> Int? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.posixPermissions] as? Int
+    }
 
     private func started() -> Date {
         var components = DateComponents()

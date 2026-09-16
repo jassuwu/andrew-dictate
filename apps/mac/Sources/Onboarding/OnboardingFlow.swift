@@ -149,7 +149,9 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
 struct OnboardingFlow: Equatable, Sendable {
     private(set) var step: OnboardingStep
 
-    /// Setup can open on the screen that is actually broken: a returning user
+    /// setup starts at `hello`, except when it was reopened to fix one
+    /// named thing and the screen that fixes it is further in.
+    /// setup can open on the screen that is actually broken: a returning user
     /// who lost a grant has no jobs to pick and nothing to download.
     init(step: OnboardingStep = .hello) {
         self.step = step

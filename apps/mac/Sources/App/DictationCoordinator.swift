@@ -118,6 +118,31 @@ final class DictationCoordinator: ObservableObject {
             && !permissions.isDictationReady
     }
 
+    /// system audio is not part of `needsPermissionAttention` — that badge is
+    /// dictation's. this is meetings' own, set when a tap would not open and
+    /// cleared by the next meeting that starts.
+    @Published private(set) var meetingsNeedAttention = false
+
+    /// the meeting that just ended, for as long as it is the thing you came
+    /// back to the menu for.
+    @Published private(set) var lastMeeting: MeetingSummary?
+    @Published private(set) var lastMeetingSavedAt: Date?
+
+    private static let lastMeetingRowLasts: TimeInterval = 600
+
+    /// ten minutes, then the menu is the hand it was. not gated on the
+    /// notification permission: a denied prompt is exactly when this row is
+    /// the only route to the file.
+    var showsLastMeetingRow: Bool {
+        guard lastMeeting != nil, let lastMeetingSavedAt else { return false }
+        return Date().timeIntervalSince(lastMeetingSavedAt) < Self.lastMeetingRowLasts
+    }
+
+    func revealLastMeeting() {
+        guard let lastMeeting else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([lastMeeting.fileURL])
+    }
+
     let dictionaryStore: DictionaryStore
     let settings: AppSettings
 
@@ -532,8 +557,11 @@ final class DictationCoordinator: ObservableObject {
         needsPermissionAttention ? .permissionsOnly : .everything
     }
 
-    func runOnboardingAgain(scope: OnboardingScope? = nil) {
-        presentOnboarding(scope: scope ?? reentryScope)
+    func runOnboardingAgain(
+        scope: OnboardingScope? = nil,
+        openAt: OnboardingStep = .hello
+    ) {
+        presentOnboarding(scope: scope ?? reentryScope, openAt: openAt)
     }
 
     /// `dictationWanted` is nil when this run of setup had no say in it —
@@ -698,7 +726,10 @@ final class DictationCoordinator: ObservableObject {
         await transcriptionEngine.unloadModels()
     }
 
-    private func presentOnboarding(scope: OnboardingScope = .everything) {
+    private func presentOnboarding(
+        scope: OnboardingScope = .everything,
+        openAt: OnboardingStep = .hello
+    ) {
         // whatever the pill is saying right now is about to be taken off
         // the screen mid-sentence. keep it rather than truncate it — it
         // gets a whole default reading when it comes back, since how much
@@ -715,10 +746,12 @@ final class DictationCoordinator: ObservableObject {
         hotkeyMonitor.setDetectionOnly(true)
         withHUDPanel { $0.dismiss() }
 
-        // a cached window keeps the scope it was built with; a different
-        // scope means a different window.
+        // a cached window keeps the scope it was built with, and the screen
+        // it was left on — the flow is state inside the view. a different
+        // errand means a different window.
         if let onboardingWindowController {
-            if onboardingWindowController.scope == scope {
+            if onboardingWindowController.scope == scope,
+               onboardingWindowController.openAt == openAt {
                 onboardingWindowController.present()
                 return
             }
@@ -729,6 +762,7 @@ final class DictationCoordinator: ObservableObject {
         let controller = OnboardingWindowController(
             coordinator: self,
             scope: scope,
+            openAt: openAt,
             proveSystemAudio: { await CoreAudioMeetingSource.proveSystemAudio() },
             prepareMeetingModel: { [weak self] progress in
                 await self?.prepareMeetingModel(progress: progress) ?? false
@@ -1296,6 +1330,12 @@ final class DictationCoordinator: ObservableObject {
     private func handleSystemResume() {
         hotkeyMonitor.reset()
         verifyEngineHealth()
+        // a meeting is meant to survive the sleep, not be cancelled by it —
+        // but the tap rarely does, and a frozen clock reads as a meeting
+        // that was heard all the way through (SPEC §11).
+        if meetings.isRecording {
+            meetings.probeTapIsAlive()
+        }
         // waking or unlocking is not the user coming to *us* — check, but
         // never take the screen back from whatever they returned to.
         refreshPermissions(moment: .midSession)
@@ -2226,38 +2266,86 @@ extension DictationCoordinator {
             .removeDuplicates()
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &meetingCancellables)
+        // same reason as the two above: the menu watches this object, and
+        // the recovery line lives on the one nested inside it.
+        meetings.$recovering
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &meetingCancellables)
         meetingNotifier.onKeepGoing = { [weak self] in
             self?.meetings.keepGoing()
         }
         meetingNotifier.onStop = { [weak self] in
             self?.stopMeeting()
         }
-        meetings.recoverOrphans()
+        meetingNotifier.onShowFile = { url in
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+        // transcripts written before the app started locking them down are
+        // still 0644 — other people's words, readable by every account on
+        // the machine. repaired once, off the main thread.
+        let folder = settings.meetingsFolder
+        Task.detached(priority: .utility) {
+            MeetingTranscriptFile.lockDown(in: folder)
+        }
+        // recovery loads the meeting model and can run for a quarter of an
+        // hour. five seconds of head start keeps it off the dictation
+        // model's prewarm, so the first fn press is not slower for it. the
+        // number is a guess, like the rest of MeetingThresholds.
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            self?.meetings.recoverOrphans()
+        }
     }
 
     private func handle(_ event: MeetingEvent) {
         switch event {
         case .started:
-            if LiveTranscriptPanel.wasOpenLastTime, !isLiveTranscriptShown {
+            meetingsNeedAttention = false
+            if LiveTranscriptPanel.wasOpenLastTime(), !isLiveTranscriptShown {
                 toggleLiveTranscript()
             }
         case .nudge:
             meetingNotifier.ask(app: meetingAppName, quietFor: meetings.thresholds.quietNudgeAfter)
-        case .saved, .nothingToKeep, .saveFailed, .engineFailed:
+        case .saved(let summary):
             liveTranscriptPanel?.dismissKeepingPreference()
+            // the file *is* the feature, and the pill that names it is gone
+            // in two seconds — often before you are back at the mac.
+            lastMeeting = summary
+            lastMeetingSavedAt = Date()
+            meetingNotifier.saved(summary)
             // the transcript has landed, so a quit that was waiting on it
             // can go through. the hook runs after this and may not finish;
             // the file it was told about is already written.
             finishQuitting()
-        case .cannotHear, .gapBegan, .gapEnded, .writingItOut, .hookFailed:
+        case .saveFailed:
+            liveTranscriptPanel?.dismissKeepingPreference()
+            meetingNotifier.saveFailed()
+            // nothing more will be written, so a quit waiting on the file
+            // goes through here too.
+            finishQuitting()
+        case .nothingToKeep, .engineFailed:
+            liveTranscriptPanel?.dismissKeepingPreference()
+            finishQuitting()
+        case .cannotHear:
+            // the pill cannot be clicked, so naming the switch was a dead
+            // end. this reopens the one surface allowed to ask for it, and
+            // leaves a way back in the menu for anyone who closes it.
+            meetingsNeedAttention = true
+            liveTranscriptPanel?.dismissKeepingPreference()
+            runOnboardingAgain(scope: .meetingsOnly, openAt: .permissions)
+        case .recovering, .gapBegan, .gapEnded, .writingItOut, .hookFailed:
             break
         }
 
         if let text = event.hudText {
             let duration: TimeInterval
             switch event {
-            case .cannotHear, .hookFailed, .engineFailed, .saveFailed: duration = 4
-            case .writingItOut: duration = 6
+            case .hookFailed, .engineFailed, .saveFailed: duration = 4
+            // a recovered meeting arrives unprompted and is about yesterday:
+            // two seconds is not long enough to read it.
+            case .saved(let summary): duration = summary.recovered ? 4 : 2
+            case .writingItOut, .recovering: duration = 6
             default: duration = 2
             }
             flashNotice(text, duration: duration)

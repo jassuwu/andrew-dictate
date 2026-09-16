@@ -30,6 +30,10 @@ struct MeetingPreferences: Sendable {
 enum MeetingEvent: Equatable, Sendable {
     case started(app: String)
     case cannotHear(app: String)
+    /// A spool the app died on is being written out, unasked, at launch. It
+    /// loads a 2.9 gb model and can run for a quarter of an hour: the lamp
+    /// stays quiet for successes, and this is not one.
+    case recovering(app: String)
     case gapBegan
     case gapEnded
     case nudge
@@ -48,20 +52,34 @@ enum MeetingEvent: Equatable, Sendable {
     var hudText: String? {
         switch self {
         case .started(let app): "recording \(app)"
-        case .cannotHear(let app): "can't hear \(app) — allow system audio recording in privacy settings"
+        // it names the fix and hands you to the one surface allowed to ask
+        // for it, rather than naming a switch you then have to go and find.
+        case .cannotHear(let app): "can't hear \(app) — opening setup"
         case .gapBegan: "lost \(Self.themWord) — rebuilding"
         case .gapEnded: "hearing them again"
         case .nudge: nil
+        case .recovering(let app): "found an unsaved \(app) recording — writing it out…"
         case .writingItOut: "writing it out…"
-        case .saved(let summary):
-            summary.gapCount == 0
-                ? "saved · \(summary.duration.spoken)"
-                : "saved · \(summary.gapCount) \(summary.gapCount == 1 ? "gap" : "gaps")"
+        case .saved(let summary): Self.savedText(summary)
         case .nothingToKeep: "nothing was heard, nothing kept"
         case .hookFailed(let label): "hook failed (\(label))"
         case .engineFailed(let reason): "meeting model failed — \(reason)"
         case .saveFailed(let reason): "couldn't save the transcript — \(reason). kept for next launch"
         }
+    }
+
+    /// A recovery nobody asked for is about a meeting they had yesterday, so
+    /// it does not get the words a live stop gets — it gets the word the
+    /// history row already uses.
+    private static func savedText(_ summary: MeetingSummary) -> String {
+        if summary.recovered {
+            return "recovered \(summary.app) — saved · \(summary.duration.spoken)"
+        }
+        if summary.gapCount == 0 {
+            return "saved · \(summary.duration.spoken)"
+        }
+        let word = summary.gapCount == 1 ? "gap" : "gaps"
+        return "saved · \(summary.gapCount) \(word)"
     }
 
     private static let themWord = "the other side"
@@ -79,6 +97,9 @@ final class MeetingCoordinator: ObservableObject {
     @Published private(set) var app: RunningApp?
     @Published private(set) var elapsed: Duration = .zero
     @Published private(set) var liveLines: [LiveLine] = []
+    /// The app of the spool being written out at launch, while it runs. The
+    /// menu draws it; the pill only says it once.
+    @Published private(set) var recovering: String?
 
     var onEvent: (@MainActor (MeetingEvent) -> Void)?
     var onLine: (@MainActor (LiveLine) -> Void)?
@@ -106,6 +127,32 @@ final class MeetingCoordinator: ObservableObject {
     private var linesTask: Task<Void, Never>?
     private var nudgePending = false
     private var isRebuilding = false
+    /// The tap hears this app too, so the start sound it plays to prove
+    /// itself lands in the far channel a moment after every rebuild. Until
+    /// this mark passes, audio is proof the tap works and nothing more —
+    /// counting our own chirp as the room speaking is what kept the quiet
+    /// hour from ever coming round.
+    private var probeUntil: Duration = .zero
+    /// The tapped app's own account of whether it is playing anything, kept
+    /// for a second at a time so the HAL is not asked ten times a second.
+    private var appIsPlaying: Bool?
+    private var lastLivenessCheck: Duration?
+    /// Every health check in here is driven by a chunk arriving, so a tap
+    /// that stops calling back altogether — the mac slept, the screen
+    /// locked, the driver died — freezes the clock instead of failing. These
+    /// two are the wall the meeting is measured against when that happens.
+    private var startedOn: ContinuousClock.Instant?
+    private var lastChunkArrived: ContinuousClock.Instant?
+    private var watchdogTask: Task<Void, Never>?
+    /// injected so a test can move the wall without waiting on it.
+    private let now: @Sendable () -> ContinuousClock.Instant
+
+    /// A system event has already proven something happened, so this may be
+    /// short: five seconds of a tap that has not called back is a dead tap.
+    private static let silentTapOnWaking = Duration.seconds(5)
+    /// Unprompted, nothing has proven anything — so the watchdog waits the
+    /// full silence timeout before it says the same thing.
+    private static let watchdogInterval = Duration.seconds(10)
 
     init(
         source: any MeetingAudioSource,
@@ -114,6 +161,7 @@ final class MeetingCoordinator: ObservableObject {
         spool: MeetingSpool = MeetingSpool(),
         hookRunner: HookRunner = HookRunner(logURL: HookRunner.defaultLogURL),
         thresholds: MeetingThresholds = .provisional,
+        now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now },
         preferences: @escaping @MainActor () -> MeetingPreferences
     ) {
         self.source = source
@@ -122,6 +170,7 @@ final class MeetingCoordinator: ObservableObject {
         self.spool = spool
         self.hookRunner = hookRunner
         self.thresholds = thresholds
+        self.now = now
         self.preferences = preferences
         session = MeetingSession(quietNudgeAfter: thresholds.quietNudgeAfter)
         health = Self.freshMonitor(thresholds)
@@ -148,7 +197,13 @@ final class MeetingCoordinator: ObservableObject {
         elapsed = .zero
         liveLines = []
         startedAt = Date()
+        startedOn = now()
+        lastChunkArrived = now()
         nudgePending = false
+        probeUntil = thresholds.probeTimeout
+        appIsPlaying = nil
+        lastLivenessCheck = nil
+        startWatchdog()
         publish()
 
         let appName = MeetingApps.displayName(app)
@@ -219,12 +274,18 @@ final class MeetingCoordinator: ObservableObject {
         captureTask = nil
         linesTask?.cancel()
         linesTask = nil
+        watchdogTask?.cancel()
+        watchdogTask = nil
         let appName = MeetingApps.displayName(app)
 
         Task { [weak self] in
             guard let self else { return }
             await source.stop()
-            let recording = session.finish(at: elapsed)
+            // A tap that never came back leaves an open gap; closing it at
+            // the wall makes the file cover the whole call instead of
+            // stopping where the audio did.
+            let recording = session.finish(at: max(elapsed, wallElapsed))
+            startedOn = nil
             publish()
 
             guard let recording, let handle else {
@@ -256,12 +317,61 @@ final class MeetingCoordinator: ObservableObject {
         captureTask = nil
         linesTask?.cancel()
         linesTask = nil
+        watchdogTask?.cancel()
+        watchdogTask = nil
+        startedOn = nil
         transcriber = nil
         audioFile = nil
         handle = nil
         Task { [source] in await source.stop() }
         _ = session.finish(at: elapsed)
         publish()
+    }
+
+    // MARK: - the tap that stopped calling back
+
+    /// Called when the mac wakes or the screen unlocks. `TapHealthMonitor`
+    /// only ever hears about a tap that is still delivering buffers, so a
+    /// sleep — which stops the callback outright — looks like nothing at all
+    /// from inside `ingest`. The wall clock is the only witness: if nothing
+    /// has arrived for five seconds across a system event, the tap is gone
+    /// and this takes the same route a zero-sample buffer would (SPEC §11).
+    func probeTapIsAlive() {
+        noteTheTapStoppedCallingBack(after: Self.silentTapOnWaking)
+    }
+
+    /// The machine never slept; the IOProc died anyway (a driver panic, a
+    /// device yanked). Nothing will wake us for that, so a timer asks.
+    private func startWatchdog() {
+        watchdogTask?.cancel()
+        watchdogTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: MeetingCoordinator.watchdogInterval)
+                guard let self, !Task.isCancelled else { return }
+                noteTheTapStoppedCallingBack(after: thresholds.silenceTimeout)
+            }
+        }
+    }
+
+    private func noteTheTapStoppedCallingBack(after limit: Duration) {
+        guard session.state == .recording, let lastChunkArrived else { return }
+        guard now() - lastChunkArrived >= limit else { return }
+
+        // The gap begins where the audio stopped, not where the wall is now
+        // — then the clock catches up, so the menu stops counting a meeting
+        // in frames that no longer arrive.
+        session.tapWentSilent(at: elapsed)
+        elapsed = max(elapsed, wallElapsed)
+        publish()
+        onEvent?(.gapBegan)
+        rebuildTap()
+    }
+
+    /// How long the meeting has actually been going. Audio time is a frame
+    /// count and frames stop existing when the tap does.
+    private var wallElapsed: Duration {
+        guard let startedOn else { return elapsed }
+        return now() - startedOn
     }
 
     /// The nudge asked; the user said yes.
@@ -273,13 +383,18 @@ final class MeetingCoordinator: ObservableObject {
     // MARK: - launch
 
     /// Spools that outlived the app. Each becomes a transcript flagged
-    /// `recovered`, in the background, in order.
+    /// `recovered`, in the background, in order — announced, because a
+    /// quarter of an hour of the neural engine at login is not a silent
+    /// success, it is a job nobody asked for.
     func recoverOrphans() {
         let orphans = spool.orphans()
         guard !orphans.isEmpty else { return }
         Task { [weak self] in
             guard let self else { return }
+            defer { recovering = nil }
             for orphan in orphans {
+                recovering = orphan.manifest.app
+                onEvent?(.recovering(app: orphan.manifest.app))
                 await recover(orphan.handle, manifest: orphan.manifest)
             }
         }
@@ -289,11 +404,20 @@ final class MeetingCoordinator: ObservableObject {
 
     private func ingest(_ chunk: MeetingAudioChunk) async {
         elapsed = chunk.at + chunk.duration
+        lastChunkArrived = now()
         if let audioFile {
             try? await audioFile.append(chunk)
         }
 
-        health.observe(rms: chunk.themRMS, elapsed: elapsed)
+        // A HAL round trip, and chunks arrive ten times a second: once a
+        // second is plenty to tell a quiet room from a dead tap.
+        let dueForCheck = lastLivenessCheck.map { elapsed - $0 >= .seconds(1) } ?? true
+        if dueForCheck {
+            lastLivenessCheck = elapsed
+            appIsPlaying = source.tappedAppIsPlaying()
+        }
+        health.observe(
+            rms: chunk.themRMS, elapsed: elapsed, tappedAppIsPlaying: appIsPlaying)
         switch health.verdict {
         case .waitingForProbeTone:
             break
@@ -306,8 +430,15 @@ final class MeetingCoordinator: ObservableObject {
             }
             session.tapRecovered(at: elapsed)
             if wasRebuilding { onEvent?(.gapEnded); publish() }
-            session.heardAudio(at: elapsed)
-            nudgePending = false
+            // A working tap is not the same thing as a room with people
+            // talking in it: the verdict stays `.capturing` through every
+            // pause. Only a chunk with sound in it, and only past the probe
+            // window, moves the quiet clock — otherwise silence resets the
+            // clock that is meant to be measuring it.
+            if chunk.themRMS > thresholds.silenceFloor, elapsed > probeUntil {
+                session.heardAudio(at: elapsed)
+                nudgePending = false
+            }
         case .neverHeardTheProbeTone:
             if session.state == .provingItCanHear {
                 session.neverHeardTheProbe()
@@ -343,6 +474,9 @@ final class MeetingCoordinator: ObservableObject {
             guard let self else { return }
             defer { isRebuilding = false }
             do {
+                // Set before the rebuild, not after: the tone can be heard
+                // the instant the tap is back.
+                probeUntil = elapsed + thresholds.probeTimeout
                 try await source.rebuild()
                 // A rebuilt tap must hear something before it is trusted
                 // again; a rebuild that produces silence is just a new gap.
@@ -383,7 +517,9 @@ final class MeetingCoordinator: ObservableObject {
         recovered: Bool
     ) async {
         let them = (try? SpoolAudioFile.read(handle.audioURL))?.them ?? []
-        let split = them.isEmpty ? turns : await diarizer.split(them: them, turns: turns)
+        let split = them.isEmpty
+            ? turns
+            : await splitSpeakers(in: turns, them: them, gaps: recording.gaps)
 
         let transcript = MeetingTranscript(
             app: app,
@@ -435,6 +571,42 @@ final class MeetingCoordinator: ObservableObject {
         }
     }
 
+    /// The diarizer hears the spool, and a gap is time nothing was written to
+    /// it: after one, a turn stamped on the meeting's clock sits past the end
+    /// of the audio and every speaker after it would be guessed from the last
+    /// segment. So the lookup gets times shifted back over the gaps before
+    /// them, and the file keeps the stamps the meeting actually had.
+    private func splitSpeakers(
+        in turns: [MeetingTurn],
+        them: [Float],
+        gaps: [MeetingSession.Gap]
+    ) async -> [MeetingTurn] {
+        guard !gaps.isEmpty else {
+            return await diarizer.split(them: them, turns: turns)
+        }
+        let shifted = turns.map { turn in
+            MeetingTurn(
+                speaker: turn.speaker,
+                at: max(.zero, turn.at - Self.lost(before: turn.at, in: gaps)),
+                text: turn.text)
+        }
+        let split = await diarizer.split(them: them, turns: shifted)
+        guard split.count == turns.count else { return split }
+        return zip(turns, split).map {
+            MeetingTurn(speaker: $1.speaker, at: $0.at, text: $0.text)
+        }
+    }
+
+    private static func lost(
+        before at: Duration,
+        in gaps: [MeetingSession.Gap]
+    ) -> Duration {
+        gaps.reduce(.zero) { total, gap in
+            guard at > gap.began else { return total }
+            return total + (min(at, gap.ended) - gap.began)
+        }
+    }
+
     private func recover(_ handle: MeetingSpool.Handle, manifest: MeetingSpool.Manifest) async {
         guard let audio = try? SpoolAudioFile.read(handle.audioURL),
               !audio.them.isEmpty || !audio.you.isEmpty
@@ -456,7 +628,15 @@ final class MeetingCoordinator: ObservableObject {
                 model: manifest.model,
                 recovered: true)
         } catch {
+            // Only logging it meant the same quarter of an hour was spent on
+            // the same failure at every launch, forever. Two tries, then the
+            // spool is set aside — kept, never retried, and said out loud in
+            // settings › history.
             logger.error("could not recover a spool: \(error.localizedDescription, privacy: .public)")
+            let noted = spool.noteAttempt(handle, manifest: manifest)
+            if (noted.attempts ?? 0) >= MeetingSpool.attemptsBeforeSettingAside {
+                spool.setAside(handle)
+            }
         }
     }
 

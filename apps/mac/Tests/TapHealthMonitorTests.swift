@@ -96,6 +96,43 @@ final class TapHealthMonitorTests: XCTestCase {
         XCTAssertEqual(monitor.verdict, .capturing)
     }
 
+    // MARK: - quiet rooms
+
+    /// Two minutes of nothing while the app plays nothing is a quiet room,
+    /// not a dead tap: the recording carries on, no gap is recorded, and no
+    /// start sound goes off in the middle of a call.
+    func testAnAppThatIsPlayingNothingIsNeverCalledADeadTap() {
+        var monitor = monitor()
+        monitor.observe(rms: 0.5, elapsed: .seconds(1))
+
+        monitor.observe(rms: 0, elapsed: .seconds(200), tappedAppIsPlaying: false)
+
+        XCTAssertEqual(monitor.verdict, .capturing)
+    }
+
+    /// The other direction is not trusted: a room of muted participants
+    /// still satisfies `isRunningOutput` (002 §6), so an app that says it is
+    /// playing changes nothing about the timeout.
+    func testAnAppThatSaysItIsPlayingKeepsTheOrdinaryTimeout() {
+        var monitor = monitor()
+        monitor.observe(rms: 0.5, elapsed: .seconds(1))
+
+        monitor.observe(rms: 0, elapsed: .seconds(5), tappedAppIsPlaying: true)
+        XCTAssertEqual(monitor.verdict, .capturing)
+
+        monitor.observe(rms: 0, elapsed: .seconds(20), tappedAppIsPlaying: true)
+        XCTAssertEqual(monitor.verdict, .wentSilent)
+    }
+
+    func testAnUnanswerableQuestionLeavesTodaysRuleAlone() {
+        var monitor = monitor()
+        monitor.observe(rms: 0.5, elapsed: .seconds(1))
+
+        monitor.observe(rms: 0, elapsed: .seconds(20), tappedAppIsPlaying: nil)
+
+        XCTAssertEqual(monitor.verdict, .wentSilent)
+    }
+
     // MARK: - what the app does about it
 
     func testOnlyTheTwoFailuresAskForAction() {

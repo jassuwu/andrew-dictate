@@ -16,15 +16,26 @@ final class MeetingsListModel: ObservableObject {
     @Published var query = ""
     /// nil while everything is fine. otherwise a sentence to show verbatim.
     @Published private(set) var failure: String?
+    /// recordings the app tried twice to write out and could not. it keeps
+    /// them rather than deleting them, so something has to say they exist.
+    @Published private(set) var setAsideCount = 0
 
     private let load: () -> [MeetingSummary]
+    private let countSetAside: () -> Int
     private let fileManager: FileManager
+
+    /// where the ones it could not read are kept, for the row's button.
+    let setAsideFolder: URL?
 
     init(
         fileManager: FileManager = .default,
+        setAsideFolder: URL? = nil,
+        countSetAside: @escaping () -> Int = { 0 },
         load: @escaping () -> [MeetingSummary]
     ) {
         self.fileManager = fileManager
+        self.setAsideFolder = setAsideFolder
+        self.countSetAside = countSetAside
         self.load = load
         reload()
     }
@@ -52,6 +63,7 @@ final class MeetingsListModel: ObservableObject {
 
     func reload() {
         items = load()
+        setAsideCount = countSetAside()
     }
 
     func delete(_ meeting: MeetingSummary) {

@@ -33,6 +33,16 @@ protocol MeetingAudioSource: Sendable {
     /// 002 §6's response to a tap that went all-zero: tear down, rebuild.
     func rebuild() async throws
     func stop() async
+    /// Whether the tapped app is putting audio out at this moment, or `nil`
+    /// when that cannot be told. Silence from an app that is playing nothing
+    /// is what a working tap should deliver — it is not evidence of a dead
+    /// one. The other direction proves nothing (002 §6), so this is only
+    /// ever used to *withhold* a verdict, never to reach one sooner.
+    func tappedAppIsPlaying() -> Bool?
+}
+
+extension MeetingAudioSource {
+    func tappedAppIsPlaying() -> Bool? { nil }
 }
 
 /// The engine listening to a meeting. Lines arrive as whisper decides them,

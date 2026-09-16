@@ -25,6 +25,6 @@ the domain model. one term, one meaning. if a word isn't here, it doesn't get us
 | **you / them** | the two channels of a meeting: your mic is *you*, the tapped app is *them*. after stop the diarizer splits *them* into `them 1`, `them 2`… |
 | **spool** | the 0600 audio file a meeting writes to while it runs. deleted the moment the transcript is saved; a spool orphaned by a crash is transcribed at next launch and saved `recovered`. |
 | **live transcript** | the floating glass panel during a meeting: confirmed lines in ink, the tentative tail dimmed. the live pass *is* the transcript. |
-| **transcript file** | the markdown file a meeting produces: front matter, then `you` / `them` lines with timestamps. english, always. |
+| **transcript file** | the markdown file a meeting produces: front matter, then `you` / `them` lines with timestamps. english when the model translates (whisper large, the default); as spoken when it cannot (turbo). |
 | **hook** | one executable, run detached after a transcript is saved, with the path as `$1` and the details as json on stdin. the only event is `meeting-saved`. |
 | **nudge** | after an hour of silence in a meeting, a notification asks `still recording?`. it asks; it never acts. |

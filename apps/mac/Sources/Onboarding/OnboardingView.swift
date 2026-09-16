@@ -52,6 +52,9 @@ final class OnboardingWindowController:
     /// which jobs this window was built for; a different ask needs a
     /// different window.
     let scope: OnboardingScope
+    /// which screen it opens on. the flow lives inside the view, so a window
+    /// built for one errand cannot be reopened on another.
+    let openAt: OnboardingStep
 
     private weak var coordinator: DictationCoordinator?
 
@@ -62,6 +65,7 @@ final class OnboardingWindowController:
     init(
         coordinator: DictationCoordinator,
         scope: OnboardingScope = .everything,
+        openAt: OnboardingStep = .hello,
         proveSystemAudio: @escaping OnboardingMeetingSetup.SystemAudioProof =
             OnboardingMeetingSetup.stubbedSystemAudioProof,
         prepareMeetingModel:
@@ -70,6 +74,7 @@ final class OnboardingWindowController:
     ) {
         self.coordinator = coordinator
         self.scope = scope
+        self.openAt = openAt
 
         // the folder the transcripts go in, made during setup so macOS asks
         // for ~/Documents here rather than mid-save at the end of the first
@@ -85,6 +90,7 @@ final class OnboardingWindowController:
         let rootView = OnboardingView(
             coordinator: coordinator,
             scope: scope,
+            openAt: openAt,
             meetingSetup: OnboardingMeetingSetup(
                 proveSystemAudio: proveSystemAudio,
                 prepareMeetingModel: prepareMeetingModel,
@@ -260,10 +266,15 @@ struct OnboardingView: View {
     @State private var launchAtLogin = true
 
     private let windowResizer: OnboardingWindowResizer
+    /// `.hello` unless something went wrong and this window was reopened to
+    /// fix it. opening straight at a later screen means the consent that
+    /// screen assumes has to be given here instead.
+    private let openAt: OnboardingStep
 
     fileprivate init(
         coordinator: DictationCoordinator,
         scope: OnboardingScope,
+        openAt: OnboardingStep = .hello,
         meetingSetup: OnboardingMeetingSetup,
         windowResizer: OnboardingWindowResizer
     ) {
@@ -292,12 +303,13 @@ struct OnboardingView: View {
         _meetingSetup = StateObject(wrappedValue: meetingSetup)
         _onboarding = State(initialValue: onboarding)
         // built here rather than jumped to in onAppear, so the hello screen
-        // never flashes for a frame on the way to the broken row.
-        _flow = State(
-            initialValue: OnboardingFlow(
-                step: scope == .permissionsOnly ? .permissions : .hello
-            )
-        )
+        // never flashes for a frame on the way to the broken row. a
+        // permissions-only reopen always starts on that row; any other
+        // reopen starts where the errand said.
+        let startingStep: OnboardingStep =
+            scope == .permissionsOnly ? .permissions : openAt
+        _flow = State(initialValue: OnboardingFlow(step: startingStep))
+        self.openAt = startingStep
         self.windowResizer = windowResizer
     }
 
@@ -320,6 +332,16 @@ struct OnboardingView: View {
         .animation(.easeInOut(duration: 0.2), value: flow.step)
         .onAppear {
             permissions.refresh()
+            // Skipping past `hello` skips the click that gives consent and
+            // starts the probe. Without it the system audio row would read
+            // "proved when you click" — a window opened to fix a failure,
+            // showing neither the failure nor its button.
+            if openAt != .hello {
+                onboarding.consentToSetup()
+                if onboarding.meetingsSelected {
+                    meetingSetup.begin()
+                }
+            }
             synchronizeOnboarding()
             // read from macOS rather than assumed: setup reopened from
             // `record a meeting` should show the real state, not re-ask.
@@ -672,9 +694,16 @@ struct OnboardingView: View {
                     .foregroundStyle(BrandUI.textSecondary)
             }
         case .ready:
-            Text("got it. it hears every language and writes english.")
-                .font(.caption)
-                .foregroundStyle(BrandUI.gold)
+            // one decode for the whole room, so the language is the model's
+            // choice: turbo cannot translate, and saying it writes english
+            // would be a promise it does not keep.
+            Text(
+                coordinator.settings.meetingModel.translatesToEnglish
+                    ? "got it. it hears every language and writes english."
+                    : "got it. it hears every language and writes it as spoken."
+            )
+            .font(.caption)
+            .foregroundStyle(BrandUI.gold)
         case .actionRequired:
             VStack(spacing: 7) {
                 Text("that download didn't finish.")

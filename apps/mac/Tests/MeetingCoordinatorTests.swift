@@ -29,7 +29,8 @@ final class MeetingCoordinatorTests: XCTestCase {
     private func coordinator(
         thresholds: MeetingThresholds = .init(
             probeTimeout: .seconds(1), silenceTimeout: .seconds(5),
-            silenceFloor: 0.001, quietNudgeAfter: .seconds(30))
+            silenceFloor: 0.001, quietNudgeAfter: .seconds(30)),
+        clock: FakeClock = FakeClock()
     ) -> MeetingCoordinator {
         let folder = dir.appendingPathComponent("docs")
         let c = MeetingCoordinator(
@@ -39,6 +40,7 @@ final class MeetingCoordinatorTests: XCTestCase {
             spool: MeetingSpool(root: dir.appendingPathComponent("spool")),
             hookRunner: HookRunner(logURL: dir.appendingPathComponent("hooks.log")),
             thresholds: thresholds,
+            now: { clock.now },
             preferences: { [hook] in
                 MeetingPreferences(folder: folder, hook: hook, model: .whisperLargeV3Turbo)
             }
@@ -77,6 +79,9 @@ final class MeetingCoordinatorTests: XCTestCase {
         // never read "recording" over a tap that delivered nothing.
         XCTAssertEqual(c.state, .idle)
         XCTAssertEqual(events, [.cannotHear(app: "zoom")])
+        // the pill ignores the mouse, so it points at setup rather than at a
+        // switch the user would then have to go and find.
+        XCTAssertEqual(events.first?.hudText, "can't hear zoom — opening setup")
         XCTAssertEqual(c.dictationResponse, .allow)
         XCTAssertEqual(MeetingSpool(root: dir.appendingPathComponent("spool")).orphans().count, 0)
     }
@@ -142,7 +147,7 @@ final class MeetingCoordinatorTests: XCTestCase {
         XCTAssertEqual(MeetingSpool(root: dir.appendingPathComponent("spool")).orphans().count, 0)
     }
 
-    func testAQuietHourAsksOnce() async throws {
+    func testFaintAudioCountsAsActivity() async throws {
         let c = coordinator()
         c.start(tapping: zoom)
         await source.awaitStart()
@@ -156,17 +161,115 @@ final class MeetingCoordinatorTests: XCTestCase {
         await settle()
 
         XCTAssertEqual(events.filter { $0 == .nudge }.count, 0, "faint audio counts as activity")
+        XCTAssertEqual(c.state, .recording)
+    }
 
-        // Now truly silent for longer than the nudge, shorter than the tap timeout each step.
-        source.send(loud(at: .seconds(41)))
-        var t = 42
-        while t < 80 {
-            source.send(quiet(at: .seconds(t)))
-            source.send(loud(at: .seconds(t + 4)))  // keep the tap alive
-            t += 5
-        }
+    /// SPEC §11's hour of silence. It could never arrive: every rebuild
+    /// replays the start sound into our own tap, and every silent chunk in
+    /// between read as activity, so the quiet clock was reset every two
+    /// minutes for as long as the quiet lasted.
+    func testASilentHourAsksOnce() async throws {
+        let c = coordinator()
+        // the real source chirps on every rebuild and the tap hears this
+        // app: a fake that stays mute cannot see the bug.
+        source.toneOnRebuild = loud(at: .zero)
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
         await settle()
-        XCTAssertEqual(events.filter { $0 == .nudge }.count, 0, "a loud chunk every 5 s is activity")
+
+        // nobody says another word. the tap goes silent, rebuilds, hears its
+        // own tone, and goes silent again — over and over.
+        await beQuiet(from: 5, through: 60)
+
+        XCTAssertEqual(events.filter { $0 == .nudge }.count, 1, "\(events)")
+        XCTAssertTrue(events.contains(.gapBegan))
+        XCTAssertGreaterThan(source.rebuilds, 1, "the tone really was replayed")
+    }
+
+    /// ADR 0023: it asks, it never acts — and an answered nudge does not come
+    /// straight back.
+    func testAnsweringTheNudgeBuysAnotherQuietSpan() async throws {
+        let c = coordinator()
+        source.toneOnRebuild = loud(at: .zero)
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+
+        await beQuiet(from: 5, through: 40)
+        XCTAssertEqual(events.filter { $0 == .nudge }.count, 1, "\(events)")
+
+        c.keepGoing()
+        await beQuiet(from: 45, through: 65)
+        XCTAssertEqual(events.filter { $0 == .nudge }.count, 1, "answered, so it waits")
+
+        await beQuiet(from: 70, through: 100)
+        XCTAssertEqual(events.filter { $0 == .nudge }.count, 2, "\(events)")
+    }
+
+    /// SPEC §11: a tap that stops calling back — a sleep, a locked screen, a
+    /// driver that died — is a gap like any other. No chunk ever arrives to
+    /// report it, so nothing inside `ingest` can: only the wall clock knows,
+    /// and a file that says `complete: true` over forty minutes it never
+    /// heard is the one failure that looks exactly like a success.
+    func testAMacThatSleptThroughAMeetingSaysSoInTheFile() async throws {
+        let clock = FakeClock()
+        let c = coordinator(clock: clock)
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        source.send(loud(at: .seconds(1_082)))
+        await settle()
+        XCTAssertEqual(c.state, .recording)
+        XCTAssertEqual(c.elapsed, .seconds(1_083))
+
+        // the lid closes at 00:18:03; forty minutes later the mac wakes at
+        // 00:58:18 by the wall and asks the tap whether it is still there.
+        clock.advance(by: .seconds(3_498))
+        c.probeTapIsAlive()
+        await settle()
+
+        XCTAssertEqual(c.state, .rebuilding)
+        XCTAssertTrue(events.contains(.gapBegan), "\(events)")
+        XCTAssertEqual(c.elapsed, .seconds(3_498), "the menu stops counting frozen frames")
+
+        // the rebuilt tap hears the room again, wall-aligned.
+        source.send(loud(at: .seconds(3_498)))
+        await settle()
+        XCTAssertTrue(events.contains(.gapEnded), "\(events)")
+
+        clock.advance(by: .seconds(230))
+        c.stop()
+        await settle(for: 1.0)
+
+        let saved = try XCTUnwrap(
+            MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).first)
+        XCTAssertFalse(saved.complete)
+        XCTAssertEqual(saved.gapCount, 1)
+        XCTAssertEqual(saved.duration, .seconds(3_728))
+        let body = try String(contentsOf: saved.fileURL, encoding: .utf8)
+        XCTAssertTrue(body.contains("- [1083.0, 3499.0]"), body)
+        XCTAssertTrue(body.contains("complete: false"), body)
+    }
+
+    /// The other half of the same rule: a wall clock that has moved is not
+    /// on its own a reason to declare a gap.
+    func testATapStillCallingBackIsNotDeclaredDead() async throws {
+        let clock = FakeClock()
+        let c = coordinator(clock: clock)
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+
+        clock.advance(by: .seconds(2))
+        c.probeTapIsAlive()
+        await settle()
+
+        XCTAssertEqual(c.state, .recording)
+        XCTAssertFalse(events.contains(.gapBegan), "\(events)")
+        XCTAssertEqual(source.rebuilds, 0)
     }
 
     func testLiveLinesAreUpsertedById() async throws {
@@ -200,6 +303,101 @@ final class MeetingCoordinatorTests: XCTestCase {
         XCTAssertEqual(all.map(\.app), ["teams"])
         XCTAssertEqual(all.first?.recovered, true)
         XCTAssertEqual(spool.orphans().count, 0)
+
+        // it says so first, and the word it lands on is the one the history
+        // row already uses — not the one a live stop shows.
+        XCTAssertEqual(events.first, .recovering(app: "teams"))
+        XCTAssertEqual(
+            events.first?.hudText,
+            "found an unsaved teams recording — writing it out…")
+        XCTAssertEqual(events.last?.hudText, "recovered teams — saved · <1m")
+        XCTAssertNil(c.recovering)
+    }
+
+    /// Fifteen minutes of the neural engine for the same failure at every
+    /// launch, forever. Two tries, then it is kept out of the way.
+    func testASpoolThatCannotBeTranscribedIsSetAsideAfterTwoTries() async throws {
+        let spool = MeetingSpool(root: dir.appendingPathComponent("spool"))
+        let handle = try spool.begin(.init(
+            app: "teams", started: Date(timeIntervalSince1970: 1_787_000_000),
+            engine: "whisper-large-v3-turbo", model: .whisperLargeV3Turbo))
+        let file = try SpoolAudioFile(url: handle.audioURL)
+        try await file.append(loud(at: .zero))
+        transcriber.batchFailure = Unreadable()
+
+        let c = coordinator()
+        c.recoverOrphans()
+        await settle(for: 0.6)
+        XCTAssertEqual(spool.orphans().count, 1, "one failure is not two")
+        XCTAssertEqual(spool.unreadableCount(), 0)
+
+        c.recoverOrphans()
+        await settle(for: 0.6)
+
+        XCTAssertEqual(spool.orphans().count, 0)
+        XCTAssertEqual(spool.unreadableCount(), 1, "kept, never retried")
+        XCTAssertEqual(
+            MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).count, 0)
+    }
+
+    /// The call ended, the tab stopped playing, nobody said anything for
+    /// minutes: the file must come back whole. A gap means audio was lost,
+    /// and once it means "it was quiet" it means nothing at all.
+    func testAQuietRoomIsNotRecordedAsDamage() async throws {
+        let c = coordinator()
+        source.playing = false
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+
+        await beQuiet(from: 5, through: 40)
+
+        XCTAssertFalse(events.contains(.gapBegan), "\(events)")
+        XCTAssertEqual(source.rebuilds, 0)
+        XCTAssertEqual(c.state, .recording)
+
+        c.stop()
+        await settle(for: 1.0)
+
+        let saved = try XCTUnwrap(
+            MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).first)
+        XCTAssertTrue(saved.complete)
+        XCTAssertEqual(saved.gapCount, 0)
+    }
+
+    /// The banner is the only surface that waits until you are back at the
+    /// mac, so it names the file rather than congratulating itself.
+    func testTheSavedBannerNamesTheFile() {
+        let url = URL(
+            fileURLWithPath: "/tmp/meetings/2026-09/2026-09-05-1402-zoom.md")
+        let whole = MeetingSummary(
+            fileURL: url, app: "zoom",
+            started: Date(timeIntervalSince1970: 1_787_000_000),
+            duration: .seconds(6_120), complete: true, gapCount: 0,
+            recovered: false)
+
+        XCTAssertEqual(
+            MeetingNudgeNotifier.savedBody(whole),
+            "zoom · 1h 42m · 2026-09-05-1402-zoom.md")
+
+        let holed = MeetingSummary(
+            fileURL: url, app: "zoom", started: whole.started,
+            duration: .seconds(6_120), complete: false, gapCount: 2,
+            recovered: false)
+
+        XCTAssertEqual(
+            MeetingNudgeNotifier.savedBody(holed),
+            "zoom · 1h 42m · 2 gaps · 2026-09-05-1402-zoom.md")
+
+        let rescued = MeetingSummary(
+            fileURL: url, app: "zoom", started: whole.started,
+            duration: .seconds(6_120), complete: true, gapCount: 0,
+            recovered: true)
+
+        XCTAssertEqual(
+            MeetingNudgeNotifier.savedBody(rescued),
+            "zoom · 1h 42m · recovered · 2026-09-05-1402-zoom.md")
     }
 
     // MARK: - helpers
@@ -224,6 +422,15 @@ final class MeetingCoordinatorTests: XCTestCase {
         try? await Task.sleep(for: .seconds(seconds))
     }
 
+    /// Silence, delivered the way a live tap delivers it: one chunk at a
+    /// time, with room for a rebuild and its tone to land in between.
+    private func beQuiet(from first: Int, through last: Int) async {
+        for s in stride(from: first, through: last, by: 5) {
+            source.send(quiet(at: .seconds(s)))
+            await settle(for: 0.12)
+        }
+    }
+
     private func script(_ text: String) throws -> URL {
         let url = dir.appendingPathComponent("hook.sh")
         try text.write(to: url, atomically: true, encoding: .utf8)
@@ -234,10 +441,31 @@ final class MeetingCoordinatorTests: XCTestCase {
 
 // MARK: - fakes
 
+/// A wall the test moves by hand — the coordinator only ever reads it.
+private final class FakeClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private let origin = ContinuousClock.now
+    private var offset: Duration = .zero
+
+    var now: ContinuousClock.Instant {
+        lock.withLock { origin + offset }
+    }
+
+    func advance(by amount: Duration) {
+        lock.withLock { offset += amount }
+    }
+}
+
 private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     private var continuation: AsyncStream<MeetingAudioChunk>.Continuation?
     private var started = false
+    private var nextAt: Duration = .zero
     var rebuilds = 0
+    /// The real source plays the start sound again on every rebuild, and the
+    /// tap is scoped to this app as well — so the tone comes back as far-side
+    /// audio a moment later. A fake that stays mute cannot see what that
+    /// does to the quiet clock.
+    var toneOnRebuild: MeetingAudioChunk?
 
     func start(tapping app: RunningApp) async throws -> AsyncStream<MeetingAudioChunk> {
         let (stream, continuation) = AsyncStream<MeetingAudioChunk>.makeStream()
@@ -246,20 +474,37 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
         return stream
     }
 
-    func rebuild() async throws { rebuilds += 1 }
+    func rebuild() async throws {
+        rebuilds += 1
+        guard let tone = toneOnRebuild else { return }
+        send(MeetingAudioChunk(you: tone.you, them: tone.them, at: nextAt))
+    }
+
+    /// What the tapped app says about its own output. `nil` is "cannot
+    /// tell", which is what the real source returns for a helper process.
+    var playing: Bool?
+
+    func tappedAppIsPlaying() -> Bool? { playing }
 
     func stop() async { continuation?.finish() }
 
-    func send(_ chunk: MeetingAudioChunk) { continuation?.yield(chunk) }
+    func send(_ chunk: MeetingAudioChunk) {
+        nextAt = chunk.at + chunk.duration
+        continuation?.yield(chunk)
+    }
 
     func awaitStart() async {
         while !started { try? await Task.sleep(for: .milliseconds(10)) }
     }
 }
 
+private struct Unreadable: Error {}
+
 private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
     var finalTurns: [MeetingTurn] = []
     var batchTurns: [MeetingTurn] = []
+    /// what a spool the engine cannot read does at every launch.
+    var batchFailure: (any Error)?
     private(set) var fed = 0
     let lines: AsyncStream<LiveLine>
     private let emitter: AsyncStream<LiveLine>.Continuation
@@ -271,7 +516,10 @@ private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
     func begin() async throws {}
     func feed(_ chunk: MeetingAudioChunk) async { fed += 1 }
     func finish() async -> [MeetingTurn] { finalTurns }
-    func transcribe(you: [Float], them: [Float]) async throws -> [MeetingTurn] { batchTurns }
+    func transcribe(you: [Float], them: [Float]) async throws -> [MeetingTurn] {
+        if let batchFailure { throw batchFailure }
+        return batchTurns
+    }
     func emit(_ line: LiveLine) { emitter.yield(line) }
 }
 

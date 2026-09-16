@@ -18,6 +18,27 @@ struct MeetingsBrowserView: View {
                     .padding(.top, 14)
             }
 
+            // kept, not deleted, and never retried again — so this is the
+            // only place it exists as far as anyone can tell.
+            if viewModel.setAsideCount > 0, let folder = viewModel.setAsideFolder {
+                HStack(spacing: 8) {
+                    Text(
+                        viewModel.setAsideCount == 1
+                            ? "1 recording couldn't be transcribed"
+                            : "\(viewModel.setAsideCount) recordings couldn't be transcribed"
+                    )
+                    .font(BrandUI.bodyFont)
+                    .foregroundStyle(BrandUI.attention)
+
+                    Button("show in finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([folder])
+                    }
+                    .font(.caption)
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 14)
+            }
+
             if viewModel.filtered.isEmpty {
                 // a search that found nothing is not an empty folder, and
                 // must not read like one.

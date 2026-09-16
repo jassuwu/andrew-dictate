@@ -134,6 +134,24 @@ struct AndrewDictateApp: App {
                     coordinator.toggleLiveTranscript()
                 }
             } else {
+                // a spool the app died on is being written out in the
+                // background. the pill says it once; this says it for as
+                // long as it runs.
+                if let app = coordinator.meetings.recovering {
+                    Text("writing out an unsaved \(app) recording…")
+                        .foregroundStyle(.secondary)
+                        .disabled(true)
+                }
+
+                // a meeting leaves one file and no other trace on screen.
+                // for ten minutes it is the thing you came back for; after
+                // that the menu is the hand it was.
+                if coordinator.showsLastMeetingRow {
+                    Button("show last meeting in finder") {
+                        coordinator.revealLastMeeting()
+                    }
+                }
+
                 // The only action here that is time-sensitive: you just
                 // watched it mishear a name. Everything else the app can do
                 // is configuration or curiosity, and lives in settings
@@ -175,6 +193,15 @@ struct AndrewDictateApp: App {
                     if ranked.meeting.isEmpty, ranked.other.isEmpty {
                         Text("nothing is running that could be recorded")
                             .disabled(true)
+                    }
+                }
+
+                // one row, and only while it is needed: the tap would not
+                // open, and the window that can fix it was closed.
+                if coordinator.meetingsNeedAttention {
+                    Button("fix system audio…") {
+                        coordinator.runOnboardingAgain(
+                            scope: .meetingsOnly, openAt: .permissions)
                     }
                 }
             }
