@@ -303,6 +303,41 @@ final class MeetingCoordinatorTests: XCTestCase {
         XCTAssertEqual(all.map(\.app), ["teams"])
         XCTAssertEqual(all.first?.recovered, true)
         XCTAssertEqual(spool.orphans().count, 0)
+
+        // it says so first, and the word it lands on is the one the history
+        // row already uses — not the one a live stop shows.
+        XCTAssertEqual(events.first, .recovering(app: "teams"))
+        XCTAssertEqual(
+            events.first?.hudText,
+            "found an unsaved teams recording — writing it out…")
+        XCTAssertEqual(events.last?.hudText, "recovered teams — saved · <1m")
+        XCTAssertNil(c.recovering)
+    }
+
+    /// Fifteen minutes of the neural engine for the same failure at every
+    /// launch, forever. Two tries, then it is kept out of the way.
+    func testASpoolThatCannotBeTranscribedIsSetAsideAfterTwoTries() async throws {
+        let spool = MeetingSpool(root: dir.appendingPathComponent("spool"))
+        let handle = try spool.begin(.init(
+            app: "teams", started: Date(timeIntervalSince1970: 1_787_000_000),
+            engine: "whisper-large-v3-turbo", model: .whisperLargeV3Turbo))
+        let file = try SpoolAudioFile(url: handle.audioURL)
+        try await file.append(loud(at: .zero))
+        transcriber.batchFailure = Unreadable()
+
+        let c = coordinator()
+        c.recoverOrphans()
+        await settle(for: 0.6)
+        XCTAssertEqual(spool.orphans().count, 1, "one failure is not two")
+        XCTAssertEqual(spool.unreadableCount(), 0)
+
+        c.recoverOrphans()
+        await settle(for: 0.6)
+
+        XCTAssertEqual(spool.orphans().count, 0)
+        XCTAssertEqual(spool.unreadableCount(), 1, "kept, never retried")
+        XCTAssertEqual(
+            MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).count, 0)
     }
 
     /// The call ended, the tab stopped playing, nobody said anything for
@@ -463,9 +498,13 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     }
 }
 
+private struct Unreadable: Error {}
+
 private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
     var finalTurns: [MeetingTurn] = []
     var batchTurns: [MeetingTurn] = []
+    /// what a spool the engine cannot read does at every launch.
+    var batchFailure: (any Error)?
     private(set) var fed = 0
     let lines: AsyncStream<LiveLine>
     private let emitter: AsyncStream<LiveLine>.Continuation
@@ -477,7 +516,10 @@ private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
     func begin() async throws {}
     func feed(_ chunk: MeetingAudioChunk) async { fed += 1 }
     func finish() async -> [MeetingTurn] { finalTurns }
-    func transcribe(you: [Float], them: [Float]) async throws -> [MeetingTurn] { batchTurns }
+    func transcribe(you: [Float], them: [Float]) async throws -> [MeetingTurn] {
+        if let batchFailure { throw batchFailure }
+        return batchTurns
+    }
     func emit(_ line: LiveLine) { emitter.yield(line) }
 }
 
