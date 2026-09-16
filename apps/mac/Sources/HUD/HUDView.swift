@@ -227,9 +227,11 @@ struct HUDView: View {
             // and draws its own edge, which retired the NSVisualEffectView
             // + maskImage workaround and the hand-drawn gold stroke. proven
             // over a borderless non-activating panel by a screenshot spike
-            // before betting the HUD on it (ADR 0037).
+            // before betting the HUD on it (ADR 0037). tinted toward the
+            // brand black, not gold: the pill carries every exceptional
+            // sentence, and gold-on-gold vanished over a white document.
             .glassEffect(
-                .regular.tint(BrandUI.gold.opacity(0.16)),
+                .regular.tint(BrandUI.black.opacity(0.35)),
                 in: RoundedRectangle(cornerRadius: 22, style: .continuous)
             )
     }
@@ -355,6 +357,12 @@ struct GoldRippleLine: View {
                 time: date.timeIntervalSinceReferenceDate
             )
 
+            separationPass(
+                in: &context,
+                path: path,
+                alpha: alpha
+            )
+
             // glow pass — the bloom
             context.drawLayer { layer in
                 layer.addFilter(
@@ -434,6 +442,7 @@ struct GoldRippleLine: View {
         path.addLine(
             to: CGPoint(x: cx + HUDWaveMotion.lineWidth / 2, y: cy)
         )
+        separationPass(in: &context, path: path, alpha: 1)
         context.stroke(
             path,
             with: .color(color(goldMix(b), 0.6 + 0.4 * min(b, 1))),
@@ -569,6 +578,25 @@ struct GoldRippleLine: View {
             lerp(Self.deepRGB[1], Self.paleRGB[1], t),
             lerp(Self.deepRGB[2], Self.paleRGB[2], t),
         ]
+    }
+
+    /// a dark pass under the gold. black over a dark app behind the panel
+    /// is invisible; over a white document it becomes the halo that lifts
+    /// the line out of the page — the lamp stays bare either way.
+    private func separationPass(
+        in context: inout GraphicsContext,
+        path: Path,
+        alpha: Double
+    ) {
+        context.stroke(
+            path,
+            with: .color(color(BrandUI.blackRGB, 0.45 * alpha)),
+            style: StrokeStyle(
+                lineWidth: HUDWaveMotion.strokeWidth + 3,
+                lineCap: .round,
+                lineJoin: .round
+            )
+        )
     }
 
     private func color(_ rgb: [Double], _ alpha: Double) -> Color {

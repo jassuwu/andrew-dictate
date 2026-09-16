@@ -40,13 +40,28 @@ enum BrandUI {
     static let windowBg = color(windowBgRGB)
     static let cardBg = color(cardBgRGB)
     static let textPrimary = color(textPrimaryRGB)
-    static let textSecondary = textPrimary.opacity(0.55)
+    /// 0.70, not the old 0.55: over the worst backdrop — a white window
+    /// behind the glass — 0.55 captions land at 3.5:1, under AA. a named
+    /// number so BrandPaletteTests can hold the floor.
+    static let textSecondaryOpacity = 0.70
+    static let textSecondary = textPrimary.opacity(textSecondaryOpacity)
     static let goldPale = color(goldPaleRGB)
     static let gold = color(goldRGB)
     static let goldDeep = color(goldDeepRGB)
     static let attention = color(attentionRGB)
 
     static let hairline = gold.opacity(0.14)
+
+    /// spiked at 0.72 / 0.55 / 0.40 / 0.25 / 0.10 over a busy desktop.
+    /// 0.72 was a curtain; 0.10 went light grey and lost the black.
+    /// 0.25 is glass you can see through with the ink still crisp.
+    static let windowTintOpacity = 0.25
+    /// that spike was judged over a dark desktop only. the 0.25 tint alone
+    /// composites to rgb(197) over a white app behind the window, which puts
+    /// textPrimary at 1.5:1 — on screen and unreadable. a scrim of the brand
+    /// black over the glass fixes the light backdrop and is invisible on the
+    /// dark one the ladder was chosen against: rgb(27) → rgb(23).
+    static let windowScrimOpacity = 0.70
 
     static let titleFont = Font.system(size: 22, weight: .semibold)
     static let sectionLabelFont = Font.system(
@@ -151,16 +166,24 @@ struct KeyChip: View {
 /// screenshot before choosing (ADR 0039). the window itself goes
 /// transparent so the glass has something to sample.
 private struct BrandGlassWindow: ViewModifier {
-    /// spiked at 0.72 / 0.55 / 0.40 / 0.25 / 0.10 over a busy desktop.
-    /// 0.72 was a curtain; 0.10 went light grey and lost the black.
-    /// 0.25 is glass you can see through with the ink still crisp.
-    static let tintOpacity = 0.25
+    @Environment(\.accessibilityReduceTransparency)
+    private var reduceTransparency
 
     func body(content: Content) -> some View {
         content
+            // over the glass and under the content: the order is the fix.
+            // whoever has asked macOS for less transparency gets the
+            // surface flat, not a thinner version of the same problem.
+            .background(
+                BrandUI.windowBg.opacity(
+                    reduceTransparency ? 1 : BrandUI.windowScrimOpacity
+                )
+            )
             .background {
                 Color.clear.glassEffect(
-                    .regular.tint(BrandUI.windowBg.opacity(Self.tintOpacity)),
+                    .regular.tint(
+                        BrandUI.windowBg.opacity(BrandUI.windowTintOpacity)
+                    ),
                     in: Rectangle()
                 )
             }

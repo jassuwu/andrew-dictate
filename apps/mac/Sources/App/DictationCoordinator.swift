@@ -55,6 +55,20 @@ final class DictationCoordinator: ObservableObject {
             }
         }
 
+        /// the panel's view of it: to the layout engine idle and recording
+        /// are both a wave, and the panel has to tell them apart.
+        var lamp: HUDLampState {
+            switch self {
+            case .idle:
+                .idle
+            case .prewarming:
+                .prewarming
+            case .recording:
+                .recording
+            case .transcribing:
+                .transcribing
+            }
+        }
     }
 
     @Published private(set) var state: State = .prewarming
@@ -122,6 +136,9 @@ final class DictationCoordinator: ObservableObject {
         }
     }
     private var isPrewarmed = false
+    /// whether the ember is an answer to something the user did. a
+    /// launch-time warm-up is not, and shows nothing (HUDPresentation).
+    private var prewarmPresentsHUD = true
     /// a double-tapped key leaves nothing to hold, so nothing to feel. the
     /// HUD has to carry the difference for as long as the capture runs.
     private var isRecordingLocked = false
@@ -155,6 +172,16 @@ final class DictationCoordinator: ObservableObject {
     private var transcribingBeganAt: Date?
     private var feedbackGeneration: UInt64 = 0
     private var activeFeedbackGeneration: UInt64?
+    /// the cap ended this take, not the user's finger. the pill that says
+    /// so has to ride the paste, so the fact outlives the stop.
+    private var capForcedEnd = false
+    /// an exceptional message the setup window took the screen from. it is
+    /// owed, not spent: held until that window closes (HUDFeedbackGate).
+    private var heldFeedback: (
+        message: String,
+        duration: TimeInterval,
+        at: Date
+    )?
     private let timelineClock = ContinuousClock()
     private let timelineStore = UtteranceTimelineStore()
     private var timelineSequence: UInt64 = 0
@@ -276,6 +303,9 @@ final class DictationCoordinator: ObservableObject {
         recorder?.onCapReached = { [weak self] in
             self?.handleCaptureCapReached()
         }
+        recorder?.onCapApproaching = { [weak self] in
+            self?.handleCaptureCapApproaching()
+        }
 
         settings.$preRollEnabled
             .dropFirst()
@@ -341,7 +371,10 @@ final class DictationCoordinator: ObservableObject {
         }
 
         if enginePreparationRequested {
-            startPrewarming()
+            // at launch the model loads because the app is running, not
+            // because anybody reached for the key. the menu says so; the
+            // screen stays empty.
+            startPrewarming(presentsHUD: false)
         } else {
             // `state` is born .prewarming and only a prewarm ever settles it,
             // so a launch that loads nothing has to settle it here: a lamp
@@ -549,7 +582,30 @@ final class DictationCoordinator: ObservableObject {
         // walking away cancels the errand: nothing starts later out of
         // nowhere.
         pendingMeetingApp = nil
-        synchronizeHUD()
+        flushHeldFeedback()
+    }
+
+    /// the pill the setup window swallowed, flashed at last — unless it has
+    /// aged out, in which case saying it now would be a non-sequitur.
+    private func flushHeldFeedback() {
+        guard let held = heldFeedback else {
+            synchronizeHUD()
+            return
+        }
+
+        switch HUDFeedbackGate.decide(
+            isOnboardingPresented: isOnboardingPresented,
+            heldFor: Date().timeIntervalSince(held.at)
+        ) {
+        case .flashNow:
+            heldFeedback = nil
+            flashNotice(held.message, duration: held.duration)
+        case .hold:
+            synchronizeHUD()
+        case .drop:
+            heldFeedback = nil
+            synchronizeHUD()
+        }
     }
 
     func requestMicrophoneAccess() async -> Bool {
@@ -603,6 +659,18 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func presentOnboarding(scope: OnboardingScope = .everything) {
+        // whatever the pill is saying right now is about to be taken off
+        // the screen mid-sentence. keep it rather than truncate it — it
+        // gets a whole default reading when it comes back, since how much
+        // of the first one had run is not worth tracking.
+        if activeFeedbackGeneration != nil,
+           let message = hudViewModel.feedbackMessage {
+            heldFeedback = (
+                message: message,
+                duration: 1.2,
+                at: Date()
+            )
+        }
         isOnboardingPresented = true
         hotkeyMonitor.setDetectionOnly(true)
         withHUDPanel { $0.dismiss() }
@@ -717,7 +785,8 @@ final class DictationCoordinator: ObservableObject {
         startPrewarming()
     }
 
-    private func startPrewarming() {
+    private func startPrewarming(presentsHUD: Bool = true) {
+        prewarmPresentsHUD = presentsHUD
         engineSwapTask?.cancel()
         engineSwapTask = nil
         enginePrewarmTask?.cancel()
@@ -1117,6 +1186,9 @@ final class DictationCoordinator: ObservableObject {
             recorder.onCapReached = { [weak self] in
                 self?.handleCaptureCapReached()
             }
+            recorder.onCapApproaching = { [weak self] in
+                self?.handleCaptureCapApproaching()
+            }
             audioRecorder = recorder
             hudViewModel.useRecorder(recorder)
             audioLogger.notice("audio recorder rebuilt on demand")
@@ -1132,14 +1204,30 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
-    /// the recorder stops itself at the ceiling and keeps what it heard.
-    /// the only thing missing is the user knowing why the wave went quiet.
+    /// thirty seconds of runway. the wave comes back on its own when the
+    /// pill clears, so the lamp needs nothing here.
+    private func handleCaptureCapApproaching() {
+        guard state == .recording else {
+            return
+        }
+
+        flashNotice("thirty seconds left", duration: 2)
+    }
+
+    /// the recorder sealed the mic at the ceiling, so the take is over
+    /// whether the finger knows it or not — end it and deliver the five
+    /// minutes. a lamp still saying "listening" over a sealed mic is
+    /// spec §4's forbidden shape: a failure wearing the success signal.
     private func handleCaptureCapReached() {
         guard state == .recording else {
             return
         }
 
-        flashNotice("five minutes — that's the cap")
+        capForcedEnd = true
+        endRecording()
+        // the key was never released. without this a hands-free lock reads
+        // the next press as the end of a take that is already finished.
+        hotkeyMonitor.reset()
     }
 
     private func handleCaptureInterruption(
@@ -1214,6 +1302,7 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func beginRecording() {
+        capForcedEnd = false
         // ADR 0023: refused during a meeting, and it says why. you started
         // the recording, so a dead hotkey is not a mystery — but a silent
         // one would still be spec §4's forbidden shape.
@@ -1246,6 +1335,9 @@ final class DictationCoordinator: ObservableObject {
         }
 
         guard isPrewarmed else {
+            // the key is a statement of intent: from here the ember is an
+            // answer, so it may show even if the warm-up began at login.
+            prewarmPresentsHUD = true
             // read before the switch: `.notStarted` starts the download,
             // which sets `.downloading(progress: 0)` synchronously and would
             // turn the press that priced it into "0%".
@@ -1283,6 +1375,10 @@ final class DictationCoordinator: ObservableObject {
             }
             if state != .prewarming {
                 setState(.prewarming)
+            } else {
+                // already warming from launch, with nothing on screen —
+                // light it now rather than at the next state change.
+                synchronizeHUD()
             }
             // the ember breathing at bottom-centre is the only thing a
             // download has ever said, and only the menu knew why. the press
@@ -1563,6 +1659,17 @@ final class DictationCoordinator: ObservableObject {
                     at: outcome.insertedAt,
                     stage: .delivered
                 )
+                // success is silent, but a take the user did not end is
+                // not quite success: say what landed, after it lands. a
+                // pill flashed at 5:00 would be wiped by the paste's own
+                // return to idle.
+                if capForcedEnd {
+                    setState(.idle)
+                    await flashFeedback(
+                        "five minutes — that's the cap. pasted what i had.",
+                        duration: 2.4
+                    )
+                }
             case let .leftOnPasteboard(reason):
                 completeTimeline(
                     at: timelineClock.now,
@@ -1665,6 +1772,7 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func invalidatePipeline() {
+        heldFeedback = nil
         setRecordingLocked(false)
         pipelineGeneration += 1
         pipelineTask?.cancel()
@@ -1822,6 +1930,21 @@ final class DictationCoordinator: ObservableObject {
         _ message: String,
         duration: TimeInterval = 2.4
     ) async {
+        // the setup window force-dismissed the panel, so the sleep-then-
+        // clear below would run against something nobody can see and the
+        // sentence would be lost for good. hold it; closing setup says it.
+        if HUDFeedbackGate.decide(
+            isOnboardingPresented: isOnboardingPresented,
+            heldFor: nil
+        ) == .hold {
+            heldFeedback = (
+                message: message,
+                duration: duration,
+                at: Date()
+            )
+            return
+        }
+
         feedbackGeneration += 1
         let feedbackToken = feedbackGeneration
         let stateToken = stateGeneration
@@ -1868,6 +1991,11 @@ final class DictationCoordinator: ObservableObject {
         _ newState: State,
         fastHUDDismiss: Bool = false
     ) {
+        if newState == .recording {
+            // they have moved on and are talking again; a held sentence
+            // about the last take would land on this one.
+            heldFeedback = nil
+        }
         stateGeneration += 1
         feedbackGeneration += 1
         activeFeedbackGeneration = nil
@@ -1886,13 +2014,12 @@ final class DictationCoordinator: ObservableObject {
                 return
             }
 
-            if self.isOnboardingPresented {
-                panel.dismiss(fast: fastDismiss)
-                return
-            }
-
-            guard self.activeFeedbackGeneration != nil
-                    || self.state != .idle else {
+            guard HUDPresentation.shouldPresent(
+                state: self.state.lamp,
+                hasFeedback: self.activeFeedbackGeneration != nil,
+                isOnboarding: self.isOnboardingPresented,
+                prewarmPresentsHUD: self.prewarmPresentsHUD
+            ) else {
                 panel.dismiss(fast: fastDismiss)
                 return
             }

@@ -108,6 +108,7 @@ targets:
         excludes:
           - PipelinePlaygroundView.swift
           - WordFixerView.swift
+      - Sources/Audio/CaptureCapWarning.swift
       - Sources/Audio/RingSplicer.swift
       - Sources/Audio/TapHealthMonitor.swift
       - Sources/Archive/Dictation.swift
@@ -133,8 +134,11 @@ targets:
       - Sources/App/RemovalPlan.swift
       - Sources/App/RemovalViewModel.swift
       - Sources/App/RetryBuffer.swift
+      - Sources/HUD/HUDFeedbackGate.swift
+      - Sources/HUD/HUDPresentation.swift
       - Sources/HUD/WaveLevelShaper.swift
       - Sources/HUD/HUDLayoutEngine.swift
+      - Sources/UI/BrandUI.swift
       - Sources/Settings/AppSettings.swift
       - Sources/Settings/EngineSwitchState.swift
       - Sources/Onboarding/OnboardingState.swift
