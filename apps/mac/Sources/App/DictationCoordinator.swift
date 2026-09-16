@@ -1661,6 +1661,12 @@ extension DictationCoordinator {
             .removeDuplicates()
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &meetingCancellables)
+        // same reason as the two above: the menu watches this object, and
+        // the recovery line lives on the one nested inside it.
+        meetings.$recovering
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &meetingCancellables)
         meetingNotifier.onKeepGoing = { [weak self] in
             self?.meetings.keepGoing()
         }
@@ -1677,7 +1683,14 @@ extension DictationCoordinator {
         Task.detached(priority: .utility) {
             MeetingTranscriptFile.lockDown(in: folder)
         }
-        meetings.recoverOrphans()
+        // recovery loads the meeting model and can run for a quarter of an
+        // hour. five seconds of head start keeps it off the dictation
+        // model's prewarm, so the first fn press is not slower for it. the
+        // number is a guess, like the rest of MeetingThresholds.
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            self?.meetings.recoverOrphans()
+        }
     }
 
     private func handle(_ event: MeetingEvent) {
@@ -1708,7 +1721,7 @@ extension DictationCoordinator {
             meetingsNeedAttention = true
             liveTranscriptPanel?.dismissKeepingPreference()
             runOnboardingAgain(scope: .meetingsOnly, openAt: .permissions)
-        case .gapBegan, .gapEnded, .writingItOut, .hookFailed:
+        case .recovering, .gapBegan, .gapEnded, .writingItOut, .hookFailed:
             break
         }
 
@@ -1716,7 +1729,10 @@ extension DictationCoordinator {
             let duration: TimeInterval
             switch event {
             case .hookFailed, .engineFailed, .saveFailed: duration = 4
-            case .writingItOut: duration = 6
+            // a recovered meeting arrives unprompted and is about yesterday:
+            // two seconds is not long enough to read it.
+            case .saved(let summary): duration = summary.recovered ? 4 : 2
+            case .writingItOut, .recovering: duration = 6
             default: duration = 2
             }
             flashNotice(text, duration: duration)

@@ -70,6 +70,15 @@ struct AndrewDictateApp: App {
                     coordinator.toggleLiveTranscript()
                 }
             } else {
+                // a spool the app died on is being written out in the
+                // background. the pill says it once; this says it for as
+                // long as it runs.
+                if let app = coordinator.meetings.recovering {
+                    Text("writing out an unsaved \(app) recording…")
+                        .foregroundStyle(.secondary)
+                        .disabled(true)
+                }
+
                 // a meeting leaves one file and no other trace on screen.
                 // for ten minutes it is the thing you came back for; after
                 // that the menu is the hand it was.

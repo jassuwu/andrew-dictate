@@ -30,6 +30,10 @@ struct MeetingPreferences: Sendable {
 enum MeetingEvent: Equatable, Sendable {
     case started(app: String)
     case cannotHear(app: String)
+    /// A spool the app died on is being written out, unasked, at launch. It
+    /// loads a 2.9 gb model and can run for a quarter of an hour: the lamp
+    /// stays quiet for successes, and this is not one.
+    case recovering(app: String)
     case gapBegan
     case gapEnded
     case nudge
@@ -54,11 +58,18 @@ enum MeetingEvent: Equatable, Sendable {
         case .gapBegan: "lost \(Self.themWord) — rebuilding"
         case .gapEnded: "hearing them again"
         case .nudge: nil
+        case .recovering(let app): "found an unsaved \(app) recording — writing it out…"
         case .writingItOut: "writing it out…"
         case .saved(let summary):
-            summary.gapCount == 0
-                ? "saved · \(summary.duration.spoken)"
-                : "saved · \(summary.gapCount) \(summary.gapCount == 1 ? "gap" : "gaps")"
+            // nobody asked for this one, and it is about a meeting they had
+            // yesterday — the word the history row already uses says so.
+            if summary.recovered {
+                "recovered \(summary.app) — saved · \(summary.duration.spoken)"
+            } else if summary.gapCount == 0 {
+                "saved · \(summary.duration.spoken)"
+            } else {
+                "saved · \(summary.gapCount) \(summary.gapCount == 1 ? "gap" : "gaps")"
+            }
         case .nothingToKeep: "nothing was heard, nothing kept"
         case .hookFailed(let label): "hook failed (\(label))"
         case .engineFailed(let reason): "meeting model failed — \(reason)"
@@ -81,6 +92,9 @@ final class MeetingCoordinator: ObservableObject {
     @Published private(set) var app: RunningApp?
     @Published private(set) var elapsed: Duration = .zero
     @Published private(set) var liveLines: [LiveLine] = []
+    /// The app of the spool being written out at launch, while it runs. The
+    /// menu draws it; the pill only says it once.
+    @Published private(set) var recovering: String?
 
     var onEvent: (@MainActor (MeetingEvent) -> Void)?
     var onLine: (@MainActor (LiveLine) -> Void)?
@@ -364,13 +378,18 @@ final class MeetingCoordinator: ObservableObject {
     // MARK: - launch
 
     /// Spools that outlived the app. Each becomes a transcript flagged
-    /// `recovered`, in the background, in order.
+    /// `recovered`, in the background, in order — announced, because a
+    /// quarter of an hour of the neural engine at login is not a silent
+    /// success, it is a job nobody asked for.
     func recoverOrphans() {
         let orphans = spool.orphans()
         guard !orphans.isEmpty else { return }
         Task { [weak self] in
             guard let self else { return }
+            defer { recovering = nil }
             for orphan in orphans {
+                recovering = orphan.manifest.app
+                onEvent?(.recovering(app: orphan.manifest.app))
                 await recover(orphan.handle, manifest: orphan.manifest)
             }
         }
