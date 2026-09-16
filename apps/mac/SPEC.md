@@ -93,7 +93,7 @@ working targets, not commitments: key-up → transcript ≤ 250ms, key-up → in
 
 ## 10. open questions (parked, non-blocking)
 
-- **branding — settled.** black + gold; the badge is the logo everywhere and is never a template image. art lives in `art/`: `logo-character.svg` rasterizes to the icon set via `build.sh`, which then runs `og-compose.swift` for the og image. *(the icons currently committed came from a different path than `build.sh` produces — unreconciled, 2026-08-13.)* taglines: "escape the keyboard." + "free · open source · fully local".
+- **branding — settled.** black + gold; the badge is the logo everywhere and is never a template image. art lives in `art/`: `icon-source.png` rasterizes to the icon set and the menu bar badge via `build.sh`, which then runs `og-compose.swift` for the og image and copies og/badge/favicon into `apps/site/public`. taglines: "escape the keyboard." + "free · open source · fully local".
 - **website — shipped (2026-08-11):** dictate.jass.gg, astro, in `apps/site`.
 - **HUD placement/personality — decided (2026-08-12):** bottom-centre, the lamp. see §4.
 - ~~dictation history beyond "copy last" — deliberately absent~~ **superseded 2026-08-22 (ADR 0022).** two durable nouns: a **dictation** is your own speech and is kept until you delete it (raw + inserted text, 0600 on disk, no record of which app you were in); a **meeting recording** holds other people's words and is a separate type with its own retention rules, decided alongside meeting capture. the old test — "revisit only if losing a transcript hurts" — was measured and fails: nothing is lost, because a bad dictation gets fixed in place. history exists because a tool used a hundred times a day should leave a trace, not as a safety net.
