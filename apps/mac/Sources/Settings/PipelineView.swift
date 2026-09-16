@@ -53,6 +53,8 @@ struct PipelineView: View {
                         .accessibilityLabel("cleanup")
 
                     if settings.cleanupEnabled {
+                        Text("on. spoken punctuation, emails, links, numbers, capitals.")
+                            .foregroundStyle(BrandUI.textSecondary)
                         flowText(diffText(heardText, cleanedText))
                     } else {
                         Text("off. only your dictionary still applies.")
