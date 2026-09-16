@@ -76,6 +76,18 @@ struct AndrewDictateApp: App {
     @NSApplicationDelegateAdaptor(AppLifecycleDelegate.self)
     private var lifecycleDelegate
 
+    /// the badge carries hue and corner and nothing else. voiceover gets the
+    /// sentence, including which mic is live.
+    private var menuBarLabel: String {
+        if coordinator.needsAttention {
+            return "Andrew Dictate — setup needed"
+        }
+        if coordinator.meetings.isRecording {
+            return "Andrew Dictate — recording a meeting"
+        }
+        return "Andrew Dictate"
+    }
+
     var body: some Scene {
         MenuBarExtra {
             // two menu bar icons that look identical is a bad time. the badge
@@ -209,11 +221,7 @@ struct AndrewDictateApp: App {
                     isRecordingMeeting: coordinator.meetings.isRecording
                 )
             )
-            .accessibilityLabel(
-                coordinator.needsAttention
-                    ? "Andrew Dictate — setup needed"
-                    : "Andrew Dictate"
-            )
+            .accessibilityLabel(menuBarLabel)
             .task {
                 lifecycleDelegate.onReopen = { [weak coordinator] in
                     coordinator?.handleReopen()

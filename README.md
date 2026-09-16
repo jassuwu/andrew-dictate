@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="apps/mac/art/icon_1024.png" width="140" alt="Andrew Dictate" />
+  <img src="apps/mac/art/badge_1024.png" width="140" alt="Andrew Dictate" />
 </p>
 
 <h1 align="center">andrew dictate</h1>
@@ -71,4 +71,4 @@ not coming: accounts, cloud, sync, a paid tier, telemetry, windows, linux, ios.
 
 ## credits
 
-[FluidAudio](https://github.com/FluidInference/FluidAudio) (apache-2.0) · [parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) (cc-by-4.0) · [WhisperKit](https://github.com/argmaxinc/WhisperKit) (mit) · [whisper](https://github.com/openai/whisper) (mit) · [mit](LICENSE) · made by [jass](https://jass.gg)
+[FluidAudio](https://github.com/FluidInference/FluidAudio) (apache-2.0) · [parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) (cc-by-4.0) · [WhisperKit](https://github.com/argmaxinc/WhisperKit) (mit) · [whisper](https://github.com/openai/whisper) (mit) · [mit](LICENSE) · [the film](https://github.com/jassuwu/andrew-dictate/releases/latest/download/andrew-dictate-launch.mp4) · made by [jass](https://jass.gg)

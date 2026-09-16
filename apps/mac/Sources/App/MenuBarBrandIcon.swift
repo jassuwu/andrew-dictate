@@ -17,31 +17,32 @@ enum MenuBarBrandIcon {
         }
         // a meeting outranks dictation states because dictation is refused
         // while one runs (ADR 0023); the dot is the persistent indicator
-        // the hud deliberately is not (ADR 0040).
+        // the hud deliberately is not (ADR 0040). it is the same gold dot
+        // dictation draws: gold means the mic is live, and which mic it is
+        // belongs in the menu, not in a 6 pt disc.
         if isRecordingMeeting {
-            return badge(recording: true, color: NSColor.systemRed)
+            let meeting = badge(recording: true)
+            meeting.accessibilityDescription = "Andrew Dictate recording a meeting"
+            return meeting
         }
 
         switch state {
-        case .transcribing:
-            if let hourglass = NSImage(
-                systemSymbolName: "hourglass",
-                accessibilityDescription: "Transcribing"
-            ) {
-                hourglass.isTemplate = true
-                return hourglass
-            }
-            return badge(recording: false)
         case .recording:
             return badge(recording: true)
+        // transcribing draws the quiet badge on purpose. the lamp's cool phase
+        // owns the wait and the menu already says "writing it out…" (ADR 0017);
+        // a narrower template glyph here only shoved the clock sideways and
+        // back, seventy times a day.
         case .idle,
-             .prewarming:
+             .prewarming,
+             .transcribing:
             return badge(recording: false)
         }
     }
 
-    /// the badge wearing a warning dot. deliberately not gold — gold means
-    /// recording, and "we're listening" is the one thing this state isn't.
+    /// the badge wearing a warning dot. red and top-right — gold means the
+    /// mic is live (dictation or a meeting), so "needs you" differs from
+    /// "listening" in both hue and corner.
     private static func attentionBadge() -> NSImage {
         guard let base = NSImage(named: "MenuBarBadge") else {
             let fallback = NSImage(
@@ -57,7 +58,7 @@ enum MenuBarBrandIcon {
             base.draw(in: rect)
             let dot = NSRect(
                 x: rect.maxX - 6.5,
-                y: rect.minY,
+                y: rect.maxY - 6,
                 width: 6,
                 height: 6
             )
@@ -77,10 +78,7 @@ enum MenuBarBrandIcon {
 
     /// the actual brand badge, full color. non-template by design: the logo
     /// is the logo, everywhere (user directive).
-    private static func badge(
-        recording: Bool,
-        color: NSColor = BrandUI.nsColor(BrandUI.goldRGB)
-    ) -> NSImage {
+    private static func badge(recording: Bool) -> NSImage {
         guard let base = NSImage(named: "MenuBarBadge") else {
             let fallback = NSImage(
                 systemSymbolName: "mic.fill",
@@ -99,7 +97,7 @@ enum MenuBarBrandIcon {
         let composed = NSImage(size: iconSize, flipped: false) { rect in
             base.draw(in: rect)
             let dot = NSRect(x: rect.maxX - 6.5, y: rect.minY, width: 6, height: 6)
-            color.setFill()
+            BrandUI.nsColor(BrandUI.goldRGB).setFill()
             NSBezierPath(ovalIn: dot).fill()
             BrandUI.nsColor(BrandUI.blackRGB).setStroke()
             let ring = NSBezierPath(ovalIn: dot)
