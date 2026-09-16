@@ -57,6 +57,21 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(flow.step, .hello)
     }
 
+    /// Until the consent click there is nothing behind the later screens —
+    /// no download asked for, and a "done" button that would end setup on a
+    /// mac where nothing had been set up.
+    func testYouCannotJumpAheadBeforeConsenting() {
+        let flow = OnboardingFlow()
+
+        XCTAssertTrue(flow.canJump(to: .hello, consented: false))
+        XCTAssertFalse(flow.canJump(to: .model, consented: false))
+        XCTAssertFalse(flow.canJump(to: .permissions, consented: false))
+
+        for step in OnboardingStep.allCases {
+            XCTAssertTrue(flow.canJump(to: step, consented: true))
+        }
+    }
+
     /// A revoked grant opens on the screen that is actually broken.
     func testSetupCanOpenOnTheScreenThatIsBroken() {
         let flow = OnboardingFlow(step: .permissions)
