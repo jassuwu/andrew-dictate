@@ -122,8 +122,11 @@ targets:
       - Sources/Onboarding/OnboardingMeetingSetup.swift
       - Sources/App/AppIdentity.swift
       - Sources/App/Capabilities.swift
+      - Sources/App/CaptureInterruptionNotice.swift
+      - Sources/App/EnginePreparationState.swift
       - Sources/App/RemovalPlan.swift
       - Sources/App/RemovalViewModel.swift
+      - Sources/App/RetryBuffer.swift
       - Sources/HUD/WaveLevelShaper.swift
       - Sources/HUD/HUDLayoutEngine.swift
       - Sources/Settings/AppSettings.swift
@@ -134,6 +137,7 @@ targets:
       - Sources/Settings/SetupHealth.swift
       - Sources/Hotkey/HotkeyBinding.swift
       - Sources/Hotkey/TapLockDetector.swift
+      - Sources/Hotkey/TranscribingRepress.swift
       - Sources/Insertion/FocusAnchor.swift
       # the pasteboard write is asserted on a private pasteboard; no test
       # here posts a keystroke. the key-code resolver comes along because

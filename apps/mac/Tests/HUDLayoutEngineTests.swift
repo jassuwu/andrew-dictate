@@ -89,3 +89,65 @@ final class HUDLayoutEngineTests: XCTestCase {
         )
     }
 }
+
+/// `flashFeedback` pays a wrapped pill 0.6 s more, because two lines are two
+/// reads — so which messages wrap is a timing decision, not just a layout one.
+extension HUDLayoutEngineTests {
+    func testFailurePillsFitOneLineOnARealScreen() {
+        for message in [
+            "heard nothing",
+            "locked — tap to end",
+            "the microphone changed — say that again",
+            "accessibility is off — the dictation key is dead",
+            "still finishing the last one",
+            "couldn't transcribe — tap to try again",
+            "speech model didn't download — finish setup",
+            "downloading the speech model — about 460 mb",
+            "can't hear zoom — allow system audio recording in privacy settings",
+        ] {
+            XCTAssertEqual(
+                HUDLayoutEngine.layout(
+                    for: .text(message),
+                    screenWidth: 1_512
+                ).lineCount,
+                1,
+                message
+            )
+        }
+    }
+
+    /// the copied-instead pills grew a "⌘V to paste" tail. they are
+    /// instructions, so truncation would be worse than a long pill.
+    func testCopiedInsteadPillsStayOnOneLineOnASmallScreen() {
+        for message in [
+            "copied — secure field · ⌘V to paste",
+            "copied — focus changed · ⌘V to paste",
+            "copied — couldn't paste it · ⌘V to paste",
+            "the clipboard is busy — nothing was copied",
+        ] {
+            let layout = HUDLayoutEngine.layout(
+                for: .text(message),
+                screenWidth: 1_280
+            )
+
+            XCTAssertEqual(layout.lineCount, 1, message)
+            XCTAssertLessThan(
+                layout.size.width,
+                1_280 * HUDLayoutEngine.maximumScreenWidthFraction
+            )
+        }
+    }
+
+    /// the longest thing the pill ever says only wraps on a small screen,
+    /// and that is the case that earns the extra beat.
+    func testTheLongestFailureWrapsOnASmallScreen() {
+        let layout = HUDLayoutEngine.layout(
+            for: .text(
+                "can't hear zoom — allow system audio recording in privacy settings"
+            ),
+            screenWidth: 640
+        )
+
+        XCTAssertEqual(layout.lineCount, 2)
+    }
+}

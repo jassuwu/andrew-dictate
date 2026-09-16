@@ -73,6 +73,56 @@ final class SetupGateTests: XCTestCase {
 }
 
 extension SetupGateTests {
+    /// the badge and the "finish setup" row answer to this, and settings
+    /// already calls a failed download a setup issue — so the menu must too.
+    func testAFailedSpeechModelNeedsAttentionEvenWithEveryGrant() {
+        XCTAssertTrue(
+            SetupGate.needsAttention(
+                onboardingDismissed: true,
+                dictationWanted: true,
+                permissions: ready,
+                speechModelFailed: true
+            )
+        )
+    }
+
+    /// keying the dot on "not ready" would blink it through every legitimate
+    /// first download, which is most of a new user's first minutes.
+    func testADownloadInProgressIsNotAProblem() {
+        XCTAssertFalse(
+            SetupGate.needsAttention(
+                onboardingDismissed: true,
+                dictationWanted: true,
+                permissions: ready,
+                speechModelFailed: false
+            )
+        )
+    }
+
+    func testAMeetingsOnlySetupIsNeverBadgedForTheSpeechModel() {
+        XCTAssertFalse(
+            SetupGate.needsAttention(
+                onboardingDismissed: true,
+                dictationWanted: false,
+                permissions: noAccessibility,
+                speechModelFailed: true
+            )
+        )
+    }
+
+    /// before setup has been dismissed, onboarding is the surface that says
+    /// this — the badge would be repeating it behind an open window.
+    func testSetupNotYetDismissedIsNeverBadged() {
+        XCTAssertFalse(
+            SetupGate.needsAttention(
+                onboardingDismissed: false,
+                dictationWanted: true,
+                permissions: noMicrophone,
+                speechModelFailed: true
+            )
+        )
+    }
+
     /// someone who set up meetings only has no hotkey to be dead, so a
     /// missing accessibility grant is not a reason to bring setup back.
     func testAMeetingsOnlySetupIsNeverNaggedForAccessibility() {

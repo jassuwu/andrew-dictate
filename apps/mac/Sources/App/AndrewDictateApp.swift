@@ -79,6 +79,15 @@ struct AndrewDictateApp: App {
                 }
                 .disabled(coordinator.lastTranscript == nil)
 
+                // the second time-sensitive row, and it disappears on its
+                // own: the samples of the sentence the model threw on are
+                // still in memory for two minutes.
+                if coordinator.canRetryLastFailure {
+                    Button("try that again") {
+                        coordinator.retryLastFailure()
+                    }
+                }
+
                 // nothing starts a recording but the user, and the user
                 // names the app (ADR 0023, 0040). meeting apps first.
                 Menu("record a meeting") {
@@ -113,7 +122,7 @@ struct AndrewDictateApp: App {
             // Zero rows when everything works, one click when it does not.
             // SPEC §5 makes settings the router; this is the shortcut for the
             // case where the user has no reason to go looking.
-            if coordinator.needsPermissionAttention {
+            if coordinator.needsAttention {
                 Button("finish setup") {
                     coordinator.runOnboardingAgain()
                 }
@@ -141,13 +150,13 @@ struct AndrewDictateApp: App {
             Image(
                 nsImage: MenuBarBrandIcon.image(
                     for: coordinator.state,
-                    needsAttention: coordinator.needsPermissionAttention,
+                    needsAttention: coordinator.needsAttention,
                     isRecordingMeeting: coordinator.meetings.isRecording
                 )
             )
             .accessibilityLabel(
-                coordinator.needsPermissionAttention
-                    ? "Andrew Dictate — permission needed"
+                coordinator.needsAttention
+                    ? "Andrew Dictate — setup needed"
                     : "Andrew Dictate"
             )
             .task {

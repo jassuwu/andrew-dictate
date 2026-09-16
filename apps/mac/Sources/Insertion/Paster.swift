@@ -78,6 +78,14 @@ final class Paster {
             snapshot = nil
         }
 
+        // nobody will read the result of a cancelled paste, so writing the
+        // transcript would replace whatever the user had copied with a
+        // sentence they threw away, silently.
+        guard !Task.isCancelled else {
+            releasePasteTransaction()
+            return PasteOutcome(result: .leftOnPasteboard(.cancelled))
+        }
+
         // asked once here, before anything is written: a password has to go
         // onto the clipboard concealed, and that cannot be decided after the
         // write. the later re-checks still catch a focus that moves since.
@@ -100,6 +108,14 @@ final class Paster {
             return PasteOutcome(result: .leftOnPasteboard(.accessibilityUnavailable))
         }
         guard !Task.isCancelled else {
+            // cancelled after the write — the reason check makes
+            // accessibility round-trips, so that window is real. hand the
+            // clipboard back, since the caller swallows this result.
+            Self.restore(
+                snapshot,
+                expectedChangeCount: writtenChangeCount,
+                transcript: text
+            )
             releasePasteTransaction()
             return PasteOutcome(result: .leftOnPasteboard(.cancelled))
         }

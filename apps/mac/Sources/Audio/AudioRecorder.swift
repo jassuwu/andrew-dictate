@@ -64,7 +64,7 @@ final class AudioRecorder {
     private var configurationChangeObserver: NSObjectProtocol?
 
     private(set) var isPreRollEnabled: Bool
-    var onInterruption: (() -> Void)?
+    var onInterruption: ((CaptureInterruption) -> Void)?
     var onCapReached: (() -> Void)?
 
     var currentLevel: Float {
@@ -346,7 +346,7 @@ final class AudioRecorder {
             )
         }
 
-        onInterruption?()
+        onInterruption?(.deviceChanged)
     }
 
     private func handleCapReached() {

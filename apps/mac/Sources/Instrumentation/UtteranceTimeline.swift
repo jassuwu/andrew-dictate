@@ -122,6 +122,12 @@ struct UtteranceTimelineBuilder {
     var transcriptReady: Instant?
     var cleaned: Instant?
 
+    /// how long the key was actually held. the one number that separates a
+    /// brush of the key from someone who meant to say something.
+    var heldDuration: Duration? {
+        keyUp.map { keyDown.duration(to: $0) }
+    }
+
     func complete(
         _ completionStage: UtteranceTimeline.CompletionStage,
         at completed: Instant

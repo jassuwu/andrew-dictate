@@ -66,7 +66,7 @@ final class HotkeyLogicTests: XCTestCase {
         )
     }
 
-    func testQuickSingleTapDefersEndUntilDoubleTapWindowExpires() {
+    func testQuickSingleTapIsDiscardedWhenNoSecondTapArrives() {
         var detector = TapLockDetector()
 
         XCTAssertEqual(
@@ -79,7 +79,7 @@ final class HotkeyLogicTests: XCTestCase {
         )
         XCTAssertEqual(
             detector.provisionalEndWindowExpired(),
-            [.end]
+            [.cancel]
         )
 
         XCTAssertEqual(
@@ -92,8 +92,33 @@ final class HotkeyLogicTests: XCTestCase {
         )
         XCTAssertEqual(
             detector.provisionalEndWindowExpired(),
+            [.cancel]
+        )
+    }
+
+    /// the 300 ms line: either side of it the same gesture means something
+    /// completely different, so both sides are pinned.
+    func testJustUnderTheTapThresholdIsDiscardedAndJustOverEndsTheTake() {
+        var brushed = TapLockDetector()
+        _ = brushed.modifierPressed(at: 1.0)
+
+        XCTAssertEqual(
+            brushed.modifierReleased(at: 1.29),
+            [.provisionalEnd]
+        )
+        XCTAssertEqual(
+            brushed.provisionalEndWindowExpired(),
+            [.cancel]
+        )
+
+        var held = TapLockDetector()
+        _ = held.modifierPressed(at: 1.0)
+
+        XCTAssertEqual(
+            held.modifierReleased(at: 1.31),
             [.end]
         )
+        XCTAssertEqual(held.provisionalEndWindowExpired(), [])
     }
 
     func testEscapeCancelsLockedCapture() {
