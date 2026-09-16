@@ -71,6 +71,15 @@ struct PipelineView: View {
                     flowText(plain(finalText))
                 }
             }
+
+            // the markers are the only way to say a line break, and nothing
+            // on screen named them until now. dimmed when the switch is off,
+            // because then they genuinely do nothing.
+            Text(PipelineSample.spokenMarkerLine)
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .opacity(settings.cleanupEnabled ? 1 : 0.6)
         }
         .onAppear {
             run.setDeterministicEnabled(settings.cleanupEnabled)
