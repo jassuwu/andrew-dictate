@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// options that appear on more than one surface are defined once, here.
-/// onboarding and settings render the same definition, so the words on the
-/// two screens cannot drift apart — there is only one set of words.
+/// an option that could appear on more than one surface is defined once,
+/// here. settings is the only screen rendering these today — onboarding
+/// omits them and lets the defaults stand — so this is a rule kept ahead of
+/// the second screen, not a description of one.
 enum DictationOption: CaseIterable, Identifiable, Sendable {
     case preRoll
     case soundFeedback
