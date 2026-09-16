@@ -257,12 +257,38 @@ final class AppSettings: ObservableObject {
     private static let meetingHookLastRunLabelKey =
         "AndrewDictate.meetingHookLastRunLabel"
 
-    /// `~/Documents/andrew-dictate` — no spaces anywhere the app creates
-    /// a path, so a hook can be a one-line shell script (SPEC §11).
+    /// `~/andrew-dictate` — no spaces anywhere the app creates a path, so a
+    /// hook can be a one-line shell script (SPEC §11). deliberately not
+    /// inside ~/Documents or ~/Desktop: those are the two folders macOS
+    /// syncs to icloud on its own, and a meeting holds other people's words.
     static let defaultMeetingsFolder: URL = FileManager.default
+        .homeDirectoryForCurrentUser
+        .appendingPathComponent("andrew-dictate", isDirectory: true)
+
+    /// where the default used to point. an install that already wrote
+    /// transcripts there keeps it — a new default must not orphan them.
+    static let legacyMeetingsFolder: URL = FileManager.default
         .homeDirectoryForCurrentUser
         .appendingPathComponent("Documents", isDirectory: true)
         .appendingPathComponent("andrew-dictate", isDirectory: true)
+
+    /// the parent to write under when nobody has picked one: the old one if
+    /// it already holds a `meetings/` folder, the new default otherwise.
+    static func unpickedMeetingsFolder(
+        legacy: URL = AppSettings.legacyMeetingsFolder,
+        fallback: URL = AppSettings.defaultMeetingsFolder,
+        fileManager: FileManager = .default
+    ) -> URL {
+        var isDirectory: ObjCBool = false
+        let written = legacy
+            .appendingPathComponent("meetings", isDirectory: true)
+            .path(percentEncoded: false)
+        guard fileManager.fileExists(atPath: written, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            return fallback
+        }
+        return legacy
+    }
 
     private let userDefaults: UserDefaults
 
@@ -306,10 +332,10 @@ final class AppSettings: ObservableObject {
         meetingModel = userDefaults
             .string(forKey: Self.meetingModelKey)
             .flatMap(MeetingModel.init(rawValue:)) ?? .default
-        meetingsFolder = userDefaults
+        let pickedMeetingsFolder = userDefaults
             .string(forKey: Self.meetingsFolderKey)
             .map { URL(fileURLWithPath: $0, isDirectory: true) }
-            ?? Self.defaultMeetingsFolder
+        meetingsFolder = pickedMeetingsFolder ?? Self.unpickedMeetingsFolder()
         meetingHook = userDefaults
             .string(forKey: Self.meetingHookKey)
             .map { URL(fileURLWithPath: $0) }
@@ -317,6 +343,17 @@ final class AppSettings: ObservableObject {
             .object(forKey: Self.meetingHookLastRunAtKey) as? Date
         meetingHookLastRunLabel = userDefaults
             .string(forKey: Self.meetingHookLastRunLabelKey)
+
+        // an install from before the default left ~/Documents keeps the
+        // folder its transcripts are in — written down, so the choice
+        // outlives whatever the default becomes next.
+        if pickedMeetingsFolder == nil,
+           meetingsFolder != Self.defaultMeetingsFolder {
+            userDefaults.set(
+                meetingsFolder.path(percentEncoded: false),
+                forKey: Self.meetingsFolderKey
+            )
+        }
     }
 
     @discardableResult
