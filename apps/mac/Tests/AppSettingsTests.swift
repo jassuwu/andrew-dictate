@@ -195,6 +195,19 @@ extension AppSettingsTests {
         XCTAssertTrue(AppSettings(userDefaults: defaults).keepDictations)
     }
 
+    /// the other half of that ruling: pre-roll stays off, and the one row
+    /// that offers it has to say when it is worth turning on and what it
+    /// costs while it is. the cost is the half that gets edited out.
+    func testPreRollNamesTheClippedWordAndTheOpenMic() {
+        let explanation = DictationOption.preRoll.explanation
+
+        XCTAssertTrue(explanation.contains("clipped"), explanation)
+        XCTAssertTrue(
+            explanation.contains("the whole time the app runs"),
+            explanation
+        )
+    }
+
     func testTurningKeepingOffSurvivesARelaunch() {
         let suite = "keep-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
