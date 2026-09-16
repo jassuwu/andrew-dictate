@@ -29,7 +29,8 @@ final class MeetingCoordinatorTests: XCTestCase {
     private func coordinator(
         thresholds: MeetingThresholds = .init(
             probeTimeout: .seconds(1), silenceTimeout: .seconds(5),
-            silenceFloor: 0.001, quietNudgeAfter: .seconds(30))
+            silenceFloor: 0.001, quietNudgeAfter: .seconds(30)),
+        clock: FakeClock = FakeClock()
     ) -> MeetingCoordinator {
         let folder = dir.appendingPathComponent("docs")
         let c = MeetingCoordinator(
@@ -39,6 +40,7 @@ final class MeetingCoordinatorTests: XCTestCase {
             spool: MeetingSpool(root: dir.appendingPathComponent("spool")),
             hookRunner: HookRunner(logURL: dir.appendingPathComponent("hooks.log")),
             thresholds: thresholds,
+            now: { clock.now },
             preferences: { [hook] in
                 MeetingPreferences(folder: folder, hook: hook, model: .whisperLargeV3Turbo)
             }
@@ -169,6 +171,70 @@ final class MeetingCoordinatorTests: XCTestCase {
         XCTAssertEqual(events.filter { $0 == .nudge }.count, 0, "a loud chunk every 5 s is activity")
     }
 
+    /// SPEC §11: a tap that stops calling back — a sleep, a locked screen, a
+    /// driver that died — is a gap like any other. No chunk ever arrives to
+    /// report it, so nothing inside `ingest` can: only the wall clock knows,
+    /// and a file that says `complete: true` over forty minutes it never
+    /// heard is the one failure that looks exactly like a success.
+    func testAMacThatSleptThroughAMeetingSaysSoInTheFile() async throws {
+        let clock = FakeClock()
+        let c = coordinator(clock: clock)
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        source.send(loud(at: .seconds(1_082)))
+        await settle()
+        XCTAssertEqual(c.state, .recording)
+        XCTAssertEqual(c.elapsed, .seconds(1_083))
+
+        // the lid closes at 00:18:03; forty minutes later the mac wakes and
+        // asks the tap whether it is still there.
+        clock.advance(by: .seconds(2_415))
+        c.probeTapIsAlive()
+        await settle()
+
+        XCTAssertEqual(c.state, .rebuilding)
+        XCTAssertTrue(events.contains(.gapBegan), "\(events)")
+        XCTAssertEqual(c.elapsed, .seconds(3_498), "the menu stops counting frozen frames")
+
+        // the rebuilt tap hears the room again, wall-aligned.
+        source.send(loud(at: .seconds(3_498)))
+        await settle()
+        XCTAssertTrue(events.contains(.gapEnded), "\(events)")
+
+        clock.advance(by: .seconds(230))
+        c.stop()
+        await settle(for: 1.0)
+
+        let saved = try XCTUnwrap(
+            MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).first)
+        XCTAssertFalse(saved.complete)
+        XCTAssertEqual(saved.gapCount, 1)
+        XCTAssertEqual(saved.duration, .seconds(3_728))
+        let body = try String(contentsOf: saved.fileURL, encoding: .utf8)
+        XCTAssertTrue(body.contains("- [1083.0, 3499.0]"), body)
+        XCTAssertTrue(body.contains("complete: false"), body)
+    }
+
+    /// The other half of the same rule: a wall clock that has moved is not
+    /// on its own a reason to declare a gap.
+    func testATapStillCallingBackIsNotDeclaredDead() async throws {
+        let clock = FakeClock()
+        let c = coordinator(clock: clock)
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+
+        clock.advance(by: .seconds(2))
+        c.probeTapIsAlive()
+        await settle()
+
+        XCTAssertEqual(c.state, .recording)
+        XCTAssertFalse(events.contains(.gapBegan), "\(events)")
+        XCTAssertEqual(source.rebuilds, 0)
+    }
+
     func testLiveLinesAreUpsertedById() async throws {
         let c = coordinator()
         c.start(tapping: zoom)
@@ -233,6 +299,21 @@ final class MeetingCoordinatorTests: XCTestCase {
 }
 
 // MARK: - fakes
+
+/// A wall the test moves by hand — the coordinator only ever reads it.
+private final class FakeClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private let origin = ContinuousClock.now
+    private var offset: Duration = .zero
+
+    var now: ContinuousClock.Instant {
+        lock.withLock { origin + offset }
+    }
+
+    func advance(by amount: Duration) {
+        lock.withLock { offset += amount }
+    }
+}
 
 private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     private var continuation: AsyncStream<MeetingAudioChunk>.Continuation?
