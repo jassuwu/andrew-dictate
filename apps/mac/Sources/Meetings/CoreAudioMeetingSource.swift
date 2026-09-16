@@ -41,6 +41,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     private var continuation: AsyncStream<MeetingAudioChunk>.Continuation?
     private var assembler: ChunkAssembler?
     private var framesDelivered: Int64 = 0
+    private var lastDelivery: ContinuousClock.Instant?
     private var player: AVAudioPlayer?
 
     init() {}
@@ -63,6 +64,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             self.targets = targets
             self.continuation = continuation
             self.framesDelivered = 0
+            self.lastDelivery = ContinuousClock.now
         }
         try build()
         playProbeTone()
@@ -72,8 +74,26 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     func rebuild() async throws {
         teardown()
         try build()
+        skipTheTimeNothingWasDelivered()
         // The tone again: a rebuilt tap must prove itself like a new one.
         playProbeTone()
+    }
+
+    /// A chunk's `at` is a frame count, and frames only exist while the tap
+    /// is calling back — so a rebuild after a sleep would stamp the next
+    /// chunk as if the lost hour never happened, and the gap the session
+    /// records would be zero seconds long. Advancing the counter over the
+    /// outage keeps the whole meeting on one clock. Small outages are the
+    /// teardown itself and are left alone.
+    private func skipTheTimeNothingWasDelivered() {
+        lock.withLock {
+            guard let last = lastDelivery else { return }
+            let now = ContinuousClock.now
+            let outage = now - last
+            guard outage > .seconds(1) else { return }
+            framesDelivered += Int64(outage.totalSeconds * MeetingAudioChunk.sampleRate)
+            lastDelivery = now
+        }
     }
 
     func stop() async {
@@ -264,6 +284,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             let at = lock.withLock { () -> Duration in
                 let at = Duration.seconds(Double(framesDelivered) / MeetingAudioChunk.sampleRate)
                 framesDelivered += Int64(them.count)
+                lastDelivery = ContinuousClock.now
                 return at
             }
             continuation.yield(MeetingAudioChunk(you: you, them: them, at: at))
