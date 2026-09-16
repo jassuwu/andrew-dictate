@@ -1033,6 +1033,15 @@ struct OnboardingView: View {
             if showsPager {
                 HStack(spacing: 7) {
                     ForEach(OnboardingStep.allCases) { step in
+                        // before the click there is nothing to come back to:
+                        // the last screen's "done" works, its two prompts are
+                        // live, and no model has been asked for. dimmer, not
+                        // gone — a dot that is not yet reads as not yet.
+                        let reachable = flow.canJump(
+                            to: step,
+                            consented: onboarding.consented
+                        )
+
                         Button {
                             flow.jump(to: step)
                         } label: {
@@ -1040,13 +1049,15 @@ struct OnboardingView: View {
                                 .fill(
                                     step == flow.step
                                         ? BrandUI.gold
-                                        : BrandUI.textPrimary.opacity(0.22)
+                                        : BrandUI.textPrimary
+                                            .opacity(reachable ? 0.22 : 0.1)
                                 )
                                 .frame(width: 6, height: 6)
                                 .contentShape(Rectangle())
                                 .padding(5)
                         }
                         .buttonStyle(.plain)
+                        .disabled(!reachable)
                         .accessibilityLabel(step.title(for: onboarding.jobs))
                     }
                 }
