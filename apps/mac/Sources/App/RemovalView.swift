@@ -104,7 +104,7 @@ struct RemovalView: View {
             }
         }
         .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(BrandUI.windowBg)
         .preferredColorScheme(.dark)
         .onAppear { viewModel.reload() }
