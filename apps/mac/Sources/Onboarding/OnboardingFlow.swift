@@ -181,8 +181,17 @@ struct OnboardingFlow: Equatable, Sendable {
         step = previous
     }
 
+    /// Any screen, any time — once the click has happened. Before it, the
+    /// last screen is a working "done" over two live system prompts and no
+    /// download, so the only way in is the one button SPEC §5 names.
+    func canJump(to target: OnboardingStep, consented: Bool) -> Bool {
+        target == step || consented
+    }
+
     /// Any screen, any time. The dots are the control, not just an indicator —
     /// going back to check something should never mean walking the whole flow.
+    /// Unconditional on purpose: reachability is the caller's question, and
+    /// `canJump(to:consented:)` is where it is answered.
     mutating func jump(to step: OnboardingStep) {
         self.step = step
     }
