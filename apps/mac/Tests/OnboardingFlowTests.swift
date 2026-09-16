@@ -5,6 +5,17 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(OnboardingFlow().step, .hello)
     }
 
+    /// Reopened to fix one named thing, setup starts on the screen that
+    /// fixes it — and can still be walked back from there.
+    func testItCanStartOnTheScreenTheErrandNeeds() {
+        var flow = OnboardingFlow(step: .permissions)
+        XCTAssertEqual(flow.step, .permissions)
+        XCTAssertTrue(flow.canGoBack)
+
+        flow.goBack()
+        XCTAssertEqual(flow.step, .model)
+    }
+
     /// Three screens, not five. The three requirements are not three ideas:
     /// the model downloads in the background, and the two permissions are one
     /// question — what the app needs in order to work.

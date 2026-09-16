@@ -79,6 +79,9 @@ final class MeetingCoordinatorTests: XCTestCase {
         // never read "recording" over a tap that delivered nothing.
         XCTAssertEqual(c.state, .idle)
         XCTAssertEqual(events, [.cannotHear(app: "zoom")])
+        // the pill ignores the mouse, so it points at setup rather than at a
+        // switch the user would then have to go and find.
+        XCTAssertEqual(events.first?.hudText, "can't hear zoom — opening setup")
         XCTAssertEqual(c.dictationResponse, .allow)
         XCTAssertEqual(MeetingSpool(root: dir.appendingPathComponent("spool")).orphans().count, 0)
     }
