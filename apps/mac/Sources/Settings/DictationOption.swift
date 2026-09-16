@@ -21,7 +21,7 @@ enum DictationOption: CaseIterable, Identifiable, Sendable {
     var explanation: String {
         switch self {
         case .preRoll:
-            "keeps a short microphone buffer warm to protect the first word."
+            "turn this on if your first word gets clipped — it keeps the mic open the whole time the app runs."
         case .soundFeedback:
             "a mic-switch click when listening starts and stops."
         }
