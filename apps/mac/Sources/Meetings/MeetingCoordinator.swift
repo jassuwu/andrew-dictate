@@ -629,7 +629,7 @@ final class MeetingCoordinator: ObservableObject {
             // settings › history.
             logger.error("could not recover a spool: \(error.localizedDescription, privacy: .public)")
             let noted = spool.noteAttempt(handle, manifest: manifest)
-            if noted.attempts ?? 0 >= MeetingSpool.attemptsBeforeSettingAside {
+            if (noted.attempts ?? 0) >= MeetingSpool.attemptsBeforeSettingAside {
                 spool.setAside(handle)
             }
         }
