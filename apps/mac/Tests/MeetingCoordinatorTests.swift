@@ -305,6 +305,40 @@ final class MeetingCoordinatorTests: XCTestCase {
         XCTAssertEqual(spool.orphans().count, 0)
     }
 
+    /// The banner is the only surface that waits until you are back at the
+    /// mac, so it names the file rather than congratulating itself.
+    func testTheSavedBannerNamesTheFile() {
+        let url = URL(
+            fileURLWithPath: "/tmp/meetings/2026-09/2026-09-05-1402-zoom.md")
+        let whole = MeetingSummary(
+            fileURL: url, app: "zoom",
+            started: Date(timeIntervalSince1970: 1_787_000_000),
+            duration: .seconds(6_120), complete: true, gapCount: 0,
+            recovered: false)
+
+        XCTAssertEqual(
+            MeetingNudgeNotifier.savedBody(whole),
+            "zoom · 1h 42m · 2026-09-05-1402-zoom.md")
+
+        let holed = MeetingSummary(
+            fileURL: url, app: "zoom", started: whole.started,
+            duration: .seconds(6_120), complete: false, gapCount: 2,
+            recovered: false)
+
+        XCTAssertEqual(
+            MeetingNudgeNotifier.savedBody(holed),
+            "zoom · 1h 42m · 2 gaps · 2026-09-05-1402-zoom.md")
+
+        let rescued = MeetingSummary(
+            fileURL: url, app: "zoom", started: whole.started,
+            duration: .seconds(6_120), complete: true, gapCount: 0,
+            recovered: true)
+
+        XCTAssertEqual(
+            MeetingNudgeNotifier.savedBody(rescued),
+            "zoom · 1h 42m · recovered · 2026-09-05-1402-zoom.md")
+    }
+
     // MARK: - helpers
 
     private func loud(at: Duration) -> MeetingAudioChunk {
