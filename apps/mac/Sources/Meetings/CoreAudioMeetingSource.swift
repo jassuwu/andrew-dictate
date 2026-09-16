@@ -96,6 +96,27 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         }
     }
 
+    /// Ask the HAL whether any of the tapped processes is putting audio out.
+    /// Our own bundle is deliberately left out of the question: this app is
+    /// in `targets` only so the tap can hear its own probe tone.
+    ///
+    /// `nil` when nothing translates — a helper process (WebKit.GPU, a
+    /// chrome helper) does the playing for some apps, and an answer we
+    /// cannot get must not be read as "no".
+    func tappedAppIsPlaying() -> Bool? {
+        let mine = Bundle.main.bundleIdentifier
+        let others = lock.withLock { targets }.filter { $0 != mine }
+        var asked = false
+        for bundleID in others {
+            guard let process = CoreAudioProperties.processObject(for: bundleID),
+                  let playing = CoreAudioProperties.isRunningOutput(process)
+            else { continue }
+            asked = true
+            if playing { return true }
+        }
+        return asked ? false : nil
+    }
+
     func stop() async {
         teardown()
         let continuation = lock.withLock { () -> AsyncStream<MeetingAudioChunk>.Continuation? in
@@ -403,6 +424,31 @@ private enum CoreAudioProperties {
         var size = UInt32(MemoryLayout<Float64>.size)
         let status = AudioObjectGetPropertyData(device, &address, 0, nil, &size, &rate)
         return status == noErr ? rate : 0
+    }
+
+    /// The HAL's object for a running process, by bundle id. Nothing is
+    /// running under that id → no object.
+    static func processObject(for bundleID: String) -> AudioObjectID? {
+        var address = address(kAudioHardwarePropertyTranslateBundleIDToProcessObject)
+        var identifier = bundleID as CFString
+        var object = AudioObjectID(0)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        let status = withUnsafeMutablePointer(to: &identifier) { qualifier in
+            AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject), &address,
+                UInt32(MemoryLayout<CFString>.size), qualifier, &size, &object)
+        }
+        guard status == noErr, object != 0 else { return nil }
+        return object
+    }
+
+    static func isRunningOutput(_ process: AudioObjectID) -> Bool? {
+        var address = address(kAudioProcessPropertyIsRunningOutput)
+        var value = UInt32(0)
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioObjectGetPropertyData(process, &address, 0, nil, &size, &value)
+        guard status == noErr else { return nil }
+        return value != 0
     }
 
     static func inputChannels(_ device: AudioObjectID) -> [Int] {

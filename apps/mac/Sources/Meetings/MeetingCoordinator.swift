@@ -114,6 +114,10 @@ final class MeetingCoordinator: ObservableObject {
     /// counting our own chirp as the room speaking is what kept the quiet
     /// hour from ever coming round.
     private var probeUntil: Duration = .zero
+    /// The tapped app's own account of whether it is playing anything, kept
+    /// for a second at a time so the HAL is not asked ten times a second.
+    private var appIsPlaying: Bool?
+    private var lastLivenessCheck: Duration?
     /// Every health check in here is driven by a chunk arriving, so a tap
     /// that stops calling back altogether — the mac slept, the screen
     /// locked, the driver died — freezes the clock instead of failing. These
@@ -178,6 +182,8 @@ final class MeetingCoordinator: ObservableObject {
         lastChunkArrived = now()
         nudgePending = false
         probeUntil = thresholds.probeTimeout
+        appIsPlaying = nil
+        lastLivenessCheck = nil
         startWatchdog()
         publish()
 
@@ -379,7 +385,15 @@ final class MeetingCoordinator: ObservableObject {
             try? await audioFile.append(chunk)
         }
 
-        health.observe(rms: chunk.themRMS, elapsed: elapsed)
+        // A HAL round trip, and chunks arrive ten times a second: once a
+        // second is plenty to tell a quiet room from a dead tap.
+        let dueForCheck = lastLivenessCheck.map { elapsed - $0 >= .seconds(1) } ?? true
+        if dueForCheck {
+            lastLivenessCheck = elapsed
+            appIsPlaying = source.tappedAppIsPlaying()
+        }
+        health.observe(
+            rms: chunk.themRMS, elapsed: elapsed, tappedAppIsPlaying: appIsPlaying)
         switch health.verdict {
         case .waitingForProbeTone:
             break
