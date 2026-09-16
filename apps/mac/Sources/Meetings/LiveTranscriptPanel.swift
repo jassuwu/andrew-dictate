@@ -13,16 +13,18 @@ import SwiftUI
 ///
 /// closing is remembered, not just hiding. someone who shut this panel does
 /// not want it back at the next meeting, and someone who left it open does —
-/// that is the whole of what the preference stores.
+/// that is the whole of what the preference stores, and until someone closes
+/// it once, it is on (`LiveTranscriptPreference`).
 @MainActor
 final class LiveTranscriptPanel: NSObject, NSWindowDelegate {
     /// Whether the panel was open when the last meeting ended, so the
-    /// coordinator can put it back without asking.
-    static var wasOpenLastTime: Bool {
-        UserDefaults.standard.bool(forKey: openDefaultsKey)
+    /// coordinator can put it back without asking. Never written means the
+    /// first meeting, which is the one that most needs to show its work.
+    static func wasOpenLastTime(in defaults: UserDefaults = .standard) -> Bool {
+        LiveTranscriptPreference.wasOpenLastTime(in: defaults)
     }
 
-    static let openDefaultsKey = "AndrewDictate.liveTranscriptOpen"
+    static let openDefaultsKey = LiveTranscriptPreference.key
 
     private static let autosaveName = "live-transcript"
     private static let defaultSize = NSSize(width: 380, height: 280)
@@ -131,7 +133,7 @@ final class LiveTranscriptPanel: NSObject, NSWindowDelegate {
     }
 
     private func remember(_ isOpen: Bool) {
-        defaults.set(isOpen, forKey: Self.openDefaultsKey)
+        LiveTranscriptPreference.remember(isOpen, in: defaults)
     }
 
     private func moveToDefaultCorner() {

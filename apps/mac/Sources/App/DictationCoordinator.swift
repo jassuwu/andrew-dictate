@@ -1697,7 +1697,7 @@ extension DictationCoordinator {
         switch event {
         case .started:
             meetingsNeedAttention = false
-            if LiveTranscriptPanel.wasOpenLastTime, !isLiveTranscriptShown {
+            if LiveTranscriptPanel.wasOpenLastTime(), !isLiveTranscriptShown {
                 toggleLiveTranscript()
             }
         case .nudge:
