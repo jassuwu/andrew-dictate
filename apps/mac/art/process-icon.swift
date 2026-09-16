@@ -47,7 +47,7 @@ func writePNG(_ image: CGImage, to path: String) {
     guard CGImageDestinationFinalize(dest) else { fatalError("finalize fail \(path)") }
 }
 
-func renderIcon(pixels: Int) -> CGImage {
+func renderIcon(pixels: Int, insetFraction: CGFloat) -> CGImage {
     let s = CGFloat(pixels)
     guard let ctx = CGContext(
         data: nil, width: pixels, height: pixels,
@@ -56,7 +56,7 @@ func renderIcon(pixels: Int) -> CGImage {
         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
     ) else { fatalError("ctx fail") }
     ctx.interpolationQuality = .high
-    let inset = s * 0.02
+    let inset = s * insetFraction
     let content = CGRect(x: inset, y: inset, width: s - 2 * inset, height: s - 2 * inset)
     let radius = content.width * 0.225
     let path = CGPath(roundedRect: content, cornerWidth: radius, cornerHeight: radius, transform: nil)
@@ -67,11 +67,22 @@ func renderIcon(pixels: Int) -> CGImage {
     return out
 }
 
+// the app icon stands on apple's grid — an 824 pt body in a 1024 pt canvas —
+// so it is the same height as its neighbours in /Applications, in spotlight and
+// in the microphone alert. everywhere else the badge gets no canvas of its own,
+// so it keeps its hairline inset and stays full-bleed.
+let appIconInset: CGFloat = 100.0 / 1024.0
+let badgeInset: CGFloat = 0.02
+
 for size in [16, 32, 64, 128, 256, 512, 1024] {
-    writePNG(renderIcon(pixels: size), to: "\(outDir)/icon_\(size).png")
+    writePNG(renderIcon(pixels: size, insetFraction: appIconInset), to: "\(outDir)/icon_\(size).png")
 }
 // menu bar sizes (full-color badge, 1x/2x)
 for size in [18, 36] {
-    writePNG(renderIcon(pixels: size), to: "\(outDir)/menubar_\(size).png")
+    writePNG(renderIcon(pixels: size, insetFraction: badgeInset), to: "\(outDir)/menubar_\(size).png")
+}
+// what the site serves and what the og image composites: the badge alone
+for size in [256, 1024] {
+    writePNG(renderIcon(pixels: size, insetFraction: badgeInset), to: "\(outDir)/badge_\(size).png")
 }
 print("icons rendered (exact pixels)")
