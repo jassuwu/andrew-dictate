@@ -47,7 +47,7 @@ one nonactivating, click-through `NSPanel` (borderless, floating, all-spaces), i
 
 the rule: **a failed dictation must never look like a successful one.** anything that goes wrong cuts the afterglow short and says why.
 
-no dock icon. menu-bar item: the brand badge → menu: fix a word…, record a meeting ▸, settings, finish setup / run onboarding again, about, quit. a red dot on the badge means a permission is missing.
+no dock icon. menu-bar item: the brand badge → menu: fix a word…, record a meeting ▸, settings, finish setup / run onboarding again, about, quit. a gold dot on the badge means the mic is live; a red dot in the top corner means a permission is missing.
 
 ## 5. onboarding (once, one app click)
 
@@ -103,7 +103,7 @@ working targets, not commitments: key-up → transcript ≤ 250ms, key-up → in
 
 a local meeting recorder. your mic is *you*; the system audio of one named process is *them*. what comes out is **one english markdown transcript**; no audio is kept.
 
-- **start / stop:** `record a meeting ▸` in the menu lists running apps, meeting apps first. manual both ends; the app never observes which processes hold the mic. while recording the menu reads `recording zoom · 12:34`, offers `stop recording` and `live transcript`, and hides `fix a word…` — dictation is refused mid-meeting and mid-rebuild, and the hud says why. the menu-bar badge gets a red dot.
+- **start / stop:** `record a meeting ▸` in the menu lists running apps, meeting apps first. manual both ends; the app never observes which processes hold the mic. while recording the menu reads `recording zoom · 12:34`, offers `stop recording` and `live transcript`, and hides `fix a word…` — dictation is refused mid-meeting and mid-rebuild, and the hud says why. the menu-bar badge gets a gold dot — the mic is live.
 - **proving it can hear:** capture starts by playing the start sound; the tap must hear it (ADR 0021). never heard → `can't hear zoom`, with a link to privacy › system audio recording. went silent after working → rebuild; the gap is kept with its timestamps and the file says `complete: false`.
 - **the nudge:** an hour of silence asks `still recording?` through a notification with `keep going` / `stop`. it asks; it never acts.
 - **the lamp's other lines**, each for a failure that must not look like success (§4): `nothing was heard, nothing kept` (stopped before the probe was heard), `meeting model failed — …` (the engine would not load; capture ends, the spool stays for recovery), `couldn't save the transcript — … kept for next launch`. `can't hear` ends the session too — the menu never says `recording` over a tap that is not delivering. dictation mid-sentence when you press record gets `finish dictating first`; the mic is one.
