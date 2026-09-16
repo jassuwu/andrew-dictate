@@ -92,6 +92,7 @@ targets:
         NSHumanReadableCopyright: "© 2026 jass. MIT license."
         ATSApplicationFontsPath: Fonts
         NSMicrophoneUsageDescription: "andrew dictate uses your microphone for local dictation. with pre-roll on, the mic stays warm while the app runs."
+        NSDocumentsFolderUsageDescription: "andrew dictate writes your meeting transcripts here. nothing leaves this mac."
 
   AndrewDictateTests:
     type: bundle.unit-test
@@ -134,6 +135,7 @@ targets:
       - Sources/Onboarding/OnboardingState.swift
       - Sources/Onboarding/OnboardingFlow.swift
       - Sources/Permissions/SetupGate.swift
+      - Sources/Permissions/EnginePrewarmGate.swift
       - Sources/Settings/SetupHealth.swift
       - Sources/Hotkey/HotkeyBinding.swift
       - Sources/Hotkey/TapLockDetector.swift

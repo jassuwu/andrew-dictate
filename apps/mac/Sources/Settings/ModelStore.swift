@@ -51,10 +51,26 @@ final class ModelStore {
         self.activeVersion = activeVersion
     }
 
+    /// one answer to "is it already here": the settings list asks it per
+    /// version, and prewarm asks it once, before any bytes move, so setup can
+    /// say whether the download it is about to start actually happened.
+    static func isOnDisk(
+        _ version: EngineVersion,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        isNonemptyDirectory(
+            modelDirectory(for: version),
+            fileManager: fileManager
+        )
+    }
+
     func installedModels() -> [InstalledModel] {
         EngineVersion.allCases.map { version in
-            let directory = modelDirectory(for: version)
-            let isDownloaded = isNonemptyDirectory(directory)
+            let directory = Self.modelDirectory(for: version)
+            let isDownloaded = Self.isOnDisk(
+                version,
+                fileManager: fileManager
+            )
             let size = isDownloaded
                 ? recursiveAllocatedSize(of: directory)
                 : 0
@@ -87,7 +103,8 @@ final class ModelStore {
         let modelsRoot = MLModelConfigurationUtils
             .defaultModelsDirectory()
             .standardizedFileURL
-        let directory = modelDirectory(for: version).standardizedFileURL
+        let directory = Self.modelDirectory(for: version)
+            .standardizedFileURL
 
         guard directory.deletingLastPathComponent() == modelsRoot else {
             throw ModelStoreError.unsafeModelDirectory
@@ -109,11 +126,14 @@ final class ModelStore {
         return decision
     }
 
-    private func modelDirectory(for version: EngineVersion) -> URL {
+    private static func modelDirectory(for version: EngineVersion) -> URL {
         AsrModels.defaultCacheDirectory(for: version.asrModelVersion)
     }
 
-    private func isNonemptyDirectory(_ directory: URL) -> Bool {
+    private static func isNonemptyDirectory(
+        _ directory: URL,
+        fileManager: FileManager
+    ) -> Bool {
         var isDirectory: ObjCBool = false
         guard fileManager.fileExists(
             atPath: directory.path,

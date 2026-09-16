@@ -25,7 +25,12 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
 
     var id: Int { rawValue }
 
-    func title(for jobs: OnboardingJobs) -> String {
+    /// `verdict` only reaches the last screen: it is what that card is
+    /// allowed to claim, and the first two claim nothing.
+    func title(
+        for jobs: OnboardingJobs,
+        verdict: OnboardingVerdict = .incomplete
+    ) -> String {
         switch self {
         case .hello:
             // Reopened from `record a meeting`, this window is not an
@@ -38,37 +43,68 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
                 ? "the speech models"
                 : "the speech model"
         case .permissions:
-            Self.spelled(jobs.permissions.count)
+            if verdict == .ready {
+                "ready"
+            } else if jobs.scope == .permissionsOnly {
+                // not an introduction and not a count: one switch went off.
+                "say yes again"
+            } else {
+                Self.spelled(jobs.permissions.count)
+            }
         }
     }
 
-    func reason(for jobs: OnboardingJobs) -> String {
+    /// `key` is the binding as it stands, not the shipped default: someone who
+    /// rebound to right ⌥ must not be told to hold fn.
+    func reason(
+        for jobs: OnboardingJobs,
+        key: String,
+        verdict: OnboardingVerdict = .incomplete
+    ) -> String {
         switch self {
         case .hello:
-            jobs.scope == .meetingsOnly
+            return jobs.scope == .meetingsOnly
                 ? "your mic is you, their app is them. one english transcript."
-                : "hold fn, talk, let go. the text lands where your cursor is."
+                : "hold \(key), talk, let go. the text lands where your cursor is."
         case .model:
-            jobs.dictation && jobs.meetings
+            return jobs.dictation && jobs.meetings
                 ? "they run on this mac, so nothing you say needs the internet."
                 : "it runs on this mac, so nothing you say needs the internet."
         case .permissions:
-            switch (jobs.dictation, jobs.meetings) {
-            case (true, true):
-                "so it can hear you, type for you, and hear the meeting."
-            case (true, false):
-                "so it can hear you, and put the text where your cursor is."
-            case (false, true):
-                "so it can hear you, and hear the app you're meeting in."
-            case (false, false):
-                "so it can hear you."
+            switch verdict {
+            case .ready:
+                return jobs.dictation
+                    ? "that's everything macos had to say yes to."
+                    : "that's everything. your mic is you, their app is them."
+            case .downloading:
+                // closing is allowed to be the right answer here, so say so.
+                return "granted. the model is still coming down — closing won't stop it."
+            case .incomplete:
+                if jobs.scope == .permissionsOnly {
+                    return "already set up — macos dropped a permission. nothing to download."
+                }
+                switch (jobs.dictation, jobs.meetings) {
+                case (true, true):
+                    return "so it can hear you, type for you, and hear the meeting."
+                case (true, false):
+                    return "so it can hear you, and put the text where your cursor is."
+                case (false, true):
+                    return "so it can hear you, and hear the app you're meeting in."
+                case (false, false):
+                    return "so it can hear you."
+                }
             }
         }
     }
 
     /// The button says what the click costs, because the click is the moment
-    /// the downloads start and nothing downloads before it (SPEC §5).
-    func actionTitle(for jobs: OnboardingJobs) -> String {
+    /// the downloads start and nothing downloads before it (SPEC §5). On the
+    /// last card it says what the click *is*: only "done" claims setup
+    /// finished, so a card with a permission missing offers "close" instead.
+    func actionTitle(
+        for jobs: OnboardingJobs,
+        verdict: OnboardingVerdict = .incomplete
+    ) -> String {
         switch self {
         case .hello:
             let name = jobs.scope == .meetingsOnly
@@ -79,7 +115,19 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
         case .model:
             return "continue"
         case .permissions:
-            return "done"
+            switch verdict {
+            case .ready:
+                // the errand this window was opened for, named — as long as
+                // it fits the button the flow tests keep short.
+                if let app = jobs.meetingApp, app.count <= 17 {
+                    return "record \(app)"
+                }
+                return jobs.dictation ? "start dictating" : "done"
+            case .downloading:
+                return "done"
+            case .incomplete:
+                return "close"
+            }
         }
     }
 
@@ -99,7 +147,13 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
 /// grant had worked, because the screen that would have told you was already
 /// gone.
 struct OnboardingFlow: Equatable, Sendable {
-    private(set) var step: OnboardingStep = .hello
+    private(set) var step: OnboardingStep
+
+    /// Setup can open on the screen that is actually broken: a returning user
+    /// who lost a grant has no jobs to pick and nothing to download.
+    init(step: OnboardingStep = .hello) {
+        self.step = step
+    }
 
     var canGoBack: Bool {
         step != .hello
@@ -127,8 +181,17 @@ struct OnboardingFlow: Equatable, Sendable {
         step = previous
     }
 
+    /// Any screen, any time — once the click has happened. Before it, the
+    /// last screen is a working "done" over two live system prompts and no
+    /// download, so the only way in is the one button SPEC §5 names.
+    func canJump(to target: OnboardingStep, consented: Bool) -> Bool {
+        target == step || consented
+    }
+
     /// Any screen, any time. The dots are the control, not just an indicator —
     /// going back to check something should never mean walking the whole flow.
+    /// Unconditional on purpose: reachability is the caller's question, and
+    /// `canJump(to:consented:)` is where it is answered.
     mutating func jump(to step: OnboardingStep) {
         self.step = step
     }

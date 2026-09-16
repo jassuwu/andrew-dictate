@@ -60,6 +60,10 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var state: State = .prewarming
     @Published private(set) var enginePreparationState:
         EnginePreparationState = .notStarted
+    /// sampled once, before the download starts: `.ready` is reached the same
+    /// way whether 460 mb came down or the folder was already full, and setup
+    /// has to say which of the two the user just lived through.
+    @Published private(set) var engineModelWasOnDisk = false
     @Published private(set) var activeEngineVersion: EngineVersion
     @Published private(set) var engineSwitchMessage: String?
     @Published private(set) var hotkeyDetection: HotkeyDetection?
@@ -170,6 +174,9 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var meetingModelDownloads: [MeetingModel: Double] = [:]
     @Published private(set) var isLiveTranscriptShown = false
     private let meetingNotifier = MeetingNudgeNotifier()
+    /// the app `record a meeting ▸ zoom` named, held while setup runs. the
+    /// click already happened; setup is the detour, not a new question.
+    private var pendingMeetingApp: RunningApp?
     private var liveTranscriptPanel: LiveTranscriptPanel?
     private var meetingCancellables: Set<AnyCancellable> = []
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
@@ -182,7 +189,10 @@ final class DictationCoordinator: ObservableObject {
             activeVersion: settings.engineVersion
         )
         isOnboardingPresented = !settings.onboardingDismissed
-        enginePreparationRequested = settings.onboardingDismissed
+        enginePreparationRequested = EnginePrewarmGate.shouldPrewarmAtLaunch(
+            onboardingDismissed: settings.onboardingDismissed,
+            dictationWanted: settings.dictationWanted
+        )
         dictionaryStore = DictionaryStore()
         transcriptionEngine = ParakeetEngine(
             version: settings.engineVersion
@@ -273,6 +283,19 @@ final class DictationCoordinator: ObservableObject {
             }
             .store(in: &settingsCancellables)
 
+        // saying yes to dictation later should not cost a relaunch: the
+        // model arrives when the tick does.
+        settings.$dictationWanted
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] wanted in
+                guard wanted else {
+                    return
+                }
+                self?.requestEnginePreparation(asking: true)
+            }
+            .store(in: &settingsCancellables)
+
         settings.$engineVersion
             .dropFirst()
             .removeDuplicates()
@@ -317,6 +340,19 @@ final class DictationCoordinator: ObservableObject {
 
         if enginePreparationRequested {
             startPrewarming()
+        } else {
+            // `state` is born .prewarming and only a prewarm ever settles it,
+            // so a launch that loads nothing has to settle it here: a lamp
+            // breathing with no download behind it is the same lie as the
+            // download nobody asked for, wearing the opposite face.
+            state = .idle
+            hudViewModel.update(state: .idle)
+        }
+
+        // meetings need the microphone too, so this is not dictation's to
+        // gate — and after setup it is a status check, not an ask. before
+        // setup, onboarding is still the only surface that asks macOS.
+        if settings.onboardingDismissed {
             Task { @MainActor [weak self] in
                 _ = await self?.requestMicrophoneAccess()
             }
@@ -416,21 +452,55 @@ final class DictationCoordinator: ObservableObject {
             isOnboardingPresented = false
             return
         }
-        presentOnboarding()
+        presentOnboarding(scope: reentryScope)
     }
 
-    func runOnboardingAgain(scope: OnboardingScope = .everything) {
-        presentOnboarding(scope: scope)
+    /// Someone who has been through setup and lost a grant is not a new user.
+    /// `needsPermissionAttention` is already exactly "set up, wants
+    /// dictation, cannot dictate", so all three doors back in — launch,
+    /// the menu's "finish setup", settings' — get the one-screen version.
+    private var reentryScope: OnboardingScope {
+        needsPermissionAttention ? .permissionsOnly : .everything
+    }
+
+    func runOnboardingAgain(scope: OnboardingScope? = nil) {
+        presentOnboarding(scope: scope ?? reentryScope)
     }
 
     /// `dictationWanted` is nil when this run of setup had no say in it —
     /// the meetings-only window must not un-set a dictation setup that was
     /// made on an earlier day.
+    ///
+    /// Last press of a meetings-only run: finish the errand that opened this
+    /// window. ADR 0023 says nothing starts a recording but the user naming
+    /// an app — they did that before the download, and honouring it is not
+    /// the app deciding on its own.
     func finishOnboarding(dictationWanted: Bool? = nil) {
         if let dictationWanted {
             settings.dictationWanted = dictationWanted
         }
+        // captured and cleared before the close, because closing the window
+        // is also how the errand is cancelled.
+        let errand = pendingMeetingApp
+        pendingMeetingApp = nil
         dismissOnboarding()
+
+        guard let errand else {
+            return
+        }
+        guard installedMeetingModels.contains(settings.meetingModel) else {
+            flashNotice("still downloading the meeting model", duration: 2)
+            return
+        }
+        guard MeetingApps.running().contains(where: { $0.pid == errand.pid })
+        else {
+            flashNotice(
+                "\(MeetingApps.displayName(errand)) isn't running any more",
+                duration: 2
+            )
+            return
+        }
+        startMeeting(errand)
     }
 
     /// "skip for now" and "we're done" both close the window. what neither
@@ -458,7 +528,10 @@ final class DictationCoordinator: ObservableObject {
             return
         }
         prepareProductiveWaitWork()
-        requestEnginePreparation()
+        // the view only calls this with dictation ticked, so the click is the
+        // ask — even for someone whose last setup was meetings only and whose
+        // stored flag still says no.
+        requestEnginePreparation(asking: true)
     }
 
     func onboardingWindowDidClose(
@@ -476,6 +549,10 @@ final class DictationCoordinator: ObservableObject {
         // that arrived after launch. midSession, never launchOrReopen: a
         // window must not reopen itself from inside its own close.
         refreshPermissions(moment: .midSession)
+
+        // walking away cancels the errand: nothing starts later out of
+        // nowhere.
+        pendingMeetingApp = nil
         synchronizeHUD()
     }
 
@@ -625,7 +702,15 @@ final class DictationCoordinator: ObservableObject {
         startEngineSwap(to: version)
     }
 
-    private func requestEnginePreparation() {
+    /// `asking` is the caller saying the user just asked for dictation: a
+    /// keypress, a consent click, a tick. The stored flag lags those by a
+    /// beat (`@Published` publishes in willSet), and consent is consent
+    /// whether or not the write has landed yet.
+    private func requestEnginePreparation(asking: Bool = false) {
+        // a job nobody ticked has no download, at launch or anywhere else.
+        guard asking || settings.dictationWanted else {
+            return
+        }
         enginePreparationRequested = true
         guard !isPrewarmed,
               enginePrewarmTask == nil,
@@ -645,6 +730,9 @@ final class DictationCoordinator: ObservableObject {
         let version = activeEngineVersion
         isPrewarmed = false
         engineSwitchMessage = nil
+        // asked before a byte moves, so the answer cannot be fooled by how
+        // the progress callbacks happen to land.
+        engineModelWasOnDisk = ModelStore.isOnDisk(version)
         enginePreparationState = .downloading(progress: 0)
         setState(.prewarming)
 
@@ -733,6 +821,7 @@ final class DictationCoordinator: ObservableObject {
         }
 
         let currentVersion = engineSwitchState.activeVersion
+        engineModelWasOnDisk = ModelStore.isOnDisk(version)
         enginePreparationState = .downloading(progress: 0)
         engineSwitchMessage = nil
         engineLogger.notice(
@@ -1152,7 +1241,22 @@ final class DictationCoordinator: ObservableObject {
             )
             switch enginePreparationState {
             case .notStarted:
-                requestEnginePreparation()
+                // a mac set up for meetings only has no model and no menu
+                // row offering one, so this keypress is both the consent the
+                // launch stopped assuming and the only way back in. say what
+                // it costs, once — silence here would be a download behind
+                // your back by another route.
+                if !settings.dictationWanted {
+                    settings.dictationWanted = true
+                    flashNotice(
+                        """
+                        getting the speech model — \
+                        \(settings.engineVersion.approximateSize), once
+                        """,
+                        duration: 2
+                    )
+                }
+                requestEnginePreparation(asking: true)
             case .failed:
                 // pressing the key is a statement of intent, and a failed
                 // model download is usually a blip. try again, out loud —
@@ -1806,12 +1910,18 @@ extension DictationCoordinator {
         meetings.app.map(MeetingApps.displayName) ?? ""
     }
 
+    /// What setup's last button should promise, when an errand is waiting.
+    var pendingMeetingAppName: String? {
+        pendingMeetingApp.map(MeetingApps.displayName)
+    }
+
     /// `record a meeting ▸ zoom`. the model is a download you may not have
     /// asked for yet: then this is the route back to the one surface that
     /// knows how to ask (SPEC §5).
     func startMeeting(_ app: RunningApp) {
         guard !meetings.isRecording else { return }
         guard installedMeetingModels.contains(settings.meetingModel) else {
+            pendingMeetingApp = app
             runOnboardingAgain(scope: .meetingsOnly)
             return
         }

@@ -71,13 +71,26 @@ final class OnboardingWindowController:
         self.coordinator = coordinator
         self.scope = scope
 
+        // the folder the transcripts go in, made during setup so macOS asks
+        // for ~/Documents here rather than mid-save at the end of the first
+        // meeting. `folderName` is MeetingTranscriptFile's, so the path stays
+        // defined once.
+        let transcriptsFolder = coordinator.settings.meetingsFolder
+            .appendingPathComponent(
+                MeetingTranscriptFile.folderName,
+                isDirectory: true
+            )
+
         let resizer = OnboardingWindowResizer()
         let rootView = OnboardingView(
             coordinator: coordinator,
             scope: scope,
             meetingSetup: OnboardingMeetingSetup(
                 proveSystemAudio: proveSystemAudio,
-                prepareMeetingModel: prepareMeetingModel
+                prepareMeetingModel: prepareMeetingModel,
+                prepareMeetingsFolder: {
+                    OnboardingMeetingSetup.createFolder(at: transcriptsFolder)
+                }
             ),
             windowResizer: resizer
         )
@@ -175,12 +188,62 @@ private final class OnboardingPermissionModel: ObservableObject {
     }
 }
 
+/// What the key test has to say, in one value.
+///
+/// `pickerShown` is sticky on purpose: once setup has offered another key,
+/// withdrawing the offer the moment it is taken would read as a glitch. One
+/// state change on the first bump, and no staged "let go" beat — detection-only
+/// mode returns early on release, so a second beat would be a timer pretending
+/// to watch the user.
+private struct KeyTest: Equatable {
+    var fired = false
+    var patienceSpent = false
+    var pickerShown = false
+    /// changing this re-arms the wait, which is how a freshly picked key gets
+    /// its own six seconds.
+    var armedAt = Date()
+
+    mutating func markFired() {
+        fired = true
+    }
+
+    mutating func spendPatience() {
+        patienceSpent = true
+        pickerShown = true
+    }
+
+    mutating func rearm() {
+        fired = false
+        patienceSpent = false
+        armedAt = Date()
+    }
+
+    func caption(for binding: HotkeyBinding) -> String {
+        if fired {
+            return "got it. that key works on this keyboard."
+        }
+        guard patienceSpent else {
+            return "press and hold it."
+        }
+        // the fn sentence is only true about fn: someone who rebound in
+        // settings and reran setup would be told a lie.
+        return binding == .fn
+            ? "nothing yet — fn only exists on apple keyboards. try another:"
+            : "nothing yet. try another key:"
+    }
+}
+
 struct OnboardingView: View {
     // Every screen is the same size. The window used to grow from 430 to 648
     // when setup began, moving itself under the pointer at the exact moment
     // the user was reaching for something.
     private static let windowWidth: CGFloat = 460
     private static let windowHeight: CGFloat = 430
+
+    /// How long setup waits for the key before offering another one. A
+    /// provisional number, like the dead-tap window: long enough that nobody
+    /// is accused of not trying, short enough to still be on this screen.
+    private static let keyTestPatience: TimeInterval = 6
 
     @Environment(\.controlActiveState) private var controlActiveState
 
@@ -189,7 +252,12 @@ struct OnboardingView: View {
     @StateObject private var permissions: OnboardingPermissionModel
     @StateObject private var meetingSetup: OnboardingMeetingSetup
     @State private var onboarding: OnboardingState
-    @State private var flow = OnboardingFlow()
+    @State private var flow: OnboardingFlow
+    @State private var keyTest = KeyTest()
+    @StateObject private var loginItem = LoginItemController()
+    /// the coda row's tick. seeded from macOS's answer on appear, applied
+    /// only by the last button.
+    @State private var launchAtLogin = true
 
     private let windowResizer: OnboardingWindowResizer
 
@@ -201,6 +269,13 @@ struct OnboardingView: View {
     ) {
         let permissions = OnboardingPermissionModel()
         var onboarding = OnboardingState(scope: scope)
+        if scope == .permissionsOnly {
+            // there is nothing here to consent to — the jobs were picked
+            // weeks ago and the models are on disk. Consenting is what makes
+            // the row read "open settings" instead of offering an "allow"
+            // macOS ignores for an app it already lists.
+            onboarding.consentToSetup()
+        }
         onboarding.updateMicrophoneStatus(
             Self.microphoneRowStatus(for: permissions.microphoneStatus)
         )
@@ -216,6 +291,13 @@ struct OnboardingView: View {
         _permissions = StateObject(wrappedValue: permissions)
         _meetingSetup = StateObject(wrappedValue: meetingSetup)
         _onboarding = State(initialValue: onboarding)
+        // built here rather than jumped to in onAppear, so the hello screen
+        // never flashes for a frame on the way to the broken row.
+        _flow = State(
+            initialValue: OnboardingFlow(
+                step: scope == .permissionsOnly ? .permissions : .hello
+            )
+        )
         self.windowResizer = windowResizer
     }
 
@@ -239,6 +321,10 @@ struct OnboardingView: View {
         .onAppear {
             permissions.refresh()
             synchronizeOnboarding()
+            // read from macOS rather than assumed: setup reopened from
+            // `record a meeting` should show the real state, not re-ask.
+            loginItem.refresh()
+            launchAtLogin = loginItem.isEnabled || loginItem.isUnregistered
             windowResizer.resize(to: Self.windowHeight, animated: false)
         }
         .onChange(of: permissions.microphoneStatus) { _, _ in
@@ -249,6 +335,15 @@ struct OnboardingView: View {
         }
         .onChange(of: coordinator.enginePreparationState) { _, _ in
             synchronizeEngine()
+        }
+        // the press itself, published on every bump of the bound key. the
+        // window is key while setup is on screen, so the local monitor
+        // delivers it without accessibility being granted yet.
+        .onChange(of: coordinator.hotkeyDetection) { _, detection in
+            guard detection != nil else {
+                return
+            }
+            keyTest.markFired()
         }
         .onChange(of: meetingSetup.systemAudioStatus) { _, _ in
             synchronizeMeetings()
@@ -292,8 +387,13 @@ struct OnboardingView: View {
                     .padding(.bottom, 2)
             }
 
-            Text(flow.step.title(for: onboarding.jobs))
-                .font(.system(size: 22, weight: .semibold))
+            Text(
+                flow.step.title(
+                    for: onboarding.jobs,
+                    verdict: onboarding.verdict
+                )
+            )
+            .font(.system(size: 22, weight: .semibold))
 
             if flow.step == .hello, onboarding.scope == .everything {
                 Text("escape the keyboard.")
@@ -301,27 +401,52 @@ struct OnboardingView: View {
                     .foregroundStyle(BrandUI.gold)
             }
 
-            Text(flow.step.reason(for: onboarding.jobs))
-                .font(BrandUI.bodyFont)
-                .foregroundStyle(BrandUI.textSecondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 330)
+            Text(
+                flow.step.reason(
+                    for: onboarding.jobs,
+                    key: settings.dictationHotkey.displayName,
+                    verdict: onboarding.verdict
+                )
+            )
+            .font(BrandUI.bodyFont)
+            .foregroundStyle(BrandUI.textSecondary)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: 330)
 
             switch flow.step {
             case .hello:
                 jobRows.padding(.top, 14)
             case .model:
-                modelProgress.padding(.top, 10)
+                VStack(spacing: 18) {
+                    modelProgress
+                    keyTestBlock
+                }
+                .padding(.top, 10)
             case .permissions:
-                permissionRows.padding(.top, 14)
+                VStack(spacing: 0) {
+                    if onboarding.verdict == .ready {
+                        readyPanel
+                    } else {
+                        permissionRows
+                    }
+
+                    // below the checklist and behind a divider, because it is
+                    // a coda and not a fourth permission.
+                    if loginItem.isAvailable {
+                        rowDivider
+                        launchAtLoginRow
+                    }
+                }
+                .padding(.top, 14)
             }
         }
         .frame(maxWidth: .infinity)
     }
 
-    /// Two jobs, both on, priced. Unticking one takes its rows and its
-    /// download out of setup — the fork is here and nowhere else (ADR 0040).
+    /// Two jobs, both priced; dictation on, meetings offered. Ticking or
+    /// unticking one adds or takes its rows and its download — the fork is
+    /// here and nowhere else (ADR 0040).
     /// In `meetingsOnly` there is nothing to choose: pressing `record a
     /// meeting` was the choice.
     @ViewBuilder
@@ -362,24 +487,7 @@ struct OnboardingView: View {
     ) -> some View {
         Button(action: toggle) {
             HStack(spacing: 8) {
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(isOn ? BrandUI.gold : Color.clear)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .stroke(
-                                isOn
-                                    ? BrandUI.gold
-                                    : BrandUI.textPrimary.opacity(0.28),
-                                lineWidth: 1
-                            )
-                    }
-                    .overlay {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(BrandUI.windowBg)
-                            .opacity(isOn ? 1 : 0)
-                    }
-                    .frame(width: 16, height: 16)
+                checkbox(isOn: isOn)
 
                 Text(name)
                     .foregroundStyle(
@@ -397,6 +505,69 @@ struct OnboardingView: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? [.isSelected] : [])
+    }
+
+    private func checkbox(isOn: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(isOn ? BrandUI.gold : Color.clear)
+            .overlay {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .stroke(
+                        isOn
+                            ? BrandUI.gold
+                            : BrandUI.textPrimary.opacity(0.28),
+                        lineWidth: 1
+                    )
+            }
+            .overlay {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(BrandUI.windowBg)
+                    .opacity(isOn ? 1 : 0)
+            }
+            .frame(width: 16, height: 16)
+    }
+
+    /// `LSUIElement` is true: no dock icon, no window, so after a restart the
+    /// app is simply not running and the only symptom is the key doing
+    /// nothing — which feels exactly like a revoked permission. Ticked by
+    /// default, registered by the last button and by nothing else: closing
+    /// this window still records nothing (ADR 0029).
+    private var launchAtLoginRow: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Button {
+                launchAtLogin.toggle()
+            } label: {
+                HStack(spacing: 8) {
+                    checkbox(isOn: launchAtLogin)
+
+                    Text("start andrew dictate when you sign in")
+                        .foregroundStyle(
+                            launchAtLogin
+                                ? BrandUI.textPrimary
+                                : BrandUI.textSecondary
+                        )
+
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(launchAtLogin ? [.isSelected] : [])
+
+            Text("otherwise it isn't running after a restart.")
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
+                .padding(.leading, 24)
+
+            if let message = loginItem.message {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.textSecondary)
+                    .padding(.leading, 24)
+            }
+        }
+        .frame(maxWidth: 330)
     }
 
     /// One block per ticked job, labelled only when there are two of them —
@@ -434,26 +605,38 @@ struct OnboardingView: View {
     private var dictationModelProgress: some View {
         switch coordinator.enginePreparationState {
         case let .downloading(progress):
-            VStack(spacing: 7) {
-                ProgressView(value: bounded(progress))
-                    .progressViewStyle(.linear)
-                    .frame(width: 240)
-                Text("about \(coordinator.settings.engineVersion.approximateSize.dropFirst()). carry on — this keeps going.")
+            // nothing is coming down when it is already here, so no bar and
+            // no size: a quoted 460 mb that never gets fetched is the same
+            // lie as the caption below, one beat earlier.
+            if coordinator.engineModelWasOnDisk {
+                Text("warming up…")
                     .font(.caption)
                     .foregroundStyle(BrandUI.textSecondary)
+            } else {
+                VStack(spacing: 7) {
+                    ProgressView(value: bounded(progress))
+                        .progressViewStyle(.linear)
+                        .frame(width: 240)
+                    Text("about \(coordinator.settings.engineVersion.approximateSize.dropFirst()). carry on — this keeps going.")
+                        .font(.caption)
+                        .foregroundStyle(BrandUI.textSecondary)
+                }
             }
         case .warmingUp:
             Text("warming up…")
                 .font(.caption)
                 .foregroundStyle(BrandUI.textSecondary)
         case .ready:
-            // The models live in FluidAudio's shared folder, not this app's, so
-            // another app on this mac may already have fetched them — or a
-            // previous install did. Saying nothing here would let the user
-            // assume a download happened and quietly took their bandwidth.
-            Text("found it already on this mac. nothing to download.")
-                .font(.caption)
-                .foregroundStyle(BrandUI.gold)
+            // Two different things end here: a real download, and a folder
+            // another install or another app had already filled. One line for
+            // both told whoever watched the bar fill that nothing came down.
+            Text(
+                OnboardingState.modelReadyCaption(
+                    wasOnDisk: coordinator.engineModelWasOnDisk
+                )
+            )
+            .font(.caption)
+            .foregroundStyle(BrandUI.gold)
         case .failed:
             VStack(spacing: 7) {
                 Text("that download didn't finish.")
@@ -503,6 +686,136 @@ struct OnboardingView: View {
         }
     }
 
+    /// Proof, not configuration. The key is the one part of dictation setup
+    /// cannot verify for you — fn does not exist on a Keychron, and the app
+    /// would otherwise say nothing about it ever again. So the press happens
+    /// here, while there is still a screen to answer on, and the picker
+    /// appears only after the shipped default has visibly failed to fire.
+    ///
+    /// A meetings-only setup has no key to prove, and before consent there is
+    /// nothing to prove it for.
+    @ViewBuilder
+    private var keyTestBlock: some View {
+        if onboarding.consented, onboarding.dictationSelected {
+            VStack(spacing: 6) {
+                BrandSectionHeader("your key")
+
+                HStack(alignment: .top, spacing: 9) {
+                    if keyTest.pickerShown {
+                        keyPicker
+                    } else {
+                        KeyChip(
+                            settings.dictationHotkey.displayName,
+                            isActive: keyTest.fired
+                        )
+                    }
+
+                    Text(
+                        keyTest.caption(for: settings.dictationHotkey)
+                    )
+                    .font(.caption)
+                    .foregroundStyle(
+                        keyTest.fired ? BrandUI.gold : BrandUI.textSecondary
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+
+                    Spacer(minLength: 0)
+                }
+                // the tallest state's height from the first render: the
+                // picker must not push the card around under the pointer.
+                .frame(height: 38, alignment: .top)
+            }
+            .frame(maxWidth: 330)
+            .task(id: keyTest.armedAt) {
+                do {
+                    try await Task.sleep(for: .seconds(Self.keyTestPatience))
+                } catch {
+                    return
+                }
+                guard !keyTest.fired else {
+                    return
+                }
+                keyTest.spendPatience()
+            }
+        }
+    }
+
+    /// The same menu settings owns (one key picker in the app, rendered
+    /// twice), so a pick here is the real rebind and not a setup-only draft.
+    private var keyPicker: some View {
+        Menu {
+            ForEach(HotkeyBinding.supported) { binding in
+                Button(binding.displayName) {
+                    rebindForKeyTest(to: binding)
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                KeyChip(
+                    settings.dictationHotkey.displayName,
+                    isActive: keyTest.fired
+                )
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(BrandUI.textSecondary)
+            }
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .fixedSize()
+        .accessibilityLabel("dictation key")
+    }
+
+    private func rebindForKeyTest(to binding: HotkeyBinding) {
+        guard coordinator.rebindHotkey(to: binding) else {
+            return
+        }
+        // the new key gets its own six seconds; the picker stays, because
+        // taking the offer back the moment it was used would read as a bug.
+        keyTest.rearm()
+    }
+
+    /// The arrival. Two things the user is about to need and cannot see: which
+    /// key, and where the app went — an `LSUIElement` app closing this window
+    /// leaves one badge on screen that no string has ever named. Both are
+    /// borrowed (the binding settings owns, the badge the menu bar draws), so
+    /// nothing here is a second success signal: the lamp's afterglow stays the
+    /// only one, and it has no dictation behind it yet.
+    ///
+    /// Shorter than the checklist it replaces — the window's height is fixed
+    /// on purpose, because it used to grow under the pointer.
+    @ViewBuilder
+    private var readyPanel: some View {
+        VStack(spacing: 14) {
+            if onboarding.dictationSelected {
+                HStack(spacing: 7) {
+                    Text("hold")
+                    KeyChip(settings.dictationHotkey.displayName)
+                    Text("· talk · let go")
+                }
+                .font(BrandUI.bodyFont)
+                .foregroundStyle(BrandUI.gold)
+            } else {
+                // meetings-only reaches this card too, and must never be told
+                // to hold a key it has no use for.
+                Text("pick “record a meeting” from that badge.")
+                    .font(BrandUI.bodyFont)
+                    .foregroundStyle(BrandUI.gold)
+            }
+
+            HStack(spacing: 8) {
+                Image("Badge")
+                    .resizable()
+                    .frame(width: 18, height: 18)
+                    .accessibilityHidden(true)
+                Text("this badge is andrew, up in your menu bar.")
+                    .foregroundStyle(BrandUI.textSecondary)
+            }
+            .font(.caption)
+        }
+        .frame(maxWidth: 330)
+    }
+
     /// One checklist, filtered by job: nothing here belongs to a job the user
     /// unticked, because a row you cannot need is a row you have to wonder
     /// about.
@@ -511,6 +824,7 @@ struct OnboardingView: View {
             permissionRow(
                 "microphone",
                 status: onboarding.microphoneStatus,
+                note: "switch the microphone on for andrew dictate.",
                 allow: {
                     permissions.requestMicrophoneAccess {
                         await coordinator.requestMicrophoneAccess()
@@ -525,6 +839,7 @@ struct OnboardingView: View {
                 permissionRow(
                     "accessibility",
                     status: onboarding.accessibilityStatus,
+                    note: "find andrew dictate in the list and switch it on.",
                     allow: permissions.requestAccessibilityPrompt,
                     openSettings: permissions.openAccessibilitySettings
                 )
@@ -535,6 +850,13 @@ struct OnboardingView: View {
                 systemAudioRow
                 rowDivider
                 meetingModelRow
+
+                // nothing new in the happy path: a folder that exists is not
+                // news, and only a refusal needs saying.
+                if meetingSetup.folderStatus == .actionRequired {
+                    rowDivider
+                    transcriptsFolderRow
+                }
             }
         }
         .frame(maxWidth: 330)
@@ -611,6 +933,21 @@ struct OnboardingView: View {
         }
     }
 
+    private var transcriptsFolderRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text("transcripts folder")
+                .foregroundStyle(BrandUI.textPrimary)
+
+            Spacer(minLength: 8)
+
+            rowNote(
+                "couldn't make the meetings folder — choose another in settings",
+                colour: BrandUI.attention
+            )
+            .frame(maxWidth: 200, alignment: .trailing)
+        }
+    }
+
     private func rowNote(
         _ text: String,
         colour: Color = BrandUI.textSecondary
@@ -635,38 +972,44 @@ struct OnboardingView: View {
     /// Says what is true right now, in a word. The previous version showed
     /// three rows reading "pending" before consent had even been given, which
     /// reads as broken rather than waiting.
+    /// `note` is the sentence the pane cannot say for us: privacy settings
+    /// opens on a list, and which row to touch is the one thing the user is
+    /// left guessing. Only shown alongside "open settings" — a granted
+    /// permission has nothing to instruct.
     private func permissionRow(
         _ name: String,
         status: OnboardingRowStatus,
+        note: String? = nil,
         allow: @escaping () -> Void,
         openSettings: @escaping () -> Void
     ) -> some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(name)
                 .foregroundStyle(BrandUI.textPrimary)
 
             Spacer(minLength: 8)
 
-            switch status {
-            case .ready:
-                HStack(spacing: 5) {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .bold))
-                    Text("granted")
+            VStack(alignment: .trailing, spacing: 6) {
+                switch status {
+                case .ready:
+                    rowVerdict("granted")
+                case .actionRequired:
+                    Button("open settings", action: openSettings)
+                        .font(.caption)
+                    if let note {
+                        // default colour: a permission you have not given
+                        // yet is not a failure, and attention is for things
+                        // that went wrong.
+                        rowNote(note)
+                    }
+                case .inProgress:
+                    rowNote("asking…")
+                case .pending:
+                    Button("allow", action: allow)
+                        .font(.caption)
                 }
-                .font(.caption.weight(.medium))
-                .foregroundStyle(BrandUI.gold)
-            case .actionRequired:
-                Button("open settings", action: openSettings)
-                    .font(.caption)
-            case .inProgress:
-                Text("asking…")
-                    .font(.caption)
-                    .foregroundStyle(BrandUI.textSecondary)
-            case .pending:
-                Button("allow", action: allow)
-                    .font(.caption)
             }
+            .frame(maxWidth: 200, alignment: .trailing)
         }
     }
 
@@ -687,23 +1030,36 @@ struct OnboardingView: View {
         ZStack {
             // Centred independently of the buttons, which are different widths
             // and would otherwise push the dots off-centre.
-            HStack(spacing: 7) {
-                ForEach(OnboardingStep.allCases) { step in
-                    Button {
-                        flow.jump(to: step)
-                    } label: {
-                        Circle()
-                            .fill(
-                                step == flow.step
-                                    ? BrandUI.gold
-                                    : BrandUI.textPrimary.opacity(0.22)
-                            )
-                            .frame(width: 6, height: 6)
-                            .contentShape(Rectangle())
-                            .padding(5)
+            if showsPager {
+                HStack(spacing: 7) {
+                    ForEach(OnboardingStep.allCases) { step in
+                        // before the click there is nothing to come back to:
+                        // the last screen's "done" works, its two prompts are
+                        // live, and no model has been asked for. dimmer, not
+                        // gone — a dot that is not yet reads as not yet.
+                        let reachable = flow.canJump(
+                            to: step,
+                            consented: onboarding.consented
+                        )
+
+                        Button {
+                            flow.jump(to: step)
+                        } label: {
+                            Circle()
+                                .fill(
+                                    step == flow.step
+                                        ? BrandUI.gold
+                                        : BrandUI.textPrimary
+                                            .opacity(reachable ? 0.22 : 0.1)
+                                )
+                                .frame(width: 6, height: 6)
+                                .contentShape(Rectangle())
+                                .padding(5)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!reachable)
+                        .accessibilityLabel(step.title(for: onboarding.jobs))
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(step.title(for: onboarding.jobs))
                 }
             }
 
@@ -720,20 +1076,21 @@ struct OnboardingView: View {
                 .buttonStyle(.plain)
                 .font(.callout)
                 .foregroundStyle(BrandUI.textSecondary)
-                .opacity(flow.canGoBack ? 1 : 0)
-                .disabled(!flow.canGoBack)
+                .opacity(canGoBack ? 1 : 0)
+                .disabled(!canGoBack)
 
                 Spacer()
 
                 Button(action: performPrimaryAction) {
                     HStack(spacing: 5) {
-                        Text(flow.step.actionTitle(for: onboarding.jobs))
-                        Image(
-                            systemName: flow.canGoForward
-                                ? "chevron.right"
-                                : "checkmark"
+                        Text(
+                            flow.step.actionTitle(
+                                for: onboarding.jobs,
+                                verdict: onboarding.verdict
+                            )
                         )
-                        .font(.system(size: 10, weight: .semibold))
+                        Image(systemName: primaryGlyph)
+                            .font(.system(size: 10, weight: .semibold))
                     }
                 }
                 // the one prominent control on the surface gets the glass
@@ -746,6 +1103,27 @@ struct OnboardingView: View {
                 )
             }
         }
+    }
+
+    /// A reentry about one revoked switch has one screen: dots that walk you
+    /// to a welcome card and a `(~3.3 gb)` button are the thing this scope
+    /// exists to remove.
+    private var showsPager: Bool {
+        onboarding.scope != .permissionsOnly
+    }
+
+    private var canGoBack: Bool {
+        showsPager && flow.canGoBack
+    }
+
+    /// The glyph follows the word. A card offering "close" has finished
+    /// nothing, so it must not wear a checkmark — SPEC §4's rule, one
+    /// screen earlier than it was written for.
+    private var primaryGlyph: String {
+        guard !flow.canGoForward else {
+            return "chevron.right"
+        }
+        return onboarding.verdict == .incomplete ? "xmark" : "checkmark"
     }
 
     private func performPrimaryAction() {
@@ -761,6 +1139,12 @@ struct OnboardingView: View {
             // only the ticked ones — "nothing downloads before the click"
             // means nothing you didn't ask for downloads after it either.
             if onboarding.dictationSelected {
+                // macOS explains this ask better than any line on this card
+                // can, and answering it either way is what registers the app
+                // in privacy › accessibility — so "open settings" arrives at
+                // a list andrew dictate is actually in. Inside the dictation
+                // gate: a meetings-only setup is never asked (SPEC §5).
+                permissions.requestAccessibilityPrompt()
                 coordinator.beginOnboardingEnginePreparation()
             }
             if onboarding.meetingsSelected {
@@ -772,6 +1156,16 @@ struct OnboardingView: View {
             flow.advance()
 
         case .permissions:
+            // the tick lands here and nowhere else. A refusal must not hold
+            // the close hostage — the controller keeps the reason and the row
+            // prints it the next time this screen is on.
+            if loginItem.isAvailable, launchAtLogin != loginItem.isEnabled {
+                loginItem.setEnabled(launchAtLogin)
+            }
+            // "finished" records the press that made it true. Never from an
+            // .onChange: it flips `completion`, which the verdict reads, so
+            // the ready card would erase itself one frame after arriving.
+            onboarding.finishAutomatically()
             coordinator.finishOnboarding(
                 dictationWanted: onboarding.scope == .everything
                     ? onboarding.dictationSelected
@@ -791,6 +1185,9 @@ struct OnboardingView: View {
     private func synchronizeMeetings() {
         onboarding.updateSystemAudioStatus(meetingSetup.systemAudioStatus)
         onboarding.updateMeetingModelStatus(meetingSetup.modelStatus)
+        // read here too, so the last button reprices the moment the meeting
+        // model lands rather than a screen later.
+        onboarding.updateMeetingErrand(app: coordinator.pendingMeetingAppName)
     }
 
     private func synchronizePermissions() {

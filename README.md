@@ -31,7 +31,7 @@ or grab the dmg from [releases](https://github.com/jassuwu/andrew-dictate/releas
 
 the `xattr` line is there because the build is unsigned. i haven't paid apple the $99 for a developer account yet, so macOS quarantines it. right-click → open works too.
 
-first launch asks which jobs you want. dictation is a ~460 mb download, meetings are ~2.9 gb. tick one or both.
+first launch asks which jobs you want. dictation (~460 mb) is ticked; meeting recording (~2.9 gb) is there to tick if you want it.
 
 ## where your words go
 
