@@ -460,7 +460,9 @@ final class MeetingCoordinator: ObservableObject {
         recovered: Bool
     ) async {
         let them = (try? SpoolAudioFile.read(handle.audioURL))?.them ?? []
-        let split = them.isEmpty ? turns : await diarizer.split(them: them, turns: turns)
+        let split = them.isEmpty
+            ? turns
+            : await splitSpeakers(in: turns, them: them, gaps: recording.gaps)
 
         let transcript = MeetingTranscript(
             app: app,
@@ -509,6 +511,42 @@ final class MeetingCoordinator: ObservableObject {
         recordHookRun?(run)
         if run.outcome != .succeeded {
             onEvent?(.hookFailed(run.outcome.label))
+        }
+    }
+
+    /// The diarizer hears the spool, and a gap is time nothing was written to
+    /// it: after one, a turn stamped on the meeting's clock sits past the end
+    /// of the audio and every speaker after it would be guessed from the last
+    /// segment. So the lookup gets times shifted back over the gaps before
+    /// them, and the file keeps the stamps the meeting actually had.
+    private func splitSpeakers(
+        in turns: [MeetingTurn],
+        them: [Float],
+        gaps: [MeetingSession.Gap]
+    ) async -> [MeetingTurn] {
+        guard !gaps.isEmpty else {
+            return await diarizer.split(them: them, turns: turns)
+        }
+        let shifted = turns.map { turn in
+            MeetingTurn(
+                speaker: turn.speaker,
+                at: max(.zero, turn.at - Self.lost(before: turn.at, in: gaps)),
+                text: turn.text)
+        }
+        let split = await diarizer.split(them: them, turns: shifted)
+        guard split.count == turns.count else { return split }
+        return zip(turns, split).map {
+            MeetingTurn(speaker: $1.speaker, at: $0.at, text: $0.text)
+        }
+    }
+
+    private static func lost(
+        before at: Duration,
+        in gaps: [MeetingSession.Gap]
+    ) -> Duration {
+        gaps.reduce(.zero) { total, gap in
+            guard at > gap.began else { return total }
+            return total + (min(at, gap.ended) - gap.began)
         }
     }
 
