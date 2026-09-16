@@ -978,6 +978,12 @@ final class DictationCoordinator: ObservableObject {
     private func handleSystemResume() {
         hotkeyMonitor.reset()
         verifyEngineHealth()
+        // a meeting is meant to survive the sleep, not be cancelled by it —
+        // but the tap rarely does, and a frozen clock reads as a meeting
+        // that was heard all the way through (SPEC §11).
+        if meetings.isRecording {
+            meetings.probeTapIsAlive()
+        }
         // waking or unlocking is not the user coming to *us* — check, but
         // never take the screen back from whatever they returned to.
         refreshPermissions(moment: .midSession)
