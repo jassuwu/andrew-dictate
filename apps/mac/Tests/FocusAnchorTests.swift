@@ -107,27 +107,42 @@ final class FocusAnchorTests: XCTestCase {
         }
     }
 
-    /// the same character answers the other question: a word character, or
-    /// a comma or semicolon, means the sentence at the caret is still
-    /// running and the first word keeps the case it was said in.
+    /// the same read answers the other question: a word character, or a
+    /// comma or semicolon, means the sentence at the caret is still running
+    /// and the first word keeps the case it was said in.
     func testACaretInsideASentenceSaysSo() {
-        let continuing: [Character] = ["o", "O", "7", ",", ";", "é"]
+        let continuing = [
+            "because", "BECAUSE", "chapter 7", "first,", "first;", "café",
+        ]
 
-        for character in continuing {
+        for text in continuing {
             XCTAssertTrue(
-                continuesSentence(after: character),
-                "after: \(character)"
+                continuesSentence(after: text),
+                "after: \(text)"
             )
         }
     }
 
-    func testAFinishedSentenceOrAnEmptyFieldStartsANewOne() {
-        let starting: [Character] = [".", "?", "!", ":", " ", "\n", ")", "\""]
+    /// the case this exists for: you type a word, you type the space after
+    /// it, and only then do you hold fn. the sentence did not end there.
+    func testTheSpaceYouTypedDoesNotEndTheSentence() {
+        XCTAssertTrue(continuesSentence(after: "failed because "))
+        XCTAssertTrue(continuesSentence(after: "failed because   "))
+        XCTAssertTrue(continuesSentence(after: "failed because\t"))
+    }
 
-        for character in starting {
+    func testAFinishedSentenceOrAnEmptyFieldStartsANewOne() {
+        let starting = [
+            "done.", "really?", "stop!", "note:", "(", "\"",
+            // a new line is a new sentence, and a space after a full stop
+            // is still after a full stop
+            "first line\n", "done. ", "", "  ",
+        ]
+
+        for text in starting {
             XCTAssertFalse(
-                continuesSentence(after: character),
-                "after: \(character)"
+                continuesSentence(after: text),
+                "after: \(text)"
             )
         }
         XCTAssertFalse(continuesSentence(after: nil))
