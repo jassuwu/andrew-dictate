@@ -106,6 +106,12 @@ final class MeetingCoordinator: ObservableObject {
     private var linesTask: Task<Void, Never>?
     private var nudgePending = false
     private var isRebuilding = false
+    /// The tap hears this app too, so the start sound it plays to prove
+    /// itself lands in the far channel a moment after every rebuild. Until
+    /// this mark passes, audio is proof the tap works and nothing more —
+    /// counting our own chirp as the room speaking is what kept the quiet
+    /// hour from ever coming round.
+    private var probeUntil: Duration = .zero
     /// Every health check in here is driven by a chunk arriving, so a tap
     /// that stops calling back altogether — the mac slept, the screen
     /// locked, the driver died — freezes the clock instead of failing. These
@@ -169,6 +175,7 @@ final class MeetingCoordinator: ObservableObject {
         startedOn = now()
         lastChunkArrived = now()
         nudgePending = false
+        probeUntil = thresholds.probeTimeout
         startWatchdog()
         publish()
 
@@ -383,8 +390,10 @@ final class MeetingCoordinator: ObservableObject {
             }
             session.tapRecovered(at: elapsed)
             if wasRebuilding { onEvent?(.gapEnded); publish() }
-            session.heardAudio(at: elapsed)
-            nudgePending = false
+            if elapsed >= probeUntil {
+                session.heardAudio(at: elapsed)
+                nudgePending = false
+            }
         case .neverHeardTheProbeTone:
             if session.state == .provingItCanHear {
                 session.neverHeardTheProbe()
@@ -423,6 +432,9 @@ final class MeetingCoordinator: ObservableObject {
                 try await source.rebuild()
                 // A rebuilt tap must hear something before it is trusted
                 // again; a rebuild that produces silence is just a new gap.
+                // What it hears first is our own tone, so the quiet clock
+                // looks away for as long as that tone lasts.
+                probeUntil = elapsed + thresholds.probeTimeout
             } catch {
                 logger.error("tap rebuild failed: \(error.localizedDescription, privacy: .public)")
                 session.rebuildFailed()
