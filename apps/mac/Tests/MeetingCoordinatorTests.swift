@@ -144,7 +144,7 @@ final class MeetingCoordinatorTests: XCTestCase {
         XCTAssertEqual(MeetingSpool(root: dir.appendingPathComponent("spool")).orphans().count, 0)
     }
 
-    func testAQuietHourAsksOnce() async throws {
+    func testFaintAudioCountsAsActivity() async throws {
         let c = coordinator()
         c.start(tapping: zoom)
         await source.awaitStart()
@@ -158,17 +158,51 @@ final class MeetingCoordinatorTests: XCTestCase {
         await settle()
 
         XCTAssertEqual(events.filter { $0 == .nudge }.count, 0, "faint audio counts as activity")
+        XCTAssertEqual(c.state, .recording)
+    }
 
-        // Now truly silent for longer than the nudge, shorter than the tap timeout each step.
-        source.send(loud(at: .seconds(41)))
-        var t = 42
-        while t < 80 {
-            source.send(quiet(at: .seconds(t)))
-            source.send(loud(at: .seconds(t + 4)))  // keep the tap alive
-            t += 5
-        }
+    /// SPEC §11's hour of silence. It could never arrive: every rebuild
+    /// replays the start sound into our own tap, and every silent chunk in
+    /// between read as activity, so the quiet clock was reset every two
+    /// minutes for as long as the quiet lasted.
+    func testASilentHourAsksOnce() async throws {
+        let c = coordinator()
+        // the real source chirps on every rebuild and the tap hears this
+        // app: a fake that stays mute cannot see the bug.
+        source.toneOnRebuild = loud(at: .zero)
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
         await settle()
-        XCTAssertEqual(events.filter { $0 == .nudge }.count, 0, "a loud chunk every 5 s is activity")
+
+        // nobody says another word. the tap goes silent, rebuilds, hears its
+        // own tone, and goes silent again — over and over.
+        await beQuiet(from: 5, through: 60)
+
+        XCTAssertEqual(events.filter { $0 == .nudge }.count, 1, "\(events)")
+        XCTAssertTrue(events.contains(.gapBegan))
+        XCTAssertGreaterThan(source.rebuilds, 1, "the tone really was replayed")
+    }
+
+    /// ADR 0023: it asks, it never acts — and an answered nudge does not come
+    /// straight back.
+    func testAnsweringTheNudgeBuysAnotherQuietSpan() async throws {
+        let c = coordinator()
+        source.toneOnRebuild = loud(at: .zero)
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+
+        await beQuiet(from: 5, through: 40)
+        XCTAssertEqual(events.filter { $0 == .nudge }.count, 1, "\(events)")
+
+        c.keepGoing()
+        await beQuiet(from: 45, through: 65)
+        XCTAssertEqual(events.filter { $0 == .nudge }.count, 1, "answered, so it waits")
+
+        await beQuiet(from: 70, through: 100)
+        XCTAssertEqual(events.filter { $0 == .nudge }.count, 2, "\(events)")
     }
 
     /// SPEC §11: a tap that stops calling back — a sleep, a locked screen, a
@@ -290,6 +324,15 @@ final class MeetingCoordinatorTests: XCTestCase {
         try? await Task.sleep(for: .seconds(seconds))
     }
 
+    /// Silence, delivered the way a live tap delivers it: one chunk at a
+    /// time, with room for a rebuild and its tone to land in between.
+    private func beQuiet(from first: Int, through last: Int) async {
+        for s in stride(from: first, through: last, by: 5) {
+            source.send(quiet(at: .seconds(s)))
+            await settle(for: 0.12)
+        }
+    }
+
     private func script(_ text: String) throws -> URL {
         let url = dir.appendingPathComponent("hook.sh")
         try text.write(to: url, atomically: true, encoding: .utf8)
@@ -318,7 +361,13 @@ private final class FakeClock: @unchecked Sendable {
 private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     private var continuation: AsyncStream<MeetingAudioChunk>.Continuation?
     private var started = false
+    private var nextAt: Duration = .zero
     var rebuilds = 0
+    /// The real source plays the start sound again on every rebuild, and the
+    /// tap is scoped to this app as well — so the tone comes back as far-side
+    /// audio a moment later. A fake that stays mute cannot see what that
+    /// does to the quiet clock.
+    var toneOnRebuild: MeetingAudioChunk?
 
     func start(tapping app: RunningApp) async throws -> AsyncStream<MeetingAudioChunk> {
         let (stream, continuation) = AsyncStream<MeetingAudioChunk>.makeStream()
@@ -327,11 +376,18 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
         return stream
     }
 
-    func rebuild() async throws { rebuilds += 1 }
+    func rebuild() async throws {
+        rebuilds += 1
+        guard let tone = toneOnRebuild else { return }
+        send(MeetingAudioChunk(you: tone.you, them: tone.them, at: nextAt))
+    }
 
     func stop() async { continuation?.finish() }
 
-    func send(_ chunk: MeetingAudioChunk) { continuation?.yield(chunk) }
+    func send(_ chunk: MeetingAudioChunk) {
+        nextAt = chunk.at + chunk.duration
+        continuation?.yield(chunk)
+    }
 
     func awaitStart() async {
         while !started { try? await Task.sleep(for: .milliseconds(10)) }
