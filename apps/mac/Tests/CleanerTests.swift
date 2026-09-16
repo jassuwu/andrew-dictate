@@ -64,6 +64,57 @@ final class CleanerTests: XCTestCase {
         )
     }
 
+    /// The reorder, in one case. `NumberParser` used to turn "seven" into
+    /// "7" before the dictionary ever saw the word, so a teammate called
+    /// Sevan could be taught and the entry would never fire again.
+    func testAWordTheParsersWouldHaveEatenIsStillTeachable() {
+        let cleaner = DeterministicCleaner(
+            entries: [DictionaryEntry(wrong: "seven", right: "Sevan")]
+        )
+
+        XCTAssertEqual(
+            cleaner.clean("call seven about the deploy"),
+            "Call Sevan about the deploy."
+        )
+        XCTAssertEqual(
+            cleaner.clean("meet at seven"),
+            "Meet at Sevan.",
+            "flat wrong→right, as ADR 0024 said: it replaces every occurrence"
+        )
+    }
+
+    /// What "fix a word" opens on: the transforms before the dictionary and
+    /// no others, in both cleanup modes.
+    func testAsHeardStopsWhereTheDictionaryStarts() {
+        XCTAssertEqual(
+            DeterministicCleaner().asHeard("  call  seven about the deploy "),
+            "call seven about the deploy"
+        )
+        XCTAssertEqual(
+            DeterministicCleaner(fullCleanup: false)
+                .asHeard("call seven about the deploy"),
+            "call seven about the deploy"
+        )
+    }
+
+    /// The mode a dictation aimed at our own window runs in. A correction is
+    /// a word: it gets no capital and no full stop, and a word you taught it
+    /// still applies.
+    func testCleanupOffLeavesACorrectiveWordAloneButStillSubstitutes() {
+        XCTAssertEqual(
+            DeterministicCleaner(entries: [], fullCleanup: false)
+                .clean("cache"),
+            "cache"
+        )
+        XCTAssertEqual(
+            DeterministicCleaner(
+                entries: [DictionaryEntry(wrong: "jason", right: "JSON")],
+                fullCleanup: false
+            ).clean("jason"),
+            "JSON"
+        )
+    }
+
     func testEmptyStringRemainsEmpty() {
         XCTAssertEqual(DeterministicCleaner().clean(""), "")
     }
@@ -369,6 +420,25 @@ final class CleanerTests: XCTestCase {
                 ("ungpt", "ungpt"),
                 ("gpt iphone", "GPT iPhone"),
                 ("  gpt  ", "  GPT  "),
+            ]
+        )
+    }
+
+    /// A rule with nothing on its right side used to compile to an empty
+    /// replacement template and delete the word from every dictation. The
+    /// cleaner renders; it never removes (ADR 0020).
+    func testAnEntryWithNothingOnTheRightNeverDeletesAWord() {
+        let transform = DictionarySubstitutions(
+            entries: [
+                DictionaryEntry(wrong: "darsh", right: ""),
+                DictionaryEntry(wrong: "jason", right: "   "),
+            ]
+        )
+        assertTransform(
+            transform,
+            cases: [
+                ("darsh ships today", "darsh ships today"),
+                ("send the jason", "send the jason"),
             ]
         )
     }

@@ -136,6 +136,65 @@ final class WordFixerViewModelTests: XCTestCase {
         )
     }
 
+    // MARK: - the one dictation the fix could not reach
+
+    func testTheFixedLineCarriesEverySavedSpan() {
+        let (model, _) = model()
+        for (first, last, right) in [(2, 2, "JSON"), (4, 5, "CypherD")] {
+            model.tap(first)
+            if last != first { model.tap(last) }
+            model.replacement = right
+            model.save()
+        }
+
+        XCTAssertEqual(
+            model.fixedLine,
+            "Send the JSON to CypherD and cc darsh."
+        )
+    }
+
+    /// "cypher d" is one entry, so the line says CypherD once.
+    func testAMultiWordSpanCollapsesToOneReplacement() {
+        let (model, _) = model()
+        model.tap(4)
+        model.tap(5)
+        model.replacement = "CypherD"
+        model.save()
+
+        XCTAssertEqual(
+            model.fixedLine,
+            "Send the jason to CypherD and cc darsh."
+        )
+    }
+
+    func testBeforeAnySaveTheFixedLineIsTheOneYouAlreadyHave() {
+        let (model, _) = model()
+
+        XCTAssertEqual(
+            model.fixedLine,
+            "Send the jason to cypher d and cc darsh."
+        )
+    }
+
+    /// Cleanup off means the words as parakeet heard them, with your
+    /// dictionary applied — no capital, no full stop, here too.
+    func testWithCleanupOffTheFixedLineIsTheHeardLineWithYourWordIn() {
+        let store = DictionaryStore(fileURL: storeURL)
+        let model = WordFixerViewModel(
+            transcript: "send the jason to cypher d and cc darsh",
+            store: store,
+            fullCleanup: false
+        )
+        model.tap(2)
+        model.replacement = "JSON"
+        model.save()
+
+        XCTAssertEqual(
+            model.fixedLine,
+            "send the JSON to cypher d and cc darsh"
+        )
+    }
+
     /// SPEC §4. A save that did not happen must not look like one that did.
     func testAFailedSaveSaysSoAndKeepsTheSelection() {
         let store = DictionaryStore(fileURL: storeURL)

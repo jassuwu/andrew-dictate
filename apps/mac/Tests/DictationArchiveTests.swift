@@ -72,6 +72,25 @@ final class DictationArchiveTests: XCTestCase {
         )
     }
 
+    // MARK: - the seed the menu's only time-sensitive action opens on
+
+    /// `heard`, never `inserted`: the fixer builds a dictionary entry's
+    /// `wrong` side out of this, and that has to be what the engine produced.
+    func testTheLatestKeptDictationIsTheNewestOneHeard() throws {
+        let archive = DictationArchive(fileURL: fileURL)
+        try archive.append(dictation(heard: "first", at: 1))
+        try archive.append(dictation(heard: "second", at: 2))
+        try archive.append(
+            dictation(heard: "call seven", inserted: "Call 7.", at: 3)
+        )
+
+        XCTAssertEqual(try archive.latest()?.heard, "call seven")
+    }
+
+    func testAnArchiveWithNoFileHasNoLatest() throws {
+        XCTAssertNil(try DictationArchive(fileURL: fileURL).latest())
+    }
+
     // MARK: - deletion, which is the whole of "until deleted"
 
     func testDeletingOneLeavesTheRest() throws {

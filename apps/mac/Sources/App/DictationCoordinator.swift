@@ -81,9 +81,14 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var activeEngineVersion: EngineVersion
     @Published private(set) var engineSwitchMessage: String?
     @Published private(set) var hotkeyDetection: HotkeyDetection?
+    /// what actually reached the page, cleaned.
     @Published private(set) var lastTranscript: String?
     /// drives the menu's one time-sensitive row after a failed transcription
     @Published private(set) var canRetryLastFailure = false
+    /// the engine's own words, before any transform ran. this is what "fix a
+    /// word" opens on: an entry's `wrong` side has to be what parakeet
+    /// produced, or it never fires.
+    @Published private(set) var lastHeard: String?
     /// re-read at launch, reopen, wake, unlock, and whenever the system says
     /// the trust table moved. a grant is a fact about now, not a fact we own.
     /// the hotkey monitors hang off this one funnel too — a path that wins
@@ -399,6 +404,25 @@ final class DictationCoordinator: ObservableObject {
                 self?.presentOnboardingIfNeeded()
             }
         }
+
+        // "fix a word…" is the menu's only time-sensitive action, and it used
+        // to be grey until this session's first dictation — while the words
+        // it wants sat in the archive the whole time. detached, because the
+        // read is disk and launch is not. the file on disk is the source of
+        // truth, so `keepDictations` does not gate the read: an empty or
+        // missing archive is the only case that stays disabled.
+        let archive = dictationArchive
+        Task.detached { [weak self] in
+            let newest = try? archive.latest()
+            await MainActor.run {
+                // a dictation that landed during the read wins: pointing the
+                // fixer back at yesterday's words would be silent and wrong.
+                guard let self, self.lastHeard == nil, let newest else {
+                    return
+                }
+                self.lastHeard = newest.heard
+            }
+        }
     }
 
     @discardableResult
@@ -418,20 +442,27 @@ final class DictationCoordinator: ObservableObject {
         controller.present()
     }
 
-    /// The door ticket 011 chose. It hands over the *raw* transcript on
-    /// purpose: a dictionary entry's `wrong` side has to be what the engine
-    /// produced, and `lastTranscript` is already exactly that.
+    /// The door ticket 011 chose. It opens on `lastHeard` — the engine's
+    /// untouched words — because a dictionary entry's `wrong` side has to be
+    /// what the engine produced.
     func openWordFixer() {
-        guard let lastTranscript else {
+        guard let lastHeard else {
             return
         }
-        openWordFixer(for: lastTranscript)
+        openWordFixer(for: lastHeard)
     }
 
-    func openWordFixer(for transcript: String) {
+    /// `heard` from either door, run forward to the point the dictionary
+    /// reads it. Both doors then show the same words, and the word you point
+    /// at is the word an entry will match.
+    func openWordFixer(for heard: String) {
         let controller = WordFixerWindowController(
-            transcript: transcript,
-            store: dictionaryStore
+            transcript: DeterministicCleaner(
+                entries: dictionaryStore.entries,
+                fullCleanup: settings.cleanupEnabled
+            ).asHeard(heard),
+            store: dictionaryStore,
+            fullCleanup: settings.cleanupEnabled
         )
         wordFixerWindowController = controller
         controller.present()
@@ -1589,9 +1620,26 @@ final class DictationCoordinator: ObservableObject {
             let transcriptReady = timelineClock.now
             activeTimeline?.transcriptReady = transcriptReady
 
-            let rawTranscript = cleaner.clean(transcript)
+            // a dictation aimed at our own window is a correction, not a
+            // sentence: dictate "cache" into the fixer's "what you meant"
+            // field and full cleanup would save it as "Cache." forever. the
+            // dictionary still runs — that is the ADR 0038 "cleanup off"
+            // path, not a new one. scoped per bundle, not per field, the
+            // same way CoreAudioMeetingSource treats our own bundle id: the
+            // fixer's field is the only dictation target we own. every
+            // other dictation goes through the cleaner built once for the
+            // current dictionary and settings.
+            let cleanedTranscript = pastesIntoOurOwnUI(
+                target: focusAnchor?.targetBundleIdentifier,
+                own: Bundle.main.bundleIdentifier
+            )
+                ? DeterministicCleaner(
+                    entries: dictionaryStore.entries,
+                    fullCleanup: false
+                ).clean(transcript)
+                : cleaner.clean(transcript)
             activeTimeline?.cleaned = timelineClock.now
-            guard !rawTranscript.trimmingCharacters(
+            guard !cleanedTranscript.trimmingCharacters(
                 in: .whitespacesAndNewlines
             ).isEmpty else {
                 let held = activeTimeline?.heldDuration
@@ -1617,9 +1665,10 @@ final class DictationCoordinator: ObservableObject {
                 )
                 return
             }
-            let pasteTranscript = rawTranscript
+            let pasteTranscript = cleanedTranscript
 
-            lastTranscript = rawTranscript
+            lastTranscript = cleanedTranscript
+            lastHeard = transcript
             pendingArchiveText = (
                 heard: transcript,
                 inserted: pasteTranscript
@@ -1645,7 +1694,7 @@ final class DictationCoordinator: ObservableObject {
             if outcome.result != .leftOnPasteboard(
                 .pasteboardUnavailable
             ) {
-                settings.recordDictatedTranscript(rawTranscript)
+                settings.recordDictatedTranscript(cleanedTranscript)
             }
             guard generation == pipelineGeneration else {
                 return

@@ -391,10 +391,24 @@ struct SettingsView: View {
     // MARK: - dictionary
 
     private var dictionaryTab: some View {
-        DictionaryEditor(store: dictionaryStore)
-            .padding(.horizontal, 24)
-            .padding(.top, 18)
-            .padding(.bottom, 20)
+        VStack(alignment: .leading, spacing: 10) {
+            // the pane used to open with an unlabelled grid, so the two
+            // rules it already keeps — whole words, any capitalisation —
+            // were things you found out by being confused.
+            Text("when andrew hears the word on the left, it writes the one on the right. whole words only, capitals don’t matter — this still applies with cleanup off.")
+                .font(.system(size: 11))
+                .foregroundStyle(BrandUI.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            DictionaryEditor(
+                store: dictionaryStore,
+                settings: settings,
+                dictations: browser.items
+            )
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 18)
+        .padding(.bottom, 20)
     }
 
     // MARK: - history
@@ -867,14 +881,33 @@ struct SettingsView: View {
     }
 }
 
+/// a decoded import, held between the panel closing and the answer to "add
+/// or replace?" — not one byte is written while this is set.
+private struct PendingImport {
+    let entries: [DictionaryEntry]
+    let existingCount: Int
+}
+
 private struct DictionaryEditor: View {
     @ObservedObject var store: DictionaryStore
+    @ObservedObject var settings: AppSettings
+    /// handed in, never re-read: the history pane already holds them.
+    let dictations: [Dictation]
 
     @State private var selection: Set<UUID> = []
     @State private var message: String?
+    @State private var pendingImport: PendingImport?
+    @State private var suggestions: [RecurringMishearings.Candidate] = []
+    @State private var drafts: [String: String] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            // nothing when there is nothing: an empty section above the
+            // table would be a row of chrome asking about no words.
+            if !suggestions.isEmpty {
+                suggestionSection
+            }
+
             Table(store.entries, selection: $selection) {
                 TableColumn("wrong") { entry in
                     DictionaryCellEditor(
@@ -968,6 +1001,129 @@ private struct DictionaryEditor: View {
                     .foregroundStyle(BrandUI.gold)
             }
         }
+        .alert(
+            "add these to your dictionary, or replace it?",
+            isPresented: Binding(
+                get: { pendingImport != nil },
+                set: { presented in
+                    if !presented {
+                        pendingImport = nil
+                    }
+                }
+            ),
+            presenting: pendingImport
+        ) { pending in
+            // ⏎ adds. the safe answer is the one your hands already have.
+            Button("add to mine") { addImport(pending) }
+                .keyboardShortcut(.defaultAction)
+            Button("replace", role: .destructive) {
+                replaceWithImport(pending)
+            }
+            Button("cancel", role: .cancel) {}
+        } message: { pending in
+            Text(
+                """
+                the file has \(words(pending.entries.count)). you’ve taught \
+                andrew \(words(pending.existingCount)).
+                """
+            )
+        }
+        // on appear only. this reads every kept dictation, and it is not a
+        // thing to do on a keystroke.
+        .onAppear(perform: refreshSuggestions)
+    }
+
+    /// It asks rather than asserts: the app genuinely cannot tell "swiggy"
+    /// (right) from "kunur" (wrong), and nothing here is added for you.
+    private var suggestionSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            BrandSectionHeader("did it get these right?")
+
+            Text("words you said more than once that andrew doesn’t know. teach it the ones it got wrong.")
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ForEach(suggestions) { candidate in
+                suggestionRow(candidate)
+            }
+        }
+        .padding(.bottom, 6)
+    }
+
+    private func suggestionRow(
+        _ candidate: RecurringMishearings.Candidate
+    ) -> some View {
+        HStack(spacing: 8) {
+            Text("heard “\(candidate.heard)”")
+                .font(BrandUI.machineFont(size: 12))
+                .foregroundStyle(BrandUI.goldPale)
+
+            Text("· \(candidate.count) times")
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
+
+            TextField(
+                "what you meant",
+                text: Binding(
+                    get: { draft(for: candidate) },
+                    set: { drafts[candidate.heard] = $0 }
+                )
+            )
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 150)
+            .onSubmit { teach(candidate) }
+
+            Button("save") { teach(candidate) }
+                .buttonStyle(.plain)
+                .foregroundStyle(BrandUI.gold)
+                .disabled(
+                    draft(for: candidate)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty
+                )
+
+            Button("not a mistake") { dismiss(candidate) }
+                .buttonStyle(.plain)
+                .foregroundStyle(BrandUI.textSecondary)
+
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 12))
+    }
+
+    /// a word you spelled out loud near it is the answer you already gave —
+    /// the field opens with it.
+    private func draft(
+        for candidate: RecurringMishearings.Candidate
+    ) -> String {
+        drafts[candidate.heard] ?? candidate.spelledOut ?? ""
+    }
+
+    private func teach(_ candidate: RecurringMishearings.Candidate) {
+        let right = draft(for: candidate)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !right.isEmpty,
+              store.add(wrong: candidate.heard, right: right) else {
+            return
+        }
+        drafts[candidate.heard] = nil
+        suggestions.removeAll { $0.heard == candidate.heard }
+    }
+
+    private func dismiss(_ candidate: RecurringMishearings.Candidate) {
+        settings.dismissSuggestion(candidate.heard)
+        suggestions.removeAll { $0.heard == candidate.heard }
+    }
+
+    private func refreshSuggestions() {
+        suggestions = RecurringMishearings.scan(
+            dictations,
+            dictionary: store.entries,
+            dismissed: settings.dismissedSuggestions,
+            isSuspect: { RecurringMishearings.isSuspect($0) },
+            now: Date()
+        )
     }
 
     private func importDictionary() {
@@ -983,7 +1139,10 @@ private struct DictionaryEditor: View {
             return
         }
 
-        guard store.importJSON(from: sourceURL) else {
+        // a second import must not wear the first one’s receipt.
+        message = nil
+
+        guard let imported = store.decodeEntries(from: sourceURL) else {
             // the store publishes the specific reason itself; this is only
             // the fallback for a failure it somehow didn’t record.
             message = store.lastFailure == nil
@@ -992,8 +1151,45 @@ private struct DictionaryEditor: View {
             return
         }
 
+        guard !store.entries.isEmpty else {
+            // nothing to lose, so nothing to ask.
+            guard store.replace(with: imported) else {
+                return
+            }
+            selection.removeAll()
+            message = "added \(words(imported.count))."
+            return
+        }
+
+        // nothing is written until the alert is answered: "import" is the one
+        // word on this row that does not sound like "delete everything".
+        pendingImport = PendingImport(
+            entries: imported,
+            existingCount: store.entries.count
+        )
+    }
+
+    private func addImport(_ pending: PendingImport) {
+        guard let result = store.merge(pending.entries) else {
+            return
+        }
         selection.removeAll()
-        message = nil
+        message = "added \(words(result.added))."
+    }
+
+    private func replaceWithImport(_ pending: PendingImport) {
+        let lost = pending.existingCount
+        guard store.replace(with: pending.entries) else {
+            return
+        }
+        selection.removeAll()
+        message = "replaced \(words(lost)) with \(pending.entries.count)."
+    }
+
+    /// "added 1 word.", not "added 1 words." — the deadpan voice stops being
+    /// one the moment it reads like a log line.
+    private func words(_ count: Int) -> String {
+        count == 1 ? "1 word" : "\(count) words"
     }
 
     private func exportDictionary() {
@@ -1022,7 +1218,9 @@ private struct DictionaryEditor: View {
 private struct DictionaryCellEditor: View {
     let value: String
     let prompt: String
-    let onCommit: (String) -> Void
+    /// false means the store refused the edit, and the cell has to say so by
+    /// going back to what is still on disk.
+    let onCommit: (String) -> Bool
 
     @State private var draft: String
     @FocusState private var isFocused: Bool
@@ -1030,7 +1228,7 @@ private struct DictionaryCellEditor: View {
     init(
         value: String,
         prompt: String,
-        onCommit: @escaping (String) -> Void
+        onCommit: @escaping (String) -> Bool
     ) {
         self.value = value
         self.prompt = prompt
@@ -1068,6 +1266,8 @@ private struct DictionaryCellEditor: View {
         guard draft != value else {
             return
         }
-        onCommit(draft)
+        if !onCommit(draft) {
+            draft = value
+        }
     }
 }

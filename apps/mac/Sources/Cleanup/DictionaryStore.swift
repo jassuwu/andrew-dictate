@@ -29,6 +29,12 @@ final class DictionaryStore: ObservableObject {
     /// pane can show the user verbatim.
     @Published private(set) var lastFailure: String?
 
+    /// what a merge did, so the pane can say it in words.
+    struct MergeResult: Equatable, Sendable {
+        let added: Int
+        let updated: Int
+    }
+
     /// a failed read leaves `entries` empty for reasons the user never
     /// asked for, so an empty table isn't proof of an empty dictionary and
     /// the unreadable file must survive the next write.
@@ -60,6 +66,22 @@ final class DictionaryStore: ObservableObject {
         else {
             // the row is already gone; nothing to persist and no i/o went
             // wrong, so an existing failure keeps standing.
+            return false
+        }
+
+        // emptying the right side of a working rule used to save, and the
+        // rule then deleted that word from every dictation afterwards.
+        // typing the wrong side first still saves — only the clearing case
+        // is refused.
+        let clearsAWorkingRule = !entries[index].right.isEmpty
+            && entry.right
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+        guard !clearsAWorkingRule else {
+            lastFailure = """
+                a word has to become something. remove the row to drop the \
+                rule.
+                """
             return false
         }
 
@@ -103,12 +125,12 @@ final class DictionaryStore: ObservableObject {
         remove(id: entry.id)
     }
 
-    @discardableResult
-    func importJSON(from sourceURL: URL) -> Bool {
-        let imported: [DictionaryEntry]
+    /// Reads the file and touches nothing else. Import asks before it
+    /// replaces, and it cannot ask until it knows what the file holds.
+    func decodeEntries(from sourceURL: URL) -> [DictionaryEntry]? {
         do {
             let data = try Data(contentsOf: sourceURL)
-            imported = try JSONDecoder().decode(
+            return try JSONDecoder().decode(
                 [DictionaryEntry].self,
                 from: data
             )
@@ -122,9 +144,12 @@ final class DictionaryStore: ObservableObject {
             lastFailure = """
                 couldn’t import that file — it may not be a dictionary.
                 """
-            return false
+            return nil
         }
+    }
 
+    @discardableResult
+    func replace(with imported: [DictionaryEntry]) -> Bool {
         // an import that can't reach disk must not look like it landed, so
         // the old rows come back if the write fails.
         let previous = entries
@@ -134,6 +159,62 @@ final class DictionaryStore: ObservableObject {
             return false
         }
         return true
+    }
+
+    /// What an import does when you keep your own words: upsert by `wrong`,
+    /// so a file someone sent you can add rules and correct rules but never
+    /// delete one you taught it. nil means the write failed and the rows you
+    /// had are still the rows you have.
+    @discardableResult
+    func merge(_ imported: [DictionaryEntry]) -> MergeResult? {
+        let previous = entries
+        var added = 0
+        var updated = 0
+
+        for entry in imported {
+            // the same refusal the table makes: a rule that becomes nothing
+            // is a rule that can never fire, and a file someone sent you
+            // does not get to empty a word you taught it.
+            guard !entry.right
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty else {
+                continue
+            }
+
+            let key = Self.matchKey(entry.wrong)
+            guard let index = entries.firstIndex(where: {
+                Self.matchKey($0.wrong) == key
+            }) else {
+                entries.append(entry)
+                added += 1
+                continue
+            }
+            guard entries[index].right != entry.right else {
+                continue
+            }
+            // the row keeps its id and the spelling you typed; the file only
+            // gets to say what the word becomes.
+            entries[index].right = entry.right
+            updated += 1
+        }
+
+        let result = MergeResult(added: added, updated: updated)
+        guard added > 0 || updated > 0 else {
+            // the same file twice changes nothing, so nothing is written.
+            return result
+        }
+        guard save() else {
+            entries = previous
+            return nil
+        }
+        return result
+    }
+
+    /// trimmed and case-folded — the identity `DictionarySubstitutions`
+    /// matches on, so a merge can never leave two rows that both fire, and
+    /// the suggestion scan can tell what you have already taught it.
+    nonisolated static func matchKey(_ wrong: String) -> String {
+        wrong.trimmingCharacters(in: .whitespaces).lowercased()
     }
 
     @discardableResult

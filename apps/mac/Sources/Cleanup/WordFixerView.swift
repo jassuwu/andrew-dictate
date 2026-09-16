@@ -4,6 +4,8 @@ import SwiftUI
 struct WordFixerView: View {
     @ObservedObject var viewModel: WordFixerViewModel
 
+    @State private var lineCopied = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("what it heard")
@@ -14,17 +16,31 @@ struct WordFixerView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(BrandUI.textSecondary)
 
-            WordFlow(spacing: 4) {
-                ForEach(viewModel.correction.spans) { span in
-                    WordChip(
-                        text: viewModel.saved[span.id] ?? span.text,
-                        isSaved: viewModel.saved[span.id] != nil,
-                        isSelected: isSelected(span.id)
-                    ) {
-                        viewModel.tap(span.id)
+            // only the chips scroll. a 200-word dictation used to lay the
+            // picker row and the footer out past the bottom edge, so you
+            // could see the word you wanted to fix and not reach the field
+            // that fixes it.
+            ScrollView {
+                WordFlow(spacing: 4) {
+                    ForEach(viewModel.correction.spans) { span in
+                        WordChip(
+                            text: viewModel.saved[span.id] ?? span.text,
+                            isSaved: viewModel.saved[span.id] != nil,
+                            isSelected: isSelected(span.id)
+                        ) {
+                            viewModel.tap(span.id)
+                        }
                     }
                 }
+                // a concrete width proposal, or the flow falls back to its
+                // hardcoded 480 and stops tracking a resized window.
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: .infinity,
+                alignment: .topLeading
+            )
 
             Divider().overlay(BrandUI.hairline)
 
@@ -57,16 +73,41 @@ struct WordFixerView: View {
                     .foregroundStyle(BrandUI.attention)
             }
 
-            Spacer(minLength: 0)
+            HStack(spacing: 12) {
+                // "from now on" left out the one dictation you came here
+                // about. no pill and no auto-paste: focus is long gone, so
+                // the button's own label is the whole receipt.
+                if !viewModel.saved.isEmpty {
+                    Button(action: copyFixedLine) {
+                        Text(lineCopied ? "copied" : "copy the fixed line")
+                            .font(.system(size: 11))
+                            .foregroundStyle(BrandUI.gold)
+                    }
+                    .buttonStyle(.plain)
+                }
 
-            Text("saved words are corrected from now on, everywhere.")
-                .font(.system(size: 11))
-                .foregroundStyle(BrandUI.textSecondary)
+                Text("saved words are corrected from now on, everywhere.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(BrandUI.textSecondary)
+            }
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .brandGlassWindow()
         .preferredColorScheme(.dark)
+    }
+
+    /// the same shape and the same 1.2 s as the about window's copy button,
+    /// so the app's two transient copy buttons behave identically.
+    private func copyFixedLine() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(viewModel.fixedLine, forType: .string)
+        lineCopied = true
+        Task {
+            try? await Task.sleep(for: .seconds(1.2))
+            lineCopied = false
+        }
     }
 
     private func isSelected(_ index: Int) -> Bool {
@@ -157,8 +198,16 @@ private struct WordFlow: Layout {
 
 @MainActor
 final class WordFixerWindowController: NSWindowController {
-    init(transcript: String, store: DictionaryStore) {
-        let viewModel = WordFixerViewModel(transcript: transcript, store: store)
+    init(
+        transcript: String,
+        store: DictionaryStore,
+        fullCleanup: Bool = true
+    ) {
+        let viewModel = WordFixerViewModel(
+            transcript: transcript,
+            store: store,
+            fullCleanup: fullCleanup
+        )
         let window = NSWindow(
             contentViewController: NSHostingController(
                 rootView: WordFixerView(viewModel: viewModel)
@@ -166,7 +215,7 @@ final class WordFixerWindowController: NSWindowController {
         )
         window.title = "fix a word"
         window.styleMask = [.titled, .closable, .resizable]
-        window.setContentSize(NSSize(width: 520, height: 340))
+        window.setContentSize(NSSize(width: 520, height: 420))
         window.minSize = NSSize(width: 420, height: 280)
         window.isReleasedWhenClosed = false
         window.center()

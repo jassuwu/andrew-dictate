@@ -129,7 +129,10 @@ struct AndrewDictateApp: App {
                 Button("fix a word…") {
                     coordinator.openWordFixer()
                 }
-                .disabled(coordinator.lastTranscript == nil)
+                .disabled(coordinator.lastHeard == nil)
+                // the only disabled case left is an empty archive, and a
+                // dead row with no sentence explains nothing.
+                .help("after your first dictation — this teaches andrew the word it got wrong.")
 
                 // the second time-sensitive row, and it disappears on its
                 // own: the samples of the sentence the model threw on are

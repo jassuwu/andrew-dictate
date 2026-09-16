@@ -128,6 +128,21 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// words the suggestion list has been told are not mistakes. half of any
+    /// first list is spelled how it is spelled — "swiggy", "paneer" — so
+    /// "not a mistake" is one click and has to stick.
+    @Published private(set) var dismissedSuggestions: Set<String> {
+        didSet {
+            guard dismissedSuggestions != oldValue else {
+                return
+            }
+            userDefaults.set(
+                dismissedSuggestions.sorted(),
+                forKey: Self.dismissedSuggestionsKey
+            )
+        }
+    }
+
     /// which model listens to meetings — its own pick, not dictation's
     /// (ADR 0040). the two jobs want opposite things and the cards say so.
     @Published var meetingModel: MeetingModel {
@@ -234,6 +249,8 @@ final class AppSettings: ObservableObject {
     private static let keepDictationsKey = "AndrewDictate.keepDictations"
     private static let engineVersionKey = "AndrewDictate.engineVersion"
     private static let cleanupEnabledKey = "AndrewDictate.cleanupEnabled"
+    private static let dismissedSuggestionsKey =
+        "AndrewDictate.dismissedSuggestions"
     private static let totalWordsDictatedKey =
         "AndrewDictate.totalWordsDictated"
     /// whether this mac set the app up for dictation at all. someone who
@@ -299,6 +316,9 @@ final class AppSettings: ObservableObject {
             0,
             userDefaults.integer(forKey: Self.totalWordsDictatedKey)
         )
+        dismissedSuggestions = Set(
+            userDefaults.stringArray(forKey: Self.dismissedSuggestionsKey) ?? []
+        )
 
         dictationWanted = userDefaults.object(forKey: Self.dictationWantedKey) == nil
             ? true
@@ -327,6 +347,11 @@ final class AppSettings: ObservableObject {
 
         dictationHotkey = binding
         return true
+    }
+
+    /// "not a mistake", and it never comes back.
+    func dismissSuggestion(_ word: String) {
+        dismissedSuggestions.insert(word.lowercased())
     }
 
     func recordDictatedTranscript(_ transcript: String) {

@@ -71,11 +71,28 @@ func focusYieldDecision(
     return .activateAnchor(processIdentifier: anchor.processIdentifier)
 }
 
+/// Whether the dictation is aimed at one of our own windows — today only the
+/// word fixer's "what you meant" field. A correction is a word, not a
+/// sentence, so that one destination skips full cleanup and runs the
+/// dictionary alone. `nil == nil` must not count: a dev run and the test
+/// bundle can both have no bundle id, and that is not our window.
+func pastesIntoOurOwnUI(target: String?, own: String?) -> Bool {
+    guard let target, let own else {
+        return false
+    }
+    return target == own
+}
+
 @MainActor
 struct FocusAnchor {
     private let application: FocusApplicationIdentity
     private let focusedElement: AXUIElement?
     private let focusedElementWasSecure: Bool
+
+    /// where the text is headed, as of key-down.
+    var targetBundleIdentifier: String? {
+        application.bundleIdentifier
+    }
 
     static func capture(
         workspace: NSWorkspace = .shared

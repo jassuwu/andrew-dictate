@@ -62,6 +62,14 @@ struct DictationArchive {
             }
     }
 
+    /// The newest kept dictation, which is what "fix a word…" opens on at
+    /// launch. It reads the whole file to take the last line — the same
+    /// ceiling every read here has, and one entry point the seed can be
+    /// tested through.
+    func latest() throws -> Dictation? {
+        try all().last
+    }
+
     func delete(id: UUID) throws {
         try replace(with: try all().filter { $0.id != id })
     }

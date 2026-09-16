@@ -53,19 +53,50 @@ final class TranscriptCorrectionTests: XCTestCase {
     /// asks the user to reproduce a misspelling they saw once, and an entry
     /// whose `wrong` side is off by a character silently never fires — a
     /// failure that looks exactly like success.
+    ///
+    /// The guarantee only holds because the dictionary reads what the engine
+    /// heard. A transcript carrying a number word, a spoken email or spoken
+    /// punctuation used to have those parsed away before the dictionary
+    /// looked at it, so an entry pointing at "seven" silently never fired
+    /// again — and cleanup off and cleanup on disagreed about which entries
+    /// worked.
     func testAnEntryBuiltFromASpanAlwaysFiresOnThatTranscript() {
-        let correction = TranscriptCorrection(transcript: raw)
+        let transcripts = [
+            raw,
+            "call seven about the deploy",
+            "the total is twenty five percent comma email jason at gmail dot com",
+        ]
 
-        for index in correction.spans.indices {
-            let entry = try! XCTUnwrap(
-                correction.entry(from: index, through: index, right: "MARKER")
-            )
-            let cleaned = DeterministicCleaner(entries: [entry]).clean(raw)
+        for transcript in transcripts {
+            let correction = TranscriptCorrection(transcript: transcript)
+            // every word, and every adjacent pair — the two things a click
+            // and a second click can produce.
+            var selections = correction.spans.indices.map { ($0, $0) }
+            selections += correction.spans.indices
+                .dropLast()
+                .map { ($0, $0 + 1) }
 
-            XCTAssertTrue(
-                cleaned.contains("MARKER"),
-                "span '\(correction.spans[index].text)' produced an entry that never fired"
-            )
+            for (first, last) in selections {
+                let entry = try! XCTUnwrap(
+                    correction.entry(from: first, through: last, right: "MARKER")
+                )
+
+                for fullCleanup in [true, false] {
+                    let cleaned = DeterministicCleaner(
+                        entries: [entry],
+                        fullCleanup: fullCleanup
+                    ).clean(transcript)
+
+                    XCTAssertTrue(
+                        cleaned.contains("MARKER"),
+                        """
+                        \"\(entry.wrong)\" produced an entry that never \
+                        fired with cleanup \(fullCleanup ? "on" : "off"): \
+                        \(cleaned)
+                        """
+                    )
+                }
+            }
         }
     }
 
