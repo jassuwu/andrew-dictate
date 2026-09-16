@@ -57,8 +57,18 @@ private let openingOrWhitespace: Set<Character> = [
 /// character, or a comma or semicolon it carries on after. a full stop, a
 /// bracket, a blank field or an app that refused the read all mean "this is
 /// the start of something", and the first word gets its capital as before.
-func continuesSentence(after previous: Character?) -> Bool {
-    guard let previous else {
+func continuesSentence(after preceding: String?) -> Bool {
+    guard let preceding else {
+        return false
+    }
+    // a space you left at the end of "the build failed because " is still
+    // the middle of that sentence. a newline is not — that is a new line,
+    // and a new line starts a new sentence.
+    var line = Substring(preceding)
+    while let last = line.last, last == " " || last == "\t" {
+        line = line.dropLast()
+    }
+    guard let previous = line.last else {
         return false
     }
     return previous.isLetter
@@ -125,10 +135,12 @@ struct FocusAnchor {
         )
     }
 
-    /// the one character the caret is sitting after, read off the element
-    /// this dictation was anchored to. it is looked at and dropped — never
-    /// stored, never archived, never sent anywhere.
-    func characterBeforeCursor() -> Character? {
+    /// the last few characters before the caret, read off the element this
+    /// dictation was anchored to. a handful rather than one, because "the
+    /// build failed because " ends in a space you typed and the sentence is
+    /// still yours. it is looked at and dropped — never stored, never
+    /// archived, never sent anywhere.
+    func textBeforeCursor(_ length: Int = 8) -> String? {
         guard let focusedElement else {
             return nil
         }
@@ -140,9 +152,10 @@ struct FocusAnchor {
               caret.location > 0 else {
             return nil
         }
+        let wanted = min(length, caret.location)
         var precedingRange = CFRange(
-            location: caret.location - 1,
-            length: 1
+            location: caret.location - wanted,
+            length: wanted
         )
         guard let parameter = AXValueCreate(
             .cfRange,
@@ -163,7 +176,7 @@ struct FocusAnchor {
               let text = value as? String else {
             return nil
         }
-        return text.last
+        return text
     }
 
     private static func selectedTextRange(
