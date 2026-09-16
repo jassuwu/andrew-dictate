@@ -60,21 +60,26 @@ enum MeetingEvent: Equatable, Sendable {
         case .nudge: nil
         case .recovering(let app): "found an unsaved \(app) recording — writing it out…"
         case .writingItOut: "writing it out…"
-        case .saved(let summary):
-            // nobody asked for this one, and it is about a meeting they had
-            // yesterday — the word the history row already uses says so.
-            if summary.recovered {
-                "recovered \(summary.app) — saved · \(summary.duration.spoken)"
-            } else if summary.gapCount == 0 {
-                "saved · \(summary.duration.spoken)"
-            } else {
-                "saved · \(summary.gapCount) \(summary.gapCount == 1 ? "gap" : "gaps")"
-            }
+        case .saved(let summary): Self.savedText(summary)
         case .nothingToKeep: "nothing was heard, nothing kept"
         case .hookFailed(let label): "hook failed (\(label))"
         case .engineFailed(let reason): "meeting model failed — \(reason)"
         case .saveFailed(let reason): "couldn't save the transcript — \(reason). kept for next launch"
         }
+    }
+
+    /// A recovery nobody asked for is about a meeting they had yesterday, so
+    /// it does not get the words a live stop gets — it gets the word the
+    /// history row already uses.
+    private static func savedText(_ summary: MeetingSummary) -> String {
+        if summary.recovered {
+            return "recovered \(summary.app) — saved · \(summary.duration.spoken)"
+        }
+        if summary.gapCount == 0 {
+            return "saved · \(summary.duration.spoken)"
+        }
+        let word = summary.gapCount == 1 ? "gap" : "gaps"
+        return "saved · \(summary.gapCount) \(word)"
     }
 
     private static let themWord = "the other side"
