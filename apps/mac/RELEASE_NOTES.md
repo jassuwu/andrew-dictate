@@ -1,10 +1,20 @@
 ## 0.9.3
 
-updating is one command, and every surface now says it: `brew upgrade --cask jassuwu/tap/andrew-dictate`. your gatekeeper approval and your microphone and accessibility grants come with you.
+the polish release. a hundred small things a switcher would have tripped on in week one, most of them found by reading the code against the wispr flow bar and then fixed one commit at a time.
 
-about notices when the new version is already sitting in /Applications, and restarts onto it.
+the key: granting accessibility makes fn work without a relaunch, setup asks you to press your key before it lets you finish, and esc, the double-tap lock and the five-minute cap are written down under `key` in settings.
 
-a second copy of the app refuses to run — the one already in your menu bar says so, instead of quietly eating the meeting the first one is recording.
+what lands: two dictations in a row get a space between them, a dictation into the middle of a sentence keeps its lowercase, "7 p. M." and "1. 5" are gone, and `one` stays a word. the settings tile measures to the keystroke now, not to the clipboard restore that ran after it.
+
+failure has a voice: every `copied` pill ends in `⌘V to paste`, pills stay up long enough to read, a stray tap is silent instead of chiming twice and saying `heard nothing`, airpods arriving mid-sentence says so, and `try that again` in the menu re-runs a dictation the model dropped.
+
+teach it a word: `fix a word…` points at what the model actually heard, the dictionary runs before the parsers so an entry always fires, importing asks before it replaces your words, and settings lists the words it keeps mishearing.
+
+meetings: transcripts moved out of ~/Documents (icloud syncs it) into `~/andrew-dictate`, files are 0600, a saved meeting gets a notification with `show in finder`, a mac that slept mid-call writes a gap instead of `complete: true`, and quitting mid-meeting waits for the file.
+
+updating is one command, and every surface says it: `brew upgrade --cask jassuwu/tap/andrew-dictate`. your gatekeeper approval and your microphone and accessibility grants come with you. about notices when the new version is already sitting in /Applications, and restarts onto it. a second copy of the app refuses to run.
+
+the readme stops recommending right-click → open, which macOS removed two versions ago, and the site finally shows the thing working.
 
 ## 0.9.2
 
