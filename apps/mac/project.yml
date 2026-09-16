@@ -141,6 +141,7 @@ targets:
       - Sources/HUD/HUDLayoutEngine.swift
       - Sources/UI/BrandUI.swift
       - Sources/Settings/AppSettings.swift
+      - Sources/Settings/DictationOption.swift
       - Sources/Settings/EngineSwitchState.swift
       - Sources/Onboarding/OnboardingState.swift
       - Sources/Onboarding/OnboardingFlow.swift

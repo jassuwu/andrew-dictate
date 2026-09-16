@@ -117,7 +117,7 @@ final class AppSettings: ObservableObject {
     }
 
     /// the deterministic cleanup stage — spoken punctuation, emails,
-    /// numbers, capitalisation. off means raw parakeet words; only the
+    /// links, numbers, capitalisation. off means raw parakeet words; only the
     /// dictionary still applies, because a word you taught it is yours.
     @Published var cleanupEnabled: Bool {
         didSet {

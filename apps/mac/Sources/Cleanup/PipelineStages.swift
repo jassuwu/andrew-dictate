@@ -86,4 +86,11 @@ enum PipelineSample {
     static let text =
         "send it to jass at jass dot gg comma and say we shipped "
             + "five hundred dollars of credits period"
+
+    /// the markers, read out of the transform itself: the line settings
+    /// prints can only ever name the phrases the cleaner listens for.
+    static let spokenMarkerLine =
+        "say them and they appear: "
+            + SpokenPunctuation.spokenMarkers.joined(separator: " · ")
+            + "."
 }

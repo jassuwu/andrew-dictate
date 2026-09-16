@@ -46,52 +46,56 @@ struct SpokenPunctuation: TranscriptTransform {
         "([,.;:!?])(?=[\\p{L}\"])"
     )
 
-    private let markers: [Marker] = [
-        Marker(
-            pattern: "(?<![\\p{L}\\p{N}_])new paragraph(?![\\p{L}\\p{N}_])",
-            kind: .lineBreak("\n\n")
-        ),
-        Marker(
-            pattern: "(?<![\\p{L}\\p{N}_])new line(?![\\p{L}\\p{N}_])",
-            kind: .lineBreak("\n")
-        ),
-        Marker(
-            pattern: "(?<![\\p{L}\\p{N}_])question mark(?![\\p{L}\\p{N}_])",
-            kind: .trailing("?")
-        ),
-        Marker(
-            pattern: "(?<![\\p{L}\\p{N}_])exclamation (?:mark|point)(?![\\p{L}\\p{N}_])",
+    /// one row per spoken marker: the phrase you say, any other phrasing
+    /// that means the same mark, and what it becomes. the patterns below and
+    /// the list settings prints both read this table, so they cannot drift.
+    private struct Row {
+        let spoken: String
+        var alternates: [String] = []
+        let kind: Kind
+
+        /// every way to say it, for one alternation in the pattern.
+        var phrases: [String] { [spoken] + alternates }
+    }
+
+    /// reading order: the two line breaks first, because saying them is the
+    /// only way to get one. the phrases are not substrings of one another,
+    /// so the order the pass applies them in does not change the result.
+    private static let rows: [Row] = [
+        Row(spoken: "new paragraph", kind: .lineBreak("\n\n")),
+        Row(spoken: "new line", kind: .lineBreak("\n")),
+        Row(spoken: "comma", kind: .trailing(",")),
+        Row(spoken: "period", kind: .trailing(".")),
+        Row(spoken: "full stop", kind: .trailing(".")),
+        Row(spoken: "question mark", kind: .trailing("?")),
+        Row(
+            spoken: "exclamation mark",
+            alternates: ["exclamation point"],
             kind: .trailing("!")
         ),
+        Row(spoken: "colon", kind: .trailing(":")),
+        Row(spoken: "semicolon", kind: .trailing(";")),
+        Row(spoken: "open quote", kind: .openQuote),
+        Row(spoken: "close quote", kind: .closeQuote),
+    ]
+
+    /// the phrases alone, in reading order, for the line settings shows under
+    /// the pipeline. what the screen lists is what the cleaner listens for.
+    static let spokenMarkers: [String] = rows.map(\.spoken)
+
+    private let markers: [Marker] = SpokenPunctuation.rows.compactMap { row in
         Marker(
-            pattern: "(?<![\\p{L}\\p{N}_])full stop(?![\\p{L}\\p{N}_])",
-            kind: .trailing(".")
-        ),
-        Marker(
-            pattern: "(?<![\\p{L}\\p{N}_])open quote(?![\\p{L}\\p{N}_])",
-            kind: .openQuote
-        ),
-        Marker(
-            pattern: "(?<![\\p{L}\\p{N}_])close quote(?![\\p{L}\\p{N}_])",
-            kind: .closeQuote
-        ),
-        Marker(
-            pattern: "(?<![\\p{L}\\p{N}_])comma(?![\\p{L}\\p{N}_])",
-            kind: .trailing(",")
-        ),
-        Marker(
-            pattern: "(?<![\\p{L}\\p{N}_])period(?![\\p{L}\\p{N}_])",
-            kind: .trailing(".")
-        ),
-        Marker(
-            pattern: "(?<![\\p{L}\\p{N}_])colon(?![\\p{L}\\p{N}_])",
-            kind: .trailing(":")
-        ),
-        Marker(
-            pattern: "(?<![\\p{L}\\p{N}_])semicolon(?![\\p{L}\\p{N}_])",
-            kind: .trailing(";")
-        ),
-    ].compactMap { $0 }
+            pattern: SpokenPunctuation.bounded(row.phrases),
+            kind: row.kind
+        )
+    }
+
+    /// a marker counts only as a phrase of its own — "comma" inside "comma
+    /// support" is a word you said, not a mark you asked for.
+    private static func bounded(_ phrases: [String]) -> String {
+        let spoken = phrases.joined(separator: "|")
+        return "(?<![\\p{L}\\p{N}_])(?:\(spoken))(?![\\p{L}\\p{N}_])"
+    }
 
     func apply(_ transcript: String) -> String {
         var result = transcript

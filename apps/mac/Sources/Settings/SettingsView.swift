@@ -155,7 +155,11 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showsRemoval) {
             RemovalView()
-                .frame(width: 480, height: 500)
+                // a minimum, not a height: at rest the sheet is the size it
+                // always was, and a failure that has more to say makes it
+                // taller instead of pushing cancel off the bottom.
+                .frame(width: 480)
+                .frame(minHeight: 500)
         }
         .alert(item: $pendingModelRemoval) { version in
             let isActive = version == coordinator.activeEngineVersion

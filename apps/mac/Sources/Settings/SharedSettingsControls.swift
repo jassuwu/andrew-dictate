@@ -21,7 +21,9 @@ struct SettingsRowLabel: View {
             Text(explanation)
                 .font(BrandUI.bodyFont)
                 .foregroundStyle(BrandUI.textSecondary)
-                .lineLimit(1)
+                // two lines: an option that costs something needs room
+                // to say so, and a truncated price is no price at all.
+                .lineLimit(2)
         }
     }
 }
