@@ -75,10 +75,17 @@ struct RemovalView: View {
             }
 
             if let detail = viewModel.failureDetail {
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(BrandUI.textSecondary)
-                    .textSelection(.enabled)
+                // six reasons with long paths would push the sheet past the
+                // bottom of the screen, which is the clipping again from the
+                // other side. the reasons scroll; the way out does not move.
+                ScrollView {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(BrandUI.textSecondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 120)
             }
 
             Spacer(minLength: 0)
