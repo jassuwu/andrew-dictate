@@ -74,6 +74,22 @@ final class DictionaryStoreTests: XCTestCase {
         XCTAssertEqual(store.entries.count, 1)
     }
 
+    /// The table refuses to empty a working rule. A file someone sent you
+    /// does not get to do it through the other door.
+    func testAnImportedBlankRightSideIsIgnored() {
+        let store = DictionaryStore(fileURL: fileURL)
+        store.add(DictionaryEntry(wrong: "darsh", right: "Darsh"))
+
+        let result = store.merge([
+            DictionaryEntry(wrong: "darsh", right: ""),
+            DictionaryEntry(wrong: "jason", right: "   "),
+        ])
+
+        XCTAssertEqual(result, DictionaryStore.MergeResult(added: 0, updated: 0))
+        XCTAssertEqual(store.entries.map(\.right), ["Darsh"])
+        XCTAssertEqual(store.entries.count, 1, "a rule that could never fire")
+    }
+
     func testReplaceIsStillTheWholesaleThingTheButtonUsedToDo() {
         let store = DictionaryStore(fileURL: fileURL)
         store.add(DictionaryEntry(wrong: "darsh", right: "Darsh"))
