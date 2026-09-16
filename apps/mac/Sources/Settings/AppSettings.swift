@@ -290,6 +290,21 @@ final class AppSettings: ObservableObject {
         return legacy
     }
 
+    /// whether a folder is one icloud carries off the mac. ~/Documents
+    /// becomes a symlink into ~/Library/Mobile Documents once Desktop &
+    /// Documents sync is on, so the resolved path tells us even before
+    /// icloud has finished indexing a folder made a second ago. a courtesy,
+    /// not a guarantee: dropbox and google drive are invisible to it.
+    static func syncsToICloud(_ url: URL) -> Bool {
+        if url.resolvingSymlinksInPath()
+            .pathComponents
+            .contains("Mobile Documents") {
+            return true
+        }
+        return (try? url.resourceValues(forKeys: [.isUbiquitousItemKey]))?
+            .isUbiquitousItem == true
+    }
+
     private let userDefaults: UserDefaults
 
     init(userDefaults: UserDefaults = .standard) {

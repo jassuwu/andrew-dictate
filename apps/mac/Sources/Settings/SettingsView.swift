@@ -528,6 +528,15 @@ struct SettingsView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .textSelection(.enabled)
+
+                // the other thing the app cannot do for you: a folder that
+                // syncs uploads other people's words, and nothing here can
+                // stop it. saying so beats letting it happen quietly.
+                if AppSettings.syncsToICloud(settings.meetingsFolder) {
+                    Text("this folder syncs to icloud — meetings will leave the mac.")
+                        .font(.caption)
+                        .foregroundStyle(BrandUI.textSecondary)
+                }
             }
 
             Spacer(minLength: 8)
