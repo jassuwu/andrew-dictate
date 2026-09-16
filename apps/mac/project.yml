@@ -115,6 +115,7 @@ targets:
       - Sources/Archive/DictationArchive.swift
       - Sources/Archive/MeetingSession.swift
       - Sources/Archive/ArchiveBrowserViewModel.swift
+      - Sources/Archive/ArchiveSettingsModel.swift
       - Sources/About/UpdateCheck.swift
       - path: Sources/Meetings
         excludes:

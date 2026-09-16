@@ -142,4 +142,56 @@ final class DictationArchiveTests: XCTestCase {
 
         XCTAssertEqual(try archive.all().map(\.heard), ["second"])
     }
+
+    /// A byte that is not text at all used to fail the whole-file read and
+    /// come back as an empty archive — a fresh install, on top of the file.
+    func testALoneBadByteCostsItsOwnLineAndNothingElse() throws {
+        let archive = DictationArchive(fileURL: fileURL)
+        try archive.append(dictation(heard: "first", at: 1))
+        try archive.append(dictation(heard: "second", at: 2))
+
+        var raw = try Data(contentsOf: fileURL)
+        raw.append(0xFF)
+        try raw.write(to: fileURL)
+
+        XCTAssertEqual(try archive.all().map(\.heard), ["first", "second"])
+    }
+
+    /// append() writes through a raw file handle on purpose, so a crash or a
+    /// full disk can leave half a line behind. That half line is all it costs.
+    func testATornLastLineKeepsTheEarlierOnes() throws {
+        let archive = DictationArchive(fileURL: fileURL)
+        try archive.append(dictation(heard: "first", at: 1))
+        try archive.append(dictation(heard: "second", at: 2))
+
+        let whole = try Data(contentsOf: fileURL)
+        let firstNewline = try XCTUnwrap(whole.firstIndex(of: 0x0A))
+        // the first line, then eight bytes of the second: what a crash
+        // mid-append leaves on disk.
+        try whole.prefix(firstNewline + 9).write(to: fileURL)
+
+        XCTAssertEqual(try archive.all().map(\.heard), ["first"])
+    }
+
+    /// SPEC §4 for the archive: a file that exists and will not read is not an
+    /// empty archive. The pane has a sentence for exactly this, and it can only
+    /// appear if this throws.
+    func testAnArchiveThatCannotBeReadThrowsRatherThanLookingEmpty() throws {
+        try XCTSkipIf(getuid() == 0, "root can read anything")
+        let archive = DictationArchive(fileURL: fileURL)
+        try archive.append(dictation(heard: "first", at: 1))
+
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o000],
+            ofItemAtPath: fileURL.path
+        )
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: fileURL.path
+            )
+        }
+
+        XCTAssertThrowsError(try archive.all())
+    }
 }

@@ -49,16 +49,22 @@ struct DictationArchive {
 
     /// Oldest first. A line that will not decode is skipped rather than thrown:
     /// one damaged entry must not cost the user every dictation they have.
+    ///
+    /// A file that exists and will not read is the one case that does throw.
+    /// SPEC §4 applied to the archive: an unreadable archive must not be
+    /// handed back looking like an empty one.
     func all() throws -> [Dictation] {
-        guard let contents = try? String(contentsOf: fileURL, encoding: .utf8)
-        else {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
             return []
         }
 
-        return contents
-            .split(separator: "\n", omittingEmptySubsequences: true)
+        // Split the bytes, not a decoded string: JSONDecoder validates UTF-8
+        // itself, so a torn tail or a lone bad byte costs exactly the line it
+        // is on — which is what makes the non-atomic append survivable.
+        return try Data(contentsOf: fileURL)
+            .split(separator: 0x0A, omittingEmptySubsequences: true)
             .compactMap {
-                try? Self.decoder.decode(Dictation.self, from: Data($0.utf8))
+                try? Self.decoder.decode(Dictation.self, from: Data($0))
             }
     }
 

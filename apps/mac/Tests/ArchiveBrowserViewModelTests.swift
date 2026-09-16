@@ -88,4 +88,95 @@ final class ArchiveBrowserViewModelTests: XCTestCase {
 
         XCTAssertEqual(model.items.first?.heard, "heard 0")
     }
+
+    // MARK: - searching, which is how anything is found after week one
+
+    private func seed(
+        _ texts: [(heard: String, inserted: String)]
+    ) throws -> DictationArchive {
+        let archive = DictationArchive(fileURL: fileURL)
+        for (index, text) in texts.enumerated() {
+            try archive.append(
+                Dictation(
+                    startedAt: Date(timeIntervalSince1970: Double(index)),
+                    heard: text.heard,
+                    inserted: text.inserted,
+                    engine: "v2"
+                )
+            )
+        }
+        return archive
+    }
+
+    private func seedTwoKubernetes() throws -> DictationArchive {
+        try seed([
+            (
+                heard: "the coober netties ingress is fine the cert is not",
+                inserted: "The Kubernetes ingress is fine; the cert is not."
+            ),
+            (heard: "ship the tag", inserted: "Ship the tag."),
+        ])
+    }
+
+    /// The word being hunted for is usually the misheard one, which lives only
+    /// in the raw text — the row does not even show it unless the cleaner
+    /// changed something.
+    func testAWordOnlyTheRawTextHasIsStillFound() throws {
+        let archive = try seedTwoKubernetes()
+        let model = ArchiveBrowserViewModel(archive: archive)
+
+        model.query = "coober"
+
+        XCTAssertEqual(
+            model.filtered.map(\.inserted),
+            ["The Kubernetes ingress is fine; the cert is not."]
+        )
+    }
+
+    func testTheCleanedTextIsSearchedToo() throws {
+        let archive = try seedTwoKubernetes()
+        let model = ArchiveBrowserViewModel(archive: archive)
+
+        model.query = "kubernetes"
+
+        XCTAssertEqual(model.filtered.count, 1)
+    }
+
+    /// Nobody types accents into a search field, or capitals on purpose.
+    func testSearchIgnoresCaseAndAccents() throws {
+        let archive = try seedTwoKubernetes()
+        let model = ArchiveBrowserViewModel(archive: archive)
+
+        model.query = "CÖOBER"
+
+        XCTAssertEqual(model.filtered.count, 1)
+    }
+
+    /// A field with nothing but a stray space in it is not a search, and must
+    /// not hide the archive.
+    func testABlankQueryLeavesTheWholeListNewestFirst() throws {
+        let archive = try seed(3)
+        let model = ArchiveBrowserViewModel(archive: archive)
+
+        model.query = "   "
+
+        XCTAssertFalse(model.isSearching)
+        XCTAssertEqual(
+            model.filtered.map(\.heard),
+            ["heard 2", "heard 1", "heard 0"]
+        )
+    }
+
+    /// An empty result is a search that found nothing, not an empty archive —
+    /// the pane says a different sentence for each.
+    func testAQueryThatMatchesNothingIsStillASearch() throws {
+        let archive = try seed(3)
+        let model = ArchiveBrowserViewModel(archive: archive)
+
+        model.query = "kubernetes"
+
+        XCTAssertTrue(model.filtered.isEmpty)
+        XCTAssertTrue(model.isSearching)
+        XCTAssertEqual(model.items.count, 3, "and the archive is untouched")
+    }
 }

@@ -47,11 +47,13 @@ struct SettingsView: View {
     @State private var historySegment: HistorySegment = .dictations
     @State private var installedModels: [InstalledModel] = []
     @State private var pendingModelRemoval: EngineVersion?
+    @State private var pendingArchiveWipe = false
     @State private var modelStoreMessage: String?
     @State private var showsRemoval = false
     @State private var timings: TimelineSummary?
     /// lit for a quarter second every time the bound key is pressed.
     @State private var keyChipLit = false
+    @FocusState private var searchFocused: Bool
 
     /// `meetingsLoader` is left open on purpose: this pane knows how to draw
     /// the meetings folder, not where it is or how to read it.
@@ -178,6 +180,27 @@ struct SettingsView: View {
                     removeDownload(version)
                 },
                 secondaryButton: .cancel(Text("cancel"))
+            )
+        }
+        // the archive is the one thing here that does not come back: the file
+        // is unlinked, not trashed, so the wipe asks first.
+        .alert(
+            "delete everything you’ve dictated?",
+            isPresented: $pendingArchiveWipe
+        ) {
+            Button("delete all", role: .destructive) {
+                archive.deleteEverything()
+                browser.reload()
+            }
+            Button("cancel", role: .cancel) {}
+        } message: {
+            Text(
+                ArchiveSettingsModel.wipeWarning(
+                    count: browser.items.count,
+                    // reload() reverses to newest-first, so the last row is
+                    // the oldest thing in the file.
+                    oldest: browser.items.last?.startedAt
+                )
             )
         }
     }
@@ -418,17 +441,31 @@ struct SettingsView: View {
     /// is a footer, because it's set once and never looked at again.
     private var historyTab: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Picker("", selection: $historySegment) {
-                ForEach(HistorySegment.allCases) { segment in
-                    Text(segment.rawValue).tag(segment)
+            HStack(spacing: 8) {
+                Picker("", selection: $historySegment) {
+                    ForEach(HistorySegment.allCases) { segment in
+                        Text(segment.rawValue).tag(segment)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 240)
+                .accessibilityLabel("what history shows")
+
+                Spacer(minLength: 8)
+
+                historySearchField
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 240)
             .padding(.horizontal, 24)
             .padding(.bottom, 10)
-            .accessibilityLabel("what history shows")
+
+            // there is no menu bar to hang a Find item on, so ⌘F is a button
+            // with nothing to look at.
+            Button("find in history") { searchFocused = true }
+                .keyboardShortcut("f", modifiers: .command)
+                .frame(width: 0, height: 0)
+                .opacity(0)
+                .accessibilityHidden(true)
 
             switch historySegment {
             case .dictations:
@@ -453,6 +490,33 @@ struct SettingsView: View {
         .padding(.top, 8)
     }
 
+    /// one field for two piles: each model owns its own query, so switching
+    /// segments leaves the other search where you left it.
+    @ViewBuilder private var historySearchField: some View {
+        switch historySegment {
+        case .dictations:
+            // "what you said" is dictation language on purpose — the other
+            // pile holds other people's words.
+            searchField("search what you said", text: $browser.query)
+        case .meetings:
+            searchField("search the meetings", text: $meetings.query)
+        }
+    }
+
+    private func searchField(
+        _ prompt: String,
+        text: Binding<String>
+    ) -> some View {
+        TextField("", text: text, prompt: Text(prompt))
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 220)
+            .focused($searchFocused)
+            // esc empties the field rather than leaving you to select and
+            // delete what you typed.
+            .onExitCommand { text.wrappedValue = "" }
+            .accessibilityLabel(prompt)
+    }
+
     private var dictationsFooter: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {
@@ -465,24 +529,30 @@ struct SettingsView: View {
 
                 Spacer(minLength: 8)
 
-                Text(
-                    browser.items.count == 1
-                        ? "1 kept"
-                        : "\(browser.items.count) kept"
-                )
-                .font(.caption)
-                .foregroundStyle(BrandUI.textSecondary)
+                // a count beside a failed read would be a number this pane
+                // cannot stand behind, so it offers the file instead.
+                if browser.failure == nil {
+                    Text(keptCount)
+                        .font(.caption)
+                        .foregroundStyle(BrandUI.textSecondary)
+                } else {
+                    Button("show in finder") {
+                        showInFinder(browser.archiveURL)
+                    }
+                }
 
                 Button("delete all") {
-                    archive.deleteEverything()
-                    browser.reload()
+                    pendingArchiveWipe = true
                 }
-                .disabled(browser.items.isEmpty)
+                // an archive the app could not read is not one it may erase.
+                .disabled(browser.items.isEmpty || browser.failure != nil)
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 12)
 
-            if let failure = archive.failure {
+            // the list above already says this; twice in one pane reads like
+            // two different problems.
+            if browser.failure == nil, let failure = archive.failure {
                 Text(failure)
                     .font(.caption)
                     .foregroundStyle(BrandUI.attention)
@@ -496,13 +566,9 @@ struct SettingsView: View {
     /// delete it, and the folder it lives in is the whole feature.
     private var meetingsFooter: some View {
         HStack(spacing: 12) {
-            Text(
-                meetings.items.count == 1
-                    ? "1 meeting"
-                    : "\(meetings.items.count) meetings"
-            )
-            .font(.caption)
-            .foregroundStyle(BrandUI.textSecondary)
+            Text(meetingsCount)
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
 
             Spacer(minLength: 8)
 
@@ -515,6 +581,24 @@ struct SettingsView: View {
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 12)
+    }
+
+    /// while a search is on the count says both numbers: what you are looking
+    /// at, and what `delete all` beside it would still take.
+    private var keptCount: String {
+        let kept = browser.items.count
+        if browser.isSearching {
+            return "\(browser.filtered.count) of \(kept) kept"
+        }
+        return kept == 1 ? "1 kept" : "\(kept) kept"
+    }
+
+    private var meetingsCount: String {
+        let all = meetings.items.count
+        if meetings.isSearching {
+            return "\(meetings.filtered.count) of \(all) meetings"
+        }
+        return all == 1 ? "1 meeting" : "\(all) meetings"
     }
 
     // MARK: - meetings
