@@ -46,7 +46,6 @@ struct LampLabView: View {
         case burn
         case cool
         case text
-        case textWithButton
 
         var id: String { rawValue }
 
@@ -56,7 +55,6 @@ struct LampLabView: View {
             case .burn: "burn"
             case .cool: "cool"
             case .text: "text"
-            case .textWithButton: "text + button"
             }
         }
 
@@ -65,7 +63,7 @@ struct LampLabView: View {
             case .ember: .ember
             case .burn: .burn
             case .cool: .cool
-            case .text, .textWithButton: nil
+            case .text: nil
             }
         }
     }
@@ -79,6 +77,9 @@ struct LampLabView: View {
     }
 
     static let sampleText = "nothing was heard, nothing kept"
+    /// the glass morph only runs inside an animation; the picker and the
+    /// sequence go through this so the container has something to blend
+    static let morph: Animation = .snappy(duration: 0.36, extraBounce: 0.1)
 
     @State private var stage: Stage = .burn
     @State private var isLocked = false
@@ -121,7 +122,17 @@ struct LampLabView: View {
 
     private var controls: some View {
         HStack(spacing: 12) {
-            Picker("stage", selection: $stage) {
+            Picker(
+                "stage",
+                selection: Binding(
+                    get: { stage },
+                    set: { wanted in
+                        withAnimation(LampLabView.morph) {
+                            stage = wanted
+                        }
+                    }
+                )
+            ) {
                 ForEach(Stage.allCases) { stage in
                     Text(stage.label).tag(stage)
                 }
@@ -182,9 +193,28 @@ struct LampLabView: View {
         }
     }
 
+    /// screenshot runs drive the lab from outside:
+    /// `defaults write <bundle> lampLabStage text`, `lampLabLocked -bool true`
+    private func followDefaults() {
+        let defaults = UserDefaults.standard
+        if let raw = defaults.string(forKey: "lampLabStage"),
+           let wanted = Stage(rawValue: raw),
+           wanted != stage,
+           sequenceTask == nil {
+            withAnimation(LampLabView.morph) {
+                stage = wanted
+            }
+        }
+        let locked = defaults.bool(forKey: "lampLabLocked")
+        if locked != isLocked {
+            isLocked = locked
+        }
+    }
+
     /// speech-shaped loudness: bursts with gaps, smoothed like the view
     /// model smooths the mic (fast attack, slow release).
     private func tick() {
+        followDefaults()
         let interval = 1.0 / 30.0
         let t = Date().timeIntervalSinceReferenceDate
         var target: Float = 0
@@ -206,17 +236,20 @@ struct LampLabView: View {
                 (.burn, 2.6),
                 (.cool, 0.7),
                 (.burn, 1.4),
-                (.text, 1.5),
-                (.textWithButton, 1.8),
+                (.text, 1.8),
                 (.burn, 1.2),
                 (.cool, 0.7),
             ]
             for (next, hold) in script {
                 guard !Task.isCancelled else { break }
-                stage = next
+                withAnimation(LampLabView.morph) {
+                    stage = next
+                }
                 try? await Task.sleep(for: .seconds(hold))
             }
-            stage = .burn
+            withAnimation(LampLabView.morph) {
+                stage = .burn
+            }
             sequenceTask = nil
         }
     }
@@ -254,8 +287,8 @@ private struct LampLabCell: View {
         )
     }
 
-    /// the glass row morphs the sliver into the pill and materialises the
-    /// button; the other rows get today's fade-and-scale.
+    /// the glass rows morph the sliver or ribbon into the pill; the other
+    /// rows get today's fade-and-scale.
     private var content: some View {
         GlassEffectContainer(spacing: 10) {
             HStack(spacing: 8) {
@@ -273,7 +306,7 @@ private struct LampLabCell: View {
                         width: HUDLayoutEngine.waveSize.width,
                         height: HUDLayoutEngine.waveSize.height
                     )
-                    .transition(fallbackTransition)
+                    .modifier(RowTransition(ground: ground))
                 } else {
                     HUDTextPill(
                         message: LampLabView.sampleText,
@@ -287,29 +320,10 @@ private struct LampLabCell: View {
                         ground == .glass || ground == .ribbon ? "hud" : nil,
                         in: glassNamespace
                     )
-                    .transition(fallbackTransition)
-
-                    if stage == .textWithButton {
-                        Button("undo") {}
-                            .buttonStyle(.glass)
-                            .tint(BrandUI.gold)
-                            .glassEffectID("undo", in: glassNamespace)
-                            .glassEffectTransition(.materialize)
-                            .transition(fallbackTransition)
-                    }
+                    .modifier(RowTransition(ground: ground))
                 }
             }
         }
-        .animation(
-            .snappy(duration: 0.32, extraBounce: 0.12),
-            value: stage
-        )
-    }
-
-    private var fallbackTransition: AnyTransition {
-        ground == .glass || ground == .ribbon
-            ? .identity
-            : .opacity.combined(with: .scale(scale: 0.94))
     }
 
     @ViewBuilder
@@ -368,4 +382,20 @@ private struct LampLabCell: View {
         "lamp any more, it is an underline that belongs to no",
         "word. Whatever grounds it has to cost nothing on black.",
     ]
+}
+
+/// glass rows leave the transition to the container, which morphs one glass
+/// shape into the next; the plain rows keep today's fade-and-scale.
+private struct RowTransition: ViewModifier {
+    let ground: LampGround
+
+    func body(content: Content) -> some View {
+        if ground == .glass || ground == .ribbon {
+            content
+        } else {
+            content.transition(
+                .opacity.combined(with: .scale(scale: 0.94))
+            )
+        }
+    }
 }

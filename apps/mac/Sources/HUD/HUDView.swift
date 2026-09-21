@@ -363,20 +363,46 @@ struct LampLine: View {
                 time: timeline.date.timeIntervalSinceReferenceDate,
                 thickness: Self.ribbonThickness
             )
-            let glass = Color.clear
-                .glassEffect(
-                    .regular.tint(
-                        GoldRippleLine.tint(brightness: brightness)
-                            .opacity(0.12 + 0.70 * min(brightness, 1))
+            let tint = GoldRippleLine.tint(brightness: brightness)
+                .opacity(0.12 + 0.70 * min(brightness, 1))
+            let half = (Self.ribbonLength / 2) * pose.extent
+            ZStack {
+                glassed(
+                    Color.clear.glassEffect(
+                        .regular.tint(tint),
+                        in: shape
                     ),
-                    in: shape
+                    id: glassID
                 )
-                .opacity(alpha)
-            if let glassID, let glassNamespace {
-                glass.glassEffectID(glassID, in: glassNamespace)
-            } else {
-                glass
+                // locked: a glass bead off each end, the same light. it
+                // shares the container, so it blends into the ribbon's end
+                // the way the ribbon blends into the pill.
+                if isLocked, phase == .burn {
+                    ForEach([-1.0, 1.0], id: \.self) { side in
+                        Color.clear
+                            .frame(
+                                width: Self.ribbonThickness,
+                                height: Self.ribbonThickness
+                            )
+                            .glassEffect(.regular.tint(tint), in: Circle())
+                            .offset(
+                                x: side * (half + Self.lockBeadGap)
+                            )
+                    }
+                }
             }
+            .opacity(alpha)
+        }
+    }
+
+    static let lockBeadGap: CGFloat = 9
+
+    @ViewBuilder
+    private func glassed(_ view: some View, id: String?) -> some View {
+        if let id, let glassNamespace {
+            view.glassEffectID(id, in: glassNamespace)
+        } else {
+            view
         }
     }
 
@@ -648,7 +674,7 @@ struct GoldRippleLine: View {
                 }
             }
 
-            if isLocked, phase == .burn {
+            if isLocked, phase == .burn, filament {
                 drawLockDots(
                     in: &context,
                     cx: cx,
