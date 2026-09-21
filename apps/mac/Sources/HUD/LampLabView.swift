@@ -38,7 +38,7 @@ final class LampLabWindowController: NSWindowController {
 }
 
 struct LampLabView: View {
-    static let contentSize = NSSize(width: 920, height: 682)
+    static let contentSize = NSSize(width: 920, height: 470)
     static let cellSize = CGSize(width: 272, height: 96)
 
     enum Stage: String, CaseIterable, Identifiable {
@@ -100,9 +100,9 @@ struct LampLabView: View {
             grid
             Text(
                 """
-                the panel renders glass darker than this window does — pick \
-                live: defaults write \(AppIdentity.bundleID) lampGround \
-                ribbonClear · then dictate, or menu ▸ rehearse the lamp (dev)
+                the HUD ships "clear, lit inside". the panel renders glass \
+                darker than this window: judge it there — dictate, or \
+                menu ▸ rehearse the lamp (dev)
                 """
             )
             .font(.caption)

@@ -34,13 +34,6 @@ enum LampGround: String, CaseIterable, Identifiable {
     /// the same lit ribbon under clear glass, which lets more of the light
     /// through than regular
     case ribbonClear
-    /// clear, lit under the glass, plus a soft second light drawn *as* the
-    /// glass content: blurred and translucent, so the rim still shows. the
-    /// hybrid, for a transparent panel that dims what is under its glass.
-    case ribbonSoft
-    /// the light drawn as the glass content at full strength: bright
-    /// anywhere, but it paints over the glass. rejected 2026-09-21.
-    case ribbonPainted
 
     var id: String { rawValue }
 
@@ -52,37 +45,19 @@ enum LampGround: String, CaseIterable, Identifiable {
         case .ribbon: "ribbon, tinted"
         case .ribbonLit: "ribbon, lit inside"
         case .ribbonClear: "clear, lit inside"
-        case .ribbonSoft: "clear, lit + soft"
-        case .ribbonPainted: "clear, painted"
         }
     }
 
     /// what the lab shows and the live switch accepts: the ribbons. the
     /// line, smoke and sliver were the audition the ribbon won.
-    static let candidates: [LampGround] = [
-        .ribbon, .ribbonLit, .ribbonClear, .ribbonSoft, .ribbonPainted,
-    ]
+    static let candidates: [LampGround] = [.ribbon, .ribbonLit, .ribbonClear]
 
-    static let defaultsKey = "lampGround"
+    /// the one that ships: clear glass, lit from under it
     static let shipped: LampGround = .ribbonClear
-
-    /// development only: `defaults write <bundle> lampGround <case>` flips
-    /// the live HUD between candidates, because the panel does not render
-    /// glass the way the lab's opaque window does and the pick has to be
-    /// made where it ships.
-    static var current: LampGround {
-        guard Capabilities.current.hasLampLab,
-              let raw = UserDefaults.standard.string(forKey: defaultsKey),
-              let ground = LampGround(rawValue: raw),
-              ground.isRibbon else {
-            return shipped
-        }
-        return ground
-    }
 
     var isRibbon: Bool {
         switch self {
-        case .ribbon, .ribbonLit, .ribbonClear, .ribbonSoft, .ribbonPainted:
+        case .ribbon, .ribbonLit, .ribbonClear:
             true
         case .bare, .smoke, .glass:
             false
@@ -97,18 +72,8 @@ enum LampGround: String, CaseIterable, Identifiable {
     /// a light in the ribbon's outline under the glass
     var litInside: Bool {
         switch self {
-        case .ribbonLit, .ribbonClear, .ribbonSoft, .ribbonPainted: true
+        case .ribbonLit, .ribbonClear: true
         default: false
-        }
-    }
-
-    /// a light drawn as the glass content, above it: 0 = none,
-    /// 1 = painted at full strength
-    var lightOnTop: Double {
-        switch self {
-        case .ribbonSoft: 0.5
-        case .ribbonPainted: 1
-        default: 0
         }
     }
 
@@ -339,7 +304,7 @@ struct HUDView: View {
             loudness: viewModel.loudness,
             startedAt: viewModel.waveTransitionStartedAt,
             isLocked: viewModel.isRecordingLocked,
-            ground: LampGround.current,
+            ground: LampGround.shipped,
             glassID: Self.glassID,
             glassNamespace: glassNamespace
         )
@@ -475,13 +440,8 @@ struct LampLine: View {
                 )
             let half = (Self.ribbonLength / 2) * pose.extent
             ZStack {
-                // the light is the glass view's *content*, the way the text
-                // is the pill's: content draws above the glass. anything
-                // else — a fill under it, an overlay over the container —
-                // ends up beneath the glass layer and comes out olive,
-                // in a transparent panel even under clear glass.
                 glassed(
-                    lightContent.glassEffect(
+                    Color.clear.glassEffect(
                         ground.glass.tint(tint),
                         in: shape
                     ),
@@ -513,21 +473,6 @@ struct LampLine: View {
 
     static let lockBeadGap: CGFloat = 9
 
-    @ViewBuilder
-    private var lightContent: some View {
-        if ground.lightOnTop > 0 {
-            RibbonLight(
-                phase: phase,
-                loudness: loudness,
-                startedAt: startedAt,
-                lineWidth: Self.ribbonLength,
-                thickness: Self.ribbonThickness,
-                strength: ground.lightOnTop
-            )
-        } else {
-            Color.clear
-        }
-    }
 
     @ViewBuilder
     private func glassed(_ view: some View, id: String?) -> some View {
@@ -632,95 +577,6 @@ struct WaveRibbonShape: Shape {
                 lineJoin: .round
             )
         )
-    }
-}
-
-/// the lit tube's light: a gold fill in the ribbon's outline going pale with
-/// brightness, and a white-hot core by loudness. drawn over the glass,
-/// narrower than it, so the rim stays visible around the light.
-struct RibbonLight: View {
-    let phase: GoldRippleLine.Phase
-    let loudness: Float
-    let startedAt: Date
-    let lineWidth: CGFloat
-    let thickness: CGFloat
-    /// 1 paints the light at full strength; below that it thins, blurs
-    /// and fades so the glass rim shows through it
-    var strength: Double = 1
-
-    @Environment(\.accessibilityReduceMotion)
-    private var reduceMotion
-
-    var body: some View {
-        TimelineView(
-            .animation(minimumInterval: 1.0 / 60.0, paused: reduceMotion)
-        ) { timeline in
-            Canvas { context, size in
-                let soft = 1 - strength
-                let elapsed = max(
-                    0,
-                    timeline.date.timeIntervalSince(startedAt)
-                )
-                let pose = LampPose.at(
-                    phase: phase,
-                    elapsed: elapsed,
-                    date: timeline.date
-                )
-                let level = Double(loudness) * pose.damp
-                let alpha = max(pose.presence, pose.heat)
-                let glow = min(pose.heat * (0.45 + 0.55 * level), 1)
-                let half = (lineWidth / 2) * pose.extent
-                guard half > 1.2 else {
-                    return
-                }
-                let path = GoldRippleLine.wavePath(
-                    cx: size.width / 2,
-                    cy: size.height / 2,
-                    half: half,
-                    amplitude: reduceMotion
-                        ? 0
-                        : HUDWaveMotion.amplitude * level * pose.heat,
-                    time: timeline.date.timeIntervalSinceReferenceDate
-                )
-                context.drawLayer { layer in
-                    layer.addFilter(.blur(radius: 0.6 + 1.6 * soft))
-                    layer.stroke(
-                        path,
-                        with: .color(
-                            GoldRippleLine.tint(brightness: 0.35 + 0.65 * glow)
-                                .opacity(
-                                    (0.55 + 0.45 * glow) * alpha * strength
-                                )
-                        ),
-                        style: StrokeStyle(
-                            lineWidth: thickness * (0.72 - 0.22 * soft),
-                            lineCap: .round,
-                            lineJoin: .round
-                        )
-                    )
-                }
-                context.drawLayer { layer in
-                    layer.addFilter(.blur(radius: 1.2 * soft))
-                    layer.stroke(
-                        path,
-                        with: .color(
-                            Color(red: 1, green: 250 / 255, blue: 225 / 255)
-                                .opacity(
-                                    (0.30 + 0.70 * glow)
-                                        * min(level + 0.30, 1) * alpha
-                                        * (0.4 + 0.6 * strength)
-                                )
-                        ),
-                        style: StrokeStyle(
-                            lineWidth: thickness * 0.30,
-                            lineCap: .round,
-                            lineJoin: .round
-                        )
-                    )
-                }
-            }
-        }
-        .accessibilityHidden(true)
     }
 }
 
