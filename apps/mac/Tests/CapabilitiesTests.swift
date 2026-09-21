@@ -35,7 +35,8 @@ final class CapabilitiesTests: XCTestCase {
                 canUninstall: true,
                 canResetInPlace: false,
                 canCopyTimings: true,
-                announcesItself: false
+                announcesItself: false,
+                hasLampLab: false
             )
         )
     }

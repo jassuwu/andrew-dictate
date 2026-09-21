@@ -314,6 +314,13 @@ final class DictationCoordinator: ObservableObject {
                 self?.openLampLab()
             }
         }
+        if Capabilities.current.hasLampLab,
+           UserDefaults.standard.bool(forKey: "hudRehearsalAtLaunch") {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(4))
+                self?.rehearseHUDForDevelopment()
+            }
+        }
     }
 
     @discardableResult
@@ -331,6 +338,52 @@ final class DictationCoordinator: ObservableObject {
             aboutWindowController = controller
         }
         controller.present()
+    }
+
+    /// Development only (`Capabilities.hasLampLab`): walk the real HUD
+    /// through a dictation without a mic or a key — warm, record, cool,
+    /// one line of feedback — so the lamp can be seen over a real desktop.
+    /// the state machine is not touched; only the view model and the panel.
+    /// `defaults write <bundle> hudRehearsalAtLaunch -bool true` runs it
+    /// a few seconds after launch.
+    func rehearseHUDForDevelopment() {
+        guard Capabilities.current.hasLampLab,
+              state == .idle,
+              !isOnboardingPresented else {
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let steps: [(DictationCoordinator.State?, String?, Double)] = [
+                (.prewarming, nil, 1.2),
+                (.recording, nil, 3.0),
+                (.transcribing, nil, 0.5),
+                (nil, "nothing was heard, nothing kept", 1.8),
+            ]
+            for (next, feedback, hold) in steps {
+                if let next {
+                    self.hudViewModel.update(state: next)
+                }
+                if let feedback {
+                    self.hudViewModel.showFeedback(feedback)
+                }
+                self.withHUDPanel { panel in
+                    let screenWidth = panel.presentationScreenWidth()
+                    self.hudViewModel.updateStage(screenWidth: screenWidth)
+                    self.hudViewModel.updateLayout(
+                        HUDLayoutEngine.layout(
+                            for: self.hudViewModel.content,
+                            screenWidth: screenWidth
+                        )
+                    )
+                    panel.present()
+                }
+                try? await Task.sleep(for: .seconds(hold))
+            }
+            self.hudViewModel.clearFeedback()
+            self.hudViewModel.update(state: .idle)
+            self.withHUDPanel { $0.dismiss(fast: true) }
+        }
     }
 
     /// Development only (`Capabilities.hasLampLab`): the lamp audition.
@@ -1551,17 +1604,14 @@ final class DictationCoordinator: ObservableObject {
             }
 
             let screenWidth = panel.presentationScreenWidth()
-            let layout = HUDLayoutEngine.layout(
-                for: self.hudViewModel.content,
-                screenWidth: screenWidth
+            self.hudViewModel.updateStage(screenWidth: screenWidth)
+            self.hudViewModel.updateLayout(
+                HUDLayoutEngine.layout(
+                    for: self.hudViewModel.content,
+                    screenWidth: screenWidth
+                )
             )
             panel.present()
-            self.hudViewModel.updateLayout(layout)
-            panel.morph(
-                to: layout,
-                animated: !NSWorkspace.shared
-                    .accessibilityDisplayShouldReduceMotion
-            )
         }
     }
 }

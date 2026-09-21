@@ -40,10 +40,10 @@ hold fn ──▶ mic capture ──▶ key-up ──▶ engine (parakeet v2, pr
 
 ## 4. hud
 
-one nonactivating, click-through `NSPanel` (borderless, floating, all-spaces), in two styles:
+one nonactivating, click-through `NSPanel` (borderless, floating, all-spaces): an invisible stage, sized once per screen for the widest line of text, never morphing. everything visible is Liquid Glass inside it, in one container, so a change of state is a change of shape:
 
-- **bare — the lamp (2026-08-12).** a single gold line drawn in a canvas on a transparent panel: dim ember while prewarming, a wave whose amplitude and tungsten colour ride your voice while recording, then a cool-out that collapses it to a hot dot and fades. no capsule, no shadow — they would clip the bloom. **success is silent: the afterglow is the whole goodbye.** the earlier glass capsule with eleven bars, and the transcript flash that followed a paste, are both removed.
-- **glass — the pill.** the exceptional-message style, and the only thing that ever speaks: `copied — secure field` · `copied — focus changed` · `couldn't transcribe` · `heard nothing` · `recording was lost` · `speech model failed — retrying` · `microphone access is off` · `no microphone available`.
+- **the ribbon (2026-09-21).** the lamp is a 6-point ribbon of Liquid Glass, 112 wide, and the ribbon is the light: its tint runs deep gold to pale and its opacity climbs with the same brightness the old filament had — dim ember while prewarming, lit while recording, hot when you speak, a blurred halo spilling by loudness. it waves to your voice. under it, smoke: a blurred dark stroke that is nothing on black and a subtitle's shadow on a page, so the lamp reads over any window. a locked capture pins it with a glass bead off each end. on release it collapses to a dot and goes out. **success is silent: the afterglow is the whole goodbye.** the bare gold line it replaces (2026-08-12) vanished over light pages; the glass capsule with eleven bars before that is not coming back.
+- **the pill.** the exceptional-message shape, and the only thing that ever speaks: `copied — secure field` · `copied — focus changed` · `couldn't transcribe` · `heard nothing` · `recording was lost` · `speech model failed — retrying` · `microphone access is off` · `no microphone available`. dark glass with pale gold text, legible over a page. it shares the ribbon's glass identity, so the ribbon swells into it — the way Spotlight's field liquidates open — rather than one popping in over the other.
 
 the rule: **a failed dictation must never look like a successful one.** anything that goes wrong cuts the afterglow short and says why.
 

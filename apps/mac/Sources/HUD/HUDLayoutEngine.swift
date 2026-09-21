@@ -7,17 +7,13 @@ enum HUDContent: Equatable, Sendable {
     case text(String)
 }
 
-enum HUDStyle: Equatable, Sendable {
-    /// no chrome: a transparent window holding only the lamp line and its glow
-    case bare
-    /// the glass capsule — reserved for exceptional text (errors, copied-instead)
-    case glass
-}
-
+/// the size of the thing on the stage — the ribbon's canvas or the text
+/// pill. the window itself is the stage (`HUDLayoutEngine.stageSize`), an
+/// invisible rectangle wide enough for the widest pill, so the glass can
+/// morph from one shape to the next without the window moving.
 struct HUDLayout: Equatable, Sendable {
     let size: CGSize
     let lineCount: Int
-    let style: HUDStyle
 }
 
 enum HUDLayoutEngine {
@@ -28,6 +24,10 @@ enum HUDLayoutEngine {
     static let measurementSafety: CGFloat = 2
     static let maximumScreenWidthFraction: CGFloat = 0.55
     static let wrappedLineSpacing: CGFloat = 4
+    /// room around the widest content for the ribbon's halo and the pill's
+    /// glass edge — nothing on the stage may touch the window's edge, which
+    /// clips regardless of layer masks
+    static let stageMargin: CGFloat = 24
 
     static var primaryFont: NSFont {
         .systemFont(ofSize: 12, weight: .medium)
@@ -41,6 +41,23 @@ enum HUDLayoutEngine {
         )
     }
 
+    /// the window: fixed per screen, never morphs
+    static func stageSize(screenWidth: CGFloat) -> CGSize {
+        let widestPill = max(
+            minimumSize.width,
+            screenWidth * maximumScreenWidthFraction
+        )
+        let tallest = max(
+            waveSize.height,
+            primaryLineHeight * 2 + wrappedLineSpacing
+                + (minimumSize.height - primaryLineHeight)
+        )
+        return CGSize(
+            width: ceil(widestPill + stageMargin * 2),
+            height: ceil(tallest + stageMargin * 2)
+        )
+    }
+
     static func layout(
         for content: HUDContent,
         screenWidth: CGFloat
@@ -49,8 +66,7 @@ enum HUDLayoutEngine {
         case .wave, .prewarming:
             return HUDLayout(
                 size: waveSize,
-                lineCount: 1,
-                style: .bare
+                lineCount: 1
             )
         case let .text(text):
             let maximumWidth = max(
@@ -79,8 +95,7 @@ enum HUDLayoutEngine {
 
             return HUDLayout(
                 size: CGSize(width: width, height: height),
-                lineCount: lineCount,
-                style: .glass
+                lineCount: lineCount
             )
         }
     }

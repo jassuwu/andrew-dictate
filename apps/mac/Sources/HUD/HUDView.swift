@@ -14,9 +14,8 @@ enum HUDWaveMotion {
 /// what sits under the lamp line so it survives a light background. a bare
 /// gold line is a lamp on black and an underline on a white page.
 ///
-/// dev builds pick one live with `defaults write <bundle> lampGround
-/// <bare|smoke|glass>`; the lamp lab shows all three side by side. release
-/// builds get `.bare` until the audition decides.
+/// the HUD ships `.ribbon` (2026-09-21). the others remain for the lamp lab,
+/// where they are the comparison the ribbon was chosen against.
 enum LampGround: String, CaseIterable, Identifiable {
     /// today: the line and its bloom on nothing
     case bare
@@ -32,22 +31,9 @@ enum LampGround: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    static let defaultsKey = "lampGround"
-
-    static var current: LampGround {
-        guard Capabilities.current.hasLampLab,
-              let raw = UserDefaults.standard.string(
-                  forKey: defaultsKey
-              ),
-              let ground = LampGround(rawValue: raw) else {
-            return .bare
-        }
-        return ground
-    }
-
     var label: String {
         switch self {
-        case .bare: "bare (today)"
+        case .bare: "bare line"
         case .smoke: "smoke"
         case .glass: "glass sliver"
         case .ribbon: "glass ribbon"
@@ -97,6 +83,14 @@ final class HUDViewModel: ObservableObject {
         }
     }
 
+    /// the glass morphs only inside an animation, so every swap of what is
+    /// on the stage goes through this. reduce motion: snap.
+    static var morph: Animation? {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            ? nil
+            : .snappy(duration: 0.36, extraBounce: 0.1)
+    }
+
     func update(state: DictationCoordinator.State) {
         let previousState = self.state
 
@@ -108,9 +102,11 @@ final class HUDViewModel: ObservableObject {
             for: state,
             previousState: previousState
         )
-        self.state = state
-        feedbackMessage = nil
-        presentationGeneration += 1
+        withAnimation(Self.morph) {
+            self.state = state
+            feedbackMessage = nil
+            presentationGeneration += 1
+        }
     }
 
     /// not folded into `update(state:)`: the lock is set a beat after the
@@ -129,13 +125,17 @@ final class HUDViewModel: ObservableObject {
     }
 
     func showFeedback(_ message: String) {
-        feedbackMessage = message
-        presentationGeneration += 1
+        withAnimation(Self.morph) {
+            feedbackMessage = message
+            presentationGeneration += 1
+        }
     }
 
     func clearFeedback() {
-        feedbackMessage = nil
-        presentationGeneration += 1
+        withAnimation(Self.morph) {
+            feedbackMessage = nil
+            presentationGeneration += 1
+        }
     }
 
     func updateLayout(_ layout: HUDLayout) {
@@ -143,6 +143,20 @@ final class HUDViewModel: ObservableObject {
             return
         }
         self.layout = layout
+    }
+
+    /// the panel and this view must agree on the stage; both read the
+    /// engine, this one through the panel's screen width when it is set.
+    @Published private(set) var stageSize = HUDLayoutEngine.stageSize(
+        screenWidth: 1_440
+    )
+
+    func updateStage(screenWidth: CGFloat) {
+        let size = HUDLayoutEngine.stageSize(screenWidth: screenWidth)
+        guard size != stageSize else {
+            return
+        }
+        stageSize = size
     }
 
     private func configureLevelSampling(
@@ -190,52 +204,53 @@ final class HUDViewModel: ObservableObject {
     }
 }
 
+/// the stage: one glass container holding whichever of the two glass shapes
+/// the moment calls for — the ribbon, or the line of text. both carry the
+/// same glass ID, so a swap is a morph: the ribbon swells into the pill the
+/// way Spotlight's field liquidates open (ADR 0042).
 struct HUDView: View {
     @ObservedObject var viewModel: HUDViewModel
 
-    @Environment(\.accessibilityReduceMotion)
-    private var reduceMotion
+    @Namespace private var glassNamespace
+    private static let glassID = "lamp"
 
     var body: some View {
-        ZStack {
-            if let feedbackMessage = viewModel.feedbackMessage {
-                textPill(feedbackMessage)
-                    .id(viewModel.presentationGeneration)
-                    .transition(
-                        .opacity.combined(with: .scale(scale: 0.94))
+        GlassEffectContainer(spacing: 12) {
+            ZStack {
+                if let feedbackMessage = viewModel.feedbackMessage {
+                    HUDTextPill(
+                        message: feedbackMessage,
+                        lineCount: viewModel.layout.lineCount,
+                        size: viewModel.layout.size
                     )
-            } else {
-                switch viewModel.state {
-                case .idle:
-                    EmptyView()
-                case .prewarming:
-                    lampLine(phase: .ember)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Warming up")
-                case .recording:
-                    lampLine(phase: .burn)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(
-                            viewModel.isRecordingLocked
-                                ? "Listening, locked"
-                                : "Listening"
-                        )
-                case .transcribing:
-                    lampLine(phase: .cool)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Transcribing")
+                    .glassEffectID(Self.glassID, in: glassNamespace)
+                } else {
+                    switch viewModel.state {
+                    case .idle:
+                        EmptyView()
+                    case .prewarming:
+                        lampLine(phase: .ember)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Warming up")
+                    case .recording:
+                        lampLine(phase: .burn)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(
+                                viewModel.isRecordingLocked
+                                    ? "Listening, locked"
+                                    : "Listening"
+                            )
+                    case .transcribing:
+                        lampLine(phase: .cool)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Transcribing")
+                    }
                 }
             }
         }
-        .animation(
-            reduceMotion || viewModel.feedbackMessage == nil
-                ? nil
-                : .snappy(duration: 0.32, extraBounce: 0.12),
-            value: viewModel.presentationGeneration
-        )
         .frame(
-            width: viewModel.layout.size.width,
-            height: viewModel.layout.size.height
+            width: viewModel.stageSize.width,
+            height: viewModel.stageSize.height
         )
     }
 
@@ -245,15 +260,13 @@ struct HUDView: View {
             loudness: viewModel.loudness,
             startedAt: viewModel.waveTransitionStartedAt,
             isLocked: viewModel.isRecordingLocked,
-            ground: LampGround.current
+            ground: .ribbon,
+            glassID: Self.glassID,
+            glassNamespace: glassNamespace
         )
-    }
-
-    private func textPill(_ message: String) -> some View {
-        HUDTextPill(
-            message: message,
-            lineCount: viewModel.layout.lineCount,
-            size: viewModel.layout.size
+        .frame(
+            width: HUDLayoutEngine.waveSize.width,
+            height: HUDLayoutEngine.waveSize.height
         )
     }
 }
@@ -263,9 +276,11 @@ struct HUDTextPill: View {
     let message: String
     let lineCount: Int
     let size: CGSize
-    /// the pill ships gold-tinted glass, which goes light over a light page
-    /// and takes the pale gold text with it. the lab tries a dark tint.
-    var glassTint: Color = BrandUI.gold.opacity(0.16)
+    /// dark glass: gold-tinted glass went light over a light page and took
+    /// the pale gold text with it (lamp lab, 2026-09-21). the lab can still
+    /// try the gold.
+    static let darkTint = BrandUI.black.opacity(0.55)
+    var glassTint: Color = HUDTextPill.darkTint
 
     var body: some View {
         Text(message)
@@ -340,9 +355,14 @@ struct LampLine: View {
         }
     }
 
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
+
     /// the glass rides the same pose as the line under it, every frame
     private var ribbon: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
+        TimelineView(
+            .animation(minimumInterval: 1.0 / 60.0, paused: reduceMotion)
+        ) { timeline in
             let elapsed = max(
                 0,
                 timeline.date.timeIntervalSince(startedAt)
@@ -719,6 +739,9 @@ struct GoldRippleLine: View {
         path.addLine(to: CGPoint(x: cx + lineWidth / 2, y: cy))
         if ground == .smoke {
             drawSmoke(in: &context, path: path, alpha: 1)
+        }
+        guard filament else {
+            return
         }
         context.stroke(
             path,

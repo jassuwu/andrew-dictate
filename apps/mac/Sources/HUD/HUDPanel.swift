@@ -28,7 +28,9 @@ final class HUDPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = true
+        // no window shadow: the glass draws its own edge, and a shadow
+        // would outline the invisible stage
+        hasShadow = false
         ignoresMouseEvents = true
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
@@ -39,14 +41,8 @@ final class HUDPanel: NSPanel {
         // Never ask the hosting view to measure itself. The layout engine is the
         // sole source of truth for both this view and the panel frame.
         hostingView.sizingOptions = []
-        let size = HUDLayoutEngine.minimumSize
-        // the window IS the capsule: behind-window blur composites over the whole
-        // window rect regardless of SwiftUI clipping, so the only reliable shape
-        // is the window itself — exact HUD size, layer-rounded and masked.
+        let size = HUDLayoutEngine.stageSize(screenWidth: 1_440)
         hostingView.wantsLayer = true
-        hostingView.layer?.cornerRadius = min(size.height, 44) / 2
-        hostingView.layer?.cornerCurve = .continuous
-        hostingView.layer?.masksToBounds = true
         hostingView.autoresizingMask = [.width, .height]
         hudHostingView = hostingView
         contentView = hostingView
@@ -57,8 +53,8 @@ final class HUDPanel: NSPanel {
     func present() {
         visibilityGeneration &+= 1
         alphaValue = 1
+        fitStage()
         positionOnPointerScreen()
-        invalidateShadow()
         orderFrontRegardless()
     }
 
@@ -95,44 +91,19 @@ final class HUDPanel: NSPanel {
             ?? 1_440
     }
 
-    func morph(to layout: HUDLayout, animated: Bool) {
-        let size = layout.size
-        let targetFrame = NSRect(
-            x: frame.midX - size.width / 2,
-            y: frame.minY,
-            width: size.width,
-            height: size.height
+    /// the window never morphs any more: it is a transparent, click-through
+    /// stage sized for the widest pill on this screen, and the glass inside
+    /// it does the shape-changing. sized on every present, because the
+    /// pointer may have moved to another screen.
+    private func fitStage() {
+        let size = HUDLayoutEngine.stageSize(
+            screenWidth: presentationScreenWidth()
         )
-        let hostingFrame = NSRect(origin: .zero, size: size)
-        let isGlass = layout.style == .glass
-        let cornerRadius = isGlass ? min(size.height, 44) / 2 : 0
-        // bare style: the window is an invisible stage for the lamp and its
-        // glow — no capsule mask (it would clip the bloom), no window shadow.
-        hasShadow = isGlass
-        hudHostingView?.layer?.masksToBounds = isGlass
-
-        guard animated else {
-            setFrame(targetFrame, display: true)
-            hudHostingView?.frame = hostingFrame
-            hudHostingView?.layer?.cornerRadius = cornerRadius
-            invalidateShadow()
+        guard frame.size != size else {
             return
         }
-
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.32
-            context.timingFunction = CAMediaTimingFunction(
-                controlPoints: 0.2,
-                1.3,
-                0.3,
-                1
-            )
-            context.allowsImplicitAnimation = true
-            animator().setFrame(targetFrame, display: true)
-            hudHostingView?.animator().frame = hostingFrame
-            hudHostingView?.layer?.cornerRadius = cornerRadius
-        }
-        invalidateShadow()
+        setContentSize(size)
+        hudHostingView?.frame = NSRect(origin: .zero, size: size)
     }
 
     private func positionOnPointerScreen() {
