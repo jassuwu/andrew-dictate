@@ -356,10 +356,22 @@ final class DictationCoordinator: ObservableObject {
             guard let self else { return }
             let steps: [(DictationCoordinator.State?, String?, Double)] = [
                 (.prewarming, nil, 1.2),
-                (.recording, nil, 3.0),
+                (.recording, nil, 4.0),
                 (.transcribing, nil, 0.5),
                 (nil, "nothing was heard, nothing kept", 1.8),
             ]
+            // a voice: bursts with gaps, roughly a sentence's rhythm
+            let voice = Task { @MainActor [weak self] in
+                let started = Date()
+                while !Task.isCancelled {
+                    let t = Date().timeIntervalSince(started)
+                    let burst = max(0, sin(t * 2.6)) * (0.55 + 0.45 * sin(t * 12.7))
+                    self?.hudViewModel.rehearsalLevel = Float(min(1, burst * 1.15))
+                    try? await Task.sleep(for: .milliseconds(33))
+                }
+                self?.hudViewModel.rehearsalLevel = nil
+            }
+            defer { voice.cancel() }
             for (next, feedback, hold) in steps {
                 if let next {
                     self.hudViewModel.update(state: next)
