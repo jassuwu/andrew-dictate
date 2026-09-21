@@ -26,6 +26,9 @@ enum LampGround: String, CaseIterable, Identifiable {
     /// a sliver of Liquid Glass behind the line: the same capsule the text
     /// pill uses, so one can morph into the other
     case glass
+    /// the line itself is the glass: a wavy ribbon of Liquid Glass with the
+    /// gold light shining up through it, smoke under both
+    case ribbon
 
     var id: String { rawValue }
 
@@ -47,6 +50,7 @@ enum LampGround: String, CaseIterable, Identifiable {
         case .bare: "bare (today)"
         case .smoke: "smoke"
         case .glass: "glass sliver"
+        case .ribbon: "glass ribbon"
         }
     }
 }
@@ -307,17 +311,60 @@ struct LampLine: View {
         height: 26
     )
 
+    static let ribbonThickness: CGFloat = 9
+
     var body: some View {
         GoldRippleLine(
             phase: phase,
             loudness: loudness,
             startedAt: startedAt,
             isLocked: isLocked,
-            ground: ground
+            ground: ground == .ribbon ? .smoke : ground
         )
         .background {
             if ground == .glass {
                 sliver
+            }
+        }
+        .overlay {
+            if ground == .ribbon {
+                ribbon
+            }
+        }
+    }
+
+    /// the glass rides the same pose as the line under it, every frame
+    private var ribbon: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
+            let elapsed = max(
+                0,
+                timeline.date.timeIntervalSince(startedAt)
+            )
+            let pose = LampPose.at(
+                phase: phase,
+                elapsed: elapsed,
+                date: timeline.date
+            )
+            let level = Double(loudness) * pose.damp
+            let alpha = max(pose.presence, pose.heat)
+            let shape = WaveRibbonShape(
+                half: (HUDWaveMotion.lineWidth / 2) * pose.extent,
+                amplitude: HUDWaveMotion.amplitude * level * pose.heat,
+                time: timeline.date.timeIntervalSinceReferenceDate,
+                thickness: Self.ribbonThickness
+            )
+            let glass = Color.clear
+                .glassEffect(
+                    .regular.tint(
+                        BrandUI.gold.opacity(0.18 + 0.30 * min(level, 1))
+                    ),
+                    in: shape
+                )
+                .opacity(alpha)
+            if let glassID, let glassNamespace {
+                glass.glassEffectID(glassID, in: glassNamespace)
+            } else {
+                glass
             }
         }
     }
@@ -338,6 +385,84 @@ struct LampLine: View {
         } else {
             glass
         }
+    }
+}
+
+/// where the lamp is in its life, as numbers: the same pose drives the gold
+/// line and, in the ribbon variant, the glass shape over it.
+struct LampPose {
+    var heat = 0.0
+    var presence = 0.0
+    var extent = 1.0
+    var dotFlash = 0.0
+    var damp = 1.0
+
+    static func at(
+        phase: GoldRippleLine.Phase,
+        elapsed: TimeInterval,
+        date: Date
+    ) -> LampPose {
+        var pose = LampPose()
+        switch phase {
+        case .ember:
+            let breathe = sin(
+                date.timeIntervalSinceReferenceDate
+                    * .pi * 2 / 2.8
+            )
+            pose.heat = 0.20 + 0.08 * breathe
+            pose.presence = 1
+            pose.damp = 0
+        case .burn:
+            let t = min(elapsed / HUDWaveMotion.igniteDuration, 1)
+            pose.presence = min(t / 0.6, 1)
+            pose.extent = 1 - pow(1 - t, 3)
+            pose.heat = t < 0.75
+                ? smoothstep(t / 0.75) * 1.12
+                : lerp(1.12, 1, (t - 0.75) / 0.25)
+        case .cool:
+            let t = min(elapsed / HUDWaveMotion.coolDuration, 1)
+            pose.presence = 1 - smoothstep(t)
+            pose.heat = pow(1 - t, 1.6)
+            pose.extent = pow(1 - min(t / 0.6, 1), 2)
+            pose.dotFlash = max(0, (t - 0.35) / 0.65)
+            pose.damp = exp(-elapsed / 0.12)
+        }
+        return pose
+    }
+
+    private static func lerp(_ a: Double, _ b: Double, _ t: Double) -> Double {
+        a + (b - a) * t
+    }
+
+    private static func smoothstep(_ t: Double) -> Double {
+        let clamped = min(max(t, 0), 1)
+        return clamped * clamped * (3 - 2 * clamped)
+    }
+}
+
+/// the wave as a shape, so Liquid Glass can take its outline: the stroked
+/// path of the same line the canvas draws.
+struct WaveRibbonShape: Shape {
+    let half: CGFloat
+    let amplitude: CGFloat
+    let time: TimeInterval
+    let thickness: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        GoldRippleLine.wavePath(
+            cx: rect.midX,
+            cy: rect.midY,
+            half: max(half, 0.5),
+            amplitude: amplitude,
+            time: time
+        )
+        .strokedPath(
+            StrokeStyle(
+                lineWidth: thickness,
+                lineCap: .round,
+                lineJoin: .round
+            )
+        )
     }
 }
 
@@ -415,42 +540,16 @@ struct GoldRippleLine: View {
             return
         }
 
-        var heat = 0.0
-        var presence = 0.0
-        var extent = 1.0
-        var dotFlash = 0.0
-        var damp = 1.0
-
-        switch phase {
-        case .ember:
-            let breathe = sin(
-                date.timeIntervalSinceReferenceDate
-                    * .pi * 2 / 2.8
-            )
-            heat = 0.20 + 0.08 * breathe
-            presence = 1
-            damp = 0
-        case .burn:
-            let t = min(
-                elapsed / HUDWaveMotion.igniteDuration,
-                1
-            )
-            presence = min(t / 0.6, 1)
-            extent = 1 - pow(1 - t, 3)
-            heat = t < 0.75
-                ? smoothstep(t / 0.75) * 1.12
-                : lerp(1.12, 1, (t - 0.75) / 0.25)
-        case .cool:
-            let t = min(
-                elapsed / HUDWaveMotion.coolDuration,
-                1
-            )
-            presence = 1 - smoothstep(t)
-            heat = pow(1 - t, 1.6)
-            extent = pow(1 - min(t / 0.6, 1), 2)
-            dotFlash = max(0, (t - 0.35) / 0.65)
-            damp = exp(-elapsed / 0.12)
-        }
+        let pose = LampPose.at(
+            phase: phase,
+            elapsed: elapsed,
+            date: date
+        )
+        let heat = pose.heat
+        let presence = pose.presence
+        let extent = pose.extent
+        let dotFlash = pose.dotFlash
+        let damp = pose.damp
 
         let level = Double(loudness) * damp
         let b = heat * (0.24 + 0.76 * level)
@@ -458,7 +557,7 @@ struct GoldRippleLine: View {
         let half = (HUDWaveMotion.lineWidth / 2) * extent
 
         if half > 1.2 {
-            let path = wavePath(
+            let path = Self.wavePath(
                 cx: cx,
                 cy: cy,
                 half: half,
@@ -635,7 +734,7 @@ struct GoldRippleLine: View {
         }
     }
 
-    private func wavePath(
+    static func wavePath(
         cx: CGFloat,
         cy: CGFloat,
         half: CGFloat,

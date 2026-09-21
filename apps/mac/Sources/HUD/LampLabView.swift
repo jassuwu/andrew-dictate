@@ -38,7 +38,7 @@ final class LampLabWindowController: NSWindowController {
 }
 
 struct LampLabView: View {
-    static let contentSize = NSSize(width: 920, height: 470)
+    static let contentSize = NSSize(width: 920, height: 576)
     static let cellSize = CGSize(width: 272, height: 96)
 
     enum Stage: String, CaseIterable, Identifiable {
@@ -266,7 +266,7 @@ private struct LampLabCell: View {
                         startedAt: startedAt,
                         isLocked: isLocked,
                         ground: ground,
-                        glassID: ground == .glass ? "hud" : nil,
+                        glassID: ground == .glass || ground == .ribbon ? "hud" : nil,
                         glassNamespace: glassNamespace
                     )
                     .frame(
@@ -284,7 +284,7 @@ private struct LampLabCell: View {
                             : BrandUI.gold.opacity(0.16)
                     )
                     .glassEffectID(
-                        ground == .glass ? "hud" : nil,
+                        ground == .glass || ground == .ribbon ? "hud" : nil,
                         in: glassNamespace
                     )
                     .transition(fallbackTransition)
@@ -307,7 +307,7 @@ private struct LampLabCell: View {
     }
 
     private var fallbackTransition: AnyTransition {
-        ground == .glass
+        ground == .glass || ground == .ribbon
             ? .identity
             : .opacity.combined(with: .scale(scale: 0.94))
     }
