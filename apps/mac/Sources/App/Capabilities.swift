@@ -30,18 +30,25 @@ struct Capabilities: Equatable, Sendable {
     /// released app has no reason to talk about itself.
     let announcesItself: Bool
 
+    /// Open the lamp lab and honour the `lampGround` default that picks a
+    /// lamp variant for the live HUD. **Development only** — an audition
+    /// surface, not a setting.
+    let hasLampLab: Bool
+
     static let release = Capabilities(
         canUninstall: true,
         canResetInPlace: false,
         canCopyTimings: true,
-        announcesItself: false
+        announcesItself: false,
+        hasLampLab: false
     )
 
     static let development = Capabilities(
         canUninstall: true,
         canResetInPlace: true,
         canCopyTimings: true,
-        announcesItself: true
+        announcesItself: true,
+        hasLampLab: true
     )
 
     static var current: Capabilities {

@@ -11,6 +11,46 @@ enum HUDWaveMotion {
     static let coreStrokeWidth: CGFloat = 1.1
 }
 
+/// what sits under the lamp line so it survives a light background. a bare
+/// gold line is a lamp on black and an underline on a white page.
+///
+/// dev builds pick one live with `defaults write <bundle> lampGround
+/// <bare|smoke|glass>`; the lamp lab shows all three side by side. release
+/// builds get `.bare` until the audition decides.
+enum LampGround: String, CaseIterable, Identifiable {
+    /// today: the line and its bloom on nothing
+    case bare
+    /// a blurred dark stroke under the line — invisible on black, a faint
+    /// smoke on white. the subtitle trick.
+    case smoke
+    /// a sliver of Liquid Glass behind the line: the same capsule the text
+    /// pill uses, so one can morph into the other
+    case glass
+
+    var id: String { rawValue }
+
+    static let defaultsKey = "lampGround"
+
+    static var current: LampGround {
+        guard Capabilities.current.hasLampLab,
+              let raw = UserDefaults.standard.string(
+                  forKey: defaultsKey
+              ),
+              let ground = LampGround(rawValue: raw) else {
+            return .bare
+        }
+        return ground
+    }
+
+    var label: String {
+        switch self {
+        case .bare: "bare (today)"
+        case .smoke: "smoke"
+        case .glass: "glass sliver"
+        }
+    }
+}
+
 @MainActor
 final class HUDViewModel: ObservableObject {
     @Published private(set) var state: DictationCoordinator.State
@@ -196,41 +236,110 @@ struct HUDView: View {
     }
 
     private func lampLine(phase: GoldRippleLine.Phase) -> some View {
-        GoldRippleLine(
+        LampLine(
             phase: phase,
             loudness: viewModel.loudness,
             startedAt: viewModel.waveTransitionStartedAt,
-            isLocked: viewModel.isRecordingLocked
+            isLocked: viewModel.isRecordingLocked,
+            ground: LampGround.current
         )
     }
 
     private func textPill(_ message: String) -> some View {
+        HUDTextPill(
+            message: message,
+            lineCount: viewModel.layout.lineCount,
+            size: viewModel.layout.size
+        )
+    }
+}
+
+/// the lamp's one line of text, on real Liquid Glass.
+struct HUDTextPill: View {
+    let message: String
+    let lineCount: Int
+    let size: CGSize
+    /// the pill ships gold-tinted glass, which goes light over a light page
+    /// and takes the pale gold text with it. the lab tries a dark tint.
+    var glassTint: Color = BrandUI.gold.opacity(0.16)
+
+    var body: some View {
         Text(message)
             .font(Font(HUDLayoutEngine.primaryFont))
             .foregroundStyle(BrandUI.goldPale)
-            .lineLimit(viewModel.layout.lineCount)
+            .lineLimit(lineCount)
             .lineSpacing(HUDLayoutEngine.wrappedLineSpacing)
             .truncationMode(.tail)
             .padding(
                 .horizontal,
                 HUDLayoutEngine.horizontalPadding
             )
-            .frame(
-                width: viewModel.layout.size.width,
-                height: viewModel.layout.size.height
-            )
+            .frame(width: size.width, height: size.height)
             // real Liquid Glass: it samples whatever is behind the panel
             // and draws its own edge, which retired the NSVisualEffectView
             // + maskImage workaround and the hand-drawn gold stroke. proven
             // over a borderless non-activating panel by a screenshot spike
             // before betting the HUD on it (ADR 0037).
             .glassEffect(
-                .regular.tint(BrandUI.gold.opacity(0.16)),
+                .regular.tint(glassTint),
                 in: RoundedRectangle(cornerRadius: 22, style: .continuous)
             )
     }
 }
 
+
+/// the lamp line plus whatever grounds it. the glass sliver is a background
+/// so the bloom, drawn by the canvas, spills over the capsule's edge instead
+/// of being clipped by it.
+struct LampLine: View {
+    let phase: GoldRippleLine.Phase
+    let loudness: Float
+    let startedAt: Date
+    var isLocked = false
+    var ground: LampGround = .bare
+    /// set both to let the sliver morph into another glass shape in the
+    /// same `GlassEffectContainer`
+    var glassID: String?
+    var glassNamespace: Namespace.ID?
+
+    static let glassSize = CGSize(
+        width: HUDWaveMotion.lineWidth + 36,
+        height: 26
+    )
+
+    var body: some View {
+        GoldRippleLine(
+            phase: phase,
+            loudness: loudness,
+            startedAt: startedAt,
+            isLocked: isLocked,
+            ground: ground
+        )
+        .background {
+            if ground == .glass {
+                sliver
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var sliver: some View {
+        let glass = Color.clear
+            .frame(
+                width: Self.glassSize.width,
+                height: Self.glassSize.height
+            )
+            .glassEffect(
+                .regular.tint(BrandUI.gold.opacity(0.10)),
+                in: Capsule()
+            )
+        if let glassID, let glassNamespace {
+            glass.glassEffectID(glassID, in: glassNamespace)
+        } else {
+            glass
+        }
+    }
+}
 
 /// the lamp: a bare gold line, bolted in place. flat ember when silent,
 /// waving when voice hits it, tungsten color shift riding the loudness.
@@ -251,9 +360,16 @@ struct GoldRippleLine: View {
     let startedAt: Date
     /// double-tap lock: the key is no longer held, so the ends get pinned.
     var isLocked = false
+    var ground: LampGround = .bare
 
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
+
+    /// the smoke: wide, soft, dark. black on black is nothing; on a page it
+    /// is the shadow a subtitle carries.
+    private static let smokeWidth: CGFloat = 12
+    private static let smokeBlur: CGFloat = 7
+    private static let smokeAlpha = 0.42
 
     /// derived from the line's own metrics so the pins scale with it —
     /// a hair thicker than the hot core, set just off each end.
@@ -351,6 +467,14 @@ struct GoldRippleLine: View {
                 time: date.timeIntervalSinceReferenceDate
             )
 
+            if ground == .smoke {
+                drawSmoke(
+                    in: &context,
+                    path: path,
+                    alpha: alpha * (0.6 + 0.4 * min(heat, 1))
+                )
+            }
+
             // glow pass — the bloom
             context.drawLayer { layer in
                 layer.addFilter(
@@ -403,6 +527,13 @@ struct GoldRippleLine: View {
         }
 
         if dotFlash > 0 {
+            if ground == .smoke {
+                let strength = sin(.pi * min(dotFlash, 1)) * heat
+                var dot = Path()
+                dot.move(to: CGPoint(x: cx - 1, y: cy))
+                dot.addLine(to: CGPoint(x: cx + 1, y: cy))
+                drawSmoke(in: &context, path: dot, alpha: strength)
+            }
             drawOffDot(
                 in: &context,
                 cx: cx,
@@ -430,6 +561,9 @@ struct GoldRippleLine: View {
         path.addLine(
             to: CGPoint(x: cx + HUDWaveMotion.lineWidth / 2, y: cy)
         )
+        if ground == .smoke {
+            drawSmoke(in: &context, path: path, alpha: 1)
+        }
         context.stroke(
             path,
             with: .color(color(goldMix(b), 0.6 + 0.4 * min(b, 1))),
@@ -447,6 +581,25 @@ struct GoldRippleLine: View {
                 half: HUDWaveMotion.lineWidth / 2,
                 brightness: b,
                 alpha: 1
+            )
+        }
+    }
+
+    private func drawSmoke(
+        in context: inout GraphicsContext,
+        path: Path,
+        alpha: Double
+    ) {
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: Self.smokeBlur))
+            layer.stroke(
+                path,
+                with: .color(.black.opacity(Self.smokeAlpha * alpha)),
+                style: StrokeStyle(
+                    lineWidth: Self.smokeWidth,
+                    lineCap: .round,
+                    lineJoin: .round
+                )
             )
         }
     }
