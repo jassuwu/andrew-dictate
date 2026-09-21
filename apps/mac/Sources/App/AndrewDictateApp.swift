@@ -129,6 +129,9 @@ struct AndrewDictateApp: App {
                 Button("lamp lab (dev)") {
                     coordinator.openLampLab()
                 }
+                Button("rehearse the lamp (dev)") {
+                    coordinator.rehearseHUDForDevelopment()
+                }
             }
 
             Divider()

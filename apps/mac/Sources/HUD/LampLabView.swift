@@ -83,7 +83,7 @@ struct LampLabView: View {
 
     @State private var stage: Stage = .burn
     @State private var isLocked = false
-    @State private var darkPill = false
+    @State private var goldPill = false
     @State private var startedAt = Date()
     @State private var loudness: Float = 0
     @State private var sequenceTask: Task<Void, Never>?
@@ -100,8 +100,8 @@ struct LampLabView: View {
             grid
             Text(
                 """
-                same drawing code as the live HUD. live with a pick: \
-                defaults write \(AppIdentity.bundleID) lampGround smoke
+                same drawing code as the live HUD, which ships the ribbon. \
+                rehearse it over the desktop: menu ▸ rehearse the lamp (dev)
                 """
             )
             .font(.caption)
@@ -145,7 +145,7 @@ struct LampLabView: View {
             Toggle("locked", isOn: $isLocked)
                 .toggleStyle(.checkbox)
 
-            Toggle("dark pill", isOn: $darkPill)
+            Toggle("gold pill", isOn: $goldPill)
                 .toggleStyle(.checkbox)
 
             Spacer()
@@ -185,7 +185,7 @@ struct LampLabView: View {
                             loudness: loudness,
                             startedAt: startedAt,
                             isLocked: isLocked,
-                            darkPill: darkPill
+                            goldPill: goldPill
                         )
                     }
                 }
@@ -262,7 +262,7 @@ private struct LampLabCell: View {
     let loudness: Float
     let startedAt: Date
     let isLocked: Bool
-    let darkPill: Bool
+    let goldPill: Bool
 
     @Namespace private var glassNamespace
 
@@ -312,9 +312,9 @@ private struct LampLabCell: View {
                         message: LampLabView.sampleText,
                         lineCount: textLayout.lineCount,
                         size: textLayout.size,
-                        glassTint: darkPill
-                            ? BrandUI.black.opacity(0.55)
-                            : BrandUI.gold.opacity(0.16)
+                        glassTint: goldPill
+                            ? BrandUI.gold.opacity(0.16)
+                            : HUDTextPill.darkTint
                     )
                     .glassEffectID(
                         ground == .glass || ground == .ribbon ? "hud" : nil,
