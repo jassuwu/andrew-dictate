@@ -42,7 +42,10 @@ final class FeedbackSounds {
 
             do {
                 let player = try AVAudioPlayer(contentsOf: url)
-                player.volume = 0.55
+                // 8 dB under where it shipped: the same switch, further from the ear.
+                // picked by ear against EQ'd variants (2026-09-21); the sound
+                // itself stays untouched.
+                player.volume = 0.22
                 player.prepareToPlay()
                 players[cue] = player
             } catch {
