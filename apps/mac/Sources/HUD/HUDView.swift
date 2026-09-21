@@ -52,8 +52,9 @@ enum LampGround: String, CaseIterable, Identifiable {
     /// line, smoke and sliver were the audition the ribbon won.
     static let candidates: [LampGround] = [.ribbon, .ribbonLit, .ribbonClear]
 
-    /// the one that ships: clear glass, lit from under it
-    static let shipped: LampGround = .ribbonClear
+    /// the one that ships: the tinted ribbon — regular glass, gold tint
+    /// riding the brightness, halo under it. picked live 2026-09-21.
+    static let shipped: LampGround = .ribbon
 
     var isRibbon: Bool {
         switch self {
@@ -296,6 +297,11 @@ struct HUDView: View {
             width: viewModel.stageSize.width,
             height: viewModel.stageSize.height
         )
+        // the panel never becomes key — it must not steal the keyboard
+        // from the app being dictated into — and glass in an inactive
+        // window is drawn dimmed and desaturated. this tells the glass it
+        // is active anyway, which is what a lamp is.
+        .environment(\.appearsActive, true)
     }
 
     private func lampLine(phase: GoldRippleLine.Phase) -> some View {

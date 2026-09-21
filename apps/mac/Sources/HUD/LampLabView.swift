@@ -198,6 +198,24 @@ struct LampLabView: View {
     /// `defaults write <bundle> lampLabStage text`, `lampLabLocked -bool true`
     private func followDefaults() {
         let defaults = UserDefaults.standard
+        if let mode = defaults.string(forKey: "labDumpNow"),
+           let window = NSApp.windows.first(where: { $0.title == "lamp lab" }) {
+            defaults.removeObject(forKey: "labDumpNow")
+            // the app activates or deactivates itself: another process
+            // cannot make it frontmost on modern macOS
+            if mode == "active" {
+                NSApp.activate(ignoringOtherApps: true)
+                window.makeKeyAndOrderFront(nil)
+            } else {
+                NSApp.deactivate()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                HUDHierarchyDump.write(
+                    window: window,
+                    to: "/tmp/lab-\(mode).txt"
+                )
+            }
+        }
         if let raw = defaults.string(forKey: "lampLabStage"),
            let wanted = Stage(rawValue: raw),
            wanted != stage,

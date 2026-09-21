@@ -376,6 +376,24 @@ final class DictationCoordinator: ObservableObject {
                 if let next {
                     self.hudViewModel.update(state: next)
                 }
+                if next == .recording {
+                    // experiment: what AppKit and Core Animation actually
+                    // build for the glass in this panel, and whether any
+                    // of it has an active-state knob
+                    try? await Task.sleep(for: .seconds(1))
+                    self.withHUDPanel { panel in
+                        HUDHierarchyDump.write(
+                            window: panel,
+                            to: "/tmp/hud-hierarchy.txt"
+                        )
+                    }
+                    if let lab = self.lampLabWindowController?.window {
+                        HUDHierarchyDump.write(
+                            window: lab,
+                            to: "/tmp/lab-hierarchy.txt"
+                        )
+                    }
+                }
                 if let feedback {
                     self.hudViewModel.showFeedback(feedback)
                 }
@@ -389,6 +407,7 @@ final class DictationCoordinator: ObservableObject {
                         )
                     )
                     panel.present()
+                    HUDHierarchyDump.runExperiment(on: panel)
                 }
                 try? await Task.sleep(for: .seconds(hold))
             }
@@ -1624,6 +1643,7 @@ final class DictationCoordinator: ObservableObject {
                 )
             )
             panel.present()
+            HUDHierarchyDump.runExperiment(on: panel)
         }
     }
 }
@@ -1751,5 +1771,169 @@ extension DictationCoordinator {
         }
         meetingModelDownloads[model] = nil
         return ok
+    }
+}
+
+
+/// development only: dump a window's layer tree with the properties that
+/// could carry an active/inactive look, to diff the panel against the lab.
+enum HUDHierarchyDump {
+    static let keys = [
+        "effect", "filters", "compositingFilter", "backgroundFilters",
+        "opacity", "hidden", "mode", "operation", "enabled",
+        "windowServerAware", "smoothness", "gaussianRadius", "effectOffset",
+        "mergeElements", "contentsZeroValueDistance",
+        "contentsOneValueDistance", "gradientOvalization", "backgroundColor",
+        "cornerRadius", "allowsGroupOpacity", "scale",
+        "substituteColor", "allowsSubstituteColor", "bleedAmount",
+    ]
+
+    /// experiment: make every backdrop in the window sample in-window
+    /// content (as the lab's opaque window does) instead of the screen
+    /// behind the window, so the glass sees the halo and fill under it.
+    static func patchBackdrops(window: NSWindow) {
+        func walk(_ l: CALayer) {
+            if NSStringFromClass(type(of: l)) == "CABackdropLayer" {
+                l.setValue(false, forKey: "windowServerAware")
+            }
+            for sub in l.sublayers ?? [] { walk(sub) }
+        }
+        if let layer = window.contentView?.layer { walk(layer) }
+    }
+
+    /// the glass filter's parameters in a key window of the active app
+    /// (dumped from the lab, 2026-09-21) versus what an inactive window
+    /// gets: refraction off, flat blur. this puts the active set back.
+    static let activeGlass: [String: Any] = [
+        "inputOuterRefractionAmount": 16.0,
+        "inputOuterRefractionHeight": 16.0,
+        "inputRefractionOpacity": 0.6,
+        "inputInnerRefractionAmount": -3.1675,
+        "inputInnerRefractionHeight": 1.58375,
+        "inputBlurOpacity0": 0.0,
+        "inputBlurOpacity1": 0.0,
+        "inputBlurOpacity2": 0.5,
+        "inputBlurOpacity3": 1.0,
+        "inputBlurDistance0": -3.1675,
+        "inputBlurDistance1": -1.0,
+        "inputFaceColorMatrixBlack": 0.125,
+        "inputBleedAmount": 2.21725,
+        "inputBleedHeight": 2.21725,
+        "inputShadowOpacity": 0.04,
+        "inputShadowRadius": 4.0,
+        "inputRingShadowOpacity": 0.06,
+        "inputSDRGradientDistance0": 0.0,
+        "inputSDRGradientDistance1": 0.0,
+    ]
+
+    /// dev only: `hudPanelExperiment` = inwindow | active. re-applied on
+    /// a short schedule after every present, since SwiftUI rewrites the
+    /// filter as the shape changes.
+    static func runExperiment(on panel: NSWindow) {
+        guard Capabilities.current.hasLampLab,
+              let experiment = UserDefaults.standard.string(
+                  forKey: "hudPanelExperiment"
+              ) else {
+            return
+        }
+        for step in 0..<40 {
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + 0.05 + Double(step) * 0.2
+            ) {
+                switch experiment {
+                case "inwindow": patchBackdrops(window: panel)
+                case "active": patchGlassActive(window: panel)
+                default: break
+                }
+            }
+        }
+    }
+
+    static func patchGlassActive(window: NSWindow) {
+        func walk(_ l: CALayer) {
+            if NSStringFromClass(type(of: l)) == "CABackdropLayer",
+               let filters = l.filters as? [NSObject] {
+                var changed = false
+                for f in filters where "\(f)".contains("glassBackground") {
+                    guard let keys = f.value(forKey: "inputKeys") as? [String] else {
+                        continue
+                    }
+                    for (k, v) in activeGlass where keys.contains(k) {
+                        f.setValue(v, forKey: k)
+                        changed = true
+                    }
+                }
+                if changed {
+                    l.filters = filters
+                }
+            }
+            // the key/fill highlight — the specular that makes it glass —
+            // is switched off in an inactive window: opacity 0, and its
+            // light colours at alpha 0
+            if NSStringFromClass(type(of: l)) == "CASDFLayer",
+               let effect = l.value(forKey: "effect") as? NSObject,
+               NSStringFromClass(type(of: effect)).contains("KeyFillHighlight") {
+                l.opacity = 1
+                let white = CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
+                effect.setValue(white, forKey: "keyColor")
+                effect.setValue(white, forKey: "fillColor")
+            }
+            if NSStringFromClass(type(of: l)) == "CASDFElementLayer" {
+                l.setValue(-16.0, forKey: "contentsOneValueDistance")
+            }
+            for sub in l.sublayers ?? [] { walk(sub) }
+        }
+        if let layer = window.contentView?.layer { walk(layer) }
+    }
+
+    static func write(window: NSWindow, to path: String) {
+        var out: [String] = [
+            "window \(NSStringFromClass(type(of: window))) isKey=\(window.isKeyWindow) isMain=\(window.isMainWindow) appActive=\(NSApp.isActive)"
+        ]
+        func walkLayer(_ l: CALayer, _ depth: Int) {
+            let pad = String(repeating: "  ", count: depth)
+            var props: [String] = []
+            for key in keys where l.responds(to: Selector(key)) {
+                let v = l.value(forKey: key)
+                props.append("\(key)=\(v.map { "\($0)" } ?? "nil")")
+            }
+            for f in (l.filters ?? []) as? [NSObject] ?? [] {
+                props.append("filter \(f)")
+                if let keys = f.value(forKey: "inputKeys") as? [String] {
+                    for k in keys {
+                        let v = f.value(forKey: k)
+                        if let nsdata = v as? NSData {
+                            let data = Data(referencing: nsdata)
+                            let floats = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+                            props.append("   \(k)=floats\(floats.map { String(format: "%.4f", $0) })")
+                        } else {
+                            props.append("   \(k)=\(v.map { "\($0)" } ?? "nil")")
+                        }
+                    }
+                }
+            }
+            if l.responds(to: Selector("effect")),
+               let e = l.value(forKey: "effect") as? NSObject {
+                var pc: UInt32 = 0
+                if let plist = class_copyPropertyList(type(of: e), &pc) {
+                    for i in 0..<Int(pc) {
+                        let k = String(cString: property_getName(plist[i]))
+                        props.append("effect.\(k)=\(e.value(forKey: k).map { "\($0)" } ?? "nil")")
+                    }
+                    free(plist)
+                }
+            }
+            out.append("\(pad)L \(NSStringFromClass(type(of: l))) frame=\(l.frame)")
+            for p in props { out.append("\(pad)    \(p)") }
+            for sub in l.sublayers ?? [] { walkLayer(sub, depth + 1) }
+        }
+        if let layer = window.contentView?.layer {
+            walkLayer(layer, 0)
+        }
+        try? out.joined(separator: "\n").write(
+            toFile: path,
+            atomically: true,
+            encoding: .utf8
+        )
     }
 }
