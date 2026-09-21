@@ -38,7 +38,7 @@ final class LampLabWindowController: NSWindowController {
 }
 
 struct LampLabView: View {
-    static let contentSize = NSSize(width: 920, height: 576)
+    static let contentSize = NSSize(width: 920, height: 788)
     static let cellSize = CGSize(width: 272, height: 96)
 
     enum Stage: String, CaseIterable, Identifiable {
@@ -299,7 +299,7 @@ private struct LampLabCell: View {
                         startedAt: startedAt,
                         isLocked: isLocked,
                         ground: ground,
-                        glassID: ground == .glass || ground == .ribbon ? "hud" : nil,
+                        glassID: ground.isGlass ? "hud" : nil,
                         glassNamespace: glassNamespace
                     )
                     .frame(
@@ -317,7 +317,7 @@ private struct LampLabCell: View {
                             : HUDTextPill.darkTint
                     )
                     .glassEffectID(
-                        ground == .glass || ground == .ribbon ? "hud" : nil,
+                        ground.isGlass ? "hud" : nil,
                         in: glassNamespace
                     )
                     .modifier(RowTransition(ground: ground))
@@ -390,7 +390,7 @@ private struct RowTransition: ViewModifier {
     let ground: LampGround
 
     func body(content: Content) -> some View {
-        if ground == .glass || ground == .ribbon {
+        if ground.isGlass {
             content
         } else {
             content.transition(

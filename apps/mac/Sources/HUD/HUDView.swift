@@ -14,8 +14,8 @@ enum HUDWaveMotion {
 /// what sits under the lamp line so it survives a light background. a bare
 /// gold line is a lamp on black and an underline on a white page.
 ///
-/// the HUD ships `.ribbon` (2026-09-21). the others remain for the lamp lab,
-/// where they are the comparison the ribbon was chosen against.
+/// the HUD ships `.ribbonClear` (2026-09-21). the others remain for the
+/// lamp lab, where they are the comparison it was chosen against.
 enum LampGround: String, CaseIterable, Identifiable {
     /// today: the line and its bloom on nothing
     case bare
@@ -28,6 +28,12 @@ enum LampGround: String, CaseIterable, Identifiable {
     /// the line itself is the glass: a wavy ribbon of Liquid Glass with the
     /// gold light shining up through it, smoke under both
     case ribbon
+    /// the ribbon with the light *inside* it: a bright gold fill in the
+    /// ribbon's own outline, under regular glass, which refracts it
+    case ribbonLit
+    /// the same lit ribbon under clear glass, which lets more of the light
+    /// through than regular
+    case ribbonClear
 
     var id: String { rawValue }
 
@@ -36,8 +42,27 @@ enum LampGround: String, CaseIterable, Identifiable {
         case .bare: "bare line"
         case .smoke: "smoke"
         case .glass: "glass sliver"
-        case .ribbon: "glass ribbon"
+        case .ribbon: "ribbon, tinted"
+        case .ribbonLit: "ribbon, lit inside"
+        case .ribbonClear: "clear, lit inside"
         }
+    }
+
+    var isRibbon: Bool {
+        self == .ribbon || self == .ribbonLit || self == .ribbonClear
+    }
+
+    /// carries a glass ID, so it can morph into the pill
+    var isGlass: Bool {
+        self == .glass || isRibbon
+    }
+
+    var litInside: Bool {
+        self == .ribbonLit || self == .ribbonClear
+    }
+
+    var glass: Glass {
+        self == .ribbonClear ? .clear : .regular
     }
 }
 
@@ -260,7 +285,7 @@ struct HUDView: View {
             loudness: viewModel.loudness,
             startedAt: viewModel.waveTransitionStartedAt,
             isLocked: viewModel.isRecordingLocked,
-            ground: .ribbon,
+            ground: .ribbonClear,
             glassID: Self.glassID,
             glassNamespace: glassNamespace
         )
@@ -337,9 +362,10 @@ struct LampLine: View {
             loudness: loudness,
             startedAt: startedAt,
             isLocked: isLocked,
-            ground: ground == .ribbon ? .smoke : ground,
-            filament: ground != .ribbon,
-            lineWidth: ground == .ribbon
+            ground: ground.isRibbon ? .smoke : ground,
+            filament: !ground.isRibbon,
+            innerLight: ground.litInside,
+            lineWidth: ground.isRibbon
                 ? Self.ribbonLength
                 : HUDWaveMotion.lineWidth
         )
@@ -349,7 +375,7 @@ struct LampLine: View {
             }
         }
         .overlay {
-            if ground == .ribbon {
+            if ground.isRibbon {
                 ribbon
             }
         }
@@ -376,20 +402,28 @@ struct LampLine: View {
             let alpha = max(pose.presence, pose.heat)
             // the same brightness curve the filament had: ember dim, burn
             // lit, loud hot — now it is the glass that carries it
-            let brightness = pose.heat * (0.24 + 0.76 * level)
+            let brightness = ground.litInside
+                ? pose.heat * (0.45 + 0.55 * level)
+                : pose.heat * (0.24 + 0.76 * level)
             let shape = WaveRibbonShape(
                 half: (Self.ribbonLength / 2) * pose.extent,
                 amplitude: HUDWaveMotion.amplitude * level * pose.heat,
                 time: timeline.date.timeIntervalSinceReferenceDate,
                 thickness: Self.ribbonThickness
             )
+            // lit inside: the fill under the glass is the light, so the
+            // tint only warms the glass instead of painting it
             let tint = GoldRippleLine.tint(brightness: brightness)
-                .opacity(0.12 + 0.70 * min(brightness, 1))
+                .opacity(
+                    ground.litInside
+                        ? 0.06 + 0.30 * min(brightness, 1)
+                        : 0.12 + 0.70 * min(brightness, 1)
+                )
             let half = (Self.ribbonLength / 2) * pose.extent
             ZStack {
                 glassed(
                     Color.clear.glassEffect(
-                        .regular.tint(tint),
+                        ground.glass.tint(tint),
                         in: shape
                     ),
                     id: glassID
@@ -404,7 +438,10 @@ struct LampLine: View {
                                 width: Self.ribbonThickness,
                                 height: Self.ribbonThickness
                             )
-                            .glassEffect(.regular.tint(tint), in: Circle())
+                            .glassEffect(
+                                ground.glass.tint(tint),
+                                in: Circle()
+                            )
                             .offset(
                                 x: side * (half + Self.lockBeadGap)
                             )
@@ -547,6 +584,9 @@ struct GoldRippleLine: View {
     /// the smoke, a halo that spills light by loudness, the lock dots and
     /// the off-dot. the glass over it carries the colour.
     var filament = true
+    /// with `filament` off: a bright fill in the ribbon's own width under
+    /// the glass, plus a hotter core — the tube lit from inside
+    var innerLight = false
     var lineWidth: CGFloat = HUDWaveMotion.lineWidth
 
     @Environment(\.accessibilityReduceMotion)
@@ -676,17 +716,52 @@ struct GoldRippleLine: View {
                     )
                 )
             } else {
-                // halo pass — the light the glass spills, no line under it
+                let lit = innerLight
+                    ? b * (0.45 + 0.55 * level) / max(b, 0.001)
+                    : 1
+                // halo pass — the light the glass spills
                 context.drawLayer { layer in
                     layer.addFilter(.blur(radius: 6 + 6 * min(b, 1)))
                     layer.stroke(
                         path,
                         with: .color(color(
                             goldMix(b),
-                            0.55 * min(b, 1) * alpha
+                            (innerLight ? 0.40 : 0.55) * min(b, 1) * alpha
                         )),
                         style: StrokeStyle(
                             lineWidth: LampLine.ribbonThickness + 8,
+                            lineCap: .round,
+                            lineJoin: .round
+                        )
+                    )
+                }
+
+                if innerLight {
+                    // the light itself: full ribbon width, gold going pale
+                    // with brightness, and a white-hot core when loud. the
+                    // glass over it blurs the two into one lit tube.
+                    let glow = min(b * lit, 1)
+                    context.stroke(
+                        path,
+                        with: .color(color(
+                            goldMix(0.35 + 0.65 * glow),
+                            (0.45 + 0.55 * glow) * alpha
+                        )),
+                        style: StrokeStyle(
+                            lineWidth: LampLine.ribbonThickness,
+                            lineCap: .round,
+                            lineJoin: .round
+                        )
+                    )
+                    context.stroke(
+                        path,
+                        with: .color(color(
+                            [255, 250, 225],
+                            (0.35 + 0.65 * glow) * min(level + 0.35, 1)
+                                * alpha
+                        )),
+                        style: StrokeStyle(
+                            lineWidth: LampLine.ribbonThickness * 0.45,
                             lineCap: .round,
                             lineJoin: .round
                         )
