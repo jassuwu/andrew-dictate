@@ -424,8 +424,13 @@ struct LampLine: View {
                 )
             let half = (Self.ribbonLength / 2) * pose.extent
             ZStack {
+                // the light is the glass view's *content*, the way the text
+                // is the pill's: content draws above the glass. anything
+                // else — a fill under it, an overlay over the container —
+                // ends up beneath the glass layer and comes out olive,
+                // in a transparent panel even under clear glass.
                 glassed(
-                    Color.clear.glassEffect(
+                    lightContent.glassEffect(
                         ground.glass.tint(tint),
                         in: shape
                     ),
@@ -456,6 +461,21 @@ struct LampLine: View {
     }
 
     static let lockBeadGap: CGFloat = 9
+
+    @ViewBuilder
+    private var lightContent: some View {
+        if ground.litInside {
+            RibbonLight(
+                phase: phase,
+                loudness: loudness,
+                startedAt: startedAt,
+                lineWidth: Self.ribbonLength,
+                thickness: Self.ribbonThickness
+            )
+        } else {
+            Color.clear
+        }
+    }
 
     @ViewBuilder
     private func glassed(_ view: some View, id: String?) -> some View {
@@ -560,6 +580,85 @@ struct WaveRibbonShape: Shape {
                 lineJoin: .round
             )
         )
+    }
+}
+
+/// the lit tube's light: a gold fill in the ribbon's outline going pale with
+/// brightness, and a white-hot core by loudness. drawn over the glass,
+/// narrower than it, so the rim stays visible around the light.
+struct RibbonLight: View {
+    let phase: GoldRippleLine.Phase
+    let loudness: Float
+    let startedAt: Date
+    let lineWidth: CGFloat
+    let thickness: CGFloat
+
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
+
+    var body: some View {
+        TimelineView(
+            .animation(minimumInterval: 1.0 / 60.0, paused: reduceMotion)
+        ) { timeline in
+            Canvas { context, size in
+                let elapsed = max(
+                    0,
+                    timeline.date.timeIntervalSince(startedAt)
+                )
+                let pose = LampPose.at(
+                    phase: phase,
+                    elapsed: elapsed,
+                    date: timeline.date
+                )
+                let level = Double(loudness) * pose.damp
+                let alpha = max(pose.presence, pose.heat)
+                let glow = min(pose.heat * (0.45 + 0.55 * level), 1)
+                let half = (lineWidth / 2) * pose.extent
+                guard half > 1.2 else {
+                    return
+                }
+                let path = GoldRippleLine.wavePath(
+                    cx: size.width / 2,
+                    cy: size.height / 2,
+                    half: half,
+                    amplitude: reduceMotion
+                        ? 0
+                        : HUDWaveMotion.amplitude * level * pose.heat,
+                    time: timeline.date.timeIntervalSinceReferenceDate
+                )
+                context.drawLayer { layer in
+                    layer.addFilter(.blur(radius: 0.6))
+                    layer.stroke(
+                        path,
+                        with: .color(
+                            GoldRippleLine.tint(brightness: 0.35 + 0.65 * glow)
+                                .opacity((0.55 + 0.45 * glow) * alpha)
+                        ),
+                        style: StrokeStyle(
+                            lineWidth: thickness * 0.72,
+                            lineCap: .round,
+                            lineJoin: .round
+                        )
+                    )
+                }
+                context.stroke(
+                    path,
+                    with: .color(
+                        Color(red: 1, green: 250 / 255, blue: 225 / 255)
+                            .opacity(
+                                (0.30 + 0.70 * glow)
+                                    * min(level + 0.30, 1) * alpha
+                            )
+                    ),
+                    style: StrokeStyle(
+                        lineWidth: thickness * 0.30,
+                        lineCap: .round,
+                        lineJoin: .round
+                    )
+                )
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -719,9 +818,6 @@ struct GoldRippleLine: View {
                     )
                 )
             } else {
-                let lit = innerLight
-                    ? b * (0.45 + 0.55 * level) / max(b, 0.001)
-                    : 1
                 // halo pass — the light the glass spills
                 context.drawLayer { layer in
                     layer.addFilter(.blur(radius: 6 + 6 * min(b, 1)))
@@ -739,37 +835,6 @@ struct GoldRippleLine: View {
                     )
                 }
 
-                if innerLight {
-                    // the light itself: full ribbon width, gold going pale
-                    // with brightness, and a white-hot core when loud. the
-                    // glass over it blurs the two into one lit tube.
-                    let glow = min(b * lit, 1)
-                    context.stroke(
-                        path,
-                        with: .color(color(
-                            goldMix(0.35 + 0.65 * glow),
-                            (0.45 + 0.55 * glow) * alpha
-                        )),
-                        style: StrokeStyle(
-                            lineWidth: LampLine.ribbonThickness,
-                            lineCap: .round,
-                            lineJoin: .round
-                        )
-                    )
-                    context.stroke(
-                        path,
-                        with: .color(color(
-                            [255, 250, 225],
-                            (0.35 + 0.65 * glow) * min(level + 0.35, 1)
-                                * alpha
-                        )),
-                        style: StrokeStyle(
-                            lineWidth: LampLine.ribbonThickness * 0.45,
-                            lineCap: .round,
-                            lineJoin: .round
-                        )
-                    )
-                }
             }
 
             if isLocked, phase == .burn, filament {
