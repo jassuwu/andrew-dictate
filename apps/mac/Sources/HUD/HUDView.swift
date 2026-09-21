@@ -311,7 +311,10 @@ struct LampLine: View {
         height: 26
     )
 
-    static let ribbonThickness: CGFloat = 9
+    /// thinner than the glass wants, longer to make up for it: the ribbon
+    /// has to stay a line, not a worm
+    static let ribbonThickness: CGFloat = 6
+    static let ribbonLength: CGFloat = 112
 
     var body: some View {
         GoldRippleLine(
@@ -319,7 +322,11 @@ struct LampLine: View {
             loudness: loudness,
             startedAt: startedAt,
             isLocked: isLocked,
-            ground: ground == .ribbon ? .smoke : ground
+            ground: ground == .ribbon ? .smoke : ground,
+            filament: ground != .ribbon,
+            lineWidth: ground == .ribbon
+                ? Self.ribbonLength
+                : HUDWaveMotion.lineWidth
         )
         .background {
             if ground == .glass {
@@ -347,8 +354,11 @@ struct LampLine: View {
             )
             let level = Double(loudness) * pose.damp
             let alpha = max(pose.presence, pose.heat)
+            // the same brightness curve the filament had: ember dim, burn
+            // lit, loud hot — now it is the glass that carries it
+            let brightness = pose.heat * (0.24 + 0.76 * level)
             let shape = WaveRibbonShape(
-                half: (HUDWaveMotion.lineWidth / 2) * pose.extent,
+                half: (Self.ribbonLength / 2) * pose.extent,
                 amplitude: HUDWaveMotion.amplitude * level * pose.heat,
                 time: timeline.date.timeIntervalSinceReferenceDate,
                 thickness: Self.ribbonThickness
@@ -356,7 +366,8 @@ struct LampLine: View {
             let glass = Color.clear
                 .glassEffect(
                     .regular.tint(
-                        BrandUI.gold.opacity(0.18 + 0.30 * min(level, 1))
+                        GoldRippleLine.tint(brightness: brightness)
+                            .opacity(0.12 + 0.70 * min(brightness, 1))
                     ),
                     in: shape
                 )
@@ -486,6 +497,11 @@ struct GoldRippleLine: View {
     /// double-tap lock: the key is no longer held, so the ends get pinned.
     var isLocked = false
     var ground: LampGround = .bare
+    /// false when a glass ribbon is the lamp: no line and no hot core, only
+    /// the smoke, a halo that spills light by loudness, the lock dots and
+    /// the off-dot. the glass over it carries the colour.
+    var filament = true
+    var lineWidth: CGFloat = HUDWaveMotion.lineWidth
 
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
@@ -554,7 +570,7 @@ struct GoldRippleLine: View {
         let level = Double(loudness) * damp
         let b = heat * (0.24 + 0.76 * level)
         let alpha = max(presence, heat)
-        let half = (HUDWaveMotion.lineWidth / 2) * extent
+        let half = (lineWidth / 2) * extent
 
         if half > 1.2 {
             let path = Self.wavePath(
@@ -574,44 +590,63 @@ struct GoldRippleLine: View {
                 )
             }
 
-            // glow pass — the bloom
-            context.drawLayer { layer in
-                layer.addFilter(
-                    .shadow(
-                        color: color(
-                            Self.midRGB,
-                            0.65 * max(b, 0.35 * heat) * alpha
-                        ),
-                        radius: (8 + 22 * b) * 0.5
+            if filament {
+                // glow pass — the bloom
+                context.drawLayer { layer in
+                    layer.addFilter(
+                        .shadow(
+                            color: color(
+                                Self.midRGB,
+                                0.65 * max(b, 0.35 * heat) * alpha
+                            ),
+                            radius: (8 + 22 * b) * 0.5
+                        )
                     )
-                )
-                layer.stroke(
+                    layer.stroke(
+                        path,
+                        with: .color(color(
+                            goldMix(b),
+                            (0.5 + 0.5 * min(b, 1)) * alpha
+                        )),
+                        style: StrokeStyle(
+                            lineWidth: HUDWaveMotion.strokeWidth,
+                            lineCap: .round,
+                            lineJoin: .round
+                        )
+                    )
+                }
+
+                // hot core pass
+                context.stroke(
                     path,
                     with: .color(color(
-                        goldMix(b),
-                        (0.5 + 0.5 * min(b, 1)) * alpha
+                        Self.paleRGB,
+                        min(b, 1) * 0.85 * alpha
                     )),
                     style: StrokeStyle(
-                        lineWidth: HUDWaveMotion.strokeWidth,
+                        lineWidth: HUDWaveMotion.coreStrokeWidth,
                         lineCap: .round,
                         lineJoin: .round
                     )
                 )
+            } else {
+                // halo pass — the light the glass spills, no line under it
+                context.drawLayer { layer in
+                    layer.addFilter(.blur(radius: 6 + 6 * min(b, 1)))
+                    layer.stroke(
+                        path,
+                        with: .color(color(
+                            goldMix(b),
+                            0.55 * min(b, 1) * alpha
+                        )),
+                        style: StrokeStyle(
+                            lineWidth: LampLine.ribbonThickness + 8,
+                            lineCap: .round,
+                            lineJoin: .round
+                        )
+                    )
+                }
             }
-
-            // hot core pass
-            context.stroke(
-                path,
-                with: .color(color(
-                    Self.paleRGB,
-                    min(b, 1) * 0.85 * alpha
-                )),
-                style: StrokeStyle(
-                    lineWidth: HUDWaveMotion.coreStrokeWidth,
-                    lineCap: .round,
-                    lineJoin: .round
-                )
-            )
 
             if isLocked, phase == .burn {
                 drawLockDots(
@@ -654,12 +689,8 @@ struct GoldRippleLine: View {
         let b = (phase == .ember ? 0.24 : 1.0)
             * (0.24 + 0.76 * level)
         var path = Path()
-        path.move(
-            to: CGPoint(x: cx - HUDWaveMotion.lineWidth / 2, y: cy)
-        )
-        path.addLine(
-            to: CGPoint(x: cx + HUDWaveMotion.lineWidth / 2, y: cy)
-        )
+        path.move(to: CGPoint(x: cx - lineWidth / 2, y: cy))
+        path.addLine(to: CGPoint(x: cx + lineWidth / 2, y: cy))
         if ground == .smoke {
             drawSmoke(in: &context, path: path, alpha: 1)
         }
@@ -677,7 +708,7 @@ struct GoldRippleLine: View {
                 in: &context,
                 cx: cx,
                 cy: cy,
-                half: HUDWaveMotion.lineWidth / 2,
+                half: lineWidth / 2,
                 brightness: b,
                 alpha: 1
             )
@@ -808,6 +839,25 @@ struct GoldRippleLine: View {
                 with: .color(color(Self.paleRGB, 0.95 * strength))
             )
         }
+    }
+
+    /// the lamp's colour at a brightness, for anything outside the canvas
+    /// that wants to glow the same gold — the glass ribbon's tint.
+    static func tint(brightness b: Double) -> Color {
+        let t = min(max(b, 0), 1)
+        return Color(
+            red: lerpValue(deepRGB[0], paleRGB[0], t) / 255,
+            green: lerpValue(deepRGB[1], paleRGB[1], t) / 255,
+            blue: lerpValue(deepRGB[2], paleRGB[2], t) / 255
+        )
+    }
+
+    private static func lerpValue(
+        _ a: Double,
+        _ b: Double,
+        _ t: Double
+    ) -> Double {
+        a + (b - a) * t
     }
 
     private func goldMix(_ b: Double) -> [Double] {
