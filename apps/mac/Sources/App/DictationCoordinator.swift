@@ -148,6 +148,7 @@ final class DictationCoordinator: ObservableObject {
     private var timelineSequence: UInt64 = 0
     private var activeTimeline: UtteranceTimelineBuilder?
     private var aboutWindowController: AboutWindowController?
+    private var lampLabWindowController: LampLabWindowController?
     /// Rebuilt per transcript rather than reused: the window is *about* one
     /// dictation, so keeping a stale one around would show the wrong words.
     private let dictationArchive = DictationArchive()
@@ -304,6 +305,15 @@ final class DictationCoordinator: ObservableObject {
                 self?.presentOnboardingIfNeeded()
             }
         }
+
+        if Capabilities.current.hasLampLab,
+           UserDefaults.standard.bool(
+               forKey: LampLabWindowController.atLaunchKey
+           ) {
+            Task { @MainActor [weak self] in
+                self?.openLampLab()
+            }
+        }
     }
 
     @discardableResult
@@ -319,6 +329,21 @@ final class DictationCoordinator: ObservableObject {
         } else {
             controller = AboutWindowController(settings: settings)
             aboutWindowController = controller
+        }
+        controller.present()
+    }
+
+    /// Development only (`Capabilities.hasLampLab`): the lamp audition.
+    func openLampLab() {
+        guard Capabilities.current.hasLampLab else {
+            return
+        }
+        let controller: LampLabWindowController
+        if let lampLabWindowController {
+            controller = lampLabWindowController
+        } else {
+            controller = LampLabWindowController()
+            lampLabWindowController = controller
         }
         controller.present()
     }

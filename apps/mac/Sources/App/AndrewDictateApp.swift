@@ -125,6 +125,12 @@ struct AndrewDictateApp: App {
                 }
             }
 
+            if Capabilities.current.hasLampLab {
+                Button("lamp lab (dev)") {
+                    coordinator.openLampLab()
+                }
+            }
+
             Divider()
 
             // back from settings (reversing part of ADR 0030, recorded in
