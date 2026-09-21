@@ -38,7 +38,7 @@ final class LampLabWindowController: NSWindowController {
 }
 
 struct LampLabView: View {
-    static let contentSize = NSSize(width: 920, height: 788)
+    static let contentSize = NSSize(width: 920, height: 682)
     static let cellSize = CGSize(width: 272, height: 96)
 
     enum Stage: String, CaseIterable, Identifiable {
@@ -100,8 +100,9 @@ struct LampLabView: View {
             grid
             Text(
                 """
-                same drawing code as the live HUD, which ships the ribbon. \
-                rehearse it over the desktop: menu ▸ rehearse the lamp (dev)
+                the panel renders glass darker than this window does — pick \
+                live: defaults write \(AppIdentity.bundleID) lampGround \
+                ribbonClear · then dictate, or menu ▸ rehearse the lamp (dev)
                 """
             )
             .font(.caption)
@@ -171,7 +172,7 @@ struct LampLabView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            ForEach(LampGround.allCases) { ground in
+            ForEach(LampGround.candidates) { ground in
                 GridRow {
                     Text(ground.label)
                         .font(.caption)
