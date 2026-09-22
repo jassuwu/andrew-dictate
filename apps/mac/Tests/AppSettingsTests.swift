@@ -107,22 +107,84 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(dictatedWordCount(in: "...?!"), 1)
     }
 
-    func testMeetingsDefaultToWhisperLargeInDocumentsWithNoHook() {
+    func testMeetingsDefaultToWhisperLargeOutsideDocumentsWithNoHook() {
         let (userDefaults, suiteName) = makeUserDefaults()
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
 
-        let settings = AppSettings(userDefaults: userDefaults)
+        let settings = AppSettings(
+            userDefaults: userDefaults,
+            unpickedMeetingsFolder: AppSettings.defaultMeetingsFolder
+        )
 
         XCTAssertEqual(settings.meetingModel, .whisperLargeV3)
         XCTAssertEqual(
             settings.meetingsFolder,
             FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Documents", isDirectory: true)
                 .appendingPathComponent("andrew-dictate", isDirectory: true)
         )
+        XCTAssertFalse(settings.meetingsFolder.pathComponents.contains("Documents"))
         XCTAssertNil(settings.meetingHook)
         XCTAssertNil(settings.meetingHookLastRunAt)
         XCTAssertNil(settings.meetingHookLastRunLabel)
+    }
+
+    func testAnInstallThatAlreadyWroteUnderDocumentsKeepsItsFolder() throws {
+        let home = URL(
+            fileURLWithPath: NSTemporaryDirectory(),
+            isDirectory: true
+        ).appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let legacy = home
+            .appendingPathComponent("Documents", isDirectory: true)
+            .appendingPathComponent("andrew-dictate", isDirectory: true)
+        let fallback = home
+            .appendingPathComponent("andrew-dictate", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        XCTAssertEqual(
+            AppSettings.unpickedMeetingsFolder(legacy: legacy, fallback: fallback),
+            fallback
+        )
+
+        try FileManager.default.createDirectory(
+            at: legacy.appendingPathComponent("meetings", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        XCTAssertEqual(
+            AppSettings.unpickedMeetingsFolder(legacy: legacy, fallback: fallback),
+            legacy
+        )
+    }
+
+    /// the old folder is written down the first time it is resolved, so a
+    /// later change of default cannot move anyone's transcripts again.
+    func testTheOldFolderIsPinnedIntoDefaults() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let legacy = URL(fileURLWithPath: "/tmp/andrew-legacy", isDirectory: true)
+
+        let settings = AppSettings(
+            userDefaults: userDefaults,
+            unpickedMeetingsFolder: legacy
+        )
+
+        XCTAssertEqual(settings.meetingsFolder, legacy)
+        XCTAssertEqual(
+            userDefaults.string(forKey: "AndrewDictate.meetingsFolder"),
+            legacy.path(percentEncoded: false)
+        )
+    }
+
+    func testAFolderInsideMobileDocumentsIsKnownToSync() {
+        let synced = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Mobile Documents", isDirectory: true)
+            .appendingPathComponent("com~apple~CloudDocs", isDirectory: true)
+            .appendingPathComponent("Documents", isDirectory: true)
+            .appendingPathComponent("andrew-dictate", isDirectory: true)
+
+        XCTAssertTrue(AppSettings.syncsToICloud(synced))
+        XCTAssertFalse(AppSettings.syncsToICloud(AppSettings.defaultMeetingsFolder))
     }
 
     func testMeetingChoicesSurviveARelaunch() {
@@ -193,6 +255,19 @@ extension AppSettingsTests {
             suiteName: "keep-\(UUID().uuidString)"
         )!
         XCTAssertTrue(AppSettings(userDefaults: defaults).keepDictations)
+    }
+
+    /// the other half of that ruling: pre-roll stays off, and the one row
+    /// that offers it has to say when it is worth turning on and what it
+    /// costs while it is. the cost is the half that gets edited out.
+    func testPreRollNamesTheClippedWordAndTheOpenMic() {
+        let explanation = DictationOption.preRoll.explanation
+
+        XCTAssertTrue(explanation.contains("clipped"), explanation)
+        XCTAssertTrue(
+            explanation.contains("the whole time the app runs"),
+            explanation
+        )
     }
 
     func testTurningKeepingOffSurvivesARelaunch() {

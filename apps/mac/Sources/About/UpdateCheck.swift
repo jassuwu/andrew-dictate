@@ -14,6 +14,39 @@ enum UpdateCheck {
             + "andrew-dictate/releases/latest"
     )!
 
+    /// The one line that updates it. Every copy was installed with a brew
+    /// command, so the update is a brew command — and `brew upgrade` carries
+    /// the gatekeeper approval and the microphone / accessibility grants to
+    /// the new version, so there is no `xattr` line to run afterwards.
+    static let upgradeCommand = "brew upgrade --cask jassuwu/tap/andrew-dictate"
+
+    /// What is in /Applications *now*, which is not what this process
+    /// launched with: brew replaces the bundle under a running app, and
+    /// `Bundle.main`'s Info.plist was cached at launch. Read fresh off disk,
+    /// so the old process can stop offering an update it is standing on.
+    ///
+    /// Any failure is `nil`. A dev build, a bundle run from a build folder or
+    /// one the user moved must never produce a phantom "already installed".
+    static func installedVersion(atBundle url: URL) -> String? {
+        let plist = url
+            .appendingPathComponent("Contents", isDirectory: true)
+            .appendingPathComponent("Info.plist", isDirectory: false)
+        guard let data = try? Data(contentsOf: plist) else {
+            return nil
+        }
+        let parsed = try? PropertyListSerialization.propertyList(
+            from: data,
+            options: [],
+            format: nil
+        )
+        guard let root = parsed as? [String: Any],
+              let version = root["CFBundleShortVersionString"] as? String
+        else {
+            return nil
+        }
+        return version
+    }
+
     /// `v0.8.0`-style tags against `CFBundleShortVersionString`. A tag that
     /// doesn't parse is never "newer" — a garbage response must not produce
     /// an upgrade prompt.

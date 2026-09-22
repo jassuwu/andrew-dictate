@@ -151,6 +151,19 @@ final class MeetingSessionTests: XCTestCase {
         XCTAssertTrue(session.shouldNudge(at: .seconds(6_700)))
     }
 
+    /// A rebuild is the app proving the tap to itself with its own start
+    /// sound. It is not the room speaking, so it must not buy the meeting
+    /// another hour of silence.
+    func testARecoveredTapIsNotSomebodySpeaking() {
+        var session = session()
+        session.start()
+        session.heardTheProbe()
+        session.tapWentSilent(at: .seconds(600))
+        session.tapRecovered(at: .seconds(700))
+
+        XCTAssertTrue(session.shouldNudge(at: .seconds(3_601)))
+    }
+
     func testAnAnsweredNudgeStopsAskingUntilItGoesQuietAgain() {
         var session = session()
         session.start()

@@ -11,6 +11,11 @@ struct MeetingSpool: Sendable {
         let started: Date
         let engine: String
         let model: MeetingModel
+        /// How many launches have tried to write this one out and failed.
+        /// Optional, not defaulted: a synthesized decoder does not fall back
+        /// to a property's default, and a manifest written before the ledger
+        /// existed must still read — sweeping it would be losing a meeting.
+        var attempts: Int?
     }
 
     struct Handle: Equatable, Sendable {
@@ -58,9 +63,66 @@ struct MeetingSpool: Sendable {
         try? FileManager.default.removeItem(at: handle.folder)
     }
 
+    /// Where a spool goes when the app has tried twice and cannot read it. A
+    /// meeting recording is never deleted, only set aside (ADR 0022).
+    static let unreadableFolderName = "unreadable"
+
+    /// Two failed launches is enough: the third would be another quarter of
+    /// an hour of the neural engine for the same nothing. The audio stays on
+    /// disk, out of the retry loop, and settings says it is there.
+    static let attemptsBeforeSettingAside = 2
+
+    /// One more launch has tried and failed. Returns the manifest as it now
+    /// stands, so the caller can decide whether that was the last try.
+    @discardableResult
+    func noteAttempt(_ handle: Handle, manifest: Manifest) -> Manifest {
+        var updated = manifest
+        updated.attempts = (manifest.attempts ?? 0) + 1
+        guard let data = try? Self.encoder.encode(updated) else {
+            return updated
+        }
+        do {
+            try data.write(to: handle.manifestURL, options: .atomic)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600], ofItemAtPath: handle.manifestURL.path)
+        } catch {
+            // A ledger that could not be written means one more try than
+            // intended, which is better than losing the spool over it.
+        }
+        return updated
+    }
+
+    /// Out of the way, not away: `orphans()` stops offering it and nothing
+    /// deletes it.
+    func setAside(_ handle: Handle) {
+        let fm = FileManager.default
+        let folder = root.appendingPathComponent(
+            Self.unreadableFolderName, isDirectory: true)
+        try? fm.createDirectory(
+            at: folder, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        let destination = folder.appendingPathComponent(
+            handle.folder.lastPathComponent, isDirectory: true)
+        try? fm.removeItem(at: destination)
+        try? fm.moveItem(at: handle.folder, to: destination)
+    }
+
+    /// The folder those go to, whether or not anything is in it — the
+    /// settings row needs somewhere to send you.
+    var unreadableFolder: URL {
+        root.appendingPathComponent(Self.unreadableFolderName, isDirectory: true)
+    }
+
+    func unreadableCount() -> Int {
+        let names = (try? FileManager.default.contentsOfDirectory(
+            atPath: unreadableFolder.path)) ?? []
+        return names.filter { !$0.hasPrefix(".") }.count
+    }
+
     /// Spools with a manifest and audio, oldest first. A folder whose manifest
     /// cannot be read is junk and is swept; a manifest without audio is a
-    /// meeting that has just begun and is left alone.
+    /// meeting that has just begun and is left alone; one set aside as
+    /// unreadable is never offered again.
     func orphans() -> [(handle: Handle, manifest: Manifest)] {
         let fm = FileManager.default
         // Names, not URLs: `contentsOfDirectory(at:)` hands back resolved
@@ -71,7 +133,8 @@ struct MeetingSpool: Sendable {
         }
 
         var found: [(handle: Handle, manifest: Manifest)] = []
-        for name in names where !name.hasPrefix(".") {
+        for name in names
+        where !name.hasPrefix(".") && name != Self.unreadableFolderName {
             let folder = root.appendingPathComponent(name, isDirectory: true)
             let handle = Handle(folder: folder)
             guard let data = try? Data(contentsOf: handle.manifestURL),

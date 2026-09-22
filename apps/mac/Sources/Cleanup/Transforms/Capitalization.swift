@@ -1,15 +1,27 @@
 import Foundation
 
 struct Capitalization: TranscriptTransform {
+    /// what the caret was sitting after. dictating into "the build failed
+    /// because " continues a sentence rather than starting one, and a
+    /// capital there is a shout in the middle of your own line.
+    private let continuingASentence: Bool
+
+    init(continuingASentence: Bool = false) {
+        self.continuingASentence = continuingASentence
+    }
+
     func apply(_ transcript: String) -> String {
         let characters = Array(transcript)
         var output = ""
-        var shouldCapitalize = true
+        var shouldCapitalize = !continuingASentence
 
         for (index, character) in characters.enumerated() {
-            // an address is not a sentence. capitalising the start of one
-            // gives you Jass@jass.gg, which is nobody's email.
-            if shouldCapitalize, isInsideAddress(at: index, in: characters) {
+            // an address is not a sentence, and a word that carries its own
+            // capital already has a spelling — Jass@jass.gg and IPhone are
+            // both nobody's (ADR 0038: a word you taught it is yours).
+            if shouldCapitalize,
+               isInsideAddress(at: index, in: characters)
+                   || hasIntentionalCasing(at: index, in: characters) {
                 output.append(character)
                 shouldCapitalize = false
                 continue
@@ -37,8 +49,9 @@ struct Capitalization: TranscriptTransform {
         return output
     }
 
-    /// looks ahead over the token about to be capitalised: if it carries an
-    /// @ or a scheme, it is an address and its own spelling is the correct one.
+    /// looks ahead over the token about to be capitalised: if it is an
+    /// address, its own spelling is the correct one — and cypher.io/docs is
+    /// as much an address as john@cypher.io is.
     private func isInsideAddress(
         at index: Int,
         in characters: [Character]
@@ -50,15 +63,40 @@ struct Capitalization: TranscriptTransform {
             token.append(characters[cursor])
             cursor += 1
         }
-        return token.contains("@")
-            || token.contains("://")
-            || token.lowercased().hasPrefix("www.")
+        return AddressToken.isAddress(token)
+    }
+
+    /// a capital anywhere past the first character means the spelling was
+    /// chosen, not guessed: iPhone, macOS, gRPC. it only sees spellings that
+    /// carry one, so npm and ffmpeg still get capitalised at a sentence
+    /// start — that half stays open.
+    private func hasIntentionalCasing(
+        at index: Int,
+        in characters: [Character]
+    ) -> Bool {
+        var cursor = index + 1
+        while cursor < characters.count,
+              !characters[cursor].isWhitespace {
+            if characters[cursor].isUppercase {
+                return true
+            }
+            cursor += 1
+        }
+        return false
     }
 
     private func isTerminalPeriod(
         at index: Int,
         in characters: [Character]
     ) -> Bool {
+        // "7 p.m. that means" — a dot after a single letter that already
+        // follows a dot closes an abbreviation, not a sentence. ADR 0018
+        // would rather miss a capital than shout one mid-line.
+        if index >= 2,
+           characters[index - 1].isLetter,
+           characters[index - 2] == "." {
+            return false
+        }
         guard index + 1 < characters.count else {
             return true
         }

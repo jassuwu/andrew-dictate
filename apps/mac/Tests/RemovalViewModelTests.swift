@@ -39,6 +39,20 @@ final class RemovalViewModelTests: XCTestCase {
         )
     }
 
+    /// a remover macOS refuses: the one failure the sheet has to survive.
+    private func modelThatCannotForgetPermissions() -> RemovalViewModel {
+        struct Nope: Error {}
+        return RemovalViewModel(
+            remover: Remover(
+                supportDirectory: support,
+                modelDirectory: models,
+                preferencesDomain: domain,
+                userDefaults: defaults,
+                resetPermissions: { _ in throw Nope() }
+            )
+        )
+    }
+
     private func write(_ name: String) throws {
         try Data(repeating: 0x41, count: 2_048).write(
             to: support.appendingPathComponent(name)
@@ -106,5 +120,29 @@ final class RemovalViewModelTests: XCTestCase {
         let entry = model().entries.first { $0.item == .dictations }!
 
         XCTAssertEqual(model().sizeText(for: entry), "nothing kept")
+    }
+
+    /// ADR 0035: a removal that did not happen says so, and says why. the
+    /// sheet has to draw both sentences and its own buttons, so both
+    /// sentences have to be there to draw.
+    func testAFailedRemovalKeepsBothTheReasonAndTheItems() {
+        defaults.setPersistentDomain(
+            ["AndrewDictate.onboardingCompleted": true], forName: domain
+        )
+        let model = modelThatCannotForgetPermissions()
+        XCTAssertTrue(model.selection.contains(.permissions))
+
+        let failed = model.removeSelected()
+
+        XCTAssertEqual(failed, [.permissions])
+        XCTAssertEqual(
+            model.outcome?.hasPrefix("couldn\u{2019}t remove:"), true,
+            model.outcome ?? "no outcome at all"
+        )
+        XCTAssertEqual(
+            model.failureDetail?.contains(RemovalPlan.Item.permissions.title),
+            true,
+            model.failureDetail ?? "no reason at all"
+        )
     }
 }

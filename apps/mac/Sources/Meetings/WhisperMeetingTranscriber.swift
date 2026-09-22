@@ -201,7 +201,8 @@ actor WhisperMeetingTranscriber: MeetingTranscriber {
     }
 
     /// Whoever was louder while it was said. Overlap goes to the far side —
-    /// it is the one being translated, and the one you cannot hear yourself.
+    /// it is the one you cannot hear yourself, so losing a word of theirs
+    /// costs more.
     private static func speaker(
         from start: Double, to end: Double,
         energies: [(you: Float, them: Float)]

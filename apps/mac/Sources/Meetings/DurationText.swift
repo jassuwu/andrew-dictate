@@ -23,12 +23,14 @@ extension Duration {
             : String(format: "%02d:%02d", m, s)
     }
 
-    /// `1h 42m`, `12m`, `<1m` — how long, said the way a person would.
+    /// `1h 42m`, `1h`, `12m`, `<1m` — how long, said the way a person would.
+    /// Nobody says "one hour zero minutes".
     var spoken: String {
         let minutes = max(0, Int(components.seconds / 60))
         guard minutes > 0 else { return "<1m" }
         let hours = minutes / 60
-        return hours > 0 ? "\(hours)h \(minutes % 60)m" : "\(minutes)m"
+        guard hours > 0 else { return "\(minutes)m" }
+        return minutes % 60 == 0 ? "\(hours)h" : "\(hours)h \(minutes % 60)m"
     }
 
     private var clockParts: (Int, Int, Int) {

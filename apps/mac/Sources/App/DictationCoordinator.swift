@@ -4,18 +4,6 @@ import Foundation
 import AppKit
 import AVFoundation
 
-enum EnginePreparationState: Equatable, Sendable {
-    case notStarted
-    case downloading(progress: Double)
-    case warmingUp
-    case ready
-    case failed
-
-    var isReady: Bool {
-        self == .ready
-    }
-}
-
 struct HotkeyDetection: Equatable, Sendable {
     let sequence: Int
 }
@@ -67,26 +55,92 @@ final class DictationCoordinator: ObservableObject {
             }
         }
 
+        /// the panel's view of it: to the layout engine idle and recording
+        /// are both a wave, and the panel has to tell them apart.
+        var lamp: HUDLampState {
+            switch self {
+            case .idle:
+                .idle
+            case .prewarming:
+                .prewarming
+            case .recording:
+                .recording
+            case .transcribing:
+                .transcribing
+            }
+        }
     }
 
     @Published private(set) var state: State = .prewarming
     @Published private(set) var enginePreparationState:
         EnginePreparationState = .notStarted
+    /// sampled once, before the download starts: `.ready` is reached the same
+    /// way whether 460 mb came down or the folder was already full, and setup
+    /// has to say which of the two the user just lived through.
+    @Published private(set) var engineModelWasOnDisk = false
     @Published private(set) var activeEngineVersion: EngineVersion
     @Published private(set) var engineSwitchMessage: String?
     @Published private(set) var hotkeyDetection: HotkeyDetection?
+    /// what actually reached the page, cleaned.
     @Published private(set) var lastTranscript: String?
+    /// drives the menu's one time-sensitive row after a failed transcription
+    @Published private(set) var canRetryLastFailure = false
+    /// the engine's own words, before any transform ran. this is what "fix a
+    /// word" opens on: an entry's `wrong` side has to be what parakeet
+    /// produced, or it never fires.
+    @Published private(set) var lastHeard: String?
     /// re-read at launch, reopen, wake, unlock, and whenever the system says
     /// the trust table moved. a grant is a fact about now, not a fact we own.
+    /// the hotkey monitors hang off this one funnel too — a path that wins
+    /// accessibility without coming through here leaves fn dead.
     @Published private(set) var permissions = PermissionSnapshot(
         microphoneGranted: false,
         accessibilityGranted: false
     )
 
+    /// a missing grant and a download that never finished leave the app
+    /// equally unable to transcribe a word, so they wear the same dot.
+    var needsAttention: Bool {
+        SetupGate.needsAttention(
+            onboardingDismissed: settings.onboardingDismissed,
+            dictationWanted: settings.dictationWanted,
+            permissions: permissions,
+            speechModelFailed: enginePreparationState == .failed
+        )
+    }
+
+    /// the narrower question the re-entry scope asks: set up, wants dictation,
+    /// and a grant is what is missing. a failed download wears the same dot
+    /// but goes back through the whole checklist, model row included.
     var needsPermissionAttention: Bool {
         settings.onboardingDismissed
             && settings.dictationWanted
             && !permissions.isDictationReady
+    }
+
+    /// system audio is not part of `needsPermissionAttention` — that badge is
+    /// dictation's. this is meetings' own, set when a tap would not open and
+    /// cleared by the next meeting that starts.
+    @Published private(set) var meetingsNeedAttention = false
+
+    /// the meeting that just ended, for as long as it is the thing you came
+    /// back to the menu for.
+    @Published private(set) var lastMeeting: MeetingSummary?
+    @Published private(set) var lastMeetingSavedAt: Date?
+
+    private static let lastMeetingRowLasts: TimeInterval = 600
+
+    /// ten minutes, then the menu is the hand it was. not gated on the
+    /// notification permission: a denied prompt is exactly when this row is
+    /// the only route to the file.
+    var showsLastMeetingRow: Bool {
+        guard lastMeeting != nil, let lastMeetingSavedAt else { return false }
+        return Date().timeIntervalSince(lastMeetingSavedAt) < Self.lastMeetingRowLasts
+    }
+
+    func revealLastMeeting() {
+        guard let lastMeeting else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([lastMeeting.fileURL])
     }
 
     let dictionaryStore: DictionaryStore
@@ -121,19 +175,33 @@ final class DictationCoordinator: ObservableObject {
         }
     }
     private var isPrewarmed = false
+    /// whether the ember is an answer to something the user did. a
+    /// launch-time warm-up is not, and shows nothing (HUDPresentation).
+    private var prewarmPresentsHUD = true
     /// a double-tapped key leaves nothing to hold, so nothing to feel. the
     /// HUD has to carry the difference for as long as the capture runs.
     private var isRecordingLocked = false
     private var activeFocusAnchor: FocusAnchor?
     private var pipelineTask: Task<Void, Never>?
+    /// the start chime, held back 120 ms so a discarded capture can cancel it
+    private var startCueTask: Task<Void, Never>?
+    private var retryBuffer = RetryBuffer()
+    private var retryExpiryTask: Task<Void, Never>?
     private var pipelineGeneration = 0
     private var enginePrewarmTask: Task<Void, Never>?
     private var engineSwapTask: Task<Void, Never>?
     private var engineHealthTask: Task<Void, Never>?
     private var engineGeneration = 0
+    /// set only by `retryEnginePrewarm`, read once by the prewarm's catch
+    private var retryWasUserInitiated = false
     private var engineSwitchState: EngineSwitchState
     private var enginePreparationRequested: Bool
     private var settingsCancellables: Set<AnyCancellable> = []
+    /// One cleaner, kept. Its nineteen regexes — plus one per taught word —
+    /// compile on construction, and that used to happen on the main actor
+    /// between transcript and paste, growing with the dictionary. Rebuilt
+    /// only when the dictionary or the cleanup toggle changes.
+    private var cleaner = DeterministicCleaner(entries: [], fullCleanup: true)
     private var isApplyingPreRollSetting = false
     private var isApplyingEngineVersionSetting = false
     private var onboardingWindowController: OnboardingWindowController?
@@ -143,6 +211,16 @@ final class DictationCoordinator: ObservableObject {
     private var transcribingBeganAt: Date?
     private var feedbackGeneration: UInt64 = 0
     private var activeFeedbackGeneration: UInt64?
+    /// the cap ended this take, not the user's finger. the pill that says
+    /// so has to ride the paste, so the fact outlives the stop.
+    private var capForcedEnd = false
+    /// an exceptional message the setup window took the screen from. it is
+    /// owed, not spent: held until that window closes (HUDFeedbackGate).
+    private var heldFeedback: (
+        message: String,
+        duration: TimeInterval,
+        at: Date
+    )?
     private let timelineClock = ContinuousClock()
     private let timelineStore = UtteranceTimelineStore()
     private var timelineSequence: UInt64 = 0
@@ -163,8 +241,13 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var meetingModelDownloads: [MeetingModel: Double] = [:]
     @Published private(set) var isLiveTranscriptShown = false
     private let meetingNotifier = MeetingNudgeNotifier()
+    /// the app `record a meeting ▸ zoom` named, held while setup runs. the
+    /// click already happened; setup is the detour, not a new question.
+    private var pendingMeetingApp: RunningApp?
     private var liveTranscriptPanel: LiveTranscriptPanel?
     private var meetingCancellables: Set<AnyCancellable> = []
+    /// A quit is waiting on a meeting's transcript to be written.
+    private var quitWaitingOnMeeting = false
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
     private var distributedNotificationObservers: [NSObjectProtocol] = []
 
@@ -175,7 +258,10 @@ final class DictationCoordinator: ObservableObject {
             activeVersion: settings.engineVersion
         )
         isOnboardingPresented = !settings.onboardingDismissed
-        enginePreparationRequested = settings.onboardingDismissed
+        enginePreparationRequested = EnginePrewarmGate.shouldPrewarmAtLaunch(
+            onboardingDismissed: settings.onboardingDismissed,
+            dictationWanted: settings.dictationWanted
+        )
         dictionaryStore = DictionaryStore()
         transcriptionEngine = ParakeetEngine(
             version: settings.engineVersion
@@ -251,11 +337,14 @@ final class DictationCoordinator: ObservableObject {
         monitor.onEscape = { [weak self] in
             self?.handleEscape() ?? false
         }
-        recorder?.onInterruption = { [weak self] in
-            self?.handleCaptureInterruption()
+        recorder?.onInterruption = { [weak self] reason in
+            self?.handleCaptureInterruption(reason: reason)
         }
         recorder?.onCapReached = { [weak self] in
             self?.handleCaptureCapReached()
+        }
+        recorder?.onCapApproaching = { [weak self] in
+            self?.handleCaptureCapApproaching()
         }
 
         settings.$preRollEnabled
@@ -263,6 +352,19 @@ final class DictationCoordinator: ObservableObject {
             .removeDuplicates()
             .sink { [weak self] enabled in
                 self?.applyPreRoll(enabled)
+            }
+            .store(in: &settingsCancellables)
+
+        // saying yes to dictation later should not cost a relaunch: the
+        // model arrives when the tick does.
+        settings.$dictationWanted
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] wanted in
+                guard wanted else {
+                    return
+                }
+                self?.requestEnginePreparation(asking: true)
             }
             .store(in: &settingsCancellables)
 
@@ -277,6 +379,22 @@ final class DictationCoordinator: ObservableObject {
                 self.replaceEngine(with: version)
             }
             .store(in: &settingsCancellables)
+
+        // one cleaner per dictionary-and-toggle, not one per dictation.
+        // CombineLatest seeds itself from both current values here, and the
+        // closure must use what it is handed: a @Published sink fires on
+        // willSet, so reading the store would hand back the old array.
+        Publishers.CombineLatest(
+            dictionaryStore.$entries,
+            settings.$cleanupEnabled
+        )
+        .sink { [weak self] entries, fullCleanup in
+            self?.cleaner = DeterministicCleaner(
+                entries: entries,
+                fullCleanup: fullCleanup
+            )
+        }
+        .store(in: &settingsCancellables)
 
         installSystemLifecycleObservers()
         wireMeetings()
@@ -293,7 +411,23 @@ final class DictationCoordinator: ObservableObject {
         }
 
         if enginePreparationRequested {
-            startPrewarming()
+            // at launch the model loads because the app is running, not
+            // because anybody reached for the key. the menu says so; the
+            // screen stays empty.
+            startPrewarming(presentsHUD: false)
+        } else {
+            // `state` is born .prewarming and only a prewarm ever settles it,
+            // so a launch that loads nothing has to settle it here: a lamp
+            // breathing with no download behind it is the same lie as the
+            // download nobody asked for, wearing the opposite face.
+            state = .idle
+            hudViewModel.update(state: .idle)
+        }
+
+        // meetings need the microphone too, so this is not dictation's to
+        // gate — and after setup it is a status check, not an ask. before
+        // setup, onboarding is still the only surface that asks macOS.
+        if settings.onboardingDismissed {
             Task { @MainActor [weak self] in
                 _ = await self?.requestMicrophoneAccess()
             }
@@ -316,39 +450,34 @@ final class DictationCoordinator: ObservableObject {
         }
         if Capabilities.current.hasLampLab {
             // `defaults write <bundle> hudRehearseNow -bool true` fires the
-            // rehearsal on demand; the state is logged so a no-show can be
-            // read instead of guessed at.
+            // rehearsal on demand, so a screenshot run needs no clicking
             Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    let defaults = UserDefaults.standard
-                    let line = "\(Date()) state=\(self.state) onboarding=\(self.isOnboardingPresented)\n"
-                    if let h = FileHandle(forWritingAtPath: "/tmp/hud-state.txt") {
-                        h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); h.closeFile()
-                    } else {
-                        try? line.write(toFile: "/tmp/hud-state.txt", atomically: true, encoding: .utf8)
+                    guard let self,
+                          UserDefaults.standard.bool(forKey: "hudRehearseNow") else {
+                        return
                     }
-                    if defaults.bool(forKey: "hudRehearseNow") {
-                        defaults.removeObject(forKey: "hudRehearseNow")
-                        self.rehearseHUDForDevelopment()
-                    }
+                    UserDefaults.standard.removeObject(forKey: "hudRehearseNow")
+                    self.rehearseHUDForDevelopment()
                 }
             }
         }
-        if Capabilities.current.hasLampLab,
-           UserDefaults.standard.bool(forKey: "hudRehearsalAtLaunch") {
-            Task { @MainActor [weak self] in
-                // wait for the engine to be idle: prewarming can outlast
-                // any fixed delay on a cold launch
-                for _ in 0..<60 {
-                    try? await Task.sleep(for: .milliseconds(500))
-                    guard let self else { return }
-                    if self.state == .idle, !self.isOnboardingPresented {
-                        try? await Task.sleep(for: .seconds(1))
-                        self.rehearseHUDForDevelopment()
-                        return
-                    }
+        // "fix a word…" is the menu's only time-sensitive action, and it used
+        // to be grey until this session's first dictation — while the words
+        // it wants sat in the archive the whole time. detached, because the
+        // read is disk and launch is not. the file on disk is the source of
+        // truth, so `keepDictations` does not gate the read: an empty or
+        // missing archive is the only case that stays disabled.
+        let archive = dictationArchive
+        Task.detached { [weak self] in
+            let newest = try? archive.latest()
+            await MainActor.run {
+                // a dictation that landed during the read wins: pointing the
+                // fixer back at yesterday's words would be silent and wrong.
+                guard let self, self.lastHeard == nil, let newest else {
+                    return
                 }
+                self.lastHeard = newest.heard
             }
         }
     }
@@ -374,8 +503,7 @@ final class DictationCoordinator: ObservableObject {
     /// through a dictation without a mic or a key — warm, record, cool,
     /// one line of feedback — so the lamp can be seen over a real desktop.
     /// the state machine is not touched; only the view model and the panel.
-    /// `defaults write <bundle> hudRehearsalAtLaunch -bool true` runs it
-    /// a few seconds after launch.
+    /// `defaults write <bundle> hudRehearseNow -bool true` fires it.
     func rehearseHUDForDevelopment() {
         guard Capabilities.current.hasLampLab,
               state == .idle,
@@ -406,24 +534,6 @@ final class DictationCoordinator: ObservableObject {
                 if let next {
                     self.hudViewModel.update(state: next)
                 }
-                if next == .recording {
-                    // experiment: what AppKit and Core Animation actually
-                    // build for the glass in this panel, and whether any
-                    // of it has an active-state knob
-                    try? await Task.sleep(for: .seconds(1))
-                    self.withHUDPanel { panel in
-                        HUDHierarchyDump.write(
-                            window: panel,
-                            to: "/tmp/hud-hierarchy.txt"
-                        )
-                    }
-                    if let lab = self.lampLabWindowController?.window {
-                        HUDHierarchyDump.write(
-                            window: lab,
-                            to: "/tmp/lab-hierarchy.txt"
-                        )
-                    }
-                }
                 if let feedback {
                     self.hudViewModel.showFeedback(feedback)
                 }
@@ -437,7 +547,6 @@ final class DictationCoordinator: ObservableObject {
                         )
                     )
                     panel.present()
-                    HUDHierarchyDump.runExperiment(on: panel)
                 }
                 try? await Task.sleep(for: .seconds(hold))
             }
@@ -462,20 +571,27 @@ final class DictationCoordinator: ObservableObject {
         controller.present()
     }
 
-    /// The door ticket 011 chose. It hands over the *raw* transcript on
-    /// purpose: a dictionary entry's `wrong` side has to be what the engine
-    /// produced, and `lastTranscript` is already exactly that.
+    /// The door ticket 011 chose. It opens on `lastHeard` — the engine's
+    /// untouched words — because a dictionary entry's `wrong` side has to be
+    /// what the engine produced.
     func openWordFixer() {
-        guard let lastTranscript else {
+        guard let lastHeard else {
             return
         }
-        openWordFixer(for: lastTranscript)
+        openWordFixer(for: lastHeard)
     }
 
-    func openWordFixer(for transcript: String) {
+    /// `heard` from either door, run forward to the point the dictionary
+    /// reads it. Both doors then show the same words, and the word you point
+    /// at is the word an entry will match.
+    func openWordFixer(for heard: String) {
         let controller = WordFixerWindowController(
-            transcript: transcript,
-            store: dictionaryStore
+            transcript: DeterministicCleaner(
+                entries: dictionaryStore.entries,
+                fullCleanup: settings.cleanupEnabled
+            ).asHeard(heard),
+            store: dictionaryStore,
+            fullCleanup: settings.cleanupEnabled
         )
         wordFixerWindowController = controller
         controller.present()
@@ -501,13 +617,7 @@ final class DictationCoordinator: ObservableObject {
             $0 != .speechModels
         }))
 
-        let app = Bundle.main.bundleURL
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        task.arguments = ["-n", app.path]
-        // A relaunch has to outlive us, so it is handed to `open` and we go.
-        try? task.run()
-        NSApp.terminate(nil)
+        AppRelaunch.now()
     }
 
     /// Ships in release (ADR 0025). A latency claim measured on a debug build
@@ -531,21 +641,58 @@ final class DictationCoordinator: ObservableObject {
             isOnboardingPresented = false
             return
         }
-        presentOnboarding()
+        presentOnboarding(scope: reentryScope)
     }
 
-    func runOnboardingAgain(scope: OnboardingScope = .everything) {
-        presentOnboarding(scope: scope)
+    /// Someone who has been through setup and lost a grant is not a new user.
+    /// `needsPermissionAttention` is already exactly "set up, wants
+    /// dictation, cannot dictate", so all three doors back in — launch,
+    /// the menu's "finish setup", settings' — get the one-screen version.
+    private var reentryScope: OnboardingScope {
+        needsPermissionAttention ? .permissionsOnly : .everything
+    }
+
+    func runOnboardingAgain(
+        scope: OnboardingScope? = nil,
+        openAt: OnboardingStep = .hello
+    ) {
+        presentOnboarding(scope: scope ?? reentryScope, openAt: openAt)
     }
 
     /// `dictationWanted` is nil when this run of setup had no say in it —
     /// the meetings-only window must not un-set a dictation setup that was
     /// made on an earlier day.
+    ///
+    /// Last press of a meetings-only run: finish the errand that opened this
+    /// window. ADR 0023 says nothing starts a recording but the user naming
+    /// an app — they did that before the download, and honouring it is not
+    /// the app deciding on its own.
     func finishOnboarding(dictationWanted: Bool? = nil) {
         if let dictationWanted {
             settings.dictationWanted = dictationWanted
         }
+        // captured and cleared before the close, because closing the window
+        // is also how the errand is cancelled.
+        let errand = pendingMeetingApp
+        pendingMeetingApp = nil
         dismissOnboarding()
+
+        guard let errand else {
+            return
+        }
+        guard installedMeetingModels.contains(settings.meetingModel) else {
+            flashNotice("still downloading the meeting model", duration: 2)
+            return
+        }
+        guard MeetingApps.running().contains(where: { $0.pid == errand.pid })
+        else {
+            flashNotice(
+                "\(MeetingApps.displayName(errand)) isn't running any more",
+                duration: 2
+            )
+            return
+        }
+        startMeeting(errand)
     }
 
     /// "skip for now" and "we're done" both close the window. what neither
@@ -573,7 +720,10 @@ final class DictationCoordinator: ObservableObject {
             return
         }
         prepareProductiveWaitWork()
-        requestEnginePreparation()
+        // the view only calls this with dictation ticked, so the click is the
+        // ask — even for someone whose last setup was meetings only and whose
+        // stored flag still says no.
+        requestEnginePreparation(asking: true)
     }
 
     func onboardingWindowDidClose(
@@ -585,7 +735,40 @@ final class DictationCoordinator: ObservableObject {
         onboardingWindowController = nil
         isOnboardingPresented = false
         hotkeyMonitor.setDetectionOnly(false)
-        synchronizeHUD()
+        // anything granted in there was granted to onboarding's own
+        // checklist, not to us, so this is the moment to ask the system
+        // again — and it is what rebuilds the key monitors under a grant
+        // that arrived after launch. midSession, never launchOrReopen: a
+        // window must not reopen itself from inside its own close.
+        refreshPermissions(moment: .midSession)
+
+        // walking away cancels the errand: nothing starts later out of
+        // nowhere.
+        pendingMeetingApp = nil
+        flushHeldFeedback()
+    }
+
+    /// the pill the setup window swallowed, flashed at last — unless it has
+    /// aged out, in which case saying it now would be a non-sequitur.
+    private func flushHeldFeedback() {
+        guard let held = heldFeedback else {
+            synchronizeHUD()
+            return
+        }
+
+        switch HUDFeedbackGate.decide(
+            isOnboardingPresented: isOnboardingPresented,
+            heldFor: Date().timeIntervalSince(held.at)
+        ) {
+        case .flashNow:
+            heldFeedback = nil
+            flashNotice(held.message, duration: held.duration)
+        case .hold:
+            synchronizeHUD()
+        case .drop:
+            heldFeedback = nil
+            synchronizeHUD()
+        }
     }
 
     func requestMicrophoneAccess() async -> Bool {
@@ -600,6 +783,9 @@ final class DictationCoordinator: ObservableObject {
         guard enginePreparationState == .failed else {
             return
         }
+        // somebody asked for this one, so its outcome is owed an answer —
+        // an offline mac prewarming at launch is not.
+        retryWasUserInitiated = true
         requestEnginePreparation()
     }
 
@@ -635,15 +821,32 @@ final class DictationCoordinator: ObservableObject {
         await transcriptionEngine.unloadModels()
     }
 
-    private func presentOnboarding(scope: OnboardingScope = .everything) {
+    private func presentOnboarding(
+        scope: OnboardingScope = .everything,
+        openAt: OnboardingStep = .hello
+    ) {
+        // whatever the pill is saying right now is about to be taken off
+        // the screen mid-sentence. keep it rather than truncate it — it
+        // gets a whole default reading when it comes back, since how much
+        // of the first one had run is not worth tracking.
+        if activeFeedbackGeneration != nil,
+           let message = hudViewModel.feedbackMessage {
+            heldFeedback = (
+                message: message,
+                duration: 1.2,
+                at: Date()
+            )
+        }
         isOnboardingPresented = true
         hotkeyMonitor.setDetectionOnly(true)
         withHUDPanel { $0.dismiss() }
 
-        // a cached window keeps the scope it was built with; a different
-        // scope means a different window.
+        // a cached window keeps the scope it was built with, and the screen
+        // it was left on — the flow is state inside the view. a different
+        // errand means a different window.
         if let onboardingWindowController {
-            if onboardingWindowController.scope == scope {
+            if onboardingWindowController.scope == scope,
+               onboardingWindowController.openAt == openAt {
                 onboardingWindowController.present()
                 return
             }
@@ -654,6 +857,7 @@ final class DictationCoordinator: ObservableObject {
         let controller = OnboardingWindowController(
             coordinator: self,
             scope: scope,
+            openAt: openAt,
             proveSystemAudio: { await CoreAudioMeetingSource.proveSystemAudio() },
             prepareMeetingModel: { [weak self] progress in
                 await self?.prepareMeetingModel(progress: progress) ?? false
@@ -731,7 +935,15 @@ final class DictationCoordinator: ObservableObject {
         startEngineSwap(to: version)
     }
 
-    private func requestEnginePreparation() {
+    /// `asking` is the caller saying the user just asked for dictation: a
+    /// keypress, a consent click, a tick. The stored flag lags those by a
+    /// beat (`@Published` publishes in willSet), and consent is consent
+    /// whether or not the write has landed yet.
+    private func requestEnginePreparation(asking: Bool = false) {
+        // a job nobody ticked has no download, at launch or anywhere else.
+        guard asking || settings.dictationWanted else {
+            return
+        }
         enginePreparationRequested = true
         guard !isPrewarmed,
               enginePrewarmTask == nil,
@@ -742,7 +954,8 @@ final class DictationCoordinator: ObservableObject {
         startPrewarming()
     }
 
-    private func startPrewarming() {
+    private func startPrewarming(presentsHUD: Bool = true) {
+        prewarmPresentsHUD = presentsHUD
         engineSwapTask?.cancel()
         engineSwapTask = nil
         enginePrewarmTask?.cancel()
@@ -751,6 +964,9 @@ final class DictationCoordinator: ObservableObject {
         let version = activeEngineVersion
         isPrewarmed = false
         engineSwitchMessage = nil
+        // asked before a byte moves, so the answer cannot be fooled by how
+        // the progress callbacks happen to land.
+        engineModelWasOnDisk = ModelStore.isOnDisk(version)
         enginePreparationState = .downloading(progress: 0)
         setState(.prewarming)
 
@@ -783,6 +999,7 @@ final class DictationCoordinator: ObservableObject {
                 self.isPrewarmed = true
                 self.enginePreparationState = .ready
                 self.enginePrewarmTask = nil
+                self.retryWasUserInitiated = false
                 self.setState(.idle)
             } catch is CancellationError {
                 return
@@ -790,6 +1007,8 @@ final class DictationCoordinator: ObservableObject {
                 guard generation == self.engineGeneration else {
                     return
                 }
+                let wasAsked = self.retryWasUserInitiated
+                self.retryWasUserInitiated = false
                 self.enginePrewarmTask = nil
                 self.enginePreparationState = .failed
                 self.engineLogger.error(
@@ -799,6 +1018,15 @@ final class DictationCoordinator: ObservableObject {
                     """
                 )
                 self.setState(.idle)
+                // the retry announced itself ("speech model failed —
+                // retrying"); its failure must not be quieter than its
+                // beginning, or the key just stops answering.
+                if wasAsked {
+                    self.flashNotice(
+                        "speech model didn't download — finish setup",
+                        duration: 4
+                    )
+                }
             }
         }
     }
@@ -827,6 +1055,7 @@ final class DictationCoordinator: ObservableObject {
         }
 
         let currentVersion = engineSwitchState.activeVersion
+        engineModelWasOnDisk = ModelStore.isOnDisk(version)
         enginePreparationState = .downloading(progress: 0)
         engineSwitchMessage = nil
         engineLogger.notice(
@@ -959,7 +1188,9 @@ final class DictationCoordinator: ObservableObject {
                     notification.name == NSWorkspace.willSleepNotification
                 Task { @MainActor [weak self] in
                     if isSleep {
-                        self?.handleCaptureInterruption()
+                        self?.handleCaptureInterruption(
+                            reason: .systemPaused
+                        )
                     } else {
                         self?.handleSystemResume()
                     }
@@ -980,7 +1211,9 @@ final class DictationCoordinator: ObservableObject {
                 let isLock = notification.name == lockedName
                 Task { @MainActor [weak self] in
                     if isLock {
-                        self?.handleCaptureInterruption()
+                        self?.handleCaptureInterruption(
+                            reason: .systemPaused
+                        )
                     } else {
                         self?.handleSystemResume()
                     }
@@ -988,6 +1221,24 @@ final class DictationCoordinator: ObservableObject {
             }
             distributedNotificationObservers.append(observer)
         }
+
+        // a second copy just refused to run and quit (AndrewDictateApp): it
+        // cannot draw anything itself, so the copy that is running says where
+        // it is. 2 s, like the other pill that points somewhere — the 1.2 s
+        // default is not long enough to read a sentence.
+        let alreadyRunningObserver = distributedCenter.addObserver(
+            forName: .andrewDictateAlreadyRunning,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.flashNotice(
+                    "already running — it's in the menu bar",
+                    duration: 2
+                )
+            }
+        }
+        distributedNotificationObservers.append(alreadyRunningObserver)
 
         let trustObserver = distributedCenter.addObserver(
             forName: SystemPermissions.accessibilityChanged,
@@ -1007,6 +1258,7 @@ final class DictationCoordinator: ObservableObject {
     func refreshPermissions(
         moment: SetupCheckMoment
     ) -> SetupPresentation {
+        let hadAccessibility = permissions.accessibilityGranted
         let snapshot = SystemPermissions.snapshot()
         if snapshot != permissions {
             permissions = snapshot
@@ -1022,11 +1274,37 @@ final class DictationCoordinator: ObservableObject {
             }
         }
 
-        return SetupGate.presentation(
+        if SetupGate.shouldReinstallHotkey(
+            was: hadAccessibility,
+            now: snapshot.accessibilityGranted
+        ) {
+            hotkeyMonitor.reinstall()
+            permissionLogger.notice(
+                "hotkey monitors reinstalled after trust change"
+            )
+        }
+
+        let presentation = SetupGate.presentation(
             onboardingDismissed: settings.onboardingDismissed,
             permissions: snapshot,
-            moment: moment
+            moment: moment,
+            dictationWanted: settings.dictationWanted
         )
+
+        // losing accessibility kills the global event monitor itself, so no
+        // key press is left to answer for it — unlike the mic, which gets
+        // caught at the point of use. the transition guard makes this fire
+        // once: the next notification already sees it gone.
+        if hadAccessibility,
+           !snapshot.accessibilityGranted,
+           presentation == .badgeOnly {
+            announcePermissionGap(
+                "accessibility is off — the dictation key is dead",
+                duration: 2.6
+            )
+        }
+
+        return presentation
     }
 
     /// the user double-clicked the app while it was already living in the
@@ -1039,12 +1317,15 @@ final class DictationCoordinator: ObservableObject {
     }
 
     /// says it where the user is already looking, without taking the screen.
-    private func announcePermissionGap(_ message: String) {
+    private func announcePermissionGap(
+        _ message: String,
+        duration: TimeInterval = 1.8
+    ) {
         guard state == .idle else {
             return
         }
 
-        flashNotice(message, duration: 1.8)
+        flashNotice(message, duration: duration)
     }
 
     private func flashNotice(
@@ -1068,11 +1349,14 @@ final class DictationCoordinator: ObservableObject {
             let recorder = try AudioRecorder(
                 preRollEnabled: settings.preRollEnabled
             )
-            recorder.onInterruption = { [weak self] in
-                self?.handleCaptureInterruption()
+            recorder.onInterruption = { [weak self] reason in
+                self?.handleCaptureInterruption(reason: reason)
             }
             recorder.onCapReached = { [weak self] in
                 self?.handleCaptureCapReached()
+            }
+            recorder.onCapApproaching = { [weak self] in
+                self?.handleCaptureCapApproaching()
             }
             audioRecorder = recorder
             hudViewModel.useRecorder(recorder)
@@ -1089,24 +1373,48 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
-    /// the recorder stops itself at the ceiling and keeps what it heard.
-    /// the only thing missing is the user knowing why the wave went quiet.
+    /// thirty seconds of runway. the wave comes back on its own when the
+    /// pill clears, so the lamp needs nothing here.
+    private func handleCaptureCapApproaching() {
+        guard state == .recording else {
+            return
+        }
+
+        flashNotice("thirty seconds left", duration: 2)
+    }
+
+    /// the recorder sealed the mic at the ceiling, so the take is over
+    /// whether the finger knows it or not — end it and deliver the five
+    /// minutes. a lamp still saying "listening" over a sealed mic is
+    /// spec §4's forbidden shape: a failure wearing the success signal.
     private func handleCaptureCapReached() {
         guard state == .recording else {
             return
         }
 
-        flashNotice("five minutes — that's the cap")
+        capForcedEnd = true
+        endRecording()
+        // the key was never released. without this a hands-free lock reads
+        // the next press as the end of a take that is already finished.
+        hotkeyMonitor.reset()
     }
 
-    private func handleCaptureInterruption() {
+    private func handleCaptureInterruption(
+        reason: CaptureInterruption
+    ) {
         switch state {
         case .recording:
             audioRecorder?.cancel()
             setRecordingLocked(false)
             activeFocusAnchor = nil
             activeTimeline = nil
-            setState(.idle)
+            setState(.idle, fastHUDDismiss: true)
+            // they are still holding the key and still talking, and the
+            // whole sentence is gone. the one loss path that used to say
+            // nothing at all.
+            if let notice = CaptureInterruptionNotice.message(for: reason) {
+                flashNotice(notice, duration: 2)
+            }
         case .idle, .prewarming, .transcribing:
             break
         }
@@ -1117,6 +1425,12 @@ final class DictationCoordinator: ObservableObject {
     private func handleSystemResume() {
         hotkeyMonitor.reset()
         verifyEngineHealth()
+        // a meeting is meant to survive the sleep, not be cancelled by it —
+        // but the tap rarely does, and a frozen clock reads as a meeting
+        // that was heard all the way through (SPEC §11).
+        if meetings.isRecording {
+            meetings.probeTapIsAlive()
+        }
         // waking or unlocking is not the user coming to *us* — check, but
         // never take the screen back from whatever they returned to.
         refreshPermissions(moment: .midSession)
@@ -1163,6 +1477,7 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func beginRecording() {
+        capForcedEnd = false
         // ADR 0023: refused during a meeting, and it says why. you started
         // the recording, so a dead hotkey is not a mystery — but a silent
         // one would still be spec §4's forbidden shape.
@@ -1170,15 +1485,59 @@ final class DictationCoordinator: ObservableObject {
             flashNotice("recording a meeting — stop it to dictate", duration: 2)
             return
         }
+        // the pill still says the last one failed and the samples are still
+        // here: this press means "that one", not "a new one". endRecording's
+        // state guard makes the eventual key release a no-op.
+        if activeFeedbackGeneration != nil, canRetryLastFailure {
+            retryLastFailure()
+            return
+        }
         if state == .transcribing {
-            invalidatePipeline()
-            setState(.idle)
+            let elapsed = Date().timeIntervalSince(
+                transcribingBeganAt ?? .distantPast
+            )
+            switch TranscribingRepress.response(transcribingFor: elapsed) {
+            case .refuseAndSayWhy:
+                // the sentence is still on its way to the page. discarding
+                // it silently left no text, no pill and no history row —
+                // spec §4's forbidden shape, wearing nothing at all.
+                flashNotice("still finishing the last one", duration: 1.4)
+                return
+            case .dropAndRestart:
+                invalidatePipeline()
+                setState(.idle)
+            }
         }
 
         guard isPrewarmed else {
+            // the key is a statement of intent: from here the ember is an
+            // answer, so it may show even if the warm-up began at login.
+            prewarmPresentsHUD = true
+            // read before the switch: `.notStarted` starts the download,
+            // which sets `.downloading(progress: 0)` synchronously and would
+            // turn the press that priced it into "0%".
+            let size = activeEngineVersion.approximateSize.dropFirst()
+            let notice = enginePreparationState.pressedEarlyNotice(
+                downloadSize: "about \(size)"
+            )
             switch enginePreparationState {
             case .notStarted:
-                requestEnginePreparation()
+                // a mac set up for meetings only has no model and no menu
+                // row offering one, so this keypress is both the consent the
+                // launch stopped assuming and the only way back in. say what
+                // it costs, once — silence here would be a download behind
+                // your back by another route.
+                if !settings.dictationWanted {
+                    settings.dictationWanted = true
+                    flashNotice(
+                        """
+                        getting the speech model — \
+                        \(settings.engineVersion.approximateSize), once
+                        """,
+                        duration: 2
+                    )
+                }
+                requestEnginePreparation(asking: true)
             case .failed:
                 // pressing the key is a statement of intent, and a failed
                 // model download is usually a blip. try again, out loud —
@@ -1191,6 +1550,16 @@ final class DictationCoordinator: ObservableObject {
             }
             if state != .prewarming {
                 setState(.prewarming)
+            } else {
+                // already warming from launch, with nothing on screen —
+                // light it now rather than at the next state change.
+                synchronizeHUD()
+            }
+            // the ember breathing at bottom-centre is the only thing a
+            // download has ever said, and only the menu knew why. the press
+            // could not be honoured, so answer it.
+            if let notice {
+                flashNotice(notice)
             }
             return
         }
@@ -1209,12 +1578,18 @@ final class DictationCoordinator: ObservableObject {
             return
         }
 
+        // a new take is the sentence you care about now; the lost one stops
+        // being offered.
+        clearRetry()
         timelineSequence &+= 1
         let timelineID = timelineSequence
         activeTimeline = UtteranceTimelineBuilder(
             id: timelineID,
             keyDown: timelineClock.now
         )
+        // the standby anchor. the one that decides the paste is taken at
+        // key-up; this is what stands in if AX hands back nothing then, or
+        // if by then the frontmost window is one of ours.
         let focusAnchor = FocusAnchor.capture()
 
         do {
@@ -1225,8 +1600,18 @@ final class DictationCoordinator: ObservableObject {
                 )
             }
             activeFocusAnchor = focusAnchor
-            if !isOnboardingPresented {
-                feedbackSounds.play(.start)
+            // the mic and the lamp start at key-down; only the chime waits,
+            // long enough to know the key is being held rather than caught.
+            // a brush of fn should make no sound at all.
+            startCueTask?.cancel()
+            startCueTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(120))
+                guard !Task.isCancelled,
+                      let self,
+                      !self.isOnboardingPresented else {
+                    return
+                }
+                self.feedbackSounds.play(.start)
             }
             setState(.recording)
         } catch {
@@ -1253,8 +1638,8 @@ final class DictationCoordinator: ObservableObject {
             return
         }
 
-        invalidatePipeline()
-        setState(.idle)
+        // no discard of its own: a lock that starts mid-transcription is the
+        // same repress as any other, and beginRecording owns that decision.
         beginRecording()
 
         // only claim the lock if the capture took — a missing mic or a
@@ -1288,7 +1673,12 @@ final class DictationCoordinator: ObservableObject {
         do {
             activeTimeline?.keyUp = timelineClock.now
             let samples = try audioRecorder.stop()
-            let focusAnchor = activeFocusAnchor
+            // taken now rather than at key-down: the window worth protecting
+            // is key-up → paste, the ~600 ms when nobody is moving anything.
+            // key-down → paste spans the whole utterance, which is exactly
+            // when aiming at the field you actually want is normal.
+            let focusAnchor = FocusAnchor.captureUnlessOurs()
+                ?? activeFocusAnchor
             activeFocusAnchor = nil
             if !isOnboardingPresented {
                 feedbackSounds.play(.end)
@@ -1314,6 +1704,8 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func cancelRecording() {
+        // a discarded capture must not leave a chime in flight behind it
+        startCueTask?.cancel()
         guard state == .recording,
               let audioRecorder else {
             return
@@ -1323,7 +1715,8 @@ final class DictationCoordinator: ObservableObject {
         setRecordingLocked(false)
         activeFocusAnchor = nil
         activeTimeline = nil
-        setState(.idle)
+        // a brush of the key should read as a flicker, not a cut
+        setState(.idle, fastHUDDismiss: true)
     }
 
     private func recordFirstBuffer(
@@ -1371,16 +1764,51 @@ final class DictationCoordinator: ObservableObject {
             let transcriptReady = timelineClock.now
             activeTimeline?.transcriptReady = transcriptReady
 
-            let cleaner = DeterministicCleaner(
-                entries: dictionaryStore.entries,
-                fullCleanup: settings.cleanupEnabled
+            // one read of the text at the caret, two decisions: is the
+            // sentence there still running (so no capital), and do the words
+            // need a space to stand apart from it. read off the held element,
+            // the same one the paste decision revalidates.
+            let textAtCaret = focusAnchor?.textBeforeCursor()
+            let continuingASentence = continuesSentence(after: textAtCaret)
+
+            // a dictation aimed at our own window is a correction, not a
+            // sentence: dictate "cache" into the fixer's "what you meant"
+            // field and full cleanup would save it as "Cache." forever. the
+            // dictionary still runs — that is the ADR 0038 "cleanup off"
+            // path, not a new one. scoped per bundle, not per field, the
+            // same way CoreAudioMeetingSource treats our own bundle id: the
+            // fixer's field is the only dictation target we own. every
+            // other dictation goes through the cleaner built once for the
+            // current dictionary and settings.
+            let cleanedTranscript = pastesIntoOurOwnUI(
+                target: focusAnchor?.targetBundleIdentifier,
+                own: Bundle.main.bundleIdentifier
             )
-            let rawTranscript = cleaner.clean(transcript)
+                ? DeterministicCleaner(
+                    entries: dictionaryStore.entries,
+                    fullCleanup: false
+                ).clean(transcript, continuingASentence: continuingASentence)
+                : cleaner.clean(transcript, continuingASentence: continuingASentence)
             activeTimeline?.cleaned = timelineClock.now
-            guard !rawTranscript.trimmingCharacters(
+            guard !cleanedTranscript.trimmingCharacters(
                 in: .whitespacesAndNewlines
             ).isEmpty else {
+                let held = activeTimeline?.heldDuration
                 activeTimeline = nil
+                // an accident is neither a success nor a failure. "heard
+                // nothing" is an answer, and a key nobody meant to press
+                // asked no question. a retry holds no key at all (held is
+                // exactly zero), and it did ask.
+                if let held,
+                   held > .zero,
+                   held < Duration.milliseconds(300) {
+                    guard generation == pipelineGeneration,
+                          state == .transcribing else {
+                        return
+                    }
+                    setState(.idle, fastHUDDismiss: true)
+                    return
+                }
                 // silence must not wear the success afterglow.
                 await reportPipelineFailure(
                     "heard nothing",
@@ -1388,14 +1816,25 @@ final class DictationCoordinator: ObservableObject {
                 )
                 return
             }
-            let pasteTranscript = rawTranscript
+            // a second dictation into the same field must not weld itself
+            // to the first. the space is a delivery detail — the cleaner
+            // still renders a flush string and the archive still keeps it.
+            let joinsWhatIsThere = needsJoinSpace(after: textAtCaret?.last)
+            let pasteTranscript = joinsWhatIsThere
+                ? " " + cleanedTranscript
+                : cleanedTranscript
 
-            lastTranscript = rawTranscript
+            lastTranscript = cleanedTranscript
+            lastHeard = transcript
             pendingArchiveText = (
                 heard: transcript,
-                inserted: pasteTranscript
+                inserted: cleanedTranscript
             )
-            let pasteResult = await paster.paste(
+            // hands-free means our own settings window may be in front of the
+            // app you dictated into. give the frontmost spot back before the
+            // ⌘V goes out, or the paste lands here and reads as focus theft.
+            _ = await focusAnchor?.yieldFocusBackToAnchor()
+            let outcome = await paster.paste(
                 pasteTranscript,
                 reasonForLeavingOnPasteboard: {
                     switch focusAnchor?.revalidationDecision()
@@ -1409,29 +1848,48 @@ final class DictationCoordinator: ObservableObject {
                     }
                 }
             )
-            if pasteResult != .leftOnPasteboard(
+            if outcome.result != .leftOnPasteboard(
                 .pasteboardUnavailable
             ) {
-                settings.recordDictatedTranscript(rawTranscript)
+                settings.recordDictatedTranscript(cleanedTranscript)
             }
             guard generation == pipelineGeneration else {
                 return
             }
 
-            switch pasteResult {
+            switch outcome.result {
             case .pasted:
+                // the paste's own instant, not this one: paste() returns as
+                // soon as ⌘V is posted, and that is what "inserted" means.
                 completeTimeline(
-                    at: timelineClock.now,
-                    stage: .pasteVerified
+                    at: outcome.insertedAt,
+                    stage: .delivered
                 )
+                // success is silent, but a take the user did not end is
+                // not quite success: say what landed, after it lands. a
+                // pill flashed at 5:00 would be wiped by the paste's own
+                // return to idle.
+                if capForcedEnd {
+                    setState(.idle)
+                    await flashFeedback(
+                        "five minutes — that's the cap. pasted what i had.",
+                        duration: 2.4
+                    )
+                }
             case let .leftOnPasteboard(reason):
                 completeTimeline(
                     at: timelineClock.now,
-                    stage: .leftOnPasteboard
+                    stage: reason == .secureField
+                        ? .leftOnPasteboardSecure
+                        : .leftOnPasteboard
                 )
                 setState(.idle)
+                // 4 s, not the shared default: this pill is the only thing
+                // telling them their words are on the clipboard, and it is
+                // asking them to do something about it.
                 await flashFeedback(
-                    feedbackMessage(for: reason)
+                    feedbackMessage(for: reason),
+                    duration: 4
                 )
             }
         } catch is CancellationError {
@@ -1441,9 +1899,17 @@ final class DictationCoordinator: ObservableObject {
                 "transcription failed: \(error.localizedDescription, privacy: .public)"
             )
             activeTimeline = nil
+            guard generation == pipelineGeneration,
+                  state == .transcribing else {
+                return
+            }
+            // the samples are still in this frame. "say the whole thing
+            // again" is not a recourse for a paragraph, so keep them.
+            armRetry(samples)
             await reportPipelineFailure(
-                "couldn't transcribe",
-                generation: generation
+                "couldn't transcribe — tap to try again",
+                generation: generation,
+                duration: 4
             )
         }
     }
@@ -1453,7 +1919,8 @@ final class DictationCoordinator: ObservableObject {
     /// what went wrong in the same pill that carries "copied — …".
     private func reportPipelineFailure(
         _ message: String,
-        generation: Int
+        generation: Int,
+        duration: TimeInterval = 2.4
     ) async {
         guard generation == pipelineGeneration,
               state == .transcribing else {
@@ -1461,10 +1928,57 @@ final class DictationCoordinator: ObservableObject {
         }
 
         setState(.idle, fastHUDDismiss: true)
-        await flashFeedback(message)
+        await flashFeedback(message, duration: duration)
+    }
+
+    /// the failed dictation is still recoverable until the next one, and the
+    /// menu row plus the pill are the only two places that can say so.
+    private func armRetry(_ samples: [Float]) {
+        retryBuffer.arm(samples: samples, at: Date())
+        canRetryLastFailure = true
+        retryExpiryTask?.cancel()
+        retryExpiryTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(RetryBuffer.lifetime))
+            guard !Task.isCancelled else {
+                return
+            }
+            self?.clearRetry()
+        }
+    }
+
+    private func clearRetry() {
+        retryExpiryTask?.cancel()
+        retryExpiryTask = nil
+        retryBuffer.clear()
+        canRetryLastFailure = false
+    }
+
+    /// re-runs the samples that were thrown on, delivered wherever the
+    /// cursor is *now* — the failure may have sent them to another window.
+    func retryLastFailure() {
+        guard let samples = retryBuffer.take(at: Date()) else {
+            clearRetry()
+            return
+        }
+        clearRetry()
+
+        let now = timelineClock.now
+        timelineSequence &+= 1
+        var timeline = UtteranceTimelineBuilder(
+            id: timelineSequence,
+            keyDown: now
+        )
+        // held ≈ 0 rather than a fabricated hold: this row measures the
+        // retry, and nobody held a key for it.
+        timeline.micFirstBuffer = now
+        timeline.keyUp = now
+        activeTimeline = timeline
+        setState(.transcribing)
+        startPipeline(samples, focusAnchor: FocusAnchor.capture())
     }
 
     private func invalidatePipeline() {
+        heldFeedback = nil
         setRecordingLocked(false)
         pipelineGeneration += 1
         pipelineTask?.cancel()
@@ -1472,20 +1986,25 @@ final class DictationCoordinator: ObservableObject {
         activeTimeline = nil
     }
 
+    /// "copied" is a fact; the user needs the verb. the pill cannot be
+    /// clicked (it ignores mouse events), so the recovery has to be
+    /// something their hands can already do.
     private func feedbackMessage(
         for reason: LeftOnPasteboardReason
     ) -> String {
         switch reason {
         case .secureField:
-            "copied — secure field"
+            "copied — secure field · ⌘V to paste"
         case .focusChanged:
-            "copied — focus changed"
+            "copied — focus changed · ⌘V to paste"
         case .accessibilityUnavailable,
              .shortcutUnavailable,
              .cancelled:
-            "copied — paste unavailable"
+            "copied — couldn't paste it · ⌘V to paste"
         case .pasteboardUnavailable:
-            "couldn't copy transcript"
+            // the only one with no recovery to offer: the clipboard write
+            // itself failed, so there is nothing sitting there to paste.
+            "the clipboard is busy — nothing was copied"
         }
     }
 
@@ -1507,13 +2026,14 @@ final class DictationCoordinator: ObservableObject {
     /// A dictation becomes a kept thing only once it has actually been
     /// delivered. A cancelled one produced no text, so there is nothing to
     /// keep; one left on the pasteboard reached you by another route and
-    /// still counts.
+    /// still counts — except the one refused for a secure field, which
+    /// reached nowhere and is a password.
     private func archive(
         _ timeline: UtteranceTimeline,
         stage: UtteranceTimeline.CompletionStage
     ) {
         guard settings.keepDictations,
-              stage != .cancelled,
+              stage.isKeepable,
               let text = pendingArchiveText else {
             return
         }
@@ -1608,18 +2128,60 @@ final class DictationCoordinator: ObservableObject {
         activeTimeline = nil
     }
 
+    /// 2.4 s, where it used to be 1.2: the pill springs in over 0.32 s and
+    /// then sits at bottom-centre while the reader's eyes are on their
+    /// cursor. the two call sites that ride this default are both failures,
+    /// and one of them ("copied — …") is an instruction.
     private func flashFeedback(
         _ message: String,
-        duration: TimeInterval = 1.2
+        duration: TimeInterval = 2.4
     ) async {
+        // the setup window force-dismissed the panel, so the sleep-then-
+        // clear below would run against something nobody can see and the
+        // sentence would be lost for good. hold it; closing setup says it.
+        if HUDFeedbackGate.decide(
+            isOnboardingPresented: isOnboardingPresented,
+            heldFor: nil
+        ) == .hold {
+            heldFeedback = (
+                message: message,
+                duration: duration,
+                at: Date()
+            )
+            return
+        }
+
         feedbackGeneration += 1
         let feedbackToken = feedbackGeneration
         let stateToken = stateGeneration
         activeFeedbackGeneration = feedbackToken
         hudViewModel.showFeedback(message)
+        // the pill is a non-key, click-through panel, so voiceover never
+        // visits it. without this, a failed dictation and a successful one
+        // are the same silence to someone who cannot look.
+        NSAccessibility.post(
+            element: NSApp as Any,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: message,
+                .priority: NSAccessibilityPriorityLevel.high.rawValue,
+            ]
+        )
         synchronizeHUD()
 
-        try? await Task.sleep(for: .seconds(duration))
+        // a pill that wraps to two lines is two reads. measured here rather
+        // than read off hudViewModel.layout, which synchronizeHUD only sets
+        // a run-loop turn later.
+        let screenWidth = hudPanelStorage?.presentationScreenWidth()
+            ?? NSScreen.main?.frame.width
+            ?? 1_440
+        let lineCount = HUDLayoutEngine.layout(
+            for: .text(message),
+            screenWidth: screenWidth
+        ).lineCount
+        try? await Task.sleep(
+            for: .seconds(duration + (lineCount == 2 ? 0.6 : 0))
+        )
         guard stateToken == stateGeneration,
               feedbackToken == feedbackGeneration,
               activeFeedbackGeneration == feedbackToken else {
@@ -1635,6 +2197,11 @@ final class DictationCoordinator: ObservableObject {
         _ newState: State,
         fastHUDDismiss: Bool = false
     ) {
+        if newState == .recording {
+            // they have moved on and are talking again; a held sentence
+            // about the last take would land on this one.
+            heldFeedback = nil
+        }
         stateGeneration += 1
         feedbackGeneration += 1
         activeFeedbackGeneration = nil
@@ -1653,13 +2220,12 @@ final class DictationCoordinator: ObservableObject {
                 return
             }
 
-            if self.isOnboardingPresented {
-                panel.dismiss(fast: fastDismiss)
-                return
-            }
-
-            guard self.activeFeedbackGeneration != nil
-                    || self.state != .idle else {
+            guard HUDPresentation.shouldPresent(
+                state: self.state.lamp,
+                hasFeedback: self.activeFeedbackGeneration != nil,
+                isOnboarding: self.isOnboardingPresented,
+                prewarmPresentsHUD: self.prewarmPresentsHUD
+            ) else {
                 panel.dismiss(fast: fastDismiss)
                 return
             }
@@ -1673,7 +2239,6 @@ final class DictationCoordinator: ObservableObject {
                 )
             )
             panel.present()
-            HUDHierarchyDump.runExperiment(on: panel)
         }
     }
 }
@@ -1689,12 +2254,18 @@ extension DictationCoordinator {
         meetings.app.map(MeetingApps.displayName) ?? ""
     }
 
+    /// What setup's last button should promise, when an errand is waiting.
+    var pendingMeetingAppName: String? {
+        pendingMeetingApp.map(MeetingApps.displayName)
+    }
+
     /// `record a meeting ▸ zoom`. the model is a download you may not have
     /// asked for yet: then this is the route back to the one surface that
     /// knows how to ask (SPEC §5).
     func startMeeting(_ app: RunningApp) {
         guard !meetings.isRecording else { return }
         guard installedMeetingModels.contains(settings.meetingModel) else {
+            pendingMeetingApp = app
             runOnboardingAgain(scope: .meetingsOnly)
             return
         }
@@ -1714,6 +2285,35 @@ extension DictationCoordinator {
     func stopMeeting() {
         meetingNotifier.withdraw()
         meetings.stop()
+    }
+
+    /// A quit can arrive from the menu, from ⌘Q, or from brew asking the app
+    /// to go so it can replace the bundle under it (the cask's
+    /// `uninstall quit:`). A meeting recording is one of the two durable
+    /// nouns, so a quit that lands mid-meeting stops it first and waits for
+    /// the markdown — `finishQuitting()` answers when the transcript is
+    /// written, and the ceiling answers if whisper is still flushing.
+    func prepareToQuit() -> NSApplication.TerminateReply {
+        guard meetings.isRecording else {
+            return .terminateNow
+        }
+        quitWaitingOnMeeting = true
+        stopMeeting()
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(20))
+            self?.finishQuitting()
+        }
+        return .terminateLater
+    }
+
+    /// The transcript is on disk (or it never will be). Either way the quit
+    /// gets its answer once, and a second call is a no-op.
+    private func finishQuitting() {
+        guard quitWaitingOnMeeting else {
+            return
+        }
+        quitWaitingOnMeeting = false
+        NSApp.reply(toApplicationShouldTerminate: true)
     }
 
     func toggleLiveTranscript() {
@@ -1758,34 +2358,86 @@ extension DictationCoordinator {
             .removeDuplicates()
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &meetingCancellables)
+        // same reason as the two above: the menu watches this object, and
+        // the recovery line lives on the one nested inside it.
+        meetings.$recovering
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &meetingCancellables)
         meetingNotifier.onKeepGoing = { [weak self] in
             self?.meetings.keepGoing()
         }
         meetingNotifier.onStop = { [weak self] in
             self?.stopMeeting()
         }
-        meetings.recoverOrphans()
+        meetingNotifier.onShowFile = { url in
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+        // transcripts written before the app started locking them down are
+        // still 0644 — other people's words, readable by every account on
+        // the machine. repaired once, off the main thread.
+        let folder = settings.meetingsFolder
+        Task.detached(priority: .utility) {
+            MeetingTranscriptFile.lockDown(in: folder)
+        }
+        // recovery loads the meeting model and can run for a quarter of an
+        // hour. five seconds of head start keeps it off the dictation
+        // model's prewarm, so the first fn press is not slower for it. the
+        // number is a guess, like the rest of MeetingThresholds.
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            self?.meetings.recoverOrphans()
+        }
     }
 
     private func handle(_ event: MeetingEvent) {
         switch event {
         case .started:
-            if LiveTranscriptPanel.wasOpenLastTime, !isLiveTranscriptShown {
+            meetingsNeedAttention = false
+            if LiveTranscriptPanel.wasOpenLastTime(), !isLiveTranscriptShown {
                 toggleLiveTranscript()
             }
         case .nudge:
             meetingNotifier.ask(app: meetingAppName, quietFor: meetings.thresholds.quietNudgeAfter)
-        case .saved, .nothingToKeep, .saveFailed, .engineFailed:
+        case .saved(let summary):
             liveTranscriptPanel?.dismissKeepingPreference()
-        case .cannotHear, .gapBegan, .gapEnded, .writingItOut, .hookFailed:
+            // the file *is* the feature, and the pill that names it is gone
+            // in two seconds — often before you are back at the mac.
+            lastMeeting = summary
+            lastMeetingSavedAt = Date()
+            meetingNotifier.saved(summary)
+            // the transcript has landed, so a quit that was waiting on it
+            // can go through. the hook runs after this and may not finish;
+            // the file it was told about is already written.
+            finishQuitting()
+        case .saveFailed:
+            liveTranscriptPanel?.dismissKeepingPreference()
+            meetingNotifier.saveFailed()
+            // nothing more will be written, so a quit waiting on the file
+            // goes through here too.
+            finishQuitting()
+        case .nothingToKeep, .engineFailed:
+            liveTranscriptPanel?.dismissKeepingPreference()
+            finishQuitting()
+        case .cannotHear:
+            // the pill cannot be clicked, so naming the switch was a dead
+            // end. this reopens the one surface allowed to ask for it, and
+            // leaves a way back in the menu for anyone who closes it.
+            meetingsNeedAttention = true
+            liveTranscriptPanel?.dismissKeepingPreference()
+            runOnboardingAgain(scope: .meetingsOnly, openAt: .permissions)
+        case .recovering, .gapBegan, .gapEnded, .writingItOut, .hookFailed:
             break
         }
 
         if let text = event.hudText {
             let duration: TimeInterval
             switch event {
-            case .cannotHear, .hookFailed, .engineFailed, .saveFailed: duration = 4
-            case .writingItOut: duration = 6
+            case .hookFailed, .engineFailed, .saveFailed: duration = 4
+            // a recovered meeting arrives unprompted and is about yesterday:
+            // two seconds is not long enough to read it.
+            case .saved(let summary): duration = summary.recovered ? 4 : 2
+            case .writingItOut, .recovering: duration = 6
             default: duration = 2
             }
             flashNotice(text, duration: duration)
@@ -1817,108 +2469,6 @@ enum HUDHierarchyDump {
         "cornerRadius", "allowsGroupOpacity", "scale",
         "substituteColor", "allowsSubstituteColor", "bleedAmount",
     ]
-
-    /// experiment: make every backdrop in the window sample in-window
-    /// content (as the lab's opaque window does) instead of the screen
-    /// behind the window, so the glass sees the halo and fill under it.
-    static func patchBackdrops(window: NSWindow) {
-        func walk(_ l: CALayer) {
-            if NSStringFromClass(type(of: l)) == "CABackdropLayer" {
-                l.setValue(false, forKey: "windowServerAware")
-            }
-            for sub in l.sublayers ?? [] { walk(sub) }
-        }
-        if let layer = window.contentView?.layer { walk(layer) }
-    }
-
-    /// the glass filter's parameters in a key window of the active app
-    /// (dumped from the lab, 2026-09-21) versus what an inactive window
-    /// gets: refraction off, flat blur. this puts the active set back.
-    static let activeGlass: [String: Any] = [
-        "inputOuterRefractionAmount": 16.0,
-        "inputOuterRefractionHeight": 16.0,
-        "inputRefractionOpacity": 0.6,
-        "inputInnerRefractionAmount": -3.1675,
-        "inputInnerRefractionHeight": 1.58375,
-        "inputBlurOpacity0": 0.0,
-        "inputBlurOpacity1": 0.0,
-        "inputBlurOpacity2": 0.5,
-        "inputBlurOpacity3": 1.0,
-        "inputBlurDistance0": -3.1675,
-        "inputBlurDistance1": -1.0,
-        "inputFaceColorMatrixBlack": 0.125,
-        "inputBleedAmount": 2.21725,
-        "inputBleedHeight": 2.21725,
-        "inputShadowOpacity": 0.04,
-        "inputShadowRadius": 4.0,
-        "inputRingShadowOpacity": 0.06,
-        "inputSDRGradientDistance0": 0.0,
-        "inputSDRGradientDistance1": 0.0,
-        "inputKeyFillHighlightSpread": 1.308996938995747,
-        "inputKeyFillHighlightSpreadSDR": 1.308996938995747,
-        "inputKeyFillHighlightAmount": 0.4,
-        "inputKeyFillHighlightColorBias": -0.25,
-    ]
-
-    /// dev only: `hudPanelExperiment` = inwindow | active. re-applied on
-    /// a short schedule after every present, since SwiftUI rewrites the
-    /// filter as the shape changes.
-    static func runExperiment(on panel: NSWindow) {
-        guard Capabilities.current.hasLampLab,
-              let experiment = UserDefaults.standard.string(
-                  forKey: "hudPanelExperiment"
-              ) else {
-            return
-        }
-        for step in 0..<40 {
-            DispatchQueue.main.asyncAfter(
-                deadline: .now() + 0.05 + Double(step) * 0.2
-            ) {
-                switch experiment {
-                case "inwindow": patchBackdrops(window: panel)
-                case "active": patchGlassActive(window: panel)
-                default: break
-                }
-            }
-        }
-    }
-
-    static func patchGlassActive(window: NSWindow) {
-        func walk(_ l: CALayer) {
-            if NSStringFromClass(type(of: l)) == "CABackdropLayer",
-               let filters = l.filters as? [NSObject] {
-                var changed = false
-                for f in filters where "\(f)".contains("glassBackground") {
-                    guard let keys = f.value(forKey: "inputKeys") as? [String] else {
-                        continue
-                    }
-                    for (k, v) in activeGlass where keys.contains(k) {
-                        f.setValue(v, forKey: k)
-                        changed = true
-                    }
-                }
-                if changed {
-                    l.filters = filters
-                }
-            }
-            // the key/fill highlight — the specular that makes it glass —
-            // is switched off in an inactive window: opacity 0, and its
-            // light colours at alpha 0
-            if NSStringFromClass(type(of: l)) == "CASDFLayer",
-               let effect = l.value(forKey: "effect") as? NSObject,
-               NSStringFromClass(type(of: effect)).contains("KeyFillHighlight") {
-                l.opacity = 1
-                let white = CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
-                effect.setValue(white, forKey: "keyColor")
-                effect.setValue(white, forKey: "fillColor")
-            }
-            if NSStringFromClass(type(of: l)) == "CASDFElementLayer" {
-                l.setValue(-16.0, forKey: "contentsOneValueDistance")
-            }
-            for sub in l.sublayers ?? [] { walk(sub) }
-        }
-        if let layer = window.contentView?.layer { walk(layer) }
-    }
 
     private static func valueSize(_ value: NSValue) -> Int {
         var size = 0

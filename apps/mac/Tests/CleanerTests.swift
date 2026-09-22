@@ -15,6 +15,19 @@ final class CleanerTests: XCTestCase {
         )
     }
 
+    /// the user-visible half of ADR 0038: you taught it `iPhone` for exactly
+    /// one reason, and position zero is where the old pipeline overruled you.
+    func testATaughtWordKeepsItsSpellingAtTheStartOfALine() {
+        let cleaner = DeterministicCleaner(
+            entries: [DictionaryEntry(wrong: "iphone", right: "iPhone")]
+        )
+
+        XCTAssertEqual(
+            cleaner.clean("iphone battery is fine"),
+            "iPhone battery is fine."
+        )
+    }
+
     func testWordBoundariesProtectPartialMatches() {
         let cleaner = DeterministicCleaner(
             entries: [DictionaryEntry(wrong: "gpt", right: "GPT")]
@@ -28,6 +41,7 @@ final class CleanerTests: XCTestCase {
     func testFillersAreLeftWhereYouSaidThem() {
         let cleaner = DeterministicCleaner()
 
+        // also printed on dictate.jass.gg — apps/site/src/pages/index.astro
         XCTAssertEqual(
             cleaner.clean("um, I uh think erm, this uhm works"),
             "Um, I uh think erm, this uhm works."
@@ -61,6 +75,57 @@ final class CleanerTests: XCTestCase {
         XCTAssertEqual(
             cleaner.clean("hello. second sentence"),
             "Hello. Second sentence."
+        )
+    }
+
+    /// The reorder, in one case. `NumberParser` used to turn "seven" into
+    /// "7" before the dictionary ever saw the word, so a teammate called
+    /// Sevan could be taught and the entry would never fire again.
+    func testAWordTheParsersWouldHaveEatenIsStillTeachable() {
+        let cleaner = DeterministicCleaner(
+            entries: [DictionaryEntry(wrong: "seven", right: "Sevan")]
+        )
+
+        XCTAssertEqual(
+            cleaner.clean("call seven about the deploy"),
+            "Call Sevan about the deploy."
+        )
+        XCTAssertEqual(
+            cleaner.clean("meet at seven"),
+            "Meet at Sevan.",
+            "flat wrong→right, as ADR 0024 said: it replaces every occurrence"
+        )
+    }
+
+    /// What "fix a word" opens on: the transforms before the dictionary and
+    /// no others, in both cleanup modes.
+    func testAsHeardStopsWhereTheDictionaryStarts() {
+        XCTAssertEqual(
+            DeterministicCleaner().asHeard("  call  seven about the deploy "),
+            "call seven about the deploy"
+        )
+        XCTAssertEqual(
+            DeterministicCleaner(fullCleanup: false)
+                .asHeard("call seven about the deploy"),
+            "call seven about the deploy"
+        )
+    }
+
+    /// The mode a dictation aimed at our own window runs in. A correction is
+    /// a word: it gets no capital and no full stop, and a word you taught it
+    /// still applies.
+    func testCleanupOffLeavesACorrectiveWordAloneButStillSubstitutes() {
+        XCTAssertEqual(
+            DeterministicCleaner(entries: [], fullCleanup: false)
+                .clean("cache"),
+            "cache"
+        )
+        XCTAssertEqual(
+            DeterministicCleaner(
+                entries: [DictionaryEntry(wrong: "jason", right: "JSON")],
+                fullCleanup: false
+            ).clean("jason"),
+            "JSON"
         )
     }
 
@@ -144,6 +209,43 @@ final class CleanerTests: XCTestCase {
         )
     }
 
+    /// settings prints this list under the pipeline, read straight out of
+    /// the transform — so every name on it has to still produce its mark,
+    /// and a marker nobody proved cannot quietly join the list.
+    func testEverySpokenMarkerOnTheSettingsListStillWorks() {
+        let proof: [String: (spoken: String, written: String)] = [
+            "new paragraph": ("one new paragraph two", "one\n\ntwo"),
+            "new line": ("one new line two", "one\ntwo"),
+            "comma": ("one comma two", "one, two"),
+            "period": ("one period two", "one. two"),
+            "full stop": ("one full stop two", "one. two"),
+            "question mark": ("one question mark two", "one? two"),
+            "exclamation mark": ("one exclamation mark two", "one! two"),
+            "colon": ("one colon two", "one: two"),
+            "semicolon": ("one semicolon two", "one; two"),
+            "open quote": ("say open quote one", "say \"one"),
+            "close quote": (
+                "say open quote one close quote",
+                "say \"one\""
+            ),
+        ]
+
+        XCTAssertEqual(SpokenPunctuation.spokenMarkers.count, 11)
+
+        for marker in SpokenPunctuation.spokenMarkers {
+            guard let proven = proof[marker] else {
+                XCTFail("the list names \(marker) and nothing proves it")
+                continue
+            }
+            XCTAssertTrue(proven.spoken.contains(marker), marker)
+            XCTAssertEqual(
+                SpokenPunctuation().apply(proven.spoken),
+                proven.written,
+                marker
+            )
+        }
+    }
+
     func testEmailParserTable() {
         assertTransform(
             EmailParser(),
@@ -171,6 +273,37 @@ final class CleanerTests: XCTestCase {
                 (
                     "email JOHN at Example dot COM now",
                     "email JOHN@Example.COM now"
+                ),
+                // "at" is how everyone names a website out loud, so an
+                // ordinary word on the left of it is a preposition, not a
+                // mailbox.
+                (
+                    "look at github dot com",
+                    "look at github dot com"
+                ),
+                (
+                    "the docs are at example dot com",
+                    "the docs are at example dot com"
+                ),
+                (
+                    "you can find it at cypher dot io",
+                    "you can find it at cypher dot io"
+                ),
+                (
+                    "he works at meta dot com now",
+                    "he works at meta dot com now"
+                ),
+                (
+                    "we host it at fly dot io",
+                    "we host it at fly dot io"
+                ),
+                (
+                    "sign up at notion dot so",
+                    "sign up at notion dot so"
+                ),
+                (
+                    "read more at anthropic dot com slash news",
+                    "read more at anthropic dot com slash news"
                 ),
                 ("john at localhost", "john at localhost"),
                 ("meet john at five", "meet john at five"),
@@ -233,8 +366,15 @@ final class CleanerTests: XCTestCase {
         assertTransform(
             NumberParser(),
             cases: [
-                ("zero", "0"),
-                ("five", "5"),
+                // a bare count is a word — nobody types "1 of the".
+                ("zero", "zero"),
+                ("five", "five"),
+                ("one of my keyboards", "one of my keyboards"),
+                ("no one knows", "no one knows"),
+                ("one on one meeting", "one on one meeting"),
+                ("two-ish years", "two-ish years"),
+                ("a year or two", "a year or two"),
+                ("one-way", "one-way"),
                 ("nineteen", "19"),
                 ("twenty", "20"),
                 ("twenty five", "25"),
@@ -243,15 +383,18 @@ final class CleanerTests: XCTestCase {
                 ("one hundred and five", "105"),
                 ("nine hundred ninety nine", "999"),
                 ("one thousand", "1000"),
-                ("twelve thousand three hundred", "12300"),
-                ("one million", "1000000"),
+                ("ten thousand", "10,000"),
+                ("twelve thousand three hundred", "12,300"),
+                ("one million", "1,000,000"),
+                // a year is not a quantity — the grouping floor leaves it be
+                ("two thousand twenty six", "2026"),
                 (
                     "two million three hundred thousand five",
-                    "2300005"
+                    "2,300,005"
                 ),
                 (
                     "nine hundred ninety nine million nine hundred ninety nine thousand nine hundred ninety nine",
-                    "999999999"
+                    "999,999,999"
                 ),
             ]
         )
@@ -266,8 +409,9 @@ final class CleanerTests: XCTestCase {
                 ("zero dollars", "$0"),
                 (
                     "two million dollars",
-                    "$2000000"
+                    "$2,000,000"
                 ),
+                ("fifty thousand rupees", "₹50,000"),
                 ("five hundred rupees", "₹500"),
                 ("one rupee", "₹1"),
                 ("twenty five percent", "25%"),
@@ -373,6 +517,25 @@ final class CleanerTests: XCTestCase {
         )
     }
 
+    /// A rule with nothing on its right side used to compile to an empty
+    /// replacement template and delete the word from every dictation. The
+    /// cleaner renders; it never removes (ADR 0020).
+    func testAnEntryWithNothingOnTheRightNeverDeletesAWord() {
+        let transform = DictionarySubstitutions(
+            entries: [
+                DictionaryEntry(wrong: "darsh", right: ""),
+                DictionaryEntry(wrong: "jason", right: "   "),
+            ]
+        )
+        assertTransform(
+            transform,
+            cases: [
+                ("darsh ships today", "darsh ships today"),
+                ("send the jason", "send the jason"),
+            ]
+        )
+    }
+
     func testCapitalizationTable() {
         assertTransform(
             Capitalization(),
@@ -394,8 +557,46 @@ final class CleanerTests: XCTestCase {
                     "john@cypher.io"
                 ),
                 ("123 hello", "123 hello"),
-                ("iPhone works", "IPhone works"),
+                // a capital past the first character is a spelling somebody
+                // chose. without one there is nothing to protect, so the
+                // sentence start still wins.
+                ("iPhone works", "iPhone works"),
+                ("macOS 26 is out", "macOS 26 is out"),
+                ("gRPC is fast", "gRPC is fast"),
+                ("iphone works", "Iphone works"),
             ]
+        )
+    }
+
+    /// the caret was sitting after "the build failed because ", so the
+    /// utterance is the rest of that sentence — everything inside it still
+    /// starts sentences the way it always did.
+    func testCapitalizationContinuingASentenceTable() {
+        assertTransform(
+            Capitalization(continuingASentence: true),
+            cases: [
+                (
+                    "the linker ran out of memory",
+                    "the linker ran out of memory"
+                ),
+                ("hello. second", "hello. Second"),
+                ("hello\nsecond", "hello\nSecond"),
+                (
+                    "john@cypher.io is mine",
+                    "john@cypher.io is mine"
+                ),
+            ]
+        )
+    }
+
+    /// only the capital is held back: the words still get their full stop.
+    func testAContinuationStillGetsItsTerminalPeriod() {
+        XCTAssertEqual(
+            DeterministicCleaner().clean(
+                "the linker ran out of memory",
+                continuingASentence: true
+            ),
+            "the linker ran out of memory."
         )
     }
 
@@ -414,8 +615,23 @@ final class CleanerTests: XCTestCase {
                 ("10:30", "10:30."),
                 ("version 1.2", "version 1.2."),
                 ("50 %", "50%."),
+                // an utterance that ends on an address ends there
+                ("john@cypher.io", "john@cypher.io"),
+                ("visit cypher.io/docs", "visit cypher.io/docs"),
                 ("", ""),
             ]
+        )
+    }
+
+    /// the pipeline proof for the grouping comma: PunctuationFinishing's
+    /// after-separator rule wants a letter next, and a digit is not one, so
+    /// nothing creeps in between the 50 and the 000.
+    func testAGroupedPriceKeepsItsCommaClosed() {
+        XCTAssertEqual(
+            DeterministicCleaner().clean(
+                "fifty thousand rupees is just ten percent"
+            ),
+            "₹50,000 is just 10%."
         )
     }
 
@@ -431,6 +647,7 @@ final class CleanerTests: XCTestCase {
     }
 
     func testADRExampleSpokenPunctuationPipeline() {
+        // also printed on dictate.jass.gg — apps/site/src/pages/index.astro
         XCTAssertEqual(
             DeterministicCleaner().clean(
                 "hello comma how are you question mark"
@@ -489,12 +706,14 @@ final class CleanerTests: XCTestCase {
                 "This is very, very important."
             ),
             (
+                // no full stop: mail refuses a recipient with a dot on the
+                // end, and the link 404s with one.
                 "um send it to john at cypher dot io",
-                "Um send it to john@cypher.io."
+                "Um send it to john@cypher.io"
             ),
             (
                 "visit cypher dot io slash docs",
-                "Visit cypher.io/docs."
+                "Visit cypher.io/docs"
             ),
             (
                 "the total is twenty five percent",
@@ -531,6 +750,145 @@ final class CleanerTests: XCTestCase {
         }
     }
 
+    /// the whole pipeline is the only place this shows: EmailParser has to
+    /// hand the sentence on, because only URLParser can turn "slash news"
+    /// into a path. swallow the span and the "at" becomes an @.
+    func testSayingAWebsiteOutLoudStaysAWebsite() {
+        let cleaner = DeterministicCleaner()
+
+        XCTAssertEqual(
+            cleaner.clean("read more at anthropic dot com slash news"),
+            "Read more at anthropic.com/news"
+        )
+        XCTAssertEqual(
+            cleaner.clean("sign up at notion dot so"),
+            "Sign up at notion.so"
+        )
+        XCTAssertEqual(
+            cleaner.clean("her email is sarah at gmail dot com"),
+            "Her email is sarah@gmail.com"
+        )
+    }
+
+    /// an address, a clock time and a thousands separator all carry a dot or
+    /// a comma that is not sentence punctuation. four stages used to read
+    /// them as one; they now ask AddressToken the same question.
+    func testAnAddressATimeAndAPriceArriveIntact() {
+        let cleaner = DeterministicCleaner()
+        let cases = [
+            ("john at cypher dot io", "john@cypher.io"),
+            ("cypher dot io slash docs", "cypher.io/docs"),
+            ("go to seven dot com", "Go to seven.com"),
+            ("go to example.com", "Go to example.com"),
+            (
+                "send the invoice at five dot com",
+                "Send the invoice@five.com"
+            ),
+            (
+                "let's meet at 10:30 tomorrow",
+                "Let's meet at 10:30 tomorrow."
+            ),
+            ("it cost 3,500 dollars", "It cost 3,500 dollars."),
+            // and the prose that must not move
+            ("hello,world", "Hello, world."),
+            ("version 1.2", "Version 1.2."),
+            (
+                "i met him at home. great to see him",
+                "I met him at home. Great to see him."
+            ),
+        ]
+
+        for (input, expected) in cases {
+            XCTAssertEqual(
+                cleaner.clean(input),
+                expected,
+                "input: \(input)"
+            )
+        }
+    }
+
+    /// the space between two dictations is added at the cursor, not here:
+    /// the cleaner's output is flush at both ends, and that flush string is
+    /// what dictations.jsonl keeps.
+    func testTheCleanerStillReturnsAFlushString() {
+        let cleaned = DeterministicCleaner().clean("second thing")
+
+        XCTAssertEqual(cleaned, "Second thing.")
+        XCTAssertEqual(
+            cleaned,
+            cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
+    /// the whole pipeline, not one stage: a time, an amount, a version, a
+    /// filename and an address are punctuation parakeet wrote itself, and
+    /// the cleaner has no business re-spacing any of it. every one of these
+    /// was split and shouted before the spoken-punctuation stage learned to
+    /// stand down.
+    func testTheModelsOwnPunctuationSurvivesTheWholePipeline() {
+        let cleaner = DeterministicCleaner()
+        let cases = [
+            ("7 p.m. tomorrow", "7 p.m. tomorrow."),
+            ("9 a.m. then", "9 a.m. then."),
+            ("1.5 GB", "1.5 GB."),
+            ("10:30", "10:30."),
+            ("meet at 8:30", "Meet at 8:30."),
+            ("20,000", "20,000."),
+            ("the file is main.swift", "The file is main.swift."),
+            (
+                "Check https://example.com/docs",
+                "Check https://example.com/docs"
+            ),
+            (
+                "Send it to jass@jass.gg now",
+                "Send it to jass@jass.gg now."
+            ),
+            ("the U.S. team", "The U.S. team."),
+        ]
+
+        for (input, expected) in cases {
+            XCTAssertEqual(
+                cleaner.clean(input),
+                expected,
+                "input: \(input)"
+            )
+        }
+    }
+
+    /// the other half of the same fix: when a marker *did* fire, the stage
+    /// still spaces its own symbols — and still leaves the model's alone.
+    func testSpokenMarkersStillPunctuateAndStillSpareTheDigits() {
+        let cleaner = DeterministicCleaner()
+        let cases = [
+            ("ship it comma then tell me", "Ship it, then tell me."),
+            ("hello comma world question mark", "Hello, world?"),
+            (
+                "he said open quote hello close quote to me",
+                "He said \"hello\" to me."
+            ),
+            (
+                "para one new paragraph para two",
+                "Para one\n\nPara two."
+            ),
+            (
+                "the price comma 20,000 rupees",
+                "The price, 20,000 rupees."
+            ),
+            (
+                "meet at 8:30 comma bring the 1.5 GB drive",
+                "Meet at 8:30, bring the 1.5 GB drive."
+            ),
+        ]
+
+        for (input, expected) in cases {
+            XCTAssertEqual(
+                cleaner.clean(input),
+                expected,
+                "input: \(input)"
+            )
+        }
+    }
+
     /// ADR 0019's order contract still bites, on a narrower case than it used
     /// to. `SelfCorrections` now only recognises a whole utterance that is
     /// exactly "scratch that" — so whether the trailing spoken "period" has
@@ -550,6 +908,30 @@ final class CleanerTests: XCTestCase {
 
         XCTAssertEqual(punctuationFirst, "Hello. How are you")
         XCTAssertNotEqual(capitalizationFirst, punctuationFirst)
+    }
+
+    /// The property the coordinator's one kept cleaner depends on: the
+    /// transforms hold nothing but `let`s, so a reused cleaner cannot drift
+    /// from a freshly built one no matter how many transcripts it has seen.
+    func testOneCleanerReusedAcrossTranscriptsMatchesFreshConstruction() {
+        let entries = [
+            DictionaryEntry(wrong: "gpt", right: "GPT"),
+            DictionaryEntry(wrong: "iphone", right: "iPhone"),
+        ]
+        let transcripts = [
+            "use gpt on my iphone comma please",
+            "twenty three new line send it to me at jass at jass dot gg",
+            "it works question mark",
+        ]
+        let reused = DeterministicCleaner(entries: entries)
+
+        for transcript in transcripts {
+            XCTAssertEqual(
+                reused.clean(transcript),
+                DeterministicCleaner(entries: entries).clean(transcript),
+                "transcript: \(transcript)"
+            )
+        }
     }
 
     private func assertTransform(

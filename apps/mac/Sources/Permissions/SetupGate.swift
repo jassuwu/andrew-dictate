@@ -58,4 +58,26 @@ enum SetupGate {
         }
         return moment == .launchOrReopen ? .present : .badgeOnly
     }
+
+    /// a global key monitor built before trust existed never starts hearing
+    /// keys, so the one moment worth rebuilding them is accessibility going
+    /// from withheld to granted. losing trust needs nothing: dead monitors
+    /// are what a revoked grant should look like.
+    static func shouldReinstallHotkey(was: Bool, now: Bool) -> Bool {
+        !was && now
+    }
+
+    /// one definition of "setup is wrong", to match what settings already
+    /// reports (SetupHealth). deliberately not part of `presentation`: a
+    /// failed download badges the icon, it does not reopen the window.
+    static func needsAttention(
+        onboardingDismissed: Bool,
+        dictationWanted: Bool,
+        permissions: PermissionSnapshot,
+        speechModelFailed: Bool
+    ) -> Bool {
+        onboardingDismissed
+            && dictationWanted
+            && (!permissions.isDictationReady || speechModelFailed)
+    }
 }

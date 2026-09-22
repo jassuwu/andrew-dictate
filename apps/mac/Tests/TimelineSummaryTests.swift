@@ -7,7 +7,7 @@ final class TimelineSummaryTests: XCTestCase {
         keyUpToCompletion ms: Int,
         transcription: Int = 0,
         cleanup: Int = 0,
-        stage: UtteranceTimeline.CompletionStage = .pasteVerified
+        stage: UtteranceTimeline.CompletionStage = .delivered
     ) -> UtteranceTimeline {
         let keyUp = ContinuousClock.now
         return UtteranceTimeline(
@@ -23,7 +23,7 @@ final class TimelineSummaryTests: XCTestCase {
 
     // MARK: - the population
 
-    func testOnlyVerifiedPastesCountTowardsTheNumbers() {
+    func testOnlyDeliveredPastesCountTowardsTheNumbers() {
         let summary = TimelineSummary(timelines: [
             timeline(keyUpToCompletion: 100),
             timeline(keyUpToCompletion: 900, stage: .cancelled),
@@ -44,7 +44,18 @@ final class TimelineSummaryTests: XCTestCase {
 
         XCTAssertEqual(summary.excluded[.cancelled], 1)
         XCTAssertEqual(summary.excluded[.leftOnPasteboard], 2)
-        XCTAssertNil(summary.excluded[.pasteVerified])
+        XCTAssertNil(summary.excluded[.delivered])
+    }
+
+    func testSecureFieldRefusalsAreCountedAsTheirOwnExclusion() {
+        let summary = TimelineSummary(timelines: [
+            timeline(keyUpToCompletion: 100),
+            timeline(keyUpToCompletion: 900, stage: .leftOnPasteboardSecure),
+        ])
+
+        XCTAssertEqual(summary.sampleSize, 1)
+        XCTAssertEqual(summary.excluded[.leftOnPasteboardSecure], 1)
+        XCTAssertNil(summary.excluded[.leftOnPasteboard])
     }
 
     func testAnEmptySampleReportsNothingRatherThanZero() {
@@ -142,7 +153,7 @@ final class TimelineSummaryTests: XCTestCase {
 final class TimelineSummaryFormattingTests: XCTestCase {
     private func timeline(
         keyUpToCompletion ms: Int,
-        stage: UtteranceTimeline.CompletionStage = .pasteVerified
+        stage: UtteranceTimeline.CompletionStage = .delivered
     ) -> UtteranceTimeline {
         let keyUp = ContinuousClock.now
         return UtteranceTimeline(
@@ -176,6 +187,17 @@ final class TimelineSummaryFormattingTests: XCTestCase {
         XCTAssertTrue(text.contains("left on pasteboard"), text)
     }
 
+    /// A stage missing from the exclusions list would drop its count without
+    /// failing to compile, so the conditions line has to be asserted on.
+    func testSecureFieldExclusionsAreNamedInTheConditionsLine() {
+        let text = TimelineSummary(timelines: [
+            timeline(keyUpToCompletion: 100),
+            timeline(keyUpToCompletion: 100, stage: .leftOnPasteboardSecure),
+        ]).formatted()
+
+        XCTAssertTrue(text.contains("1 secure field"), text)
+    }
+
     func testNothingIsExcludedIsStatedExplicitly() {
         let text = TimelineSummary(
             timelines: [timeline(keyUpToCompletion: 100)]
@@ -190,11 +212,11 @@ final class TimelineSummaryFormattingTests: XCTestCase {
         let text = TimelineSummary(timelines: []).formatted()
 
         XCTAssertFalse(text.contains("p50"), text)
-        XCTAssertTrue(text.lowercased().contains("no verified"), text)
+        XCTAssertTrue(text.lowercased().contains("no delivered"), text)
     }
 
     /// Caught in review: the empty-sample sentence was concatenated straight
-    /// onto the conditions line, producing "…summarise.n=0 verified pastes".
+    /// onto the conditions line, producing "…summarise.n=0 delivered".
     func testTheEmptySampleSentenceDoesNotRunIntoTheConditionsLine() {
         let lines = TimelineSummary(timelines: [])
             .formatted()

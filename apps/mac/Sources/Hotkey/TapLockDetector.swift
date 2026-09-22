@@ -105,7 +105,10 @@ struct TapLockDetector {
             return []
         }
         state = .idle
-        return [.end]
+        // a sub-300 ms tap that never became a second tap was never speech:
+        // you cannot say a word inside a 300 ms key-down. discard it rather
+        // than running the whole ceremony over a knuckle catch.
+        return [.cancel]
     }
 
     mutating func keyDown(isEscape: Bool) -> [Action] {

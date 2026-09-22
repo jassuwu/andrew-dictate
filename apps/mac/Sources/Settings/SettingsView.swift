@@ -1,5 +1,4 @@
 import AppKit
-import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -48,9 +47,13 @@ struct SettingsView: View {
     @State private var historySegment: HistorySegment = .dictations
     @State private var installedModels: [InstalledModel] = []
     @State private var pendingModelRemoval: EngineVersion?
+    @State private var pendingArchiveWipe = false
     @State private var modelStoreMessage: String?
     @State private var showsRemoval = false
     @State private var timings: TimelineSummary?
+    /// lit for a quarter second every time the bound key is pressed.
+    @State private var keyChipLit = false
+    @FocusState private var searchFocused: Bool
 
     /// `meetingsLoader` is left open on purpose: this pane knows how to draw
     /// the meetings folder, not where it is or how to read it.
@@ -61,8 +64,13 @@ struct SettingsView: View {
         let settings = coordinator.settings
 
         _coordinator = ObservedObject(wrappedValue: coordinator)
+        let spool = MeetingSpool()
         _meetings = StateObject(
-            wrappedValue: MeetingsListModel(load: meetingsLoader)
+            wrappedValue: MeetingsListModel(
+                setAsideFolder: spool.unreadableFolder,
+                countSetAside: { spool.unreadableCount() },
+                load: meetingsLoader
+            )
         )
         _settings = ObservedObject(wrappedValue: settings)
         _dictionaryStore = ObservedObject(
@@ -152,7 +160,11 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showsRemoval) {
             RemovalView()
-                .frame(width: 480, height: 500)
+                // a minimum, not a height: at rest the sheet is the size it
+                // always was, and a failure that has more to say makes it
+                // taller instead of pushing cancel off the bottom.
+                .frame(width: 480)
+                .frame(minHeight: 500)
         }
         .alert(item: $pendingModelRemoval) { version in
             let isActive = version == coordinator.activeEngineVersion
@@ -177,6 +189,27 @@ struct SettingsView: View {
                     removeDownload(version)
                 },
                 secondaryButton: .cancel(Text("cancel"))
+            )
+        }
+        // the archive is the one thing here that does not come back: the file
+        // is unlinked, not trashed, so the wipe asks first.
+        .alert(
+            "delete everything you’ve dictated?",
+            isPresented: $pendingArchiveWipe
+        ) {
+            Button("delete all", role: .destructive) {
+                archive.deleteEverything()
+                browser.reload()
+            }
+            Button("cancel", role: .cancel) {}
+        } message: {
+            Text(
+                ArchiveSettingsModel.wipeWarning(
+                    count: browser.items.count,
+                    // reload() reverses to newest-first, so the last row is
+                    // the oldest thing in the file.
+                    oldest: browser.items.last?.startedAt
+                )
             )
         }
     }
@@ -259,11 +292,15 @@ struct SettingsView: View {
     }
 
     private var hotkeyRow: some View {
-        HStack(spacing: 10) {
-            Text("key")
-                .font(BrandUI.bodyFont.weight(.medium))
+        HStack(alignment: .top, spacing: 16) {
+            // hold, double-tap lock and esc all ship; until this line, the
+            // only way to find them was to do one by accident.
+            SettingsRowLabel(
+                "key",
+                explanation: HotkeyBinding.gestureExplanation
+            )
 
-            Spacer(minLength: 10)
+            Spacer(minLength: 8)
 
             // the chip is the control — it and a picker beside it showed the
             // same value twice.
@@ -275,7 +312,10 @@ struct SettingsView: View {
                 }
             } label: {
                 HStack(spacing: 5) {
-                    KeyChip(settings.dictationHotkey.displayName)
+                    KeyChip(
+                        settings.dictationHotkey.displayName,
+                        isActive: keyChipLit
+                    )
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(BrandUI.textSecondary)
@@ -285,6 +325,23 @@ struct SettingsView: View {
             .buttonStyle(.plain)
             .fixedSize()
             .accessibilityLabel("dictation key")
+            .accessibilityHint(HotkeyBinding.gestureExplanation)
+        }
+        // the same press setup listens to. hold the key with this pane open
+        // and the chip answers, so "i hold fn and nothing happens" is a
+        // five-second self-diagnosis instead of a support thread.
+        .task(id: coordinator.hotkeyDetection) {
+            guard coordinator.hotkeyDetection != nil else {
+                return
+            }
+            keyChipLit = true
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+            } catch {
+                // a press that lands mid-pulse owns the chip from here.
+                return
+            }
+            keyChipLit = false
         }
     }
 
@@ -366,10 +423,24 @@ struct SettingsView: View {
     // MARK: - dictionary
 
     private var dictionaryTab: some View {
-        DictionaryEditor(store: dictionaryStore)
-            .padding(.horizontal, 24)
-            .padding(.top, 18)
-            .padding(.bottom, 20)
+        VStack(alignment: .leading, spacing: 10) {
+            // the pane used to open with an unlabelled grid, so the two
+            // rules it already keeps — whole words, any capitalisation —
+            // were things you found out by being confused.
+            Text("when andrew hears the word on the left, it writes the one on the right. whole words only, capitals don’t matter — this still applies with cleanup off.")
+                .font(.system(size: 11))
+                .foregroundStyle(BrandUI.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            DictionaryEditor(
+                store: dictionaryStore,
+                settings: settings,
+                dictations: browser.items
+            )
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 18)
+        .padding(.bottom, 20)
     }
 
     // MARK: - history
@@ -379,17 +450,31 @@ struct SettingsView: View {
     /// is a footer, because it's set once and never looked at again.
     private var historyTab: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Picker("", selection: $historySegment) {
-                ForEach(HistorySegment.allCases) { segment in
-                    Text(segment.rawValue).tag(segment)
+            HStack(spacing: 8) {
+                Picker("", selection: $historySegment) {
+                    ForEach(HistorySegment.allCases) { segment in
+                        Text(segment.rawValue).tag(segment)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 240)
+                .accessibilityLabel("what history shows")
+
+                Spacer(minLength: 8)
+
+                historySearchField
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 240)
             .padding(.horizontal, 24)
             .padding(.bottom, 10)
-            .accessibilityLabel("what history shows")
+
+            // there is no menu bar to hang a Find item on, so ⌘F is a button
+            // with nothing to look at.
+            Button("find in history") { searchFocused = true }
+                .keyboardShortcut("f", modifiers: .command)
+                .frame(width: 0, height: 0)
+                .opacity(0)
+                .accessibilityHidden(true)
 
             switch historySegment {
             case .dictations:
@@ -414,6 +499,33 @@ struct SettingsView: View {
         .padding(.top, 8)
     }
 
+    /// one field for two piles: each model owns its own query, so switching
+    /// segments leaves the other search where you left it.
+    @ViewBuilder private var historySearchField: some View {
+        switch historySegment {
+        case .dictations:
+            // "what you said" is dictation language on purpose — the other
+            // pile holds other people's words.
+            searchField("search what you said", text: $browser.query)
+        case .meetings:
+            searchField("search the meetings", text: $meetings.query)
+        }
+    }
+
+    private func searchField(
+        _ prompt: String,
+        text: Binding<String>
+    ) -> some View {
+        TextField("", text: text, prompt: Text(prompt))
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 220)
+            .focused($searchFocused)
+            // esc empties the field rather than leaving you to select and
+            // delete what you typed.
+            .onExitCommand { text.wrappedValue = "" }
+            .accessibilityLabel(prompt)
+    }
+
     private var dictationsFooter: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {
@@ -426,24 +538,30 @@ struct SettingsView: View {
 
                 Spacer(minLength: 8)
 
-                Text(
-                    browser.items.count == 1
-                        ? "1 kept"
-                        : "\(browser.items.count) kept"
-                )
-                .font(.caption)
-                .foregroundStyle(BrandUI.textSecondary)
+                // a count beside a failed read would be a number this pane
+                // cannot stand behind, so it offers the file instead.
+                if browser.failure == nil {
+                    Text(keptCount)
+                        .font(.caption)
+                        .foregroundStyle(BrandUI.textSecondary)
+                } else {
+                    Button("show in finder") {
+                        showInFinder(browser.archiveURL)
+                    }
+                }
 
                 Button("delete all") {
-                    archive.deleteEverything()
-                    browser.reload()
+                    pendingArchiveWipe = true
                 }
-                .disabled(browser.items.isEmpty)
+                // an archive the app could not read is not one it may erase.
+                .disabled(browser.items.isEmpty || browser.failure != nil)
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 12)
 
-            if let failure = archive.failure {
+            // the list above already says this; twice in one pane reads like
+            // two different problems.
+            if browser.failure == nil, let failure = archive.failure {
                 Text(failure)
                     .font(.caption)
                     .foregroundStyle(BrandUI.attention)
@@ -457,13 +575,9 @@ struct SettingsView: View {
     /// delete it, and the folder it lives in is the whole feature.
     private var meetingsFooter: some View {
         HStack(spacing: 12) {
-            Text(
-                meetings.items.count == 1
-                    ? "1 meeting"
-                    : "\(meetings.items.count) meetings"
-            )
-            .font(.caption)
-            .foregroundStyle(BrandUI.textSecondary)
+            Text(meetingsCount)
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
 
             Spacer(minLength: 8)
 
@@ -476,6 +590,24 @@ struct SettingsView: View {
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 12)
+    }
+
+    /// while a search is on the count says both numbers: what you are looking
+    /// at, and what `delete all` beside it would still take.
+    private var keptCount: String {
+        let kept = browser.items.count
+        if browser.isSearching {
+            return "\(browser.filtered.count) of \(kept) kept"
+        }
+        return kept == 1 ? "1 kept" : "\(kept) kept"
+    }
+
+    private var meetingsCount: String {
+        let all = meetings.items.count
+        if meetings.isSearching {
+            return "\(meetings.filtered.count) of \(all) meetings"
+        }
+        return all == 1 ? "1 meeting" : "\(all) meetings"
     }
 
     // MARK: - meetings
@@ -528,6 +660,15 @@ struct SettingsView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .textSelection(.enabled)
+
+                // the other thing the app cannot do for you: a folder that
+                // syncs uploads other people's words, and nothing here can
+                // stop it. saying so beats letting it happen quietly.
+                if AppSettings.syncsToICloud(settings.meetingsFolder) {
+                    Text("this folder syncs to icloud — meetings will leave the mac.")
+                        .font(.caption)
+                        .foregroundStyle(BrandUI.textSecondary)
+                }
             }
 
             Spacer(minLength: 8)
@@ -795,12 +936,14 @@ struct SettingsView: View {
 
     private var sampleLine: String {
         guard let timings, timings.sampleSize > 0 else {
-            return "no verified pastes measured yet — dictate something."
+            return "no delivered pastes measured yet — dictate something."
         }
-        return timings.sampleSize == 1
-            ? "measured over 1 verified paste on this mac."
-            : "measured over \(timings.sampleSize) verified pastes "
-                + "on this mac."
+        if timings.sampleSize == 1 {
+            return "measured over 1 delivered paste on this mac."
+        }
+        return """
+            measured over \(timings.sampleSize) delivered pastes on this mac.
+            """
     }
 
     private func milliseconds(_ duration: Duration?) -> String {
@@ -840,14 +983,33 @@ struct SettingsView: View {
     }
 }
 
+/// a decoded import, held between the panel closing and the answer to "add
+/// or replace?" — not one byte is written while this is set.
+private struct PendingImport {
+    let entries: [DictionaryEntry]
+    let existingCount: Int
+}
+
 private struct DictionaryEditor: View {
     @ObservedObject var store: DictionaryStore
+    @ObservedObject var settings: AppSettings
+    /// handed in, never re-read: the history pane already holds them.
+    let dictations: [Dictation]
 
     @State private var selection: Set<UUID> = []
     @State private var message: String?
+    @State private var pendingImport: PendingImport?
+    @State private var suggestions: [RecurringMishearings.Candidate] = []
+    @State private var drafts: [String: String] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            // nothing when there is nothing: an empty section above the
+            // table would be a row of chrome asking about no words.
+            if !suggestions.isEmpty {
+                suggestionSection
+            }
+
             Table(store.entries, selection: $selection) {
                 TableColumn("wrong") { entry in
                     DictionaryCellEditor(
@@ -941,6 +1103,129 @@ private struct DictionaryEditor: View {
                     .foregroundStyle(BrandUI.gold)
             }
         }
+        .alert(
+            "add these to your dictionary, or replace it?",
+            isPresented: Binding(
+                get: { pendingImport != nil },
+                set: { presented in
+                    if !presented {
+                        pendingImport = nil
+                    }
+                }
+            ),
+            presenting: pendingImport
+        ) { pending in
+            // ⏎ adds. the safe answer is the one your hands already have.
+            Button("add to mine") { addImport(pending) }
+                .keyboardShortcut(.defaultAction)
+            Button("replace", role: .destructive) {
+                replaceWithImport(pending)
+            }
+            Button("cancel", role: .cancel) {}
+        } message: { pending in
+            Text(
+                """
+                the file has \(words(pending.entries.count)). you’ve taught \
+                andrew \(words(pending.existingCount)).
+                """
+            )
+        }
+        // on appear only. this reads every kept dictation, and it is not a
+        // thing to do on a keystroke.
+        .onAppear(perform: refreshSuggestions)
+    }
+
+    /// It asks rather than asserts: the app genuinely cannot tell "swiggy"
+    /// (right) from "kunur" (wrong), and nothing here is added for you.
+    private var suggestionSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            BrandSectionHeader("did it get these right?")
+
+            Text("words you said more than once that andrew doesn’t know. teach it the ones it got wrong.")
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ForEach(suggestions) { candidate in
+                suggestionRow(candidate)
+            }
+        }
+        .padding(.bottom, 6)
+    }
+
+    private func suggestionRow(
+        _ candidate: RecurringMishearings.Candidate
+    ) -> some View {
+        HStack(spacing: 8) {
+            Text("heard “\(candidate.heard)”")
+                .font(BrandUI.machineFont(size: 12))
+                .foregroundStyle(BrandUI.goldPale)
+
+            Text("· \(candidate.count) times")
+                .font(.caption)
+                .foregroundStyle(BrandUI.textSecondary)
+
+            TextField(
+                "what you meant",
+                text: Binding(
+                    get: { draft(for: candidate) },
+                    set: { drafts[candidate.heard] = $0 }
+                )
+            )
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 150)
+            .onSubmit { teach(candidate) }
+
+            Button("save") { teach(candidate) }
+                .buttonStyle(.plain)
+                .foregroundStyle(BrandUI.gold)
+                .disabled(
+                    draft(for: candidate)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty
+                )
+
+            Button("not a mistake") { dismiss(candidate) }
+                .buttonStyle(.plain)
+                .foregroundStyle(BrandUI.textSecondary)
+
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 12))
+    }
+
+    /// a word you spelled out loud near it is the answer you already gave —
+    /// the field opens with it.
+    private func draft(
+        for candidate: RecurringMishearings.Candidate
+    ) -> String {
+        drafts[candidate.heard] ?? candidate.spelledOut ?? ""
+    }
+
+    private func teach(_ candidate: RecurringMishearings.Candidate) {
+        let right = draft(for: candidate)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !right.isEmpty,
+              store.add(wrong: candidate.heard, right: right) else {
+            return
+        }
+        drafts[candidate.heard] = nil
+        suggestions.removeAll { $0.heard == candidate.heard }
+    }
+
+    private func dismiss(_ candidate: RecurringMishearings.Candidate) {
+        settings.dismissSuggestion(candidate.heard)
+        suggestions.removeAll { $0.heard == candidate.heard }
+    }
+
+    private func refreshSuggestions() {
+        suggestions = RecurringMishearings.scan(
+            dictations,
+            dictionary: store.entries,
+            dismissed: settings.dismissedSuggestions,
+            isSuspect: { RecurringMishearings.isSuspect($0) },
+            now: Date()
+        )
     }
 
     private func importDictionary() {
@@ -956,7 +1241,10 @@ private struct DictionaryEditor: View {
             return
         }
 
-        guard store.importJSON(from: sourceURL) else {
+        // a second import must not wear the first one’s receipt.
+        message = nil
+
+        guard let imported = store.decodeEntries(from: sourceURL) else {
             // the store publishes the specific reason itself; this is only
             // the fallback for a failure it somehow didn’t record.
             message = store.lastFailure == nil
@@ -965,8 +1253,45 @@ private struct DictionaryEditor: View {
             return
         }
 
+        guard !store.entries.isEmpty else {
+            // nothing to lose, so nothing to ask.
+            guard store.replace(with: imported) else {
+                return
+            }
+            selection.removeAll()
+            message = "added \(words(imported.count))."
+            return
+        }
+
+        // nothing is written until the alert is answered: "import" is the one
+        // word on this row that does not sound like "delete everything".
+        pendingImport = PendingImport(
+            entries: imported,
+            existingCount: store.entries.count
+        )
+    }
+
+    private func addImport(_ pending: PendingImport) {
+        guard let result = store.merge(pending.entries) else {
+            return
+        }
         selection.removeAll()
-        message = nil
+        message = "added \(words(result.added))."
+    }
+
+    private func replaceWithImport(_ pending: PendingImport) {
+        let lost = pending.existingCount
+        guard store.replace(with: pending.entries) else {
+            return
+        }
+        selection.removeAll()
+        message = "replaced \(words(lost)) with \(pending.entries.count)."
+    }
+
+    /// "added 1 word.", not "added 1 words." — the deadpan voice stops being
+    /// one the moment it reads like a log line.
+    private func words(_ count: Int) -> String {
+        count == 1 ? "1 word" : "\(count) words"
     }
 
     private func exportDictionary() {
@@ -995,7 +1320,9 @@ private struct DictionaryEditor: View {
 private struct DictionaryCellEditor: View {
     let value: String
     let prompt: String
-    let onCommit: (String) -> Void
+    /// false means the store refused the edit, and the cell has to say so by
+    /// going back to what is still on disk.
+    let onCommit: (String) -> Bool
 
     @State private var draft: String
     @FocusState private var isFocused: Bool
@@ -1003,7 +1330,7 @@ private struct DictionaryCellEditor: View {
     init(
         value: String,
         prompt: String,
-        onCommit: @escaping (String) -> Void
+        onCommit: @escaping (String) -> Bool
     ) {
         self.value = value
         self.prompt = prompt
@@ -1041,50 +1368,8 @@ private struct DictionaryCellEditor: View {
         guard draft != value else {
             return
         }
-        onCommit(draft)
-    }
-}
-
-@MainActor
-private final class LoginItemController: ObservableObject {
-    @Published private(set) var isEnabled = false
-    @Published private(set) var message: String?
-
-    init() {
-        refresh()
-    }
-
-    func refresh() {
-        switch SMAppService.mainApp.status {
-        case .enabled:
-            isEnabled = true
-            message = nil
-        case .requiresApproval:
-            isEnabled = true
-            message = "approval is required in system settings"
-        case .notFound:
-            isEnabled = false
-            message = "launch at login is unavailable"
-        case .notRegistered:
-            isEnabled = false
-            message = nil
-        @unknown default:
-            isEnabled = false
-            message = nil
-        }
-    }
-
-    func setEnabled(_ enabled: Bool) {
-        do {
-            if enabled {
-                try SMAppService.mainApp.register()
-            } else {
-                try SMAppService.mainApp.unregister()
-            }
-            refresh()
-        } catch {
-            refresh()
-            message = "couldn’t update launch at login"
+        if !onCommit(draft) {
+            draft = value
         }
     }
 }

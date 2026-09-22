@@ -3,7 +3,7 @@ import Foundation
 struct URLParser: TranscriptTransform {
     private static let recognizedTopLevelDomains: Set<String> = [
         "ai", "app", "co", "com", "dev", "edu", "gov", "info", "io",
-        "ly", "me", "net", "org", "tech", "uk",
+        "ly", "me", "net", "org", "so", "tech", "uk",
     ]
 
     private let expression = CleanupRegex.compile(

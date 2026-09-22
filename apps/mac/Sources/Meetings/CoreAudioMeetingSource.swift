@@ -41,6 +41,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     private var continuation: AsyncStream<MeetingAudioChunk>.Continuation?
     private var assembler: ChunkAssembler?
     private var framesDelivered: Int64 = 0
+    private var lastDelivery: ContinuousClock.Instant?
     private var player: AVAudioPlayer?
 
     init() {}
@@ -63,6 +64,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             self.targets = targets
             self.continuation = continuation
             self.framesDelivered = 0
+            self.lastDelivery = ContinuousClock.now
         }
         try build()
         playProbeTone()
@@ -72,8 +74,47 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     func rebuild() async throws {
         teardown()
         try build()
+        skipTheTimeNothingWasDelivered()
         // The tone again: a rebuilt tap must prove itself like a new one.
         playProbeTone()
+    }
+
+    /// A chunk's `at` is a frame count, and frames only exist while the tap
+    /// is calling back — so a rebuild after a sleep would stamp the next
+    /// chunk as if the lost hour never happened, and the gap the session
+    /// records would be zero seconds long. Advancing the counter over the
+    /// outage keeps the whole meeting on one clock. Small outages are the
+    /// teardown itself and are left alone.
+    private func skipTheTimeNothingWasDelivered() {
+        lock.withLock {
+            guard let last = lastDelivery else { return }
+            let now = ContinuousClock.now
+            let outage = now - last
+            guard outage > .seconds(1) else { return }
+            framesDelivered += Int64(outage.totalSeconds * MeetingAudioChunk.sampleRate)
+            lastDelivery = now
+        }
+    }
+
+    /// Ask the HAL whether any of the tapped processes is putting audio out.
+    /// Our own bundle is deliberately left out of the question: this app is
+    /// in `targets` only so the tap can hear its own probe tone.
+    ///
+    /// `nil` when nothing translates — a helper process (WebKit.GPU, a
+    /// chrome helper) does the playing for some apps, and an answer we
+    /// cannot get must not be read as "no".
+    func tappedAppIsPlaying() -> Bool? {
+        let mine = Bundle.main.bundleIdentifier
+        let others = lock.withLock { targets }.filter { $0 != mine }
+        var asked = false
+        for bundleID in others {
+            guard let process = CoreAudioProperties.processObject(for: bundleID),
+                  let playing = CoreAudioProperties.isRunningOutput(process)
+            else { continue }
+            asked = true
+            if playing { return true }
+        }
+        return asked ? false : nil
     }
 
     func stop() async {
@@ -264,6 +305,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             let at = lock.withLock { () -> Duration in
                 let at = Duration.seconds(Double(framesDelivered) / MeetingAudioChunk.sampleRate)
                 framesDelivered += Int64(them.count)
+                lastDelivery = ContinuousClock.now
                 return at
             }
             continuation.yield(MeetingAudioChunk(you: you, them: them, at: at))
@@ -382,6 +424,43 @@ private enum CoreAudioProperties {
         var size = UInt32(MemoryLayout<Float64>.size)
         let status = AudioObjectGetPropertyData(device, &address, 0, nil, &size, &rate)
         return status == noErr ? rate : 0
+    }
+
+    /// The HAL's object for a running process, by bundle id. Nothing is
+    /// running under that id → no object. there is no bundle-id lookup in
+    /// the HAL: walk its process list and read each object's bundle id.
+    static func processObject(for bundleID: String) -> AudioObjectID? {
+        var address = address(kAudioHardwarePropertyProcessObjectList)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size
+        ) == noErr, size > 0 else { return nil }
+        var objects = [AudioObjectID](
+            repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &objects
+        ) == noErr else { return nil }
+        return objects.first { processBundleID($0) == bundleID }
+    }
+
+    private static func processBundleID(_ process: AudioObjectID) -> String? {
+        var address = address(kAudioProcessPropertyBundleID)
+        var value: CFString? = nil
+        var size = UInt32(MemoryLayout<CFString?>.size)
+        let status = withUnsafeMutablePointer(to: &value) {
+            AudioObjectGetPropertyData(process, &address, 0, nil, &size, $0)
+        }
+        guard status == noErr, let value else { return nil }
+        return value as String
+    }
+
+    static func isRunningOutput(_ process: AudioObjectID) -> Bool? {
+        var address = address(kAudioProcessPropertyIsRunningOutput)
+        var value = UInt32(0)
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioObjectGetPropertyData(process, &address, 0, nil, &size, &value)
+        guard status == noErr else { return nil }
+        return value != 0
     }
 
     static func inputChannels(_ device: AudioObjectID) -> [Int] {

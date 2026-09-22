@@ -10,6 +10,19 @@ enum OnboardingRowStatus: Equatable, Sendable {
     case ready
 }
 
+/// What the last card can honestly claim right now. The card used to say
+/// "done ✓" over a denied permission, which is SPEC §4's forbidden shape — a
+/// failure wearing a success's face — one screen earlier than the rule was
+/// written for.
+enum OnboardingVerdict: Equatable, Sendable {
+    /// every row of every chosen job is ready
+    case ready
+    /// macos said yes to everything; a model is still coming down
+    case downloading
+    /// something is missing — nothing here is done
+    case incomplete
+}
+
 enum OnboardingCompletion: Equatable, Sendable {
     case pending
     case finished
@@ -21,9 +34,13 @@ enum OnboardingCompletion: Equatable, Sendable {
 /// `record a meeting` by someone who unticked meetings the first time: the
 /// job rows are gone, because the choice was already made by pressing record
 /// (ADR 0040, SPEC §5).
+/// `permissionsOnly` is the upgrade-day reentry: macOS dropped a grant from
+/// an install that has been working for weeks, so setup owes them one screen
+/// about the one switch — not the welcome, the job ticks and a price tag.
 enum OnboardingScope: Equatable, Sendable {
     case everything
     case meetingsOnly
+    case permissionsOnly
 }
 
 /// Which jobs this run of setup is for. Two jobs share one mic and one
@@ -40,6 +57,10 @@ struct OnboardingJobs: Equatable, Sendable {
     var scope: OnboardingScope = .everything
     var dictation = true
     var meetings = true
+    /// The app `record a meeting ▸ zoom` named, once its model has landed —
+    /// nil while the download runs, so the button never promises a click it
+    /// cannot keep.
+    var meetingApp: String?
 
     var anySelected: Bool {
         dictation || meetings
@@ -82,19 +103,27 @@ struct OnboardingState: Equatable, Sendable {
     private(set) var systemAudioStatus: OnboardingRowStatus = .pending
     private(set) var meetingModelStatus: OnboardingRowStatus = .pending
     private(set) var whileYouWaitVisible = false
+    private(set) var meetingErrandApp: String?
     private(set) var completion: OnboardingCompletion = .pending
 
+    /// Dictation is what the app is for, so it opens ticked. Meetings are
+    /// offered, not assumed: the row was decided when it cost ~650 mb, and
+    /// whisper large-v3 turned that into 2.9 gb — six times what dictation
+    /// costs, quoted on the only button of the first screen to someone who
+    /// came to hold a key and talk. The row keeps its price where it is; one
+    /// click restores the old behaviour byte for byte.
     init(scope: OnboardingScope = .everything) {
         self.scope = scope
         dictationSelected = scope != .meetingsOnly
-        meetingsSelected = true
+        meetingsSelected = scope == .meetingsOnly
     }
 
     var jobs: OnboardingJobs {
         OnboardingJobs(
             scope: scope,
             dictation: dictationSelected,
-            meetings: meetingsSelected
+            meetings: meetingsSelected,
+            meetingApp: meetingModelStatus == .ready ? meetingErrandApp : nil
         )
     }
 
@@ -102,28 +131,47 @@ struct OnboardingState: Equatable, Sendable {
     /// with nothing on it is not a finished setup — it is an unanswered
     /// question, and finishing on it would claim the app was ready to do
     /// something nobody asked it to do.
-    var autoFinishArmed: Bool {
+    ///
+    /// A permission is the only kind of missing row that means *nothing is
+    /// done*: a model still coming down is a wait, and closing the window
+    /// does not stop it.
+    var verdict: OnboardingVerdict {
         guard completion == .pending, dictationSelected || meetingsSelected
         else {
-            return false
+            return .incomplete
         }
+        var modelPending = false
         if dictationSelected {
             guard microphoneStatus == .ready,
-                  accessibilityStatus == .ready,
-                  modelStatus == .ready
+                  accessibilityStatus == .ready
             else {
-                return false
+                return .incomplete
             }
+            modelPending = modelPending || modelStatus != .ready
         }
         if meetingsSelected {
             guard microphoneStatus == .ready,
-                  systemAudioStatus == .ready,
-                  meetingModelStatus == .ready
+                  systemAudioStatus == .ready
             else {
-                return false
+                return .incomplete
             }
+            modelPending = modelPending || meetingModelStatus != .ready
         }
-        return true
+        return modelPending ? .downloading : .ready
+    }
+
+    var autoFinishArmed: Bool {
+        verdict == .ready
+    }
+
+    /// The models live in FluidAudio's shared folder, not this app's, so one
+    /// user watches ~460 mb arrive and the next finds it already there. The
+    /// row ends gold either way; the sentence is the only thing that knows
+    /// which of the two just happened.
+    static func modelReadyCaption(wasOnDisk: Bool) -> String {
+        wasOnDisk
+            ? "already on this mac. nothing to download."
+            : "downloaded. it stays on this mac."
     }
 
     /// The ticks are a question asked once. After consent the downloads have
@@ -195,6 +243,10 @@ struct OnboardingState: Equatable, Sendable {
         _ status: OnboardingRowStatus
     ) {
         systemAudioStatus = status
+    }
+
+    mutating func updateMeetingErrand(app: String?) {
+        meetingErrandApp = app
     }
 
     mutating func updateMeetingModelStatus(

@@ -12,23 +12,6 @@ final class HUDPanel: NSPanel {
         false
     }
 
-    /// experiment: claim to be key (never actually made key, so the
-    /// keyboard stays with the app being dictated into) to see whether
-    /// the glass draws active.
-    private var claimsKey = false
-
-    override var isKeyWindow: Bool {
-        claimsKey || super.isKeyWindow
-    }
-
-    override var isMainWindow: Bool {
-        claimsKey || super.isMainWindow
-    }
-
-    override var canBecomeMain: Bool {
-        false
-    }
-
     init(viewModel: HUDViewModel) {
         super.init(
             contentRect: .zero,
@@ -47,37 +30,6 @@ final class HUDPanel: NSPanel {
         ignoresMouseEvents = true
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
-
-        // development only: the panel draws glass differently from an
-        // ordinary window, and this is how the difference is hunted.
-        // `defaults write <bundle> hudPanelExperiment <aqua|titled|opaque|tinted>`
-        if Capabilities.current.hasLampLab,
-           let experiment = UserDefaults.standard.string(
-               forKey: "hudPanelExperiment"
-           ) {
-            switch experiment {
-            case "aqua":
-                appearance = NSAppearance(named: .aqua)
-            case "titled":
-                styleMask = [
-                    .titled, .fullSizeContentView, .nonactivatingPanel,
-                ]
-                titleVisibility = .hidden
-                titlebarAppearsTransparent = true
-                standardWindowButton(.closeButton)?.isHidden = true
-                standardWindowButton(.miniaturizeButton)?.isHidden = true
-                standardWindowButton(.zoomButton)?.isHidden = true
-            case "opaque":
-                isOpaque = true
-                backgroundColor = .black
-            case "tinted":
-                backgroundColor = NSColor(white: 0, alpha: 0.01)
-            case "key":
-                claimsKey = true
-            default:
-                break
-            }
-        }
 
         let hostingView = NSHostingView(
             rootView: HUDView(viewModel: viewModel)
@@ -105,14 +57,16 @@ final class HUDPanel: NSPanel {
     func dismiss(fast: Bool = false) {
         visibilityGeneration &+= 1
         let generation = visibilityGeneration
-        guard fast, isVisible else {
+        guard isVisible else {
             alphaValue = 1
             orderOut(nil)
             return
         }
 
+        // every pill leaves the way it arrived. the old non-fast path cut to
+        // nothing between two frames, which read as the message being eaten.
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.12
+            context.duration = fast ? 0.12 : 0.16
             context.timingFunction = CAMediaTimingFunction(
                 name: .easeOut
             )

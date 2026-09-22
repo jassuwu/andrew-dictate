@@ -1,16 +1,22 @@
 import XCTest
 
 final class OnboardingStateTests: XCTestCase {
-    /// Both jobs are ticked out of the box, so a test about the dictation
-    /// half has to say so — otherwise it is testing both.
+    /// Dictation alone is the shipped default, so this is a bare state.
     private func dictationOnly() -> OnboardingState {
+        OnboardingState()
+    }
+
+    /// Meetings are offered, not assumed: a test about them has to tick the
+    /// row the way a user would.
+    private func bothJobs() -> OnboardingState {
         var state = OnboardingState()
-        XCTAssertTrue(state.setMeetingsSelected(false))
+        XCTAssertTrue(state.setMeetingsSelected(true))
         return state
     }
 
     private func meetingsOnlyByChoice() -> OnboardingState {
         var state = OnboardingState()
+        XCTAssertTrue(state.setMeetingsSelected(true))
         XCTAssertTrue(state.setDictationSelected(false))
         return state
     }
@@ -35,19 +41,33 @@ final class OnboardingStateTests: XCTestCase {
         XCTAssertEqual(state.accessibilityStatus, .actionRequired)
     }
 
-    // MARK: - both jobs are the default
+    // MARK: - dictation is the default; meetings are offered
 
-    func testBothJobsAreOnUntilSomebodySaysOtherwise() {
+    func testOnlyDictationIsOnUntilYouAskForMeetings() {
         let state = OnboardingState()
 
         XCTAssertEqual(state.scope, .everything)
+        XCTAssertTrue(state.dictationSelected)
+        XCTAssertFalse(state.meetingsSelected)
+        XCTAssertEqual(state.jobs.downloadSize, "~460 mb")
+        XCTAssertEqual(
+            state.jobs.permissions,
+            ["microphone", "accessibility"]
+        )
+    }
+
+    func testTickingMeetingsRestoresTheOldDefaultByteForByte() {
+        var state = OnboardingState()
+
+        XCTAssertTrue(state.setMeetingsSelected(true))
+
         XCTAssertTrue(state.dictationSelected)
         XCTAssertTrue(state.meetingsSelected)
         XCTAssertEqual(state.jobs.downloadSize, "~3.3 gb")
     }
 
     func testBothJobsNeedAllFiveRows() {
-        var state = OnboardingState()
+        var state = bothJobs()
         _ = state.consentToSetup()
         state.updateMicrophoneStatus(.ready)
         state.updateAccessibility(granted: true)
@@ -78,7 +98,7 @@ final class OnboardingStateTests: XCTestCase {
         ]
 
         for (name, drop) in drops {
-            var state = OnboardingState()
+            var state = bothJobs()
             state.updateMicrophoneStatus(.ready)
             state.updateAccessibility(granted: true)
             state.updateModelStatus(.ready)
@@ -150,7 +170,7 @@ final class OnboardingStateTests: XCTestCase {
     func testNoJobSelectedIsNeverArmed() {
         var state = OnboardingState()
         XCTAssertTrue(state.setDictationSelected(false))
-        XCTAssertTrue(state.setMeetingsSelected(false))
+        XCTAssertFalse(state.meetingsSelected)
 
         state.updateMicrophoneStatus(.ready)
         state.updateAccessibility(granted: true)
@@ -167,7 +187,6 @@ final class OnboardingStateTests: XCTestCase {
 
     func testTicksAreRefusedOnceSetupHasStarted() {
         var state = OnboardingState()
-        XCTAssertTrue(state.setMeetingsSelected(false))
         XCTAssertTrue(state.consentToSetup())
 
         XCTAssertFalse(state.setMeetingsSelected(true))
@@ -186,6 +205,51 @@ final class OnboardingStateTests: XCTestCase {
         XCTAssertFalse(state.setMeetingsSelected(false))
         XCTAssertFalse(state.dictationSelected)
         XCTAssertTrue(state.meetingsSelected)
+    }
+
+    /// The errand only reaches the button once its model is on disk.
+    func testTheErrandIsOnlyOfferedOnceTheMeetingModelIsReady() {
+        var state = OnboardingState(scope: .meetingsOnly)
+        state.updateMeetingErrand(app: "zoom")
+
+        XCTAssertNil(state.jobs.meetingApp)
+
+        state.updateMeetingModelStatus(.ready)
+        XCTAssertEqual(state.jobs.meetingApp, "zoom")
+
+        state.updateMeetingErrand(app: nil)
+        XCTAssertNil(state.jobs.meetingApp)
+    }
+
+    // MARK: - a lost grant is one screen
+
+    /// The upgrade-day reentry asks for the two grants dictation needs and
+    /// nothing else: no jobs to pick, no meeting model, no price.
+    func testPermissionsOnlyAsksForTheTwoGrantsAndRefusesTheTicks() {
+        var state = OnboardingState(scope: .permissionsOnly)
+
+        XCTAssertTrue(state.dictationSelected)
+        XCTAssertFalse(state.meetingsSelected)
+        XCTAssertEqual(
+            state.jobs.permissions,
+            ["microphone", "accessibility"]
+        )
+
+        XCTAssertFalse(state.setMeetingsSelected(true))
+        XCTAssertFalse(state.setDictationSelected(false))
+        XCTAssertTrue(state.dictationSelected)
+        XCTAssertFalse(state.meetingsSelected)
+    }
+
+    /// Consent is given for that scope on arrival, which is what turns the
+    /// missing row into "open settings" instead of a dead "allow".
+    func testPermissionsOnlyConsentDemandsTheMissingSwitch() {
+        var state = OnboardingState(scope: .permissionsOnly)
+
+        XCTAssertTrue(state.consentToSetup())
+        state.updateAccessibility(granted: false)
+
+        XCTAssertEqual(state.accessibilityStatus, .actionRequired)
     }
 
     func testMeetingsOnlyConsentDoesNotDemandAccessibility() {
@@ -279,6 +343,82 @@ final class OnboardingStateTests: XCTestCase {
         XCTAssertTrue(state.consentToSetup())
         XCTAssertFalse(state.whileYouWaitVisible)
         XCTAssertTrue(state.autoFinishArmed)
+    }
+
+    // MARK: - what the last card may claim
+
+    func testEveryRowReadyIsTheOnlyReadyVerdict() {
+        var state = bothJobs()
+        _ = state.consentToSetup()
+        state.updateMicrophoneStatus(.ready)
+        state.updateAccessibility(granted: true)
+        state.updateModelStatus(.ready)
+        state.updateSystemAudioStatus(.ready)
+        state.updateMeetingModelStatus(.ready)
+
+        XCTAssertEqual(state.verdict, .ready)
+        XCTAssertTrue(state.autoFinishArmed)
+    }
+
+    /// Grants in, bytes still arriving: a wait, not a failure. Closing the
+    /// window does not stop the download, so the card may say so.
+    func testGrantsInWithAModelComingDownIsADownloadingVerdict() {
+        var state = dictationOnly()
+        _ = state.consentToSetup()
+        state.updateMicrophoneStatus(.ready)
+        state.updateAccessibility(granted: true)
+        state.updateModelStatus(.pending)
+
+        XCTAssertEqual(state.verdict, .downloading)
+        XCTAssertFalse(state.autoFinishArmed)
+
+        state.updateModelStatus(.ready)
+        XCTAssertEqual(state.verdict, .ready)
+    }
+
+    func testTheMeetingModelEarnsTheSameDownloadingVerdict() {
+        var state = meetingsOnlyByChoice()
+        _ = state.consentToSetup()
+        state.updateMicrophoneStatus(.ready)
+        state.updateSystemAudioStatus(.ready)
+        state.updateMeetingModelStatus(.inProgress)
+
+        XCTAssertEqual(state.verdict, .downloading)
+    }
+
+    /// A missing permission is the one that means nothing is done — for
+    /// either job, and even with every model already on disk.
+    func testAMissingPermissionIsAlwaysIncomplete() {
+        var dictation = dictationOnly()
+        _ = dictation.consentToSetup()
+        dictation.updateMicrophoneStatus(.ready)
+        dictation.updateAccessibility(granted: false)
+        dictation.updateModelStatus(.ready)
+        XCTAssertEqual(dictation.verdict, .incomplete)
+
+        var meetings = meetingsOnlyByChoice()
+        _ = meetings.consentToSetup()
+        meetings.updateMicrophoneStatus(.ready)
+        meetings.updateSystemAudioStatus(.actionRequired)
+        meetings.updateMeetingModelStatus(.ready)
+        XCTAssertEqual(meetings.verdict, .incomplete)
+
+        var both = bothJobs()
+        _ = both.consentToSetup()
+        both.updateMicrophoneStatus(.actionRequired)
+        both.updateAccessibility(granted: true)
+        both.updateModelStatus(.ready)
+        both.updateSystemAudioStatus(.ready)
+        both.updateMeetingModelStatus(.ready)
+        XCTAssertEqual(both.verdict, .incomplete)
+    }
+
+    func testNoJobSelectedCanNeverBeReady() {
+        var state = OnboardingState()
+        XCTAssertTrue(state.setDictationSelected(false))
+        state.updateMicrophoneStatus(.ready)
+
+        XCTAssertEqual(state.verdict, .incomplete)
     }
 
     /// The meeting model is a download too, so it earns the panel on its own.

@@ -56,6 +56,20 @@ final class HotkeyMonitor {
         perform(detector.reset())
     }
 
+    /// a global monitor added while the app was untrusted never starts
+    /// hearing keys, so granting accessibility has to build new ones or fn
+    /// stays dead until the next launch. `binding` and `isDetectionOnly` are
+    /// deliberately untouched: a custom key and onboarding's detection-only
+    /// mode outlive the swap.
+    func reinstall() {
+        reset()
+        for monitor in monitors {
+            NSEvent.removeMonitor(monitor)
+        }
+        monitors.removeAll()
+        installMonitors()
+    }
+
     private func installMonitors() {
         if let monitor = NSEvent.addGlobalMonitorForEvents(
             matching: .flagsChanged,
@@ -135,7 +149,12 @@ final class HotkeyMonitor {
 
         let isEscape = event.keyCode == 53
         if isEscape, onEscape?() == true {
-            _ = detector.keyDown(isEscape: false)
+            // the coordinator already did the cancelling, so all that is
+            // left is clearing the detector. `keyDown(isEscape: false)`
+            // cannot do it: it deliberately no-ops while locked — that is
+            // what keeps ordinary typing from ending a locked capture — and
+            // would leave the next hold swallowed by a still-locked state.
+            _ = detector.reset()
             return
         }
         perform(detector.keyDown(isEscape: isEscape))

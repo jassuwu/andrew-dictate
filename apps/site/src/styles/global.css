@@ -83,13 +83,13 @@
   /* :has() keeps the trigger on the wordmark itself, not the whole row.
      hovering the ALPHA sticker should not give the joke away. */
   .name-row:has(.wordmark:hover) ~ .aside {
-    color: rgb(242 237 224 / 0.45);
+    color: rgb(242 237 224 / 0.55);
   }
 
   /* no hover on touch: show it quietly rather than making it unreachable */
   @media (hover: none) {
     .aside {
-      color: rgb(242 237 224 / 0.3);
+      color: rgb(242 237 224 / 0.55);
     }
   }
 

@@ -10,7 +10,14 @@ struct DictionarySubstitutions: TranscriptTransform {
 
     init(entries: [DictionaryEntry] = []) {
         substitutions = entries.compactMap { entry in
-            guard !entry.wrong.isEmpty else {
+            // both sides. an entry whose right side is empty compiles to an
+            // empty replacement template, and then the rule deletes the word
+            // from every dictation — the cleaner renders, it never removes
+            // (ADR 0020). rows already on disk are covered here too.
+            guard !entry.wrong.isEmpty,
+                  !entry.right
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .isEmpty else {
                 return nil
             }
 

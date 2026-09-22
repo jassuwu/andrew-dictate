@@ -62,6 +62,10 @@ struct TranscriptCorrection {
         )
     }
 
+    /// Whitespace only. Case and a trailing full stop have to survive here —
+    /// teaching "doctor" → "Dr." is legitimate — so a dictated correction is
+    /// kept honest one layer up, by the cleaner not capitalizing a word
+    /// spoken into our own field.
     func entry(
         from first: Int,
         through last: Int,

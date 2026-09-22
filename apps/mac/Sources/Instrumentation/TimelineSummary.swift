@@ -27,8 +27,9 @@ struct TimelineSummary: Equatable, Sendable {
     /// of the things that were not successes.
     let excluded: [UtteranceTimeline.CompletionStage: Int]
 
-    /// key-up → inserted. The headline: the span a user actually waits, and
-    /// the one SPEC §7 targets at ≤450ms.
+    /// key-up → the ⌘V keystroke reaching the target app; the clipboard
+    /// restore that follows is not in it. The headline: the span a user
+    /// actually waits, and the one SPEC §7 targets at ≤450ms.
     let keyUpToCompletion: Distribution?
 
     /// The stages that span decomposes into.
@@ -36,7 +37,7 @@ struct TimelineSummary: Equatable, Sendable {
     let cleanup: Distribution?
     let delivery: Distribution?
 
-    /// Only `pasteVerified` utterances count.
+    /// Only `delivered` utterances count.
     ///
     /// A cancelled utterance has no completion to measure to. One left on the
     /// pasteboard did not reach the cursor, so counting it would be claiming a
@@ -49,7 +50,7 @@ struct TimelineSummary: Equatable, Sendable {
         var excluded: [UtteranceTimeline.CompletionStage: Int] = [:]
 
         for timeline in timelines {
-            guard timeline.completionStage == .pasteVerified else {
+            guard timeline.completionStage == .delivered else {
                 excluded[timeline.completionStage, default: 0] += 1
                 continue
             }
@@ -100,7 +101,7 @@ extension TimelineSummary {
     func formatted() -> String {
         guard sampleSize > 0 else {
             return """
-                no verified pastes recorded yet — nothing to summarise.
+                no delivered pastes recorded yet — nothing to summarise.
                 \(conditionsLine)
                 """
         }
@@ -124,9 +125,12 @@ extension TimelineSummary {
     }
 
     private var conditionsLine: String {
+        // every stage but the counted one belongs here: a stage missing from
+        // this list would drop its count silently.
         let exclusions = [
             UtteranceTimeline.CompletionStage.cancelled,
             .leftOnPasteboard,
+            .leftOnPasteboardSecure,
         ].compactMap { stage -> String? in
             guard let count = excluded[stage], count > 0 else {
                 return nil
@@ -137,15 +141,16 @@ extension TimelineSummary {
         let tail = exclusions.isEmpty
             ? "nothing excluded"
             : "excluded: " + exclusions.joined(separator: ", ")
-        return "n=\(sampleSize) verified pastes · \(tail)"
+        return "n=\(sampleSize) delivered · \(tail)"
     }
 
     private static func name(
         of stage: UtteranceTimeline.CompletionStage
     ) -> String {
         switch stage {
-        case .pasteVerified: "verified"
+        case .delivered: "delivered"
         case .leftOnPasteboard: "left on pasteboard"
+        case .leftOnPasteboardSecure: "secure field"
         case .cancelled: "cancelled"
         }
     }

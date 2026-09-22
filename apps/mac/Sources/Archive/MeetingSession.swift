@@ -130,13 +130,16 @@ struct MeetingSession {
         silenceBegan = elapsed
     }
 
+    /// A recovered tap proves the tap is alive — it is our own probe tone it
+    /// heard — not that anyone in the room spoke. So it deliberately does not
+    /// touch the quiet clock: `heardAudio` and `keepGoing` are the only two
+    /// things that do, or the hour of silence could never come round.
     mutating func tapRecovered(at elapsed: Duration) {
         guard state == .rebuilding, let began = silenceBegan else {
             return
         }
         gaps.append(Gap(began: began, ended: elapsed))
         silenceBegan = nil
-        lastActivity = elapsed
         state = .recording
     }
 

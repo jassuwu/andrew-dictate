@@ -283,7 +283,7 @@ export const Video: React.FC = () => {
               letterSpacing: '0.12em', paddingLeft: '0.12em',
               opacity: 0.9 * interpolate(frame, [END_CARD + 70, END_CARD + 100], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }),
             }}>
-              github.com/jassuwu/andrew-dictate&ensp;·&ensp;made by jass — jass.gg
+              dictate.jass.gg&ensp;·&ensp;made by jass — jass.gg
             </div>
           </div>
         </AbsoluteFill>

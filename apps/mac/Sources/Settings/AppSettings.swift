@@ -117,7 +117,7 @@ final class AppSettings: ObservableObject {
     }
 
     /// the deterministic cleanup stage — spoken punctuation, emails,
-    /// numbers, capitalisation. off means raw parakeet words; only the
+    /// links, numbers, capitalisation. off means raw parakeet words; only the
     /// dictionary still applies, because a word you taught it is yours.
     @Published var cleanupEnabled: Bool {
         didSet {
@@ -125,6 +125,21 @@ final class AppSettings: ObservableObject {
                 return
             }
             userDefaults.set(cleanupEnabled, forKey: Self.cleanupEnabledKey)
+        }
+    }
+
+    /// words the suggestion list has been told are not mistakes. half of any
+    /// first list is spelled how it is spelled — "swiggy", "paneer" — so
+    /// "not a mistake" is one click and has to stick.
+    @Published private(set) var dismissedSuggestions: Set<String> {
+        didSet {
+            guard dismissedSuggestions != oldValue else {
+                return
+            }
+            userDefaults.set(
+                dismissedSuggestions.sorted(),
+                forKey: Self.dismissedSuggestionsKey
+            )
         }
     }
 
@@ -234,6 +249,8 @@ final class AppSettings: ObservableObject {
     private static let keepDictationsKey = "AndrewDictate.keepDictations"
     private static let engineVersionKey = "AndrewDictate.engineVersion"
     private static let cleanupEnabledKey = "AndrewDictate.cleanupEnabled"
+    private static let dismissedSuggestionsKey =
+        "AndrewDictate.dismissedSuggestions"
     private static let totalWordsDictatedKey =
         "AndrewDictate.totalWordsDictated"
     /// whether this mac set the app up for dictation at all. someone who
@@ -257,16 +274,60 @@ final class AppSettings: ObservableObject {
     private static let meetingHookLastRunLabelKey =
         "AndrewDictate.meetingHookLastRunLabel"
 
-    /// `~/Documents/andrew-dictate` — no spaces anywhere the app creates
-    /// a path, so a hook can be a one-line shell script (SPEC §11).
+    /// `~/andrew-dictate` — no spaces anywhere the app creates a path, so a
+    /// hook can be a one-line shell script (SPEC §11). deliberately not
+    /// inside ~/Documents or ~/Desktop: those are the two folders macOS
+    /// syncs to icloud on its own, and a meeting holds other people's words.
     static let defaultMeetingsFolder: URL = FileManager.default
+        .homeDirectoryForCurrentUser
+        .appendingPathComponent("andrew-dictate", isDirectory: true)
+
+    /// where the default used to point. an install that already wrote
+    /// transcripts there keeps it — a new default must not orphan them.
+    static let legacyMeetingsFolder: URL = FileManager.default
         .homeDirectoryForCurrentUser
         .appendingPathComponent("Documents", isDirectory: true)
         .appendingPathComponent("andrew-dictate", isDirectory: true)
 
+    /// the parent to write under when nobody has picked one: the old one if
+    /// it already holds a `meetings/` folder, the new default otherwise.
+    static func unpickedMeetingsFolder(
+        legacy: URL = AppSettings.legacyMeetingsFolder,
+        fallback: URL = AppSettings.defaultMeetingsFolder,
+        fileManager: FileManager = .default
+    ) -> URL {
+        var isDirectory: ObjCBool = false
+        let written = legacy
+            .appendingPathComponent("meetings", isDirectory: true)
+            .path(percentEncoded: false)
+        guard fileManager.fileExists(atPath: written, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            return fallback
+        }
+        return legacy
+    }
+
+    /// whether a folder is one icloud carries off the mac. ~/Documents
+    /// becomes a symlink into ~/Library/Mobile Documents once Desktop &
+    /// Documents sync is on, so the resolved path tells us even before
+    /// icloud has finished indexing a folder made a second ago. a courtesy,
+    /// not a guarantee: dropbox and google drive are invisible to it.
+    static func syncsToICloud(_ url: URL) -> Bool {
+        if url.resolvingSymlinksInPath()
+            .pathComponents
+            .contains("Mobile Documents") {
+            return true
+        }
+        return (try? url.resourceValues(forKeys: [.isUbiquitousItemKey]))?
+            .isUbiquitousItem == true
+    }
+
     private let userDefaults: UserDefaults
 
-    init(userDefaults: UserDefaults = .standard) {
+    init(
+        userDefaults: UserDefaults = .standard,
+        unpickedMeetingsFolder: URL = AppSettings.unpickedMeetingsFolder()
+    ) {
         self.userDefaults = userDefaults
         onboardingDismissed = userDefaults.bool(
             forKey: Self.onboardingDismissedKey
@@ -299,6 +360,9 @@ final class AppSettings: ObservableObject {
             0,
             userDefaults.integer(forKey: Self.totalWordsDictatedKey)
         )
+        dismissedSuggestions = Set(
+            userDefaults.stringArray(forKey: Self.dismissedSuggestionsKey) ?? []
+        )
 
         dictationWanted = userDefaults.object(forKey: Self.dictationWantedKey) == nil
             ? true
@@ -306,10 +370,10 @@ final class AppSettings: ObservableObject {
         meetingModel = userDefaults
             .string(forKey: Self.meetingModelKey)
             .flatMap(MeetingModel.init(rawValue:)) ?? .default
-        meetingsFolder = userDefaults
+        let pickedMeetingsFolder = userDefaults
             .string(forKey: Self.meetingsFolderKey)
             .map { URL(fileURLWithPath: $0, isDirectory: true) }
-            ?? Self.defaultMeetingsFolder
+        meetingsFolder = pickedMeetingsFolder ?? unpickedMeetingsFolder
         meetingHook = userDefaults
             .string(forKey: Self.meetingHookKey)
             .map { URL(fileURLWithPath: $0) }
@@ -317,6 +381,17 @@ final class AppSettings: ObservableObject {
             .object(forKey: Self.meetingHookLastRunAtKey) as? Date
         meetingHookLastRunLabel = userDefaults
             .string(forKey: Self.meetingHookLastRunLabelKey)
+
+        // an install from before the default left ~/Documents keeps the
+        // folder its transcripts are in — written down, so the choice
+        // outlives whatever the default becomes next.
+        if pickedMeetingsFolder == nil,
+           meetingsFolder != Self.defaultMeetingsFolder {
+            userDefaults.set(
+                meetingsFolder.path(percentEncoded: false),
+                forKey: Self.meetingsFolderKey
+            )
+        }
     }
 
     @discardableResult
@@ -327,6 +402,11 @@ final class AppSettings: ObservableObject {
 
         dictationHotkey = binding
         return true
+    }
+
+    /// "not a mistake", and it never comes back.
+    func dismissSuggestion(_ word: String) {
+        dismissedSuggestions.insert(word.lowercased())
     }
 
     func recordDictatedTranscript(_ transcript: String) {

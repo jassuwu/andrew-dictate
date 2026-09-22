@@ -91,4 +91,18 @@ final class PipelineRunTests: XCTestCase {
 
         XCTAssertTrue(results[1].changedAnything)
     }
+
+    /// the line settings prints under the conveyor is the marker table, not
+    /// a retyped copy of it: a marker that leaves the transform leaves the
+    /// screen with it.
+    func testTheMarkerLineNamesEveryMarkerTheCleanerListensFor() {
+        for marker in SpokenPunctuation.spokenMarkers {
+            XCTAssertTrue(
+                PipelineSample.spokenMarkerLine.contains(marker),
+                marker
+            )
+        }
+
+        XCTAssertTrue(PipelineSample.spokenMarkerLine.hasSuffix("."))
+    }
 }
