@@ -34,6 +34,11 @@ enum LampGround: String, CaseIterable, Identifiable {
     /// the same lit ribbon under clear glass, which lets more of the light
     /// through than regular
     case ribbonClear
+    /// the tube drawn by hand: translucent tan body, pale rim on top, shade
+    /// below, halo and smoke. no Liquid Glass, so it looks the same in the
+    /// panel as in the lab — Liquid Glass draws dimmed in a window that is
+    /// not key, and the panel never is (ADR 0042).
+    case painted
 
     var id: String { rawValue }
 
@@ -45,20 +50,21 @@ enum LampGround: String, CaseIterable, Identifiable {
         case .ribbon: "ribbon, tinted"
         case .ribbonLit: "ribbon, lit inside"
         case .ribbonClear: "clear, lit inside"
+        case .painted: "glass, drawn"
         }
     }
 
     /// what the lab shows and the live switch accepts: the ribbons. the
     /// line, smoke and sliver were the audition the ribbon won.
-    static let candidates: [LampGround] = [.ribbon, .ribbonLit, .ribbonClear]
+    static let candidates: [LampGround] = [.ribbon, .ribbonClear, .painted]
 
-    /// the one that ships: the tinted ribbon — regular glass, gold tint
-    /// riding the brightness, halo under it. picked live 2026-09-21.
-    static let shipped: LampGround = .ribbon
+    /// the one that ships: the drawn tube (2026-09-22). the tinted Liquid
+    /// Glass ribbon is the look it copies; it only has it in a key window.
+    static let shipped: LampGround = .painted
 
     var isRibbon: Bool {
         switch self {
-        case .ribbon, .ribbonLit, .ribbonClear:
+        case .ribbon, .ribbonLit, .ribbonClear, .painted:
             true
         case .bare, .smoke, .glass:
             false
@@ -76,6 +82,11 @@ enum LampGround: String, CaseIterable, Identifiable {
         case .ribbonLit, .ribbonClear: true
         default: false
         }
+    }
+
+    /// no glass effect at all: the canvas draws the tube
+    var drawsGlass: Bool {
+        self == .painted
     }
 
     var glass: Glass {
@@ -390,6 +401,7 @@ struct LampLine: View {
             ground: ground.isRibbon ? .smoke : ground,
             filament: !ground.isRibbon,
             innerLight: ground.litInside,
+            drawnGlass: ground.drawsGlass,
             lineWidth: ground.isRibbon
                 ? Self.ribbonLength
                 : HUDWaveMotion.lineWidth
@@ -400,7 +412,7 @@ struct LampLine: View {
             }
         }
         .overlay {
-            if ground.isRibbon {
+            if ground.isRibbon, !ground.drawsGlass {
                 ribbon
             }
         }
@@ -613,6 +625,8 @@ struct GoldRippleLine: View {
     /// with `filament` off: a bright fill in the ribbon's own width under
     /// the glass, plus a hotter core — the tube lit from inside
     var innerLight = false
+    /// with `filament` off: paint the glass tube itself
+    var drawnGlass = false
     var lineWidth: CGFloat = HUDWaveMotion.lineWidth
 
     @Environment(\.accessibilityReduceMotion)
@@ -759,6 +773,16 @@ struct GoldRippleLine: View {
                     )
                 }
 
+                if drawnGlass {
+                    drawGlassTube(
+                        in: &context,
+                        path: path,
+                        brightness: b,
+                        level: level,
+                        alpha: alpha
+                    )
+                }
+
                 if innerLight {
                     // the light under the glass: full ribbon width, gold
                     // going pale with brightness, a white-hot core when
@@ -792,7 +816,7 @@ struct GoldRippleLine: View {
                 }
             }
 
-            if isLocked, phase == .burn, filament {
+            if isLocked, phase == .burn, filament || drawnGlass {
                 drawLockDots(
                     in: &context,
                     cx: cx,
@@ -838,6 +862,15 @@ struct GoldRippleLine: View {
         if ground == .smoke {
             drawSmoke(in: &context, path: path, alpha: 1)
         }
+        if drawnGlass {
+            drawGlassTube(
+                in: &context,
+                path: path,
+                brightness: b,
+                level: level,
+                alpha: 1
+            )
+        }
         guard filament else {
             return
         }
@@ -858,6 +891,71 @@ struct GoldRippleLine: View {
                 half: lineWidth / 2,
                 brightness: b,
                 alpha: 1
+            )
+        }
+    }
+
+    /// the tube, by hand. what tinted Liquid Glass looks like in a key
+    /// window: a translucent tan body that takes the backdrop through it,
+    /// a pale rim along the top, a shade along the bottom, a faint outline
+    /// so it holds on white, and a soft core that comes up with the voice.
+    private func drawGlassTube(
+        in context: inout GraphicsContext,
+        path: Path,
+        brightness b: Double,
+        level: Double,
+        alpha: Double
+    ) {
+        let t = LampLine.ribbonThickness
+        let lit = min(max(b, 0), 1)
+        let tube = StrokeStyle(lineWidth: t, lineCap: .round, lineJoin: .round)
+        let tubeShape = path.strokedPath(tube)
+
+        // outline: barely there on black, the edge on white
+        context.stroke(
+            path,
+            with: .color(.black.opacity(0.14 * alpha)),
+            style: StrokeStyle(lineWidth: t + 1.4, lineCap: .round, lineJoin: .round)
+        )
+        // body: tan going pale as it lights
+        context.stroke(
+            path,
+            with: .color(color(goldMix(0.40 + 0.40 * lit), (0.42 + 0.28 * lit) * alpha)),
+            style: tube
+        )
+        // shade along the bottom, inside the tube
+        context.drawLayer { layer in
+            layer.clip(to: tubeShape)
+            layer.addFilter(.blur(radius: 1.0))
+            layer.stroke(
+                path.offsetBy(dx: 0, dy: t * 0.28),
+                with: .color(color(Self.deepRGB, 0.34 * alpha)),
+                style: StrokeStyle(lineWidth: t * 0.62, lineCap: .round, lineJoin: .round)
+            )
+        }
+        // rim along the top, and a thinner echo along the bottom
+        context.drawLayer { layer in
+            layer.clip(to: tubeShape)
+            layer.addFilter(.blur(radius: 0.45))
+            layer.stroke(
+                path.offsetBy(dx: 0, dy: -(t / 2 - 1.0)),
+                with: .color(color(Self.paleRGB, (0.50 + 0.40 * lit) * alpha)),
+                style: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round)
+            )
+            layer.stroke(
+                path.offsetBy(dx: 0, dy: t / 2 - 0.7),
+                with: .color(.white.opacity(0.16 * alpha)),
+                style: StrokeStyle(lineWidth: 0.8, lineCap: .round, lineJoin: .round)
+            )
+        }
+        // the core: the light inside, by the voice
+        context.drawLayer { layer in
+            layer.clip(to: tubeShape)
+            layer.addFilter(.blur(radius: 1.4))
+            layer.stroke(
+                path,
+                with: .color(color(Self.paleRGB, (0.10 + 0.55 * min(level, 1)) * lit * alpha)),
+                style: StrokeStyle(lineWidth: t * 0.5, lineCap: .round, lineJoin: .round)
             )
         }
     }

@@ -100,9 +100,9 @@ struct LampLabView: View {
             grid
             Text(
                 """
-                the HUD ships "clear, lit inside". the panel renders glass \
-                darker than this window: judge it there — dictate, or \
-                menu ▸ rehearse the lamp (dev)
+                the HUD ships "glass, drawn". Liquid Glass draws dimmed in \
+                a window that is not key, and the panel never is — the two \
+                glass rows only look like this while this window is active
                 """
             )
             .font(.caption)

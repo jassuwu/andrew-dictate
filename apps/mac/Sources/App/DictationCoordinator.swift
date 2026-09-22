@@ -314,6 +314,27 @@ final class DictationCoordinator: ObservableObject {
                 self?.openLampLab()
             }
         }
+        if Capabilities.current.hasLampLab {
+            // `defaults write <bundle> hudRehearseNow -bool true` fires the
+            // rehearsal on demand; the state is logged so a no-show can be
+            // read instead of guessed at.
+            Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    let defaults = UserDefaults.standard
+                    let line = "\(Date()) state=\(self.state) onboarding=\(self.isOnboardingPresented)\n"
+                    if let h = FileHandle(forWritingAtPath: "/tmp/hud-state.txt") {
+                        h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); h.closeFile()
+                    } else {
+                        try? line.write(toFile: "/tmp/hud-state.txt", atomically: true, encoding: .utf8)
+                    }
+                    if defaults.bool(forKey: "hudRehearseNow") {
+                        defaults.removeObject(forKey: "hudRehearseNow")
+                        self.rehearseHUDForDevelopment()
+                    }
+                }
+            }
+        }
         if Capabilities.current.hasLampLab,
            UserDefaults.standard.bool(forKey: "hudRehearsalAtLaunch") {
             Task { @MainActor [weak self] in
