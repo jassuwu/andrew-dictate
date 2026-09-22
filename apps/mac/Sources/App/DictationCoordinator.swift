@@ -317,8 +317,17 @@ final class DictationCoordinator: ObservableObject {
         if Capabilities.current.hasLampLab,
            UserDefaults.standard.bool(forKey: "hudRehearsalAtLaunch") {
             Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(4))
-                self?.rehearseHUDForDevelopment()
+                // wait for the engine to be idle: prewarming can outlast
+                // any fixed delay on a cold launch
+                for _ in 0..<60 {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    guard let self else { return }
+                    if self.state == .idle, !self.isOnboardingPresented {
+                        try? await Task.sleep(for: .seconds(1))
+                        self.rehearseHUDForDevelopment()
+                        return
+                    }
+                }
             }
         }
     }
@@ -1824,6 +1833,10 @@ enum HUDHierarchyDump {
         "inputRingShadowOpacity": 0.06,
         "inputSDRGradientDistance0": 0.0,
         "inputSDRGradientDistance1": 0.0,
+        "inputKeyFillHighlightSpread": 1.308996938995747,
+        "inputKeyFillHighlightSpreadSDR": 1.308996938995747,
+        "inputKeyFillHighlightAmount": 0.4,
+        "inputKeyFillHighlightColorBias": -0.25,
     ]
 
     /// dev only: `hudPanelExperiment` = inwindow | active. re-applied on
@@ -1886,6 +1899,13 @@ enum HUDHierarchyDump {
         if let layer = window.contentView?.layer { walk(layer) }
     }
 
+    private static func valueSize(_ value: NSValue) -> Int {
+        var size = 0
+        var align = 0
+        NSGetSizeAndAlignment(value.objCType, &size, &align)
+        return size
+    }
+
     static func write(window: NSWindow, to path: String) {
         var out: [String] = [
             "window \(NSStringFromClass(type(of: window))) isKey=\(window.isKeyWindow) isMain=\(window.isMainWindow) appActive=\(NSApp.isActive)"
@@ -1902,10 +1922,14 @@ enum HUDHierarchyDump {
                 if let keys = f.value(forKey: "inputKeys") as? [String] {
                     for k in keys {
                         let v = f.value(forKey: k)
-                        if let nsdata = v as? NSData {
-                            let data = Data(referencing: nsdata)
-                            let floats = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+                        if let value = v as? NSValue,
+                           valueSize(value) == 80 {
+                            // a CAColorMatrix: 20 floats, rows R G B A, columns r g b a bias
+                            var floats = [Float](repeating: 0, count: 20)
+                            floats.withUnsafeMutableBytes { value.getValue($0.baseAddress!, size: 80) }
                             props.append("   \(k)=floats\(floats.map { String(format: "%.4f", $0) })")
+                        } else if let v {
+                            props.append("   \(k)=\(type(of: v)) \(v)")
                         } else {
                             props.append("   \(k)=\(v.map { "\($0)" } ?? "nil")")
                         }
