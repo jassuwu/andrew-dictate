@@ -1,3 +1,13 @@
+## 0.9.4
+
+the lamp. the gold line at the bottom of the screen is now a glass tube: a translucent body that takes the window behind it, a pale rim, a shade, a halo that spills when you speak. it waves to your voice and lights up with it, and it holds over a white page as well as a black one — the old line vanished on a document. a locked recording pins it with a bead at each end.
+
+it is drawn by hand, not Liquid Glass, because Liquid Glass draws dimmed in any window that is not the key window, and the lamp's panel must never be key — it would take the keyboard from the app you are dictating into.
+
+the pill that carries an exceptional sentence sits on the same invisible stage as the tube, so the window no longer changes shape around it.
+
+the mic-toggle sound plays 8 db quieter. same switch, further from the ear.
+
 ## 0.9.3
 
 the polish release. a hundred small things a switcher would have tripped on in week one, most of them found by reading the code against the wispr flow bar and then fixed one commit at a time.
