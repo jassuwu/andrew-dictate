@@ -258,6 +258,37 @@ final class MeetingSpoolTests: XCTestCase {
         XCTAssertEqual(spool.orphans().map(\.handle), [handle])
     }
 
+    /// A spool with no audio has nothing to try. Home, it would sit in the
+    /// spool as a meeting just begun, and launch would build everything for
+    /// it every time.
+    func testAFolderWithNoAudioStaysSetAside() throws {
+        let handle = try spool.begin(manifest())
+        spool.setAside(handle)
+
+        XCTAssertEqual(spool.bringBackSetAside().count, 0)
+
+        XCTAssertEqual(spool.unreadableCount(), 1)
+        XCTAssertFalse(spool.mayHoldOrphans())
+    }
+
+    /// Nothing in the spool is written over to make room for what comes back.
+    func testARecordingWhoseNameIsTakenInTheSpoolStaysSetAside() throws {
+        let handle = try spool.begin(manifest())
+        try Data([7]).write(to: handle.audioURL)
+        spool.setAside(handle)
+        try FileManager.default.createDirectory(
+            at: handle.folder, withIntermediateDirectories: true)
+        try Data([8]).write(to: handle.audioURL)
+
+        XCTAssertEqual(spool.bringBackSetAside().count, 0)
+
+        XCTAssertEqual(spool.unreadableCount(), 1)
+        XCTAssertEqual(try Data(contentsOf: handle.audioURL), Data([8]))
+        XCTAssertEqual(
+            try Data(contentsOf: setAsideFolder(of: handle).appendingPathComponent("audio.caf")),
+            Data([7]))
+    }
+
     // MARK: -
 
     /// Where a set-aside spool's folder ends up.

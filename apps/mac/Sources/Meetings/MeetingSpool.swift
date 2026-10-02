@@ -157,6 +157,13 @@ struct MeetingSpool: Sendable {
             let aside = Handle(
                 folder: unreadableFolder.appendingPathComponent(name, isDirectory: true))
             let home = Handle(folder: root.appendingPathComponent(name, isDirectory: true))
+            // no audio is nothing to try, and a name taken in the spool is
+            // not ours to write over: either stays where it is.
+            guard fm.fileExists(atPath: aside.audioURL.path),
+                  !fm.fileExists(atPath: home.folder.path)
+            else {
+                continue
+            }
             var manifest = manifestToTry(in: aside)
             manifest.attempts = nil
             guard let cleared = try? Self.encoder.encode(manifest),
