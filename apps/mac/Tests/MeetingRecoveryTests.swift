@@ -97,6 +97,33 @@ final class MeetingRecoveryTests: XCTestCase {
         XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).count, 0)
     }
 
+    // MARK: - a model that is gone
+
+    /// The model that recorded the meeting was removed since. Any other
+    /// meeting model on this mac can read the audio, and the file says
+    /// which one did, so nobody reads whisper's words as parakeet's.
+    func testRecoveryUsesAnotherInstalledModelAndTheFileSaysWhichOne() async throws {
+        try await orphan("teams", started: started, model: .whisperLargeV3)
+        transcribers.installed = [.whisperLargeV3Turbo]
+        transcribers.transcriber.batchTurns = [
+            .init(speaker: .them(nil), at: .zero, text: "recovered words here")]
+        let c = coordinator()
+
+        c.recoverOrphans()
+        await awaitRecords(1)
+
+        XCTAssertEqual(transcribers.made, [.whisperLargeV3Turbo])
+        let file = try XCTUnwrap(MeetingTranscriptFile.listAll(in: docs).first)
+        XCTAssertTrue(file.recovered)
+        XCTAssertTrue(
+            try String(contentsOf: file.fileURL, encoding: .utf8)
+                .contains("engine: whisperLargeV3Turbo\n"))
+        XCTAssertEqual(records.map(\.outcome), [.saved])
+        XCTAssertEqual(records.first?.model, "whisperLargeV3Turbo")
+        XCTAssertEqual(spool.orphans().count, 0)
+        XCTAssertEqual(spool.unreadableCount(), 0)
+    }
+
     // MARK: - helpers
 
     /// A spool a crash left behind, with a second of audio on it.

@@ -960,8 +960,13 @@ final class MeetingCoordinator: ObservableObject {
         }
         let duration = Duration.seconds(
             Double(max(audio.you.count, audio.them.count)) / MeetingAudioChunk.sampleRate)
+        // the model that actually reads it, which the file and the record
+        // name: not always the one the manifest does.
+        var model = manifest.model
         do {
-            let transcriber = try await makeTranscriber(manifest.model)
+            let ready = try await transcriberForRecovery(preferring: manifest.model)
+            let transcriber = ready.transcriber
+            model = ready.model
             let turns = try await transcriber.transcribe(you: audio.you, them: audio.them)
             let reading = Reading(turns: turns, tally: await transcriber.decodeTally())
             // checked like any meeting, and not read again: this was the
@@ -977,7 +982,7 @@ final class MeetingCoordinator: ObservableObject {
                 handle: handle,
                 app: manifest.app,
                 started: manifest.started,
-                model: manifest.model,
+                model: model,
                 folder: prefs.folder,
                 keepAudio: prefs.keepAudio,
                 recovered: true)
@@ -1001,9 +1006,32 @@ final class MeetingCoordinator: ObservableObject {
             }
             keepMeetingRecord?(MeetingRecord(
                 setAside ? .setAside : .couldNotRecover, app: manifest.app,
-                model: manifest.model, startedAt: manifest.started,
+                model: model, startedAt: manifest.started,
                 duration: duration, recovered: true))
         }
+    }
+
+    /// The order a spool is read in when the model that recorded it is gone:
+    /// the one that translates, then the faster whisper, then parakeet,
+    /// which only knows english and the european languages.
+    private static let modelsToRecoverWith: [MeetingModel] = [
+        .whisperLargeV3, .whisperLargeV3Turbo, .parakeetV3,
+    ]
+
+    /// A transcriber for the model a spool was recorded with, or for another
+    /// meeting model that is on this mac when that one is not. Anything but
+    /// a model missing is the model's failure and is thrown.
+    private func transcriberForRecovery(
+        preferring model: MeetingModel
+    ) async throws -> (transcriber: any MeetingTranscriber, model: MeetingModel) {
+        for candidate in [model] + Self.modelsToRecoverWith.filter({ $0 != model }) {
+            do {
+                return (try await makeTranscriber(candidate), candidate)
+            } catch is MeetingModel.NotInstalled {
+                continue
+            }
+        }
+        throw MeetingModel.NotInstalled(model: model)
     }
 
     // MARK: -
