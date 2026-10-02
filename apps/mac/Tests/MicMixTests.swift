@@ -56,4 +56,13 @@ final class MicMixTests: XCTestCase {
         XCTAssertEqual(MicMix.micChannels(said: 1, carried: 2), 0)
         XCTAssertEqual(MicMix.micChannels(said: 4, carried: 4), 2)
     }
+
+    /// a rig with the mic alone, while the tap cannot be rebuilt, has no
+    /// tap channels after the mic's: every channel it carries is `you`,
+    /// and none of it is ever read as the far side.
+    func testWithNoTapEveryChannelIsTheMics() {
+        XCTAssertEqual(MicMix.micChannels(said: 1, carried: 1, tap: 0), 1)
+        XCTAssertEqual(MicMix.micChannels(said: 4, carried: 4, tap: 0), 4)
+        XCTAssertEqual(MicMix.micChannels(said: 4, carried: 2, tap: 0), 2)
+    }
 }

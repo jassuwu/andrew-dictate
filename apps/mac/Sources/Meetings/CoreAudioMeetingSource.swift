@@ -948,7 +948,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             // mic the meeting moved to. It is left to run out its time,
             // and the move is told as failed.
             guard let standby, standby.id == id,
-                  MicMix.micChannels(said: standby.micChannels, carried: layout) > 0
+                  MicMix.micChannels(
+                      said: standby.micChannels, carried: layout, tap: standby.tapChannels) > 0
             else { return (nil, nil, nil) }
             let old = live
             live = standby
@@ -967,7 +968,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             following.async { self.tookOver(takeover) }
         }
         guard let rig, let continuation else { return }
-        let micChannels = MicMix.micChannels(said: rig.micChannels, carried: layout)
+        let micChannels = MicMix.micChannels(
+            said: rig.micChannels, carried: layout, tap: rig.tapChannels)
         if rig.layout == nil {
             rig.layout = layout
             if micChannels < rig.micChannels {
@@ -1051,6 +1053,12 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
         var hasTap: Bool {
             tapID != nil
+        }
+
+        /// How many of its buffers' channels, after the mic's, are the
+        /// tap's: none for the mic alone.
+        var tapChannels: Int {
+            hasTap ? MicMix.tapChannels : 0
         }
 
         init(

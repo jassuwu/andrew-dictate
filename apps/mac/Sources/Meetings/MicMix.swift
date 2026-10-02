@@ -34,9 +34,10 @@ enum MicMix {
     /// How many of a buffer's channels, from the first, are the mic's: what
     /// the mic said it has, unless the buffer carried fewer. The tap's come
     /// last, so a short buffer is short of the mic's: what is missing is
-    /// missing from `you`, and the far side is never read as it.
-    static func micChannels(said: Int, carried: Int) -> Int {
-        min(said, max(0, carried - tapChannels))
+    /// missing from `you`, and the far side is never read as it. `tap` is
+    /// none for a rig with the mic alone.
+    static func micChannels(said: Int, carried: Int, tap: Int = tapChannels) -> Int {
+        min(said, max(0, carried - tap))
     }
 
     private static func rms(_ samples: [Float]) -> Float {
