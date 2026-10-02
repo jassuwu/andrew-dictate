@@ -80,6 +80,38 @@ final class MeetingStartModelTests: XCTestCase {
         XCTAssertEqual(defaultModel, .whisperLargeV3)
     }
 
+    /// The choice is for that meeting alone: `record a meeting` straight
+    /// after reads settings again.
+    func testTheNextMeetingIsHeardByTheDefaultAgain() async throws {
+        let c = coordinator()
+
+        c.start(model: .parakeetV3)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await waitFor { c.state == .recording }
+        c.stop()
+        await c.untilWrittenOut()
+
+        c.start()
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await waitFor { c.state == .recording }
+
+        XCTAssertEqual(asked.models, [.parakeetV3, .whisperLargeV3])
+        let manifest = try XCTUnwrap(spool.orphans().first?.manifest)
+        XCTAssertEqual(manifest.model, .whisperLargeV3)
+
+        c.stop()
+        await c.untilWrittenOut()
+
+        let files = MeetingTranscriptFile.listAll(in: docs).sorted { $0.started < $1.started }
+        XCTAssertEqual(files.count, 2)
+        let first = try String(contentsOf: files[0].fileURL, encoding: .utf8)
+        let second = try String(contentsOf: files[1].fileURL, encoding: .utf8)
+        XCTAssertTrue(first.contains("engine: parakeetV3\n"), first)
+        XCTAssertTrue(second.contains("engine: whisperLargeV3\n"), second)
+    }
+
     // MARK: - helpers
 
     private func loud(at: Duration) -> MeetingAudioChunk {
