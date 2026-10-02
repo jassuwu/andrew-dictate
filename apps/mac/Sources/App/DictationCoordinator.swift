@@ -2800,7 +2800,11 @@ extension DictationCoordinator {
         activeFeedbackGeneration = token
         questionShown = (
             token,
-            PillCountdown(lasts: question.lasts, startedAt: questionNow)
+            PillCountdown(
+                lasts: question.lasts,
+                startedAt: questionNow,
+                pointerAt: NSEvent.mouseLocation
+            )
         )
         showOnThePill(question)
         announce(question.text)
@@ -2931,15 +2935,14 @@ extension DictationCoordinator {
         }
     }
 
-    /// the countdown stops while the pointer is over the pill, so it never
-    /// leaves from under a hand on its way to the button.
+    /// the countdown stops once the pointer moves onto the pill, so it
+    /// never leaves from under a hand on its way to the button — for a
+    /// minute at most, and not for a pointer that was resting there when
+    /// the pill came up.
     private func pointerOverPill(_ over: Bool) {
         guard isQuestionUp, var shown = questionShown else { return }
-        if over {
-            shown.countdown.pause(at: questionNow)
-        } else {
-            shown.countdown.resume(at: questionNow)
-        }
+        shown.countdown.pointer(
+            isOver: over, at: NSEvent.mouseLocation, now: questionNow)
         questionShown = shown
         timeTheQuestion()
     }
@@ -2947,11 +2950,11 @@ extension DictationCoordinator {
     private func timeTheQuestion() {
         questionExpiry?.cancel()
         questionExpiry = nil
-        guard let shown = questionShown, !shown.countdown.isPaused else {
+        guard let shown = questionShown else {
             return
         }
         let token = shown.token
-        let remaining = shown.countdown.remaining(at: questionNow)
+        let remaining = shown.countdown.timeLeft(at: questionNow)
         questionExpiry = Task { @MainActor [weak self] in
             try? await Task.sleep(for: remaining)
             guard !Task.isCancelled,

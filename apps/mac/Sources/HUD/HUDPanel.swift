@@ -25,7 +25,7 @@ final class HUDPanel: NSPanel {
     private var pointerWatch: Timer?
     private var pointerIsOverPill = false
     /// told when the pointer goes over a pill with a button, and when it
-    /// leaves: its countdown stops while a hand is on it.
+    /// leaves: its countdown stops once a hand moves onto it.
     var onPointerOverPill: ((Bool) -> Void)?
     /// out of every screen capture (`HUDPresentation.hidesFromCapture`).
     private(set) var isHiddenFromCapture = false
