@@ -664,6 +664,7 @@ final class UtteranceMachine {
                     feedbackMessage(for: reason),
                     duration: 4
                 )
+                endPress(.leftOnPasteboard(reason))
             }
         } catch is CancellationError {
             return

@@ -142,6 +142,7 @@ final class UtteranceMachineTests: XCTestCase {
 
         XCTAssertEqual(pills, [Pill("copied — secure field · ⌘V to paste", 4)])
         XCTAssertEqual(completions, [.leftOnPasteboardSecure])
+        XCTAssertEqual(outcomes, [.leftOnPasteboard(.secureField)])
         XCTAssertEqual(archived, [])
         // the pill is the goodbye here, not the afterglow.
         XCTAssertEqual(m.state, .idle)
@@ -160,6 +161,7 @@ final class UtteranceMachineTests: XCTestCase {
 
         XCTAssertEqual(pills, [Pill("copied — focus changed · ⌘V to paste", 4)])
         XCTAssertEqual(completions, [.leftOnPasteboard])
+        XCTAssertEqual(outcomes, [.leftOnPasteboard(.focusChanged)])
         XCTAssertEqual(archived, [.init(heard: "ship it", inserted: "Ship it.")])
         XCTAssertTrue(events.contains(.dictated("Ship it.")))
         XCTAssertEqual(m.state, .idle)
@@ -177,6 +179,7 @@ final class UtteranceMachineTests: XCTestCase {
 
         XCTAssertEqual(pills, [Pill("the clipboard is busy — nothing was copied", 4)])
         XCTAssertFalse(events.contains(.dictated("Ship it.")))
+        XCTAssertEqual(outcomes, [.leftOnPasteboard(.pasteboardUnavailable)])
     }
 
     // MARK: - nothing to say
