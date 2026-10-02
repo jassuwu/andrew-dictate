@@ -193,6 +193,50 @@ final class UtteranceMachineHearingTests: XCTestCase {
         XCTAssertEqual(outcomes, [.noAudio])
     }
 
+    // MARK: - judged at key-up
+
+    /// a mic heard all along that sent only zeros sent no sound: the press
+    /// names it, keeps nothing for a retry, drops it, and pressing again
+    /// records again.
+    func testAnAllZeroTakeIsTheMicNotSilence() async {
+        let m = machine()
+        mic.samples = Array(repeating: 0, count: 16_000)
+
+        m.keyDown()
+        mic.hear()
+        await pass(.seconds(1))
+        m.keyUp()
+        await settle { !self.pills.isEmpty }
+
+        XCTAssertEqual(pills, [Pill("no sound from AirPods Pro", 2.4)])
+        XCTAssertEqual(engine.heard.count, 0)
+        XCTAssertEqual(retryOffers, [])
+        XCTAssertTrue(events.contains(.microphoneDropped))
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(states.last, .init(.idle, fast: true))
+        // nothing goes on to the page, so nothing says it is going.
+        XCTAssertEqual(chimes, [.start])
+        XCTAssertEqual(outcomes, [.noAudio])
+        XCTAssertEqual(presses.first?.samples, 16_000)
+        XCTAssertEqual(presses.first?.peak, 0)
+
+        // the pill is still up: the press records, it doesn't replay.
+        let fresh = CuedMic(clock: clock)
+        micForPress = fresh
+        engine.reply = .success("second try")
+        m.keyDown()
+        XCTAssertEqual(m.state, .recording)
+        XCTAssertEqual(fresh.starts, 1)
+        fresh.hear()
+        await pass(.seconds(1))
+        m.keyUp()
+        await settle { self.inserter.inserted.count == 1 }
+
+        XCTAssertEqual(inserter.inserted, ["Second try."])
+        XCTAssertEqual(engine.heard.count, 1)
+        XCTAssertEqual(outcomes, [.noAudio, .delivered])
+    }
+
     // MARK: - helpers
 
     private var presses: [PressRecord] {

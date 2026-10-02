@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 import OSLog
 
@@ -372,21 +373,27 @@ final class UtteranceMachine {
 
         audioLogger.error("the microphone sent nothing for a second; dropping it")
         cancelCapture()
-        endWithNoSound(from: capture.microphone)
+        endWithNoSound(from: press?.mic)
     }
 
     /// the mic answered and sent no sound. the pill names it, so you know
     /// which one to look at, and it is dropped, so the next press opens a
     /// fresh one. nothing is kept for a retry: there was nothing to hear,
     /// and pressing again records again.
-    private func endWithNoSound(from microphone: any MicCapture) {
+    private func endWithNoSound(from mic: MicDescription?) {
         setRecordingLocked(false)
         activeFocusAnchor = nil
         activeTimeline = nil
         emit(.microphoneDropped)
         setState(.idle, fastHUDDismiss: true)
-        flashFeedback(Self.noSound(from: microphone.deviceDescription))
+        flashFeedback(Self.noSound(from: mic))
         endPress(.noAudio)
+    }
+
+    /// a working mic hands back at least a hiss: a take of exact zeros is
+    /// the mic failing, not you being quiet.
+    private static func sentNoSound(_ samples: [Float]) -> Bool {
+        !samples.isEmpty && vDSP.maximumMagnitude(samples) == 0
     }
 
     /// the mic as it names itself, which is what you would look for in
@@ -646,6 +653,11 @@ final class UtteranceMachine {
             setState(.idle, fastHUDDismiss: true)
             flashFeedback("heard nothing")
             endPress(.heardNothing)
+            return
+        }
+        if press?.micChanged != true, Self.sentNoSound(samples) {
+            audioLogger.error("the microphone sent only silence; dropping it")
+            endWithNoSound(from: press?.mic)
             return
         }
         // taken now rather than at key-down: the window worth protecting
