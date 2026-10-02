@@ -254,7 +254,74 @@ final class MeetingCoverageTests: XCTestCase {
         XCTAssertEqual(records.first?.coverage?.result, .pass)
     }
 
+    // MARK: - what the spool says on its own
+
+    /// A minute of the far side talking on the spool, and a transcriber
+    /// that never heard any of it — fed nothing, it counted nothing and
+    /// wrote nothing. Only the spool can tell, and it does.
+    func testTheFarSideLoudInTheSpoolWithATranscriberThatWasNeverFedIsThin() async throws {
+        let live = FakeTranscriber()
+        live.tally = StretchTally()
+        transcribers.lineUp(live, FakeTranscriber())
+
+        try await meeting(seconds: 61)
+
+        let file = try XCTUnwrap(MeetingTranscriptFile.listAll(in: docs).first)
+        XCTAssertEqual(try frontMatter(of: file)["complete"], "false")
+        XCTAssertEqual(
+            try frontMatter(of: file)["reason"],
+            "the other side was heard and nothing of it was read")
+        XCTAssertEqual(records.map(\.outcome), [.savedThin])
+        XCTAssertEqual(records.first?.coverage?.farSideLoudS, 61)
+        XCTAssertEqual(try keptSpools(), 1)
+    }
+
+    // MARK: - recovery
+
+    /// A spool a crash left is read whole at the next launch, and that
+    /// reading is checked like any other. Thin, it is written once, not
+    /// whole and saying why, and its audio stays — it is not read a second
+    /// time, because it was already read from the spool.
+    func testARecoveredSpoolGoesThroughTheCheck() async throws {
+        try await orphan(seconds: 2)
+        let recovering = FakeTranscriber()
+        recovering.tally = StretchTally(
+            decodedThem: 900, speechThem: .seconds(3_600), readThem: .seconds(3_600))
+        transcribers.lineUp(recovering)
+
+        let c = coordinator()
+        c.recoverOrphans()
+        await waitFor { !records.isEmpty }
+        await c.untilWrittenOut()
+
+        let files = MeetingTranscriptFile.listAll(in: docs)
+        XCTAssertEqual(files.count, 1)
+        let file = try XCTUnwrap(files.first)
+        XCTAssertTrue(file.recovered)
+        XCTAssertEqual(try frontMatter(of: file)["complete"], "false")
+        XCTAssertEqual(
+            try frontMatter(of: file)["reason"], "far fewer words than the talk that was heard")
+        XCTAssertEqual(transcribers.made, [.whisperLargeV3Turbo], "read once")
+        XCTAssertFalse(events.contains(.readingAgain))
+        XCTAssertEqual(try keptSpools(), 1)
+        XCTAssertEqual(spool.orphans().count, 0)
+        XCTAssertEqual(records.map(\.outcome), [.savedThin])
+        XCTAssertEqual(records.first?.recovered, true)
+        XCTAssertEqual(records.first?.coverage?.result, .thin)
+    }
+
     // MARK: - helpers
+
+    /// A spool a crash left behind, `seconds` of it loud on both sides.
+    private func orphan(seconds: Int) async throws {
+        let handle = try spool.begin(.init(
+            app: "teams", started: Date(timeIntervalSince1970: 1_787_000_000),
+            engine: "whisper-large-v3-turbo", model: .whisperLargeV3Turbo))
+        let file = try SpoolAudioFile(url: handle.audioURL)
+        for s in 0..<seconds {
+            try await file.append(loud(at: .seconds(s)))
+        }
+    }
 
     /// What follows the front matter, line by line, blank lines left out.
     private func body(of file: MeetingSummary) throws -> [String] {
