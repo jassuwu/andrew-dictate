@@ -177,6 +177,15 @@ struct AndrewDictateApp: App {
                     }
                 }
 
+                // the third, and it goes on its own too: a word the app
+                // just learned from your fixes, taken back in one click for
+                // two minutes. after that it is a row in the dictionary tab.
+                if let learned = coordinator.undoableLearning {
+                    Button("undo learned: \(learned.right)") {
+                        coordinator.undoLearning()
+                    }
+                }
+
                 // nothing starts a recording but the user, and the user
                 // names the app (ADR 0023, 0040). meeting apps first.
                 Menu("record a meeting") {
