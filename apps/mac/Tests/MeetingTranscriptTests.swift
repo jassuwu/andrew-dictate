@@ -194,6 +194,23 @@ final class MeetingTranscriptTests: XCTestCase {
         XCTAssertEqual(front["ended"], "2026-08-29T15:44:11+05:30")
     }
 
+    /// The clocks are real and the file shows whole seconds: `ended` must sit
+    /// exactly `duration_s` after `started` as written, not a second off
+    /// because of the fractions that were rounded away.
+    func testEndedIsExactlyTheDurationAfterTheStartAsWritten() throws {
+        let url = try MeetingTranscriptFile.write(
+            MeetingTranscript(
+                app: "zoom", started: started().addingTimeInterval(0.7),
+                duration: .seconds(100.9), engine: "e", gaps: [],
+                recovered: false, turns: []),
+            in: parent, timeZone: tz)
+
+        let front = try frontMatter(of: url)
+        XCTAssertEqual(front["started"], "2026-08-29T14:02:11+05:30")
+        XCTAssertEqual(front["duration_s"], "100")
+        XCTAssertEqual(front["ended"], "2026-08-29T14:03:51+05:30")
+    }
+
     // MARK: - round trip
 
     func testWriteThenSummaryReadsTheFrontMatterBack() throws {

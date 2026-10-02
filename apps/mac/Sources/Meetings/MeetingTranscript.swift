@@ -36,8 +36,6 @@ struct MeetingTranscript: Equatable, Sendable {
     /// SPEC §4 extended: a transcript with holes says so, in its front matter
     /// and in its body.
     var complete: Bool { gaps.isEmpty }
-
-    var ended: Date { started.addingTimeInterval(duration.totalSeconds) }
 }
 
 /// The transcript on disk: `<parent>/meetings/2026-08/2026-08-29-1402-zoom.md`,
@@ -106,7 +104,7 @@ enum MeetingTranscriptFile {
             "---",
             "app: \(transcript.app)",
             "started: \(iso8601(timeZone).string(from: transcript.started))",
-            "ended: \(iso8601(timeZone).string(from: transcript.ended))",
+            "ended: \(iso8601(timeZone).string(from: ended(transcript)))",
             "duration_s: \(seconds(transcript.duration))",
             "engine: \(transcript.engine)",
             "complete: \(transcript.complete)",
@@ -296,6 +294,15 @@ enum MeetingTranscriptFile {
 
     private static func seconds(_ duration: Duration) -> Int64 {
         duration.components.seconds
+    }
+
+    /// Worked out from the whole seconds the file shows for `started` and
+    /// `duration_s`, so the three always add up. Adding the real fractions
+    /// can land a second past what a reader gets by adding the two lines.
+    private static func ended(_ transcript: MeetingTranscript) -> Date {
+        Date(
+            timeIntervalSince1970: transcript.started.timeIntervalSince1970.rounded(.down)
+                + Double(seconds(transcript.duration)))
     }
 
     private static func oneDecimal(_ duration: Duration) -> String {
