@@ -88,6 +88,19 @@ final class PressLogStoreTests: XCTestCase {
         XCTAssertEqual(try store.all().map(\.stages.ended), [1, 2])
     }
 
+    /// a record written before the mic-change flag existed still reads,
+    /// with the flag off.
+    func testARecordFromBeforeTheMicChangeFlagStillReads() throws {
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let older = #"{"capped":false,"engine":"v2","mic":{"name":"MacBook Pro Microphone","transport":"built-in"},"outcome":"delivered","peak":0.25,"retry":false,"samples":16000,"stages":{"ended":7,"firstBuffer":40,"keyUp":900},"startedAt":"2026-10-02T06:52:31Z","words":3}"#
+        try Data((older + "\n").utf8).write(to: store.fileURL)
+
+        XCTAssertEqual(try store.all(), [press(endingAt: 7)])
+    }
+
     // MARK: - helpers
 
     private func press(

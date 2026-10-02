@@ -176,6 +176,29 @@ final class PressLogTests: XCTestCase {
 
     // MARK: - the line
 
+    /// a take the mic change ended, not the finger, says so like the cap.
+    func testATakeTheMicChangeEndedSaysSo() {
+        let record = PressRecord(
+            outcome: .delivered,
+            startedAt: noonish,
+            mic: nil,
+            samples: nil,
+            peak: nil,
+            words: nil,
+            stages: PressRecord.Stages(ended: 900),
+            engine: "v2",
+            capped: false,
+            micChanged: true,
+            retry: false,
+            mainStallMs: nil
+        )
+
+        XCTAssertEqual(
+            record.line(in: kolkata),
+            "at=2026-10-02T12:22:31+05:30 outcome=delivered end_ms=900 engine=v2 mic_changed=1"
+        )
+    }
+
     /// a mic that sent almost nothing must not read as one that sent
     /// exactly nothing, and a quote in a device's name stays inside it.
     func testTheLineKeepsAFaintPeakAndAnAwkwardMicName() {

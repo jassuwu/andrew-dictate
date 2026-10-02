@@ -46,6 +46,9 @@ extension PressRecord {
         if capped {
             fields.append("capped=1")
         }
+        if micChanged {
+            fields.append("mic_changed=1")
+        }
         if retry {
             fields.append("retry=1")
         }

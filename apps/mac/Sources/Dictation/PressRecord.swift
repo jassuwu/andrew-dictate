@@ -72,6 +72,9 @@ struct PressRecord: Equatable, Sendable, Codable {
     var engine: String
     /// the capture ceiling ended this take, not the finger.
     var capped: Bool
+    /// the mic changed under the take and ended it, not the finger. what
+    /// it heard up to the change went on as a take of its own.
+    var micChanged = false
     /// a replay of samples the engine threw on, not a fresh recording.
     var retry: Bool
     /// the longest the main thread stalled while this press was in flight.
@@ -102,6 +105,7 @@ extension PressRecord {
         var samples: [Float]?
         var words: Int?
         var capped = false
+        var micChanged = false
         var mainStall: Duration?
 
         init(keyDown: Instant, startedAt: Date, retry: Bool = false) {
@@ -134,6 +138,7 @@ extension PressRecord {
                 ),
                 engine: engine,
                 capped: capped,
+                micChanged: micChanged,
                 retry: retry,
                 mainStallMs: mainStall.map(Self.milliseconds)
             )
@@ -151,6 +156,33 @@ extension PressRecord {
         private static func peak(_ samples: [Float]) -> Float {
             samples.isEmpty ? 0 : vDSP.maximumMagnitude(samples)
         }
+    }
+}
+
+// MARK: - reading an older record
+
+extension PressRecord {
+    /// a record written before a flag existed still reads, with the flag
+    /// off: the log outlives the build that wrote it.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            outcome: try container.decode(Outcome.self, forKey: .outcome),
+            startedAt: try container.decode(Date.self, forKey: .startedAt),
+            mic: try container.decodeIfPresent(MicDescription.self, forKey: .mic),
+            samples: try container.decodeIfPresent(Int.self, forKey: .samples),
+            peak: try container.decodeIfPresent(Float.self, forKey: .peak),
+            words: try container.decodeIfPresent(Int.self, forKey: .words),
+            stages: try container.decode(Stages.self, forKey: .stages),
+            engine: try container.decode(String.self, forKey: .engine),
+            capped: try container.decode(Bool.self, forKey: .capped),
+            micChanged: try container.decodeIfPresent(
+                Bool.self,
+                forKey: .micChanged
+            ) ?? false,
+            retry: try container.decode(Bool.self, forKey: .retry),
+            mainStallMs: try container.decodeIfPresent(Int.self, forKey: .mainStallMs)
+        )
     }
 }
 
