@@ -83,6 +83,50 @@ final class MeetingTapHealthTests: XCTestCase {
         XCTAssertEqual(records.first?.events, [])
     }
 
+    // MARK: - the quiet probe
+
+    /// You present for longer than the timeout while the call app plays
+    /// a muted room. The tap is asked once, with the quiet tone, and hears
+    /// it: nothing else happens, the lamp says nothing, and the next
+    /// question waits a full timeout from the tone.
+    func testAQuietProbeTheTapHearsChangesNothingAndTheNextWaitsAFullTimeout() async throws {
+        source.anythingIsPlaying = true
+        let c = coordinator()
+        c.start()
+        await source.awaitStart()
+        await play(loud(at: .zero))
+
+        for s in 2...5 {
+            await play(quiet(at: .seconds(s)))
+        }
+        XCTAssertEqual(source.quietProbes, 0, "five seconds is not past the timeout")
+
+        await play(quiet(at: .seconds(6)))
+        await until { source.quietProbes == 1 }
+        XCTAssertEqual(source.quietProbes, 1)
+
+        // the tone comes back through the tap at 7.0–7.3.
+        await play(tone(at: .seconds(7)))
+        for s in 8...12 {
+            await play(quiet(at: .seconds(s)))
+        }
+        XCTAssertEqual(source.quietProbes, 1, "not sooner than a full timeout after the tone")
+
+        await play(quiet(at: .seconds(13)))
+        await until { source.quietProbes == 2 }
+        XCTAssertEqual(source.quietProbes, 2)
+
+        XCTAssertEqual(source.rebuilds, 0)
+        XCTAssertEqual(events, [.started])
+        XCTAssertEqual(c.state, .recording)
+
+        c.stop()
+        await c.untilWrittenOut()
+        XCTAssertTrue(try savedFile().complete)
+        // the second question was still open at the stop.
+        XCTAssertEqual(records.first?.events, [.init(.probeHeard, atS: 7.3)])
+    }
+
     // MARK: - helpers
 
     private func savedFile() throws -> MeetingSummary {
@@ -102,6 +146,15 @@ final class MeetingTapHealthTests: XCTestCase {
     private func quiet(at: Duration) -> MeetingAudioChunk {
         .init(you: Array(repeating: 0, count: 1_600),
               them: Array(repeating: 0, count: 1_600), at: at)
+    }
+
+    /// The quiet probe as the tap hears it: 0.3 s of a 1 kHz tone at
+    /// -40 dBFS, RMS about 0.007.
+    private func tone(at: Duration) -> MeetingAudioChunk {
+        let n = 4_800
+        return .init(you: Array(repeating: 0, count: n),
+                     them: (0..<n).map { sin(Float($0) * 2 * .pi * 1_000 / 16_000) * 0.01 },
+                     at: at)
     }
 
     /// Each chunk, and time for the coordinator to have taken it in before

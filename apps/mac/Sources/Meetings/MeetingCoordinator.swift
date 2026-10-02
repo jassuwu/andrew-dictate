@@ -555,6 +555,7 @@ final class MeetingCoordinator: ObservableObject {
         // What the source last heard from the HAL, asked on its own queue:
         // a round trip from here would be one on the main actor, ten times
         // a second.
+        let asked = health.verdict == .waitingForQuietProbe
         health.observe(
             rms: chunk.themRMS, elapsed: elapsed,
             anythingIsPlaying: source.anythingIsPlaying)
@@ -562,6 +563,9 @@ final class MeetingCoordinator: ObservableObject {
         case .waitingForProbeTone, .waitingForQuietProbe:
             break
         case .capturing:
+            if asked {
+                meeting.notes.note(.probeHeard, at: elapsed)
+            }
             let wasRebuilding = session.state == .rebuilding
             if session.state == .provingItCanHear {
                 session.heardTheProbe()
@@ -598,6 +602,7 @@ final class MeetingCoordinator: ObservableObject {
             }
         case .missedTheQuietProbe:
             if session.state == .recording {
+                meeting.notes.note(.probeUnheard, at: elapsed)
                 loseTheTap(meeting, at: elapsed)
             }
         }

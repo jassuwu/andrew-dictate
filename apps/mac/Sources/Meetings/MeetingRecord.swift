@@ -162,6 +162,12 @@ extension MeetingRecord {
         static let gapEnded = Label(rawValue: "gap-ended")
         /// the tap could not be rebuilt, and the meeting ended there.
         static let rebuildFailed = Label(rawValue: "rebuild-failed")
+        /// a far side silent while something played was asked with the
+        /// quiet probe, and the tap heard it: nothing was wrong.
+        static let probeHeard = Label(rawValue: "probe-heard")
+        /// the tap did not hear a tone of ours: the quiet probe, or the
+        /// start sound of a rebuilt tap.
+        static let probeUnheard = Label(rawValue: "probe-unheard")
     }
 
     struct Event: Equatable, Sendable, Codable {

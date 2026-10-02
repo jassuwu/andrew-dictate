@@ -476,6 +476,7 @@ final class MeetingRecordTests: XCTestCase {
 
         XCTAssertEqual(records.count, 1)
         XCTAssertEqual(records.first?.events, [
+            .init(.probeUnheard, atS: 10),
             .init(.gapBegan, atS: 10),
             .init(.gapEnded, atS: 11),
         ])
