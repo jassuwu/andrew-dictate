@@ -1877,10 +1877,15 @@ final class DictationCoordinator: ObservableObject {
         hudViewModel.update(state: newState)
         // nothing ticks at idle: the watchdog follows a press and lingers
         // a few seconds after it, then stops.
-        if newState == .idle {
+        switch newState {
+        case .idle:
             watchdog.windDown()
-        } else {
-            watchdog.watch("\(newState)")
+        case .prewarming:
+            watchdog.watch(.prewarming)
+        case .recording:
+            watchdog.watch(.recording)
+        case .transcribing:
+            watchdog.watch(.transcribing)
         }
 
         synchronizeHUD(fastDismiss: fastHUDDismiss)

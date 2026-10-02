@@ -21,6 +21,15 @@ private let watchdogLogger = Logger(
 /// so past `stuckAfter` this queue says it instead — the one line a hang
 /// that ends in a force quit would otherwise never leave.
 final class MainThreadWatchdog: @unchecked Sendable {
+    /// what the app was doing when the main thread went quiet, as the log
+    /// line names it.
+    enum Phase: String, Sendable {
+        case idle
+        case prewarming
+        case recording
+        case transcribing
+    }
+
     private let interval: TimeInterval
     private let threshold: TimeInterval
     private let linger: TimeInterval
@@ -34,7 +43,7 @@ final class MainThreadWatchdog: @unchecked Sendable {
     // everything below is touched only on `queue`.
     private var timer: DispatchSourceTimer?
     private var windingDown: DispatchWorkItem?
-    private var phase = "idle"
+    private var phase = Phase.idle
     private var outstandingPing: (sentAt: UInt64, saidStuck: Bool)?
 
     /// `onStall` runs on the main thread once it answers, with how long it
@@ -63,7 +72,7 @@ final class MainThreadWatchdog: @unchecked Sendable {
     }
 
     /// a press is in flight, in `phase`: ping, and forget any wind-down.
-    func watch(_ phase: String) {
+    func watch(_ phase: Phase) {
         queue.async { [self] in
             self.phase = phase
             windingDown?.cancel()
@@ -89,7 +98,7 @@ final class MainThreadWatchdog: @unchecked Sendable {
     /// keep pinging through the linger, then stop costing anything.
     func windDown() {
         queue.async { [self] in
-            phase = "idle"
+            phase = .idle
             guard timer != nil, windingDown == nil else {
                 return
             }
@@ -116,7 +125,7 @@ final class MainThreadWatchdog: @unchecked Sendable {
                 watchdogLogger.notice(
                     """
                     main stalled \(waited, privacy: .public)+ ms during \
-                    \(self.phase, privacy: .public) and has not come back
+                    \(self.phase.rawValue, privacy: .public) and has not come back
                     """
                 )
             }
@@ -132,7 +141,7 @@ final class MainThreadWatchdog: @unchecked Sendable {
     }
 
     /// on the main thread, the moment it got round to the ping.
-    private func answered(sentAt: UInt64, answeredAt: UInt64, phase: String) {
+    private func answered(sentAt: UInt64, answeredAt: UInt64, phase: Phase) {
         queue.async { [weak self] in
             self?.outstandingPing = nil
         }
@@ -141,7 +150,7 @@ final class MainThreadWatchdog: @unchecked Sendable {
             return
         }
         watchdogLogger.notice(
-            "main stalled \(stalled, privacy: .public) ms during \(phase, privacy: .public)"
+            "main stalled \(stalled, privacy: .public) ms during \(phase.rawValue, privacy: .public)"
         )
         MainActor.assumeIsolated {
             onStall(stalled)

@@ -25,7 +25,7 @@ final class MainThreadWatchdogTests: XCTestCase {
 
     func testAMainThreadThatStopsAnsweringIsReportedOnceItAnswers() async throws {
         let dog = watchdog()
-        dog.watch("recording")
+        dog.watch(.recording)
         try await Task.sleep(for: .milliseconds(150))
 
         Thread.sleep(forTimeInterval: 0.4)
@@ -39,7 +39,7 @@ final class MainThreadWatchdogTests: XCTestCase {
     /// costing anything — unless the next press arrives first.
     func testItStopsWatchingOnceThePressHasLingered() async throws {
         let dog = watchdog(linger: 0.1)
-        dog.watch("transcribing")
+        dog.watch(.transcribing)
         XCTAssertTrue(dog.isWatching)
 
         dog.windDown()
@@ -47,9 +47,9 @@ final class MainThreadWatchdogTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertFalse(dog.isWatching)
 
-        dog.watch("recording")
+        dog.watch(.recording)
         dog.windDown()
-        dog.watch("recording")
+        dog.watch(.recording)
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertTrue(dog.isWatching)
         dog.windDown()
