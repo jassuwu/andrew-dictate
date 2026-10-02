@@ -518,6 +518,31 @@ final class MeetingCoordinatorTests: XCTestCase {
         XCTAssertEqual(events.filter { $0 == .writingItOut }.count, 1, "\(events)")
     }
 
+    /// One source, one tap: a meeting started while the last one's tap is
+    /// still closing opens its own once that is done, not on top of it.
+    func testANewMeetingOpensTheTapOnlyOnceTheLastOneHasClosed() async throws {
+        let c = coordinator()
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+
+        source.holdsStop = true
+        c.stop()
+        for _ in 0..<200 where !source.isClosing {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        c.start(tapping: zoom)
+        await settle()
+        source.releaseStop()
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+
+        XCTAssertFalse(source.openedWhileClosing)
+        XCTAssertEqual(c.state, .recording)
+    }
+
     // MARK: - helpers
 
     private func loud(at: Duration) -> MeetingAudioChunk {
@@ -597,12 +622,17 @@ private final class StartDates: @unchecked Sendable {
 }
 
 /// The tap. Opened again after a stop, it starts a new stream, the way the
-/// real one does for the next meeting.
+/// real one does for the next meeting. While `holdsStop` is set, a stop
+/// waits for `releaseStop()` — a tap slow to close.
 private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     private let lock = NSLock()
     private var _continuation: AsyncStream<MeetingAudioChunk>.Continuation?
     private var starts = 0
     private var startsSeen = 0
+    private var stopsInFlight = 0
+    private var _holdsStop = false
+    private var _openedWhileClosing = false
+    private var waitingToStop: [CheckedContinuation<Void, Never>] = []
     private var nextAt: Duration = .zero
     var rebuilds = 0
     /// The real source plays the start sound again on every rebuild, and the
@@ -615,9 +645,25 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
         lock.withLock { _continuation }
     }
 
+    var holdsStop: Bool {
+        get { lock.withLock { _holdsStop } }
+        set { lock.withLock { _holdsStop = newValue } }
+    }
+
+    /// A stop is parked in its hold.
+    var isClosing: Bool {
+        lock.withLock { !waitingToStop.isEmpty }
+    }
+
+    /// The tap was opened while a stop of it was still in flight.
+    var openedWhileClosing: Bool {
+        lock.withLock { _openedWhileClosing }
+    }
+
     func start(tapping app: RunningApp) async throws -> AsyncStream<MeetingAudioChunk> {
         let (stream, continuation) = AsyncStream<MeetingAudioChunk>.makeStream()
         lock.withLock {
+            if stopsInFlight > 0 { _openedWhileClosing = true }
             _continuation = continuation
             starts += 1
         }
@@ -637,11 +683,46 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     func tappedAppIsPlaying() -> Bool? { playing }
 
     func stop() async {
+        let holds = lock.withLock {
+            stopsInFlight += 1
+            return _holdsStop
+        }
+        if holds {
+            // checked again in the lock that registers the wait, so a
+            // release landing between the two cannot be missed.
+            await withCheckedContinuation { continuation in
+                let goNow = lock.withLock {
+                    guard _holdsStop else {
+                        return true
+                    }
+                    waitingToStop.append(continuation)
+                    return false
+                }
+                if goNow {
+                    continuation.resume()
+                }
+            }
+        }
         let continuation = lock.withLock { () -> AsyncStream<MeetingAudioChunk>.Continuation? in
-            defer { _continuation = nil }
+            defer {
+                _continuation = nil
+                stopsInFlight -= 1
+            }
             return _continuation
         }
         continuation?.finish()
+    }
+
+    func releaseStop() {
+        let released = lock.withLock {
+            _holdsStop = false
+            let released = waitingToStop
+            waitingToStop = []
+            return released
+        }
+        for continuation in released {
+            continuation.resume()
+        }
     }
 
     func send(_ chunk: MeetingAudioChunk) {
