@@ -13,17 +13,77 @@ struct DictionaryEntry: Codable, Equatable, Identifiable, Sendable {
     let id: UUID
     var wrong: String
     var right: String
+    /// the app added it: you made the same sound-alike swap to text we
+    /// inserted twice (ADR 0046). it fires like any other row; the mark is
+    /// only so you can tell, and so taking it out means "don't learn that".
+    var learned: Bool
 
-    init(id: UUID = UUID(), wrong: String, right: String) {
+    init(
+        id: UUID = UUID(),
+        wrong: String,
+        right: String,
+        learned: Bool = false
+    ) {
         self.id = id
         self.wrong = wrong
         self.right = right
+        self.learned = learned
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, wrong, right, learned
+    }
+
+    /// a file written before the app could learn has no mark on any row:
+    /// every one of them is yours.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        wrong = try container.decode(String.self, forKey: .wrong)
+        right = try container.decode(String.self, forKey: .right)
+        learned = try container.decodeIfPresent(Bool.self, forKey: .learned)
+            ?? false
+    }
+
+    /// the mark is written only where it is true, so a row you typed reads
+    /// exactly as it always has — in an export, an older copy of the app,
+    /// or a text editor.
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(wrong, forKey: .wrong)
+        try container.encode(right, forKey: .right)
+        if learned {
+            try container.encode(learned, forKey: .learned)
+        }
+    }
+}
+
+/// one rule as the learner counts it: the side that matches, folded the way
+/// the substitution folds it, and the side it becomes, as written.
+struct LearningKey: Codable, Hashable, Sendable {
+    let wrong: String
+    let right: String
+
+    init(wrong: String, right: String) {
+        self.wrong = DictionaryStore.matchKey(wrong)
+        self.right = right
+    }
+
+    init(_ entry: DictionaryEntry) {
+        self.init(wrong: entry.wrong, right: entry.right)
     }
 }
 
 @MainActor
 final class DictionaryStore: ObservableObject {
     @Published private(set) var entries: [DictionaryEntry] = []
+
+    /// learned entries you took out. kept in plain text beside the
+    /// dictionary, because each one is a rule you were shown and turned
+    /// down — no more private than the rows that file already holds — and a
+    /// hash would be a list you could neither read nor clear.
+    private(set) var neverLearn: Set<LearningKey> = []
 
     /// nil while disk and memory agree. otherwise a sentence the settings
     /// pane can show the user verbatim.
@@ -42,9 +102,15 @@ final class DictionaryStore: ObservableObject {
 
     private let fileURL: URL
 
+    private var neverLearnURL: URL {
+        fileURL.deletingLastPathComponent()
+            .appendingPathComponent("never-learn.json", isDirectory: false)
+    }
+
     init(fileURL: URL? = nil) {
         self.fileURL = fileURL ?? Self.defaultFileURL()
         load()
+        loadNeverLearn()
     }
 
     @discardableResult
@@ -116,8 +182,16 @@ final class DictionaryStore: ObservableObject {
             return false
         }
 
-        entries.remove(at: index)
-        return save()
+        let removed = entries.remove(at: index)
+        guard save() else {
+            return false
+        }
+        // the menu's undo and the table's minus mean the same thing for a
+        // row the app added: you saw it and said no.
+        if removed.learned {
+            rememberNeverLearn(LearningKey(removed))
+        }
+        return true
     }
 
     @discardableResult
@@ -264,6 +338,46 @@ final class DictionaryStore: ObservableObject {
                 couldn’t read your dictionary — the file may be damaged. \
                 your saved words are still on disk.
                 """
+        }
+    }
+
+    /// no file is the usual case; an unreadable one is logged and treated as
+    /// empty — the worst that costs is a rule offered to you a second time.
+    private func loadNeverLearn() {
+        guard FileManager.default.fileExists(atPath: neverLearnURL.path) else {
+            return
+        }
+        do {
+            let data = try Data(contentsOf: neverLearnURL)
+            neverLearn = Set(try JSONDecoder().decode([LearningKey].self, from: data))
+        } catch {
+            dictionaryLogger.error(
+                """
+                never-learn list unreadable: \
+                \(error.localizedDescription, privacy: .public)
+                """
+            )
+        }
+    }
+
+    private func rememberNeverLearn(_ key: LearningKey) {
+        neverLearn.insert(key)
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let sorted = neverLearn.sorted {
+                ($0.wrong, $0.right) < ($1.wrong, $1.right)
+            }
+            try encoder.encode(sorted).write(to: neverLearnURL, options: .atomic)
+        } catch {
+            // the row is gone either way; this list only stops it coming
+            // back, and in memory it still does until the app quits.
+            dictionaryLogger.error(
+                """
+                never-learn list not saved: \
+                \(error.localizedDescription, privacy: .public)
+                """
+            )
         }
     }
 

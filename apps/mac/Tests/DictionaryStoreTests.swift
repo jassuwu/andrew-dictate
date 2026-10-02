@@ -179,6 +179,85 @@ final class DictionaryStoreTests: XCTestCase {
         XCTAssertEqual(store.entries.first?.right, "")
     }
 
+    // MARK: - learned entries
+
+    /// every dictionary.json written before the app could learn has no
+    /// word on it: those rows are yours, and they still load.
+    func testAFileFromBeforeLearningLoadsAsYourOwnRows() throws {
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let old = """
+            [{"id":"6B1C1F4E-3F43-4E43-9E0B-7E2A1C9B3D10","wrong":"jason","right":"JSON"}]
+            """
+        try Data(old.utf8).write(to: fileURL)
+
+        let store = DictionaryStore(fileURL: fileURL)
+
+        XCTAssertEqual(store.entries.map(\.wrong), ["jason"])
+        XCTAssertEqual(store.entries.first?.learned, false)
+        XCTAssertNil(store.lastFailure)
+    }
+
+    func testALearnedEntryIsStillLearnedAfterARelaunch() {
+        let store = DictionaryStore(fileURL: fileURL)
+        store.add(DictionaryEntry(wrong: "jaz dot dev", right: "jass.dev", learned: true))
+        store.add(DictionaryEntry(wrong: "darsh", right: "Darsh"))
+
+        let relaunched = DictionaryStore(fileURL: fileURL)
+
+        XCTAssertEqual(relaunched.entries.map(\.learned), [true, false])
+    }
+
+    /// a row you typed is written exactly as before, so an exported file
+    /// still reads in an older copy of the app and in anyone's editor.
+    func testARowYouTypedIsWrittenWithoutTheLearnedMark() throws {
+        let store = DictionaryStore(fileURL: fileURL)
+        store.add(DictionaryEntry(wrong: "darsh", right: "Darsh"))
+
+        let written = try String(contentsOf: fileURL, encoding: .utf8)
+
+        XCTAssertFalse(written.contains("learned"))
+    }
+
+    /// taking a learned entry out — the menu's undo or the table's minus —
+    /// is saying "don't learn that", and it is still said after a relaunch.
+    func testRemovingALearnedEntryMeansNeverLearnItAgain() {
+        let store = DictionaryStore(fileURL: fileURL)
+        let learned = DictionaryEntry(wrong: "Jaz Dot Dev", right: "jass.dev", learned: true)
+        store.add(learned)
+
+        XCTAssertTrue(store.remove(id: learned.id))
+
+        let relaunched = DictionaryStore(fileURL: fileURL)
+        XCTAssertTrue(relaunched.neverLearn.contains(LearningKey(wrong: "jaz dot dev", right: "jass.dev")))
+        XCTAssertEqual(relaunched.entries, [])
+    }
+
+    func testRemovingARowYouTypedRemembersNothing() {
+        let store = DictionaryStore(fileURL: fileURL)
+        let typed = DictionaryEntry(wrong: "darsh", right: "Darsh")
+        store.add(typed)
+
+        store.remove(id: typed.id)
+
+        XCTAssertEqual(DictionaryStore(fileURL: fileURL).neverLearn, [])
+    }
+
+    /// an edit makes a learned row yours: the mark goes, and removing it
+    /// afterwards is removing your own row.
+    func testEditingALearnedEntryMakesItYours() {
+        let store = DictionaryStore(fileURL: fileURL)
+        let learned = DictionaryEntry(wrong: "jason", right: "JSON", learned: true)
+        store.add(learned)
+
+        store.updateRight(id: learned.id, right: "json")
+        store.remove(id: learned.id)
+
+        XCTAssertEqual(store.neverLearn, [])
+    }
+
     // MARK: - helpers
 
     private func writeDictionary(_ entries: [DictionaryEntry]) throws {

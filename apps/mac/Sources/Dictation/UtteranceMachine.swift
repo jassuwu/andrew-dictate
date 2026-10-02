@@ -40,6 +40,10 @@ enum UtteranceEvent: Equatable, Sendable {
     case dictated(String)
     /// the engine's own words, and what the cleaner made of them.
     case transcribed(heard: String, inserted: String)
+    /// the same pair, once the paste went out with focus where we left it:
+    /// words in a field you can now fix, which is what the learner watches
+    /// (ADR 0046). never sent for words left on the clipboard.
+    case delivered(heard: String, inserted: String)
     /// whether the dictation the engine threw on can still be tried again.
     case retryOffered(Bool)
     /// the mic would not start; the next press must build a fresh one.
@@ -1308,6 +1312,7 @@ final class UtteranceMachine {
                         duration: 2.4
                     )
                 }
+                emit(.delivered(heard: transcript, inserted: cleanedTranscript))
                 endPress(.delivered)
             case let .leftOnPasteboard(reason):
                 completeTimeline(
