@@ -23,6 +23,7 @@ the domain model. one term, one meaning. if a word isn't here, it doesn't get us
 | **onboarding** | the only place that asks macOS for permissions. first run: two grants + model download, ending with a working hotkey — and it returns whenever the app can no longer do its job. |
 | **setup** | whether the app can dictate *right now*: both grants live, model ready. a fact about the present, re-asked; never a stored claim that it once succeeded. |
 | **capture** | the mic as the app holds it between presses: one `AVAudioEngine` on its own queue, bound to the default input, reused press after press until the hardware changes, then replaced — never rebuilt in place. |
+| **mic handoff** | a meeting moving to another mic while it records, because the default input changed or its mic went away: a new tap and mic come up beside the old ones and take over on their first audio. silent, and the meeting's clock carries on. |
 | **pre-roll** | optional ~300ms rolling in-memory mic buffer (user toggle) so the first word is never clipped. discarded continuously; never written anywhere. |
 | **mic turn** | the machine's hold on the capture for one utterance: started at key-down, stopped at its end. one capture serves many mic turns. |
 | **chord** | another key going down while the dictation key is held. inside the first second it is a shortcut (fn+arrow) and the utterance is thrown away quietly; after that, or over a locked recording, it ends the utterance and keeps it. |
