@@ -341,9 +341,10 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
         // Sub-device channels come first, taps after (002 §4, confirmed by
         // the spike): the first `micChannels` flat channels are the mic.
-        var mic = [Float](repeating: 0, count: frames)
+        // The mic's are kept apart and mixed by `MicMix`; the tap's two
+        // sides are averaged.
+        var micChannelSamples: [[Float]] = []
         var tap = [Float](repeating: 0, count: frames)
-        var micCount: Float = 0
         var tapCount: Float = 0
         var flatIndex = 0
         for buffer in list {
@@ -355,15 +356,18 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
                 flatIndex += 1
                 let n = min(frames, available)
                 if isMic {
-                    micCount += 1
-                    for f in 0..<n { mic[f] += data[f * channels + channel] }
+                    var samples = [Float](repeating: 0, count: frames)
+                    for f in 0..<n { samples[f] = data[f * channels + channel] }
+                    micChannelSamples.append(samples)
                 } else {
                     tapCount += 1
                     for f in 0..<n { tap[f] += data[f * channels + channel] }
                 }
             }
         }
-        if micCount > 1 { for f in 0..<frames { mic[f] /= micCount } }
+        let mic = micChannelSamples.isEmpty
+            ? [Float](repeating: 0, count: frames)
+            : MicMix.mono(micChannelSamples)
         if tapCount > 1 { for f in 0..<frames { tap[f] /= tapCount } }
 
         let (assembler, continuation) = lock.withLock { (self.assembler, self.continuation) }
