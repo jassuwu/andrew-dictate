@@ -121,6 +121,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     private var framesDelivered: Int64 = 0
     private var lastDelivery: ContinuousClock.Instant?
     private var player: AVAudioPlayer?
+    /// Whether the last start sound could be played at all.
+    private var startSoundSounded: Bool?
     private var playingTimer: DispatchSourceTimer?
     private var playing: Bool?
     /// The device the last teardown under each uid destroyed. The HAL's
@@ -728,13 +730,19 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             ?? Bundle.main.url(forResource: "dictation-start", withExtension: "wav")
         else {
             logger.error("start sound missing; the probe cannot play")
+            lock.withLock { startSoundSounded = false }
             return
         }
         let player = try? AVAudioPlayer(contentsOf: url)
         player?.prepareToPlay()
-        player?.play()
-        lock.withLock { self.player = player }
-        logger.info("probe tone played")
+        // false with no output to play on: then the tap had nothing to hear,
+        // and the meeting must not read its silence as a deaf tap.
+        let played = player?.play() ?? false
+        lock.withLock {
+            self.player = player
+            startSoundSounded = played
+        }
+        logger.info("probe tone played: \(played, privacy: .public)")
     }
 
     // MARK: - the IO proc
@@ -920,6 +928,83 @@ private final class FirstAnswer: @unchecked Sendable {
             defer { claimed = true }
             return !claimed
         }
+    }
+}
+
+// MARK: - the quiet probe
+
+extension CoreAudioMeetingSource {
+    /// The quiet probe's level: the peak of the tone, in dBFS. Provisional —
+    /// whether a person hears it is for the owner's ears to tune. -40 dBFS
+    /// is a peak of 0.01, ten times the tap's silence floor of 0.001.
+    static let quietProbeLevel: Float = -40
+    /// A third of a second of 1 kHz: long enough to fill a few of the tap's
+    /// tenth-of-a-second chunks, short enough to pass for nothing.
+    private static let quietProbeLength = 0.3
+    private static let quietProbeFrequency: Float = 1_000
+
+    var startSoundPlayed: Bool? {
+        lock.withLock { startSoundSounded }
+    }
+
+    func playQuietProbe() async throws {
+        try await playQuietProbe(dBFS: Self.quietProbeLevel)
+    }
+
+    /// The tone, through an engine of its own on the default output, and
+    /// back once it has played out. The tap hears it because the tap hears
+    /// this process. Throws when it cannot be played at all — no output
+    /// device, an engine that will not start — which is not the tap
+    /// failing to hear it.
+    func playQuietProbe(dBFS level: Float) async throws {
+        let engine: AVAudioEngine
+        do {
+            engine = try Self.startTone(peak: pow(10, level / 20))
+        } catch {
+            logger.error("the quiet probe could not play: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+        // a wait rather than a completion handler: a device that goes away
+        // mid-tone never calls one back, and this must come back regardless.
+        try? await Task.sleep(for: .seconds(Self.quietProbeLength + 0.2))
+        engine.stop()
+    }
+
+    /// The engine, started with the tone scheduled and playing.
+    private static func startTone(peak: Float) throws -> AVAudioEngine {
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1),
+              let tone = tone(peak: peak, format: format)
+        else {
+            throw CocoaError(.featureUnsupported)
+        }
+        let engine = AVAudioEngine()
+        let player = AVAudioPlayerNode()
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: format)
+        try engine.start()
+        player.scheduleBuffer(tone, completionHandler: nil)
+        player.play()
+        return engine
+    }
+
+    /// A sine at `quietProbeFrequency`, eased in and out over ten
+    /// milliseconds so it starts and stops without a click.
+    private static func tone(peak: Float, format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        let rate = format.sampleRate
+        let frames = AVAudioFrameCount(rate * quietProbeLength)
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames),
+              let samples = buffer.floatChannelData?[0]
+        else { return nil }
+        buffer.frameLength = frames
+        let count = Int(frames)
+        let ease = Int(rate * 0.01)
+        let step = 2 * Float.pi * quietProbeFrequency / Float(rate)
+        for i in 0..<count {
+            let edge = min(i, count - 1 - i)
+            let envelope = edge < ease ? Float(edge) / Float(ease) : 1
+            samples[i] = peak * envelope * sin(step * Float(i))
+        }
+        return buffer
     }
 }
 
