@@ -6,7 +6,9 @@
 /// the next press is handed a fresh one bound to whatever the mac says is
 /// the mic right now. once the hardware has been quiet for a moment the
 /// stale one is thrown away on its own, never from under a take that is
-/// still holding it, and with pre-roll on a fresh one starts listening.
+/// still holding it, and a fresh one is built in its place — ready, so the
+/// first press after a monitor or the lid starts as fast as any other, and
+/// listening only with pre-roll on.
 ///
 /// nothing here touches audio: building a capture is cheap, and its engine
 /// is made, started and torn down on that capture's own queue.
@@ -64,11 +66,9 @@ final class CaptureSlot {
     /// goes now and is never handed out again.
     func drop() {
         throwAway()
-        // with pre-roll on, a new one should be listening, but not before
-        // whatever wedged that one has had a moment to settle.
-        if keepsListening() {
-            deviceChanged()
-        }
+        // a new one is built ready, but not before whatever wedged that one
+        // has had a moment to settle.
+        deviceChanged()
     }
 
     /// the mac is going to sleep: nothing listens through it. waking is a
@@ -80,12 +80,10 @@ final class CaptureSlot {
     }
 
     /// pre-roll was switched. a capture is built for one mode or the
-    /// other, so it goes, and with pre-roll on a fresh one starts listening.
+    /// other, so it goes, and a fresh one is built ready for the new one.
     func listeningChanged() {
         throwAway()
-        if keepsListening() {
-            build().prepare()
-        }
+        build().prepare()
     }
 
     private func scheduleSettle() {
@@ -119,9 +117,10 @@ final class CaptureSlot {
         }
 
         throwAway()
-        if keepsListening() {
-            build().prepare()
-        }
+        // engine made, default mic bound, graph prepared: the warm start,
+        // not the cold one. with pre-roll off `prepare` starts nothing, so
+        // the mic is still not live at idle.
+        build().prepare()
     }
 
     private func build() -> any DisposableMicCapture {

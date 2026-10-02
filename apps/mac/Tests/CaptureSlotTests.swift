@@ -58,7 +58,7 @@ final class CaptureSlotTests: XCTestCase {
     }
 
     /// nobody pressing: the stale capture goes once nothing has moved for
-    /// half a second, and with pre-roll off nothing is built in its place.
+    /// half a second, and a fresh one is built in its place, ready.
     func testTheStaleCaptureGoesOnceTheHardwareHasSettled() async {
         let slot = slot()
         _ = slot.captureForPress()
@@ -71,7 +71,8 @@ final class CaptureSlotTests: XCTestCase {
         await pass(.milliseconds(100))
 
         XCTAssertEqual(made[0].discards, 1)
-        XCTAssertEqual(made.count, 1)
+        XCTAssertEqual(made.count, 2)
+        XCTAssertEqual(made[1].prepares, 1)
     }
 
     /// with pre-roll on a capture is always listening, so the fresh one is
@@ -141,7 +142,7 @@ final class CaptureSlotTests: XCTestCase {
     }
 
     /// pre-roll switched either way: the capture was built for the other
-    /// mode, so it goes, and with pre-roll on the new one starts listening.
+    /// mode, so it goes, and the new one is built ready for this one.
     func testSwitchingPreRollRebuildsTheCapture() {
         let slot = slot()
         _ = slot.captureForPress()
@@ -155,7 +156,8 @@ final class CaptureSlotTests: XCTestCase {
         preRoll = false
         slot.listeningChanged()
         XCTAssertEqual(made[1].discards, 1)
-        XCTAssertEqual(made.count, 2)
+        XCTAssertEqual(made.count, 3)
+        XCTAssertEqual(made[2].prepares, 1)
     }
 
     // MARK: - helpers

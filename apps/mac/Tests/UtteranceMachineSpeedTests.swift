@@ -530,6 +530,114 @@ final class EngineRestartDeadlineTests: XCTestCase {
 
 private struct RestartFailure: Error {}
 
+/// the first press after a monitor, the lid or airpods used to build its
+/// capture from nothing: 143 ms to start against 53 ms warm. now the
+/// fresh one is built once the hardware settles — engine made, default mic
+/// bound, graph prepared — and, with pre-roll off, not started: the mic is
+/// never live at idle.
+@MainActor
+final class CaptureSlotWarmTests: XCTestCase {
+    private var clock: FakeUtteranceClock!
+    private var made: [PreparingCapture] = []
+    private var preRoll = false
+
+    override func setUp() async throws {
+        clock = FakeUtteranceClock()
+        made = []
+        preRoll = false
+    }
+
+    private func slot() -> CaptureSlot {
+        CaptureSlot(
+            clock: clock,
+            isInUse: { false },
+            keepsListening: { [weak self] in self?.preRoll ?? false },
+            make: { [weak self] in
+                let capture = PreparingCapture()
+                self?.made.append(capture)
+                return capture
+            }
+        )
+    }
+
+    func testTheCaptureAfterADeviceChangeIsReadyBeforeThePress() async {
+        let slot = slot()
+        _ = slot.captureForPress()
+
+        slot.deviceChanged()
+        await pass(.milliseconds(500))
+
+        XCTAssertEqual(made.count, 2)
+        XCTAssertEqual(made[0].discards, 1)
+        XCTAssertEqual(made[1].prepares, 1)
+        XCTAssertTrue(slot.captureForPress() === made[1])
+        XCTAssertEqual(made.count, 2, "the press found it built")
+    }
+
+    /// a capture the machine gave up on is replaced the same way, once
+    /// whatever wedged it has had a moment to settle.
+    func testADroppedCaptureIsReplacedOnceTheHardwareSettles() async {
+        let slot = slot()
+        _ = slot.captureForPress()
+
+        slot.drop()
+        XCTAssertEqual(made.count, 1)
+        await pass(.milliseconds(500))
+
+        XCTAssertEqual(made.count, 2)
+        XCTAssertEqual(made[1].prepares, 1)
+        XCTAssertTrue(slot.captureForPress() === made[1])
+    }
+
+    /// pre-roll switched off: the listening capture goes, and the one
+    /// after it is ready without listening.
+    func testSwitchingPreRollOffLeavesAReadyCapture() {
+        preRoll = true
+        let slot = slot()
+        slot.prepare()
+
+        preRoll = false
+        slot.listeningChanged()
+
+        XCTAssertEqual(made[0].discards, 1)
+        XCTAssertEqual(made.count, 2)
+        XCTAssertEqual(made[1].prepares, 1)
+    }
+
+    private func pass(_ duration: Duration) async {
+        try? await Task.sleep(for: .milliseconds(10))
+        clock.advance(by: duration)
+        try? await Task.sleep(for: .milliseconds(10))
+    }
+}
+
+@MainActor
+final class PreparingCapture: DisposableMicCapture {
+    let deviceDescription: MicDescription? = nil
+    private(set) var prepares = 0
+    private(set) var discards = 0
+
+    func start(
+        onFirstBuffer: @escaping @MainActor @Sendable (
+            ContinuousClock.Instant
+        ) -> Void
+    ) async throws {}
+
+    func stop() async throws -> [Float] {
+        []
+    }
+
+    func cancel() {}
+
+    func prepare() {
+        prepares += 1
+    }
+
+    func discard() {
+        discards += 1
+    }
+}
+
 private extension Paster.Snapshot {
     var string: String? {
         items.first?.representations
