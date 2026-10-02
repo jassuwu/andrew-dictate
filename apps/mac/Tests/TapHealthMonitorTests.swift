@@ -46,10 +46,10 @@ final class TapHealthMonitorTests: XCTestCase {
     func testGoingSilentAfterCapturingIsADeadTapNotADeniedOne() {
         var monitor = monitor()
         monitor.observe(rms: 0.4, elapsed: .milliseconds(120))
-        monitor.observe(rms: 0, elapsed: .seconds(5))
+        monitor.observe(rms: 0, elapsed: .seconds(5), anythingIsPlaying: true)
         XCTAssertEqual(monitor.verdict, .capturing)
 
-        monitor.observe(rms: 0, elapsed: .seconds(9))
+        monitor.observe(rms: 0, elapsed: .seconds(9), anythingIsPlaying: true)
         XCTAssertEqual(monitor.verdict, .wentSilent)
     }
 
@@ -78,7 +78,7 @@ final class TapHealthMonitorTests: XCTestCase {
     func testADeadTapThatRecoversIsCapturingAgain() {
         var monitor = monitor()
         monitor.observe(rms: 0.4, elapsed: .milliseconds(120))
-        monitor.observe(rms: 0, elapsed: .seconds(40))
+        monitor.observe(rms: 0, elapsed: .seconds(40), anythingIsPlaying: true)
         XCTAssertEqual(monitor.verdict, .wentSilent)
 
         monitor.observe(rms: 0.5, elapsed: .seconds(41))
@@ -124,13 +124,16 @@ final class TapHealthMonitorTests: XCTestCase {
         XCTAssertEqual(monitor.verdict, .wentSilent)
     }
 
-    func testAnUnanswerableQuestionLeavesTodaysRuleAlone() {
+    /// A question the HAL would not answer is not a yes. Silence from a mac
+    /// that may be playing nothing is no more a dead tap than silence from
+    /// one that says so.
+    func testAnUnanswerableQuestionAccusesNothing() {
         var monitor = monitor()
         monitor.observe(rms: 0.5, elapsed: .seconds(1))
 
-        monitor.observe(rms: 0, elapsed: .seconds(20), anythingIsPlaying: nil)
+        monitor.observe(rms: 0, elapsed: .seconds(200), anythingIsPlaying: nil)
 
-        XCTAssertEqual(monitor.verdict, .wentSilent)
+        XCTAssertEqual(monitor.verdict, .capturing)
     }
 
     // MARK: - what the app does about it

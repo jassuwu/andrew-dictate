@@ -78,9 +78,10 @@ struct TapHealthMonitor {
     ///
     /// `anythingIsPlaying` is the one thing that can tell a quiet room from
     /// a dead tap, and only in one direction: a mac putting nothing out
-    /// cannot be misheard, so its silence is never a verdict. `true` is still
-    /// not consulted — see the note above about muted participants — and
-    /// `nil` means the question could not be asked at all.
+    /// cannot be misheard, so its silence is never a verdict. `nil` means
+    /// the question could not be asked at all, and an unanswered question
+    /// is not a yes: it accuses nothing either. `true` is still not proof —
+    /// see the note above about muted participants.
     mutating func observe(
         rms: Float,
         elapsed: Duration,
@@ -103,10 +104,10 @@ struct TapHealthMonitor {
             return
         }
 
-        // Nothing is playing, so there is nothing to have missed: the
-        // recording carries on through the quiet, no gap, no rebuild, no
-        // start sound in the middle of a call.
-        if anythingIsPlaying == false {
+        // Nothing is playing, or nobody can say, so there is nothing known
+        // to have been missed: the recording carries on through the quiet,
+        // no gap, no rebuild, no start sound in the middle of a call.
+        guard anythingIsPlaying == true else {
             return
         }
 

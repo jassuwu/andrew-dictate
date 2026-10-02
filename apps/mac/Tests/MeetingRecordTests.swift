@@ -451,8 +451,9 @@ final class MeetingRecordTests: XCTestCase {
     }
 
     /// the other way a tap is lost: it keeps calling back, with nothing but
-    /// zeros in it, for longer than a quiet room would.
+    /// zeros in it, while the mac says something is playing.
     func testTheRecordKeepsATapThatKeptCallingBackWithSilence() async throws {
+        source.anythingIsPlaying = true
         let c = coordinator()
         c.start(name: "zoom")
         await source.awaitStart()
@@ -726,6 +727,8 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     var rebuilding: (any Error)?
     /// what opening the tap does, while it is set: the permission is off.
     var opening: (any Error)?
+    /// the source's last answer to "is anything but this app playing".
+    var anythingIsPlaying: Bool?
 
     private var continuation: AsyncStream<MeetingAudioChunk>.Continuation? {
         lock.withLock { _continuation }

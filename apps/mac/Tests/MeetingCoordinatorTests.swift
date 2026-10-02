@@ -183,6 +183,7 @@ final class MeetingCoordinatorTests: XCTestCase {
         // the real source chirps on every rebuild and the tap hears this
         // app: a fake that stays mute cannot see the bug.
         source.toneOnRebuild = loud(at: .zero)
+        source.anythingIsPlaying = true
         c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
