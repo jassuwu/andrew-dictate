@@ -143,12 +143,56 @@ final class MeetingRecordTests: XCTestCase {
         XCTAssertEqual(records.first?.toDiskS, 42)
     }
 
+    // MARK: - nothing kept
+
+    /// the tap that never heard the start sound: the lamp said "can't hear"
+    /// and nothing was kept, and the record says which of the two it was.
+    func testATapThatWasNeverHeardLeavesARecordSayingSo() async throws {
+        let c = coordinator(starting: [started])
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(quiet(at: .zero))
+        source.send(quiet(at: .seconds(2)))
+        await settle()
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(records.count, 1)
+        let record = try XCTUnwrap(records.first)
+        XCTAssertEqual(record.outcome, .nothingKept(.tapNeverHeard))
+        XCTAssertEqual(record.app, "zoom")
+        XCTAssertEqual(record.startedAt, started)
+        XCTAssertEqual(record.durationS, 3)
+        XCTAssertNil(record.toDiskS)
+    }
+
+    /// stopped while the start sound was still being waited for: nothing
+    /// had been captured, and nothing is wrong with the tap that anyone knows.
+    func testAMeetingStoppedBeforeAnythingWasCapturedLeavesARecordSayingSo() async throws {
+        let c = coordinator()
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(quiet(at: .zero))
+        await settle()
+
+        c.stop()
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records.first?.outcome, .nothingKept(.stoppedBeforeCapture))
+        XCTAssertEqual(records.first?.durationS, 1)
+    }
+
     // MARK: - helpers
 
     private func loud(at: Duration) -> MeetingAudioChunk {
         let n = 16_000
         return .init(you: Array(repeating: 0.05, count: n),
                      them: (0..<n).map { sin(Float($0) * 0.05) * 0.3 }, at: at)
+    }
+
+    private func quiet(at: Duration) -> MeetingAudioChunk {
+        .init(you: Array(repeating: 0, count: 16_000),
+              them: Array(repeating: 0, count: 16_000), at: at)
     }
 
     private func settle(for seconds: Double = 0.3) async {

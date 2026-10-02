@@ -12,6 +12,17 @@ struct MeetingRecord: Equatable, Sendable {
     enum Outcome: Equatable, Sendable {
         /// the transcript is on disk.
         case saved
+        /// nothing was captured, so there was nothing to write.
+        case nothingKept(NothingKept)
+    }
+
+    enum NothingKept: Equatable, Sendable {
+        /// the start sound never came back through the tap: a permission
+        /// that is off, or a tap that was dead on arrival.
+        case tapNeverHeard
+        /// stopped before the tap had been heard, so nothing is known to
+        /// be wrong with it.
+        case stoppedBeforeCapture
     }
 
     /// what one side of the call said, as counts.
@@ -94,5 +105,19 @@ extension MeetingRecord {
     /// stored record is not the place for seventeen digits.
     private static func seconds(_ duration: Duration) -> Double {
         (duration.totalSeconds * 10).rounded() / 10
+    }
+}
+
+// MARK: - the meeting as it ends
+
+extension MeetingRecord {
+    /// what a meeting jots down about itself, as it runs and as it stops,
+    /// for the record it will leave: the things the file has no room for.
+    struct Notes: Sendable {
+        /// the wall at the stop, for the seconds to the file.
+        var stopped: ContinuousClock.Instant?
+        /// how far into itself it was when it was let go. a meeting that
+        /// kept nothing has no recording to say.
+        var ran: Duration = .zero
     }
 }

@@ -312,11 +312,13 @@ final class MeetingCoordinator: ObservableObject {
     /// twice.
     private func stop(announcingNothingKept: Bool) {
         guard let meeting = current else { return }
-        meeting.stopped = now()
         // A tap that never came back leaves an open gap; closing it at the
         // wall makes the file cover the whole call instead of stopping where
         // the audio did.
-        let recording = letGo(of: meeting, at: max(elapsed, wallElapsed))
+        let end = max(elapsed, wallElapsed)
+        meeting.notes.stopped = now()
+        meeting.notes.ran = end
+        let recording = letGo(of: meeting, at: end)
         writingOut.append(meeting)
         let tapClosed = closeTheTap(of: meeting)
         Task { [weak self] in
@@ -580,6 +582,10 @@ final class MeetingCoordinator: ObservableObject {
     ) async {
         guard let recording, let handle = meeting.handle else {
             if let handle = meeting.handle { spool.discard(handle) }
+            keepMeetingRecord?(MeetingRecord(
+                .nothingKept(announcingNothingKept ? .stoppedBeforeCapture : .tapNeverHeard),
+                app: meeting.app, model: meeting.preferences.model,
+                startedAt: meeting.started, duration: meeting.notes.ran))
             writingOut.removeAll { $0 === meeting }
             if announcingNothingKept { onEvent?(.nothingToKeep) }
             return
@@ -595,7 +601,7 @@ final class MeetingCoordinator: ObservableObject {
         let saved = await save(
             turns: turns, recording: recording, handle: handle,
             app: meeting.app, started: meeting.started, model: prefs.model,
-            folder: prefs.folder, recovered: false, stopped: meeting.stopped)
+            folder: prefs.folder, recovered: false, notes: meeting.notes)
         // written out — or never will be, and the spool waits for the next
         // launch. the hook is not part of it: it can take minutes.
         writingOut.removeAll { $0 === meeting }
@@ -615,7 +621,7 @@ final class MeetingCoordinator: ObservableObject {
         model: MeetingModel,
         folder: URL,
         recovered: Bool,
-        stopped: ContinuousClock.Instant? = nil
+        notes: MeetingRecord.Notes = .init()
     ) async -> MeetingSavedEvent? {
         let them = (try? SpoolAudioFile.read(handle.audioURL))?.them ?? []
         let split = them.isEmpty
@@ -648,7 +654,7 @@ final class MeetingCoordinator: ObservableObject {
         keepMeetingRecord?(MeetingRecord(
             .saved, app: app, model: model, startedAt: started,
             duration: recording.duration, gaps: recording.gaps, turns: split,
-            toDisk: stopped.map { now() - $0 }))
+            toDisk: notes.stopped.map { now() - $0 }))
 
         let summary = (try? MeetingTranscriptFile.summary(of: url)) ?? MeetingSummary(
             fileURL: url, app: app, started: started, duration: recording.duration,
@@ -805,8 +811,8 @@ extension MeetingCoordinator {
         var watchdog: Task<Void, Never>?
         /// A rebuild of its tap, while one is in flight.
         var rebuild: Task<Void, Never>?
-        /// The wall at the stop, for the record's seconds to the file.
-        var stopped: ContinuousClock.Instant?
+        /// What its record will say besides what the file does.
+        var notes = MeetingRecord.Notes()
 
         init(app: String, started: Date, preferences: MeetingPreferences) {
             self.app = app
