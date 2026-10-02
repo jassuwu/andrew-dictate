@@ -15,4 +15,15 @@ final class RecordWithTests: XCTestCase {
                 title: "whisper turbo — every language, as spoken · faster"),
         ])
     }
+
+    /// `record a meeting` is not in the menu while one runs, so neither is
+    /// the line under it.
+    func testNothingIsListedWhileAMeetingIsRecording() {
+        let choices = RecordWith.choices(
+            installed: [.whisperLargeV3, .whisperLargeV3Turbo, .parakeetV3],
+            default: .whisperLargeV3,
+            isRecording: true)
+
+        XCTAssertEqual(choices, [])
+    }
 }

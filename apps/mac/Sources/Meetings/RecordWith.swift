@@ -13,7 +13,8 @@ enum RecordWith {
         default defaultModel: MeetingModel,
         isRecording: Bool
     ) -> [Choice] {
-        installed.subtracting([defaultModel]).map {
+        guard !isRecording else { return [] }
+        return installed.subtracting([defaultModel]).map {
             Choice(model: $0, title: "\($0.shortName) — \($0.trait)")
         }
     }
