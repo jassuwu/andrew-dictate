@@ -22,6 +22,15 @@ actor ParakeetEngine: TranscriptionEngine {
 
     private var activeManager: ActiveManager?
     private var preparation: Preparation?
+    /// the key-down wake still running. a take waits for it rather than
+    /// run beside it: the two would share the manager's buffers mid-call,
+    /// and what is pasted has to be what the take alone gives. it is short
+    /// (~60 ms warm) and started the length of a held key earlier.
+    private var waking: Task<Void, Never>?
+    /// half a second of silence: past the model's 0.3 s floor, and padded
+    /// to the same 15 s window a short take is, so it wakes everything the
+    /// take will use.
+    private static let wakeSilence = [Float](repeating: 0, count: 8_000)
     private var nextPreparationIdentifier = 0
     private var fallbackVersion: EngineVersion
 
@@ -77,9 +86,35 @@ actor ParakeetEngine: TranscriptionEngine {
             manager: manager
         )
         fallbackVersion = version
+        // a wake on the old manager has nothing to say about the new one.
+        waking = nil
+    }
+
+    /// not loaded yet means nothing to wake: the load runs its own
+    /// warm-up. a wake already running is the same question.
+    func wake() async {
+        guard waking == nil, let manager = activeManager?.manager else {
+            return
+        }
+        let wake = Task {
+            let decoderLayerCount = await manager.decoderLayerCount
+            var decoderState = TdtDecoderState.make(
+                decoderLayers: decoderLayerCount
+            )
+            _ = try? await manager.transcribe(
+                Self.wakeSilence,
+                decoderState: &decoderState
+            )
+        }
+        waking = wake
+        await wake.value
+        if waking == wake {
+            waking = nil
+        }
     }
 
     func transcribe(_ samples: [Float]) async throws -> String {
+        await waking?.value
         let manager: AsrManager
         if let activeManager {
             manager = activeManager.manager
@@ -116,6 +151,9 @@ actor ParakeetEngine: TranscriptionEngine {
     func unloadModels() {
         cancelPreparation()
         activeManager = nil
+        // a wake stuck in the engine being restarted must not hold up the
+        // first take of the one replacing it.
+        waking = nil
     }
 
     private func preparedManager(
