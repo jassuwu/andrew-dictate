@@ -115,26 +115,22 @@ final class DictationCoordinator: ObservableObject {
     /// is being recorded, and on a mac that has no meeting model.
     @Published private(set) var unrecordedCall: String?
 
-    /// what the menu bar badge wears. a recording is the gold rim whether or
-    /// not a call is in it; a call with nothing recording is the "call on,
-    /// not recorded" look. getting ready and a meeting's problem are other
-    /// tickets' to feed, so they are never asked for here.
+    /// what the menu bar badge wears: the meeting's phase, which the menu
+    /// and the lamp read too — the partial rim while it gets ready or is
+    /// written out, the full rim while it records, the red corner while a
+    /// problem stands — and with no meeting, the "call on, not recorded"
+    /// look while a call is.
     ///
     /// transcribing is not dictating on purpose. the lamp's cool phase owns
     /// the wait and the menu already says "writing it out…" (ADR 0017).
     var badgeLook: BadgeLook {
-        let meeting: BadgeLook.Meeting
-        if meetings.isRecording {
-            meeting = .recording
-        } else if unrecordedCall != nil {
-            meeting = .callNotRecorded
-        } else {
-            meeting = .none
-        }
-        return BadgeLook(
+        BadgeLook(
             needsSetup: needsAttention,
             isDictating: state == .recording,
-            meeting: meeting
+            meeting: BadgeLook.Meeting(
+                meetings.phase,
+                callNotRecorded: unrecordedCall != nil
+            )
         )
     }
 
@@ -2536,6 +2532,11 @@ extension DictationCoordinator {
             .removeDuplicates()
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &meetingCancellables)
+        // the menu's first line and the badge read the phase.
+        built.$phase
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &meetingCancellables)
         // a word learned during the meeting is said once it is over. a
         // turn later: @Published sinks run before the new state is stored.
         built.$state
@@ -2564,12 +2565,6 @@ extension DictationCoordinator {
                     self?.meetings.recordingChanged()
                 }
             }
-            .store(in: &meetingCancellables)
-        // same reason as the two above: the menu watches this object, and
-        // the recovery line lives on the one nested inside it.
-        built.$recovering
-            .removeDuplicates()
-            .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &meetingCancellables)
         // settings › history watches this object too, and its rows say which
         // transcript is being made again.

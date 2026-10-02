@@ -18,7 +18,7 @@ enum BadgeMarks {
         case setupDot
         /// a call nobody records: a viewfinder, you could catch this.
         case brackets
-        /// getting ready: the rim part of the way round.
+        /// getting ready, or writing it out: the rim part of the way round.
         case partRim
         /// recording a meeting: the whole rim.
         case rim

@@ -10,7 +10,9 @@ enum BadgeLook: Equatable, Sendable, CaseIterable {
     /// a call app has the mic and nothing is recording it: you could still
     /// start late.
     case callNotRecorded
-    /// a meeting was started and its model is still loading.
+    /// a meeting is getting ready — its model loading, or its tap not yet
+    /// heard — or a stopped one is being written out: busy with a meeting,
+    /// and not recording one.
     case gettingReady
     case recordingMeeting
     case meetingProblem

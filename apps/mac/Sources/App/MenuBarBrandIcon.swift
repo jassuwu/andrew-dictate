@@ -1,33 +1,10 @@
 import AppKit
 
+/// the badge is the persistent indicator the hud deliberately is not (ADR
+/// 0040): it wears what `DictationCoordinator.badgeLook` says, a take, a
+/// meeting's phase, a call nobody records or a setup gap.
 @MainActor
 enum MenuBarBrandIcon {
-    static func image(
-        for state: DictationCoordinator.State,
-        needsAttention: Bool = false,
-        isRecordingMeeting: Bool = false
-    ) -> NSImage {
-        // today's inputs, as the badge's looks. the coordinator tells a
-        // meeting from a take, so a recording meeting wears the gold rim
-        // where it used to borrow dictation's dot; the badge is the
-        // persistent indicator the hud deliberately is not (ADR 0040). a
-        // call nobody records, a meeting getting ready and a meeting's
-        // problem are drawn but not asked for yet: they arrive with the
-        // meeting's own states.
-        //
-        // transcribing is not dictating on purpose. the lamp's cool phase
-        // owns the wait and the menu already says "writing it out…" (ADR
-        // 0017); a narrower template glyph here only shoved the clock
-        // sideways and back, seventy times a day.
-        image(
-            for: BadgeLook(
-                needsSetup: needsAttention,
-                isDictating: state == .recording,
-                meeting: isRecordingMeeting ? .recording : .none
-            )
-        )
-    }
-
     /// the actual brand badge, full color, wearing `look`'s mark.
     /// non-template by design: the logo is the logo, everywhere (user
     /// directive).
@@ -55,7 +32,9 @@ enum MenuBarBrandIcon {
         case .idle: nil
         case .dictating: "Andrew Dictate recording"
         case .callNotRecorded: "Andrew Dictate, a call is on"
-        case .gettingReady: "Andrew Dictate getting ready to record a meeting"
+        // worn while a meeting gets ready and while one is written out:
+        // the menu bar item's label says which.
+        case .gettingReady: "Andrew Dictate busy with a meeting"
         case .recordingMeeting: "Andrew Dictate recording a meeting"
         case .meetingProblem: "Andrew Dictate has a problem with the meeting"
         case .needsSetup: "Andrew Dictate needs setup"
