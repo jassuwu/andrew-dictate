@@ -28,7 +28,29 @@ enum CoverageCheck {
         case thin(reason: String)
     }
 
+    // Provisional, all of them (ADR 0048): reasoned from how people talk,
+    // not tuned against a real meeting yet. Every result goes in the
+    // meeting record, with the numbers it was reached from, so they can be.
+
+    /// A side with less speech than this is a cough and a "yes": too little
+    /// to hold a share of it against the transcript.
+    static let enoughSpeechToJudge = Duration.seconds(10)
+    /// The most of a side's speech that may go unread — stretches the
+    /// engine failed twice, or that were still waiting when it was never
+    /// there to read them — before the transcript does not cover it.
+    static let mostUnread = 0.2
+
+    static let couldNotBeRead = "some of what was said could not be read"
+
     static func verdict(you: Side, them: Side, farSideLoud: Duration) -> Verdict {
-        .pass
+        for side in [you, them] {
+            guard let speech = side.speech, let read = side.read,
+                  speech >= enoughSpeechToJudge
+            else { continue }
+            if (speech - read) / speech > mostUnread {
+                return .thin(reason: couldNotBeRead)
+            }
+        }
+        return .pass
     }
 }
