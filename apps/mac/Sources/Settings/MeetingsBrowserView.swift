@@ -18,17 +18,22 @@ struct MeetingsBrowserView: View {
                     .padding(.top, 14)
             }
 
-            // kept, not deleted, and never retried again — so this is the
-            // only place it exists as far as anyone can tell.
+            // kept, not deleted, and not retried on its own — so this is the
+            // only place it exists as far as anyone can tell, and the only
+            // place to ask for another try.
             if viewModel.setAsideCount > 0, let folder = viewModel.setAsideFolder {
                 HStack(spacing: 8) {
-                    Text(
-                        viewModel.setAsideCount == 1
-                            ? "1 recording couldn't be transcribed"
-                            : "\(viewModel.setAsideCount) recordings couldn't be transcribed"
-                    )
-                    .font(BrandUI.bodyFont)
-                    .foregroundStyle(BrandUI.attention)
+                    Text(setAsideSentence)
+                        .font(BrandUI.bodyFont)
+                        .foregroundStyle(BrandUI.attention)
+
+                    if viewModel.canTryAgain {
+                        Button("try again") {
+                            Task { await viewModel.tryAgain() }
+                        }
+                        .font(.caption)
+                        .disabled(viewModel.tryingAgain)
+                    }
 
                     Button("show in finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([folder])
@@ -69,6 +74,16 @@ struct MeetingsBrowserView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .preferredColorScheme(.dark)
+    }
+
+    /// what the line says: how many, or that they are being tried.
+    private var setAsideSentence: String {
+        if viewModel.tryingAgain {
+            return "trying again…"
+        }
+        return viewModel.setAsideCount == 1
+            ? "1 recording couldn't be transcribed"
+            : "\(viewModel.setAsideCount) recordings couldn't be transcribed"
     }
 }
 
