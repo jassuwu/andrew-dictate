@@ -39,7 +39,7 @@ struct CallWatcher {
         isRecording: Bool,
         at now: Duration
     ) -> [Suggestion] {
-        guard let app = apps.first else {
+        guard let app = apps.first(where: { $0.holdsMic }) else {
             qualifyingSince = nil
             return []
         }

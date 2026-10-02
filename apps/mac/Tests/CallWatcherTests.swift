@@ -26,4 +26,14 @@ final class CallWatcherTests: XCTestCase {
             [.record("zoom")]
         )
     }
+
+    /// A browser tab playing music is not a call, and neither is a podcast.
+    func testAudioAloneIsNotACall() {
+        var watcher = watcher()
+        let music = app("chrome", mic: false, audio: true)
+
+        XCTAssertEqual(watcher.observe([music], isRecording: false, at: .seconds(0)), [])
+        XCTAssertEqual(watcher.observe([music], isRecording: false, at: .seconds(60)), [])
+        XCTAssertEqual(watcher.observe([music], isRecording: false, at: .seconds(600)), [])
+    }
 }
