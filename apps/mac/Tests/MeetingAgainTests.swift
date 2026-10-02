@@ -123,6 +123,21 @@ final class MeetingAgainTests: XCTestCase {
         XCTAssertEqual(transcribers.made, [], "no model was loaded for nothing")
     }
 
+    /// Audio with nothing in it is not a meeting that was silent: reading it
+    /// would replace a transcript with "nobody spoke". It is left alone.
+    func testAudioWithNothingInItLeavesTheFileAlone() async throws {
+        let file = try await existingMeeting(audioSeconds: 0)
+        let before = try Data(contentsOf: file)
+
+        await coordinator().transcribeAgain(file, with: .whisperLargeV3)
+
+        XCTAssertEqual(try Data(contentsOf: file), before)
+        guard case .couldNotTranscribeAgain = events.last else {
+            return XCTFail("expected couldNotTranscribeAgain, got \(events)")
+        }
+        XCTAssertEqual(transcribers.made, [], "no model was loaded for nothing")
+    }
+
     /// The tap is recording and a model is working: a second model beside
     /// them is the recording's to pay for. It is refused, and says so.
     func testItIsRefusedWhileAMeetingIsBeingRecorded() async throws {
@@ -597,7 +612,8 @@ final class MeetingAgainTests: XCTestCase {
         gaps: [MeetingSession.Gap] = [],
         recovered: Bool = false,
         thin: Bool = false,
-        audioUntil: Date? = nil
+        audioUntil: Date? = nil,
+        audioSeconds: Int = 2
     ) async throws -> URL {
         let url = try MeetingTranscriptFile.write(
             MeetingTranscript(
@@ -612,7 +628,7 @@ final class MeetingAgainTests: XCTestCase {
         let handle = try spool.begin(.init(
             app: "zoom", started: started, engine: "parakeetV3", model: .parakeetV3))
         let file = try SpoolAudioFile(url: handle.audioURL)
-        for s in 0..<2 {
+        for s in 0..<audioSeconds {
             try await file.append(loud(at: .seconds(s)))
         }
         XCTAssertTrue(kept.keep(handle, label: .init(

@@ -1541,6 +1541,9 @@ extension MeetingCoordinator {
         /// meeting's facts from.
         case unreadable
         case noAudio
+        /// There is a file and nothing in it. Read, it would say nobody
+        /// spoke, over a transcript of a meeting where somebody did.
+        case emptyAudio
         /// You threw it away while it was being redone.
         case deleted
         /// The new reading did not cover what was said, over a transcript
@@ -1553,6 +1556,7 @@ extension MeetingCoordinator {
             case .busy: "another one is running"
             case .unreadable: "the transcript can't be read"
             case .noAudio: "the audio is gone"
+            case .emptyAudio: "the audio is empty"
             case .deleted: "the transcript was deleted"
             case .thin(let model, let reason): "\(model.shortName) read it thin: \(reason)"
             }
@@ -1648,6 +1652,9 @@ extension MeetingCoordinator {
         let audio = try await Task.detached(priority: .utility) {
             try SpoolAudioFile.read(url)
         }.value
+        guard !audio.you.isEmpty || !audio.them.isEmpty else {
+            throw AgainFailure.emptyAudio
+        }
         let transcriber = try await makeTranscriber(model)
         let turns = try await transcriber.transcribe(you: audio.you, them: audio.them)
         let reading = Reading(
