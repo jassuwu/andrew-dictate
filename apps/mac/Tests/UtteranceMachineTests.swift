@@ -321,6 +321,51 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(events, [.state(.prewarming, fastDismiss: false)])
     }
 
+    // MARK: - pressing again while it writes
+
+    /// you talk in bursts and press again just after letting go. the
+    /// sentence in flight is worth more than the new one, and the key says
+    /// why it is deaf.
+    func testAPressRightAfterLettingGoIsRefusedOutLoud() async {
+        let m = machine()
+        engine.holds = true
+        engine.reply = .success("first thought")
+        await hold(m, for: .seconds(1))
+        await settle { self.engine.isWaiting }
+
+        m.keyDown()
+        await settle { !self.pills.isEmpty }
+
+        XCTAssertEqual(pills, [Pill("still finishing the last one", 1.4)])
+        XCTAssertEqual(m.state, .transcribing)
+        XCTAssertEqual(mic.starts, 1)
+
+        engine.release()
+        await settle { self.inserter.inserted.count == 1 }
+        XCTAssertEqual(inserter.inserted, ["First thought."])
+    }
+
+    /// long enough to be a hang: the key must not be wedged, so the old
+    /// sentence goes and a new take starts.
+    func testAPressAfterAHungTranscriptionDropsItAndRecords() async {
+        let m = machine()
+        engine.holds = true
+        engine.reply = .success("first thought")
+        await hold(m, for: .seconds(1))
+        await settle { self.engine.isWaiting }
+        await pass(.seconds(3))
+
+        m.keyDown()
+
+        XCTAssertEqual(m.state, .recording)
+        XCTAssertEqual(mic.starts, 2)
+        engine.release()
+        await settle()
+        XCTAssertEqual(inserter.inserted, [])
+        XCTAssertEqual(pills, [])
+        XCTAssertEqual(m.state, .recording)
+    }
+
     // MARK: - helpers
 
     private var pills: [Pill] {
