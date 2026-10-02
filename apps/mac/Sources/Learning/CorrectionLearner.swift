@@ -19,11 +19,6 @@ struct CorrectionLearner {
         let fixed: String
     }
 
-    /// builds the cleaner a candidate entry is tried in: the app's own, with
-    /// your cleanup setting, so the entry is checked against the pipeline
-    /// that will run it.
-    private let cleaner: ([DictionaryEntry]) -> DeterministicCleaner
-
     /// what the engine heard and what we inserted, for the dictation being
     /// watched. in memory only, and only while it is watched.
     private var watched: (heard: String, inserted: String)?
@@ -36,10 +31,6 @@ struct CorrectionLearner {
     /// the fixes the watched dictation stands at right now — its one vote.
     private var votes: Set<LearningKey> = []
 
-    init(cleaner: @escaping ([DictionaryEntry]) -> DeterministicCleaner) {
-        self.cleaner = cleaner
-    }
-
     /// a delivered dictation, watched from now. whatever it ends as is one
     /// vote, cast for its last version.
     mutating func watch(heard: String, inserted: String) {
@@ -49,10 +40,15 @@ struct CorrectionLearner {
 
     /// the watched span as it reads now that you have paused. the answer is
     /// the entries to add — marked learned — and is usually nothing.
+    ///
+    /// `cleaner` builds the pipeline a candidate entry is tried in: the
+    /// app's own, with your cleanup setting as it is now, so an entry is
+    /// checked against the cleaner that will run it.
     mutating func settle(
         edited: String,
         dictionary: [DictionaryEntry],
-        neverLearn: Set<LearningKey>
+        neverLearn: Set<LearningKey>,
+        cleaner: ([DictionaryEntry]) -> DeterministicCleaner
     ) -> [DictionaryEntry] {
         guard let watched else {
             return []

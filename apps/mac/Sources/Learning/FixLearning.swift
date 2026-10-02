@@ -9,15 +9,18 @@ final class FixLearning {
     var onLearned: ((DictionaryEntry) -> Void)?
 
     private let store: DictionaryStore
-    private var learner: CorrectionLearner
+    /// your cleanup setting, read when an entry is tried rather than when
+    /// the app started.
+    private let fullCleanup: @MainActor () -> Bool
+    private var learner = CorrectionLearner()
     private var watcher: SpanWatcher?
 
     init(
         store: DictionaryStore,
-        cleaner: @escaping ([DictionaryEntry]) -> DeterministicCleaner
+        fullCleanup: @escaping @MainActor () -> Bool
     ) {
         self.store = store
-        learner = CorrectionLearner(cleaner: cleaner)
+        self.fullCleanup = fullCleanup
     }
 
     /// a dictation was pasted with focus where we left it. the field it
@@ -50,10 +53,12 @@ final class FixLearning {
     }
 
     private func settled(_ edited: String) {
+        let fullCleanup = fullCleanup()
         let learned = learner.settle(
             edited: edited,
             dictionary: store.entries,
-            neverLearn: store.neverLearn
+            neverLearn: store.neverLearn,
+            cleaner: { DeterministicCleaner(entries: $0, fullCleanup: fullCleanup) }
         )
         for entry in learned where store.add(entry) {
             onLearned?(entry)

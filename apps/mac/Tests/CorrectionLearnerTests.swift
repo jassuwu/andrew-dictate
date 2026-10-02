@@ -4,6 +4,11 @@ import XCTest
 /// we inserted, what you made of it, and the swaps you made before — in,
 /// and out a dictionary entry or nothing.
 final class CorrectionLearnerTests: XCTestCase {
+    /// the app's pipeline with cleanup on, which is what every entry here is
+    /// tried in.
+    private let plainCleaner: ([DictionaryEntry]) -> DeterministicCleaner = {
+        DeterministicCleaner(entries: $0)
+    }
     // MARK: - sounds like
 
     /// the mishearings the ticket was written for: a name the engine turned
@@ -110,7 +115,7 @@ final class CorrectionLearnerTests: XCTestCase {
             for: swap,
             heard: heard,
             dictionary: dictionary,
-            cleaner: { DeterministicCleaner(entries: $0) }
+            cleaner: plainCleaner
         )
     }
 
@@ -171,7 +176,7 @@ final class CorrectionLearnerTests: XCTestCase {
     // MARK: - only on the second identical swap
 
     private func learner() -> CorrectionLearner {
-        CorrectionLearner(cleaner: { DeterministicCleaner(entries: $0) })
+        CorrectionLearner()
     }
 
     /// one dictation of "send it to jaz dot dev", fixed to `fix`.
@@ -185,7 +190,8 @@ final class CorrectionLearnerTests: XCTestCase {
         return learner.settle(
             edited: "Send it to \(fix)",
             dictionary: dictionary,
-            neverLearn: neverLearn
+            neverLearn: neverLearn,
+            cleaner: plainCleaner
         )
     }
 
@@ -206,8 +212,8 @@ final class CorrectionLearnerTests: XCTestCase {
         var learner = learner()
         learner.watch(heard: "send it to jaz dot dev", inserted: "Send it to jaz.dev")
 
-        XCTAssertEqual(learner.settle(edited: "Send it to jass.dev", dictionary: [], neverLearn: []), [])
-        XCTAssertEqual(learner.settle(edited: "Send it to jass.dev", dictionary: [], neverLearn: []), [])
+        XCTAssertEqual(learner.settle(edited: "Send it to jass.dev", dictionary: [], neverLearn: [], cleaner: plainCleaner), [])
+        XCTAssertEqual(learner.settle(edited: "Send it to jass.dev", dictionary: [], neverLearn: [], cleaner: plainCleaner), [])
     }
 
     /// "jas.dev" on the way to "jass.dev" was a pause in your typing, not a
@@ -215,8 +221,8 @@ final class CorrectionLearnerTests: XCTestCase {
     func testAFixChangedBeforeTheDictationEndsCountsOnlyAsItsLastVersion() {
         var learner = learner()
         learner.watch(heard: "send it to jaz dot dev", inserted: "Send it to jaz.dev")
-        _ = learner.settle(edited: "Send it to jas.dev", dictionary: [], neverLearn: [])
-        _ = learner.settle(edited: "Send it to jass.dev", dictionary: [], neverLearn: [])
+        _ = learner.settle(edited: "Send it to jas.dev", dictionary: [], neverLearn: [], cleaner: plainCleaner)
+        _ = learner.settle(edited: "Send it to jass.dev", dictionary: [], neverLearn: [], cleaner: plainCleaner)
 
         XCTAssertEqual(fixJaz(&learner, to: "jas.dev"), [])
         XCTAssertEqual(fixJaz(&learner, to: "jass.dev").map(\.right), ["jass.dev"])
