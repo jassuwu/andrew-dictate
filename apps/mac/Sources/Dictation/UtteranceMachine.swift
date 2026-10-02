@@ -160,6 +160,8 @@ final class UtteranceMachine {
     /// takes in a row the engine never answered. one is worth a check; a
     /// second, with nothing answered in between, is an engine that stopped.
     private var unansweredTakes = 0
+    /// the mac is asleep or locked; stands in for ticket 06's flag until the merge.
+    var isAway = false
     /// the start chime, held back 120 ms so a discarded capture can cancel it
     private var startCueTask: Task<Void, Never>?
     private var retryBuffer = RetryBuffer()
@@ -868,13 +870,35 @@ final class UtteranceMachine {
         generation: Int
     ) {
         transcriptionDeadline?.cancel()
-        let deadline = TranscriptionDeadline.forSamples(samples.count)
-        transcriptionDeadline = Task { @MainActor [weak self, clock] in
-            try? await clock.sleep(for: deadline)
-            guard !Task.isCancelled else {
+        transcriptionDeadline = armDeadline(
+            after: TranscriptionDeadline.forSamples(samples.count)
+        ) { machine in
+            machine.transcriptionTimedOut(samples, generation: generation)
+        }
+    }
+
+    /// a deadline that doesn't run out while the mac is away. one that
+    /// comes due asleep or locked waits, and once the mac is back the
+    /// thing waited on gets a whole window of its own: nobody was there
+    /// to be kept waiting, and a wake is slow for everything.
+    private func armDeadline(
+        after window: Duration,
+        then expire: @escaping @MainActor (UtteranceMachine) -> Void
+    ) -> Task<Void, Never> {
+        Task { @MainActor [weak self, clock] in
+            var wasAway = false
+            while true {
+                try? await clock.sleep(for: window)
+                guard !Task.isCancelled, let self else {
+                    return
+                }
+                if self.isAway || wasAway {
+                    wasAway = self.isAway
+                    continue
+                }
+                expire(self)
                 return
             }
-            self?.transcriptionTimedOut(samples, generation: generation)
         }
     }
 

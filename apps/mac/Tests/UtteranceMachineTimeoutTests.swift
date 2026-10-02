@@ -125,6 +125,37 @@ final class UtteranceMachineTimeoutTests: XCTestCase {
         XCTAssertEqual(engineEvents, [])
     }
 
+    /// asleep or locked, the engine isn't what kept you waiting: a deadline
+    /// that comes due then waits, and once the mac is back the engine gets a
+    /// whole window of its own before the take is given up on.
+    func testADeadlineThatComesDueWhileTheMacIsAwayWaitsForItsReturn() async {
+        let m = machine()
+        engine.holds = true
+        await hold(m, for: .seconds(1))
+        await settle { self.engine.isWaiting }
+
+        m.isAway = true
+        await pass(TranscriptionDeadline.floor)
+        await pass(TranscriptionDeadline.floor)
+        XCTAssertEqual(m.state, .transcribing)
+        XCTAssertEqual(pills, [])
+
+        // back: a whole window from here, whenever the last one fell.
+        m.isAway = false
+        await pass(.milliseconds(3_900))
+        await pass(.milliseconds(100))
+        XCTAssertEqual(m.state, .transcribing)
+        XCTAssertEqual(pills, [])
+
+        // and then it is a hang like any other.
+        await pass(.milliseconds(3_900))
+        XCTAssertEqual(m.state, .transcribing)
+        await pass(.milliseconds(100))
+        await settle { !self.pills.isEmpty }
+        XCTAssertEqual(pills, [Pill("couldn't transcribe — tap to try again", 4)])
+        XCTAssertEqual(outcomes, [.couldNotTranscribe])
+    }
+
     /// pressing again over a take three seconds stuck drops it, as it always
     /// has. that is the same evidence as a timeout, so the engine is checked.
     func testAPressThatDropsAHungTakeAsksForTheEngineToBeChecked() async {
