@@ -1702,6 +1702,10 @@ extension DictationCoordinator {
         case .microphoneDropped:
             audioRecorder = nil
             hudViewModel.useRecorder(nil)
+        case .pressEnded:
+            // the press log lands in the next change; the machine already
+            // ends every press with one.
+            break
         }
     }
 }

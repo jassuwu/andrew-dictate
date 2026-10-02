@@ -56,6 +56,7 @@ final class UtteranceMachineTests: XCTestCase {
         }
         machine.microphoneForPress = { [weak self] in self?.micForPress }
         machine.isPillShowing = { [weak self] in self?.pillShowing ?? false }
+        machine.engineVersion = { "v2" }
         return machine
     }
 
@@ -608,7 +609,56 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(m.state, .idle)
     }
 
+    // MARK: - the press log
+
+    /// every press leaves exactly one record, and a delivered one carries
+    /// the whole path: the mic, what it heard, and when each stage landed.
+    func testADeliveredPressLeavesOneRecordOfTheWholePath() async {
+        let m = machine()
+        engine.reply = .success("the build failed")
+
+        m.keyDown()
+        await pass(.seconds(1))
+        m.keyUp()
+        await settle { !self.presses.isEmpty }
+        await pass(.milliseconds(400))
+
+        XCTAssertEqual(presses.count, 1)
+        let press = presses[0]
+        XCTAssertEqual(press.outcome, .delivered)
+        XCTAssertEqual(press.mic, MicDescription(name: "AirPods Pro", transport: .bluetooth))
+        XCTAssertEqual(press.samples, 1_600)
+        XCTAssertEqual(press.peak ?? 0, 0.06, accuracy: 0.000_1)
+        XCTAssertEqual(press.words, 3)
+        XCTAssertEqual(press.engine, "v2")
+        XCTAssertEqual(press.stages, PressRecord.Stages(
+            firstBuffer: 0,
+            keyUp: 1_000,
+            samplesReady: 1_000,
+            transcriptReady: 1_000,
+            cleaned: 1_000,
+            pastePosted: 1_000,
+            pasteCompleted: 1_000,
+            ended: 1_000
+        ))
+        XCTAssertFalse(press.capped)
+        XCTAssertFalse(press.retry)
+    }
+
     // MARK: - helpers
+
+    private var presses: [PressRecord] {
+        events.compactMap {
+            if case let .pressEnded(record) = $0 {
+                return record
+            }
+            return nil
+        }
+    }
+
+    private var outcomes: [PressRecord.Outcome] {
+        presses.map(\.outcome)
+    }
 
     private var pills: [Pill] {
         events.compactMap {

@@ -35,6 +35,8 @@ enum UtteranceEvent: Equatable, Sendable {
     case retryOffered(Bool)
     /// the mic would not start; the next press must build a fresh one.
     case microphoneDropped
+    /// how one press ended, whatever the ending: exactly one per press.
+    case pressEnded(PressRecord)
 }
 
 /// One utterance at a time, from key-down to its outcome: idle → recording →
@@ -104,6 +106,9 @@ final class UtteranceMachine {
     /// whether a pill is on screen right now. only the HUD knows: its own
     /// timing, the setup window and the next state change all clear it.
     var isPillShowing: (@MainActor () -> Bool)?
+    /// which speech model is answering, for the press log. the engine's
+    /// lifecycle is the coordinator's, so is the name.
+    var engineVersion: (@MainActor () -> String)?
 
     /// One cleaner, kept. Its nineteen regexes — plus one per taught word —
     /// compile on construction, and that used to happen on the main actor
@@ -141,6 +146,10 @@ final class UtteranceMachine {
     /// Held between delivery and the timeline completing, because that is the
     /// one place that knows whether anything actually reached the page.
     private var pendingArchiveText: (heard: String, inserted: String)?
+    /// the press in flight, for its record. apart from the timeline, which
+    /// only finished or cancelled takes complete: every ending gets one of
+    /// these, and `endPress` is the only way out of it.
+    private var press: PressRecord.Draft?
 
     init(
         engine: any TranscriptionEngine,
@@ -208,10 +217,12 @@ final class UtteranceMachine {
         clearRetry()
         timelineSequence &+= 1
         let timelineID = timelineSequence
+        let keyDown = clock.now
         activeTimeline = UtteranceTimelineBuilder(
             id: timelineID,
-            keyDown: clock.now
+            keyDown: keyDown
         )
+        press = PressRecord.Draft(keyDown: keyDown, startedAt: Date())
         // the standby anchor. the one that decides the paste is taken at
         // key-up; this is what stands in if AX hands back nothing then, or
         // if by then the frontmost window is one of ours.
@@ -225,6 +236,7 @@ final class UtteranceMachine {
                 )
             }
             self.microphone = microphone
+            press?.mic = microphone.deviceDescription
             activeFocusAnchor = focusAnchor
             // the mic and the lamp start at key-down; only the chime waits,
             // long enough to know the key is being held rather than caught.
@@ -287,8 +299,13 @@ final class UtteranceMachine {
         setRecordingLocked(false)
 
         do {
-            activeTimeline?.keyUp = clock.now
+            let keyUp = clock.now
+            activeTimeline?.keyUp = keyUp
+            press?.keyUp = keyUp
+            press?.capped = capForcedEnd
             let samples = try microphone.stop()
+            press?.samplesReady = clock.now
+            press?.samples = samples
             // taken now rather than at key-down: the window worth protecting
             // is key-up → paste, the ~600 ms when nobody is moving anything.
             // key-down → paste spans the whole utterance, which is exactly
@@ -490,6 +507,7 @@ final class UtteranceMachine {
             return
         }
         activeTimeline?.micFirstBuffer = instant
+        press?.firstBuffer = instant
     }
 
     private func startPipeline(
@@ -524,6 +542,7 @@ final class UtteranceMachine {
                 return
             }
             activeTimeline?.transcriptReady = clock.now
+            press?.transcriptReady = clock.now
 
             // one read of the text at the caret, two decisions: is the
             // sentence there still running (so no capital), and do the words
@@ -551,6 +570,11 @@ final class UtteranceMachine {
                 ).clean(transcript, continuingASentence: continuingASentence)
                 : cleaner.clean(transcript, continuingASentence: continuingASentence)
             activeTimeline?.cleaned = clock.now
+            press?.cleaned = clock.now
+            // a count, never the words: the record is what gets sent.
+            press?.words = cleanedTranscript.split(
+                whereSeparator: \.isWhitespace
+            ).count
             guard !cleanedTranscript.trimmingCharacters(
                 in: .whitespacesAndNewlines
             ).isEmpty else {
@@ -602,9 +626,11 @@ final class UtteranceMachine {
             guard generation == pipelineGeneration else {
                 return
             }
+            press?.pasteCompleted = clock.now
 
             switch outcome.result {
             case .pasted:
+                press?.pastePosted = outcome.insertedAt
                 // the paste's own instant, not this one: paste() returns as
                 // soon as ⌘V is posted, and that is what "inserted" means.
                 completeTimeline(
@@ -622,6 +648,7 @@ final class UtteranceMachine {
                         duration: 2.4
                     )
                 }
+                endPress(.delivered)
             case let .leftOnPasteboard(reason):
                 completeTimeline(
                     at: clock.now,
@@ -835,6 +862,20 @@ final class UtteranceMachine {
         duration: TimeInterval = 2.4
     ) {
         emit(.pill(message, duration: duration))
+    }
+
+    /// the one way a press ends: its record leaves once, and a second
+    /// ending for the same press finds nothing left to end.
+    private func endPress(_ outcome: PressRecord.Outcome) {
+        guard let press else {
+            return
+        }
+        self.press = nil
+        emit(.pressEnded(press.finished(
+            outcome,
+            at: clock.now,
+            engine: engineVersion?() ?? ""
+        )))
     }
 
     private func emit(_ event: UtteranceEvent) {
