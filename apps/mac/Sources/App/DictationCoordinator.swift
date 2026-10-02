@@ -29,6 +29,12 @@ final class DictationCoordinator: ObservableObject {
         subsystem: AppIdentity.loggingSubsystem,
         category: "permissions"
     )
+    /// one line per press, at notice so the unified log keeps it past the
+    /// moment. every field is public: there are no words in a record.
+    private let pressLogger = Logger(
+        subsystem: AppIdentity.loggingSubsystem,
+        category: "press"
+    )
     /// the machine owns the state; the menu, the HUD and the menu-bar icon
     /// still say `DictationCoordinator.State`.
     typealias State = UtteranceMachine.State
@@ -1713,10 +1719,8 @@ extension DictationCoordinator {
         case .microphoneDropped:
             audioRecorder = nil
             hudViewModel.useRecorder(nil)
-        case .pressEnded:
-            // the press log lands in the next change; the machine already
-            // ends every press with one.
-            break
+        case let .pressEnded(record):
+            pressLogger.notice("\(record.line(), privacy: .public)")
         }
     }
 }
