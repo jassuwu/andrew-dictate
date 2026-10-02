@@ -26,10 +26,18 @@ struct MeetingSession {
         /// The tap went all-zero after having worked (002 §6). Still a live
         /// meeting; audio during this window is lost.
         case rebuilding
-        /// Either the probe was never heard or the rebuild failed. The two are
-        /// indistinguishable at the API level and are told to the user the
-        /// same way.
+        /// The probe was never heard at the start: nothing was ever captured
+        /// and there is no meeting to keep running. A tap lost later is a
+        /// `Problem`, never this.
         case cannotHear
+    }
+
+    /// Something wrong that the meeting records through rather than ends
+    /// on, named so it can be shown until it clears.
+    enum Problem: Equatable, Sendable {
+        /// The tap could not be rebuilt: the far side is not being heard,
+        /// and the gap stays open while it is not. Your side still is.
+        case cannotHearTheCall
     }
 
     enum DictationResponse: Equatable, Sendable {
@@ -60,11 +68,13 @@ struct MeetingSession {
     let quietNudgeAfter: Duration
 
     private(set) var state: State = .idle
-    /// `cannotHear` means two different things — the probe was never heard, or
-    /// a rebuild failed after minutes of good audio. The first has nothing
-    /// worth keeping and the second has most of a meeting. This is the same
-    /// "has it ever delivered audio" signal ADR 0021 uses to tell a denied
-    /// grant from a dead tap, doing the same job one layer up.
+    /// Only ever while recording or rebuilding, and cleared by the stop.
+    private(set) var problem: Problem?
+    /// A meeting stopped before the probe was heard has nothing worth
+    /// keeping; one that has heard anything at all has a recording, holes
+    /// and all. This is the same "has it ever delivered audio" signal ADR
+    /// 0021 uses to tell a denied grant from a dead tap, doing the same job
+    /// one layer up.
     private var everCaptured = false
     private var gaps: [Gap] = []
     private var silenceBegan: Duration?
@@ -81,6 +91,7 @@ struct MeetingSession {
             return
         }
         state = .provingItCanHear
+        problem = nil
         everCaptured = false
         gaps = []
         silenceBegan = nil
@@ -89,7 +100,10 @@ struct MeetingSession {
 
     /// Returns what was captured, or nil if there was never anything to keep.
     mutating func finish(at elapsed: Duration) -> Recording? {
-        defer { state = .idle }
+        defer {
+            state = .idle
+            problem = nil
+        }
         guard everCaptured else {
             return nil
         }
@@ -143,11 +157,23 @@ struct MeetingSession {
         state = .recording
     }
 
-    mutating func rebuildFailed() {
-        guard state == .rebuilding else {
+    // MARK: - problems
+
+    /// A problem names what is wrong while the meeting goes on. Before the
+    /// tap has been heard there is no meeting to go on with, and after the
+    /// stop there is nothing to name.
+    mutating func problemBegan(_ problem: Problem) {
+        guard state == .recording || state == .rebuilding else {
             return
         }
-        state = .cannotHear
+        self.problem = problem
+    }
+
+    mutating func problemCleared(_ problem: Problem) {
+        guard self.problem == problem else {
+            return
+        }
+        self.problem = nil
     }
 
     // MARK: - the two interactions the prototype argued about

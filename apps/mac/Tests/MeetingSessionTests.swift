@@ -82,17 +82,56 @@ final class MeetingSessionTests: XCTestCase {
         XCTAssertEqual(session.finish(at: .seconds(200))?.isComplete, true)
     }
 
-    func testARebuildThatFailsStopsPretendingToRecord() {
+    /// A tap that cannot be rebuilt is a problem, not the end: the meeting
+    /// goes on, your side with it, and the gap stays open until the tap is
+    /// back — or runs to the end of a meeting stopped before it was.
+    func testARebuildThatFailsIsAProblemTheMeetingRecordsThrough() {
         var session = session()
         session.start()
         session.heardTheProbe()
         session.tapWentSilent(at: .seconds(60))
-        session.rebuildFailed()
+        session.problemBegan(.cannotHearTheCall)
 
-        XCTAssertEqual(session.state, .cannotHear)
-        // What was captured before it broke is still worth keeping.
+        XCTAssertEqual(session.state, .rebuilding)
+        XCTAssertEqual(session.problem, .cannotHearTheCall)
+        XCTAssertEqual(session.dictationRequest(), .refuseAndSayWhy)
         let recording = session.finish(at: .seconds(70))
+        XCTAssertEqual(recording?.gaps, [.init(began: .seconds(60), ended: .seconds(70))])
         XCTAssertEqual(recording?.isComplete, false)
+        XCTAssertNil(session.problem, "a meeting that has ended has no problem")
+    }
+
+    func testAProblemClearsWhenItIsOver() {
+        var session = session()
+        session.start()
+        session.heardTheProbe()
+        session.tapWentSilent(at: .seconds(60))
+        session.problemBegan(.cannotHearTheCall)
+
+        session.tapRecovered(at: .seconds(90))
+        session.problemCleared(.cannotHearTheCall)
+
+        XCTAssertNil(session.problem)
+        XCTAssertEqual(session.state, .recording)
+        XCTAssertEqual(
+            session.finish(at: .seconds(100))?.gaps,
+            [.init(began: .seconds(60), ended: .seconds(90))])
+    }
+
+    /// A problem belongs to a meeting that is running: none before the tap
+    /// has been heard, none once it has stopped.
+    func testOnlyARunningMeetingHasAProblem() {
+        var session = session()
+        session.problemBegan(.cannotHearTheCall)
+        XCTAssertNil(session.problem)
+
+        session.start()
+        session.problemBegan(.cannotHearTheCall)
+        XCTAssertNil(session.problem)
+
+        session.heardTheProbe()
+        session.problemBegan(.cannotHearTheCall)
+        XCTAssertEqual(session.problem, .cannotHearTheCall)
     }
 
     // MARK: - dictation is blocked, and says so

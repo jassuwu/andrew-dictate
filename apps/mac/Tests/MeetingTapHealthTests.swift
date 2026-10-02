@@ -294,6 +294,50 @@ final class MeetingTapHealthTests: XCTestCase {
         ])
     }
 
+    /// Three tries and the device is still not there. The meeting does not
+    /// end and no window opens: it has a problem, said on the lamp, and
+    /// goes on recording your side with the gap open. Stopped like that, the
+    /// file says it is not complete, with the gap running to the end.
+    func testARebuildThatThrowsThreeTimesIsAProblemTheMeetingRecordsThrough() async throws {
+        source.rebuildsThatFail = 1_000
+        let clock = FakeClock()
+        let c = coordinator(thresholds: retrying, clock: clock)
+        c.start()
+        await source.awaitStart()
+        await play(loud(at: .zero), loud(at: .seconds(1)))
+
+        clock.advance(by: .seconds(60))
+        source.skip(to: .seconds(60))
+        c.probeTapIsAlive()
+        await until { c.problem != nil }
+
+        XCTAssertEqual(source.rebuilds, 3)
+        XCTAssertEqual(c.problem, .cannotHearTheCall)
+        XCTAssertEqual(c.state, .rebuilding)
+        XCTAssertTrue(c.isRecording)
+        XCTAssertEqual(events, [.started, .gapBegan, .problemBegan(.cannotHearTheCall)])
+        XCTAssertEqual(events.last?.hudText, "can't hear the call — still recording your side")
+
+        // the mic still delivers; the far side is nothing.
+        await play(voice(at: .seconds(60)), voice(at: .seconds(61)))
+        XCTAssertEqual(transcriber.fed.map(\.at), [.zero, .seconds(1), .seconds(60), .seconds(61)])
+        XCTAssertFalse(events.contains(.cannotHear))
+
+        c.stop()
+        await c.untilWrittenOut()
+        let saved = try savedFile()
+        XCTAssertFalse(saved.complete)
+        let body = try String(contentsOf: saved.fileURL, encoding: .utf8)
+        XCTAssertTrue(body.contains("- [2.0, 62.0]"), body)
+        XCTAssertEqual(records.first?.events, [
+            .init(.gapBegan, atS: 2),
+            .init(.rebuildFailed, atS: 60),
+            .init(.rebuildFailed, atS: 60),
+            .init(.rebuildFailed, atS: 60),
+            .init(.problemBegan, atS: 60),
+        ])
+    }
+
     /// A settle, then three tries in a row 100 ms and 200 ms apart.
     private var retrying: MeetingThresholds {
         .init(
@@ -316,6 +360,12 @@ final class MeetingTapHealthTests: XCTestCase {
         let n = 16_000
         return .init(you: Array(repeating: 0.05, count: n),
                      them: (0..<n).map { sin(Float($0) * 0.05) * 0.3 }, at: at)
+    }
+
+    /// You talking, and nothing from the far side.
+    private func voice(at: Duration) -> MeetingAudioChunk {
+        .init(you: Array(repeating: 0.05, count: 16_000),
+              them: Array(repeating: 0, count: 16_000), at: at)
     }
 
     /// A tenth of a second of nothing on either side. Short, so an hour of

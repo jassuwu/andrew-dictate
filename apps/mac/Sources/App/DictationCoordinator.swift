@@ -2459,11 +2459,13 @@ extension DictationCoordinator {
         case .cannotHear:
             // the pill cannot be clicked, so naming the switch was a dead
             // end. this reopens the one surface allowed to ask for it, and
-            // leaves a way back in the menu for anyone who closes it.
+            // leaves a way back in the menu for anyone who closes it. only
+            // ever at the start: a problem mid-call is the lamp's alone.
             meetingsNeedAttention = true
             liveTranscriptPanel?.dismissKeepingPreference()
             runOnboardingAgain(scope: .meetingsOnly, openAt: .permissions)
-        case .recovering, .gapBegan, .gapEnded, .writingItOut, .readingAgain, .hookFailed:
+        case .recovering, .gapBegan, .gapEnded, .problemBegan, .problemCleared,
+             .writingItOut, .readingAgain, .hookFailed:
             break
         }
 

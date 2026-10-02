@@ -45,6 +45,9 @@ struct MeetingPreferences: Sendable {
 /// notifier turns `.nudge` into a question with buttons.
 enum MeetingEvent: Equatable, Sendable {
     case started
+    /// The start sound never came back: the meeting ends before it began.
+    /// Only ever at the start — what goes wrong once recording has begun is
+    /// a problem, and never opens a window over the call.
     case cannotHear
     /// A spool the app died on is being written out, unasked, at launch. It
     /// loads a 2.9 gb model and can run for a quarter of an hour: the lamp
@@ -52,6 +55,10 @@ enum MeetingEvent: Equatable, Sendable {
     case recovering(app: String)
     case gapBegan
     case gapEnded
+    /// Something is wrong that the meeting records through: said on the
+    /// lamp, and in the menu until it clears.
+    case problemBegan(MeetingSession.Problem)
+    case problemCleared(MeetingSession.Problem)
     case nudge
     case writingItOut
     /// The coverage check found the transcript thin, and the meeting is
@@ -78,6 +85,10 @@ enum MeetingEvent: Equatable, Sendable {
         case .cannotHear: "can't hear the mac — opening setup"
         case .gapBegan: "lost \(Self.themWord) — rebuilding"
         case .gapEnded: "hearing them again"
+        // what is lost, and what is not: it is mid-call, and "still
+        // recording" is the part that decides whether to do anything.
+        case .problemBegan(.cannotHearTheCall): "can't hear the call — still recording your side"
+        case .problemCleared(.cannotHearTheCall): "hearing the call again"
         case .nudge: nil
         case .recovering(let app): "found an unsaved \(app) recording — writing it out…"
         case .writingItOut: "writing it out…"
@@ -126,6 +137,8 @@ enum MeetingEvent: Equatable, Sendable {
 @MainActor
 final class MeetingCoordinator: ObservableObject {
     @Published private(set) var state: MeetingSession.State = .idle
+    /// What is wrong while the meeting goes on, for as long as it is.
+    @Published private(set) var problem: MeetingSession.Problem?
     @Published private(set) var elapsed: Duration = .zero
     @Published private(set) var liveLines: [LiveLine] = []
     /// The app of the spool being written out at launch, while it runs. The
@@ -575,27 +588,31 @@ final class MeetingCoordinator: ObservableObject {
         case .waitingForProbeTone, .waitingForQuietProbe:
             break
         case .capturing:
+            let heard = chunk.themRMS > thresholds.silenceFloor
             if asked {
                 meeting.notes.note(.probeHeard, at: elapsed)
             }
-            let wasRebuilding = session.state == .rebuilding
             if session.state == .provingItCanHear {
                 session.heardTheProbe()
                 publish()
                 onEvent?(.started)
             }
-            session.tapRecovered(at: elapsed)
-            if wasRebuilding {
+            // A lost tap is back once it hears something — its own start
+            // sound, as a rule. A chunk of nothing proves only that
+            // something calls back, and after a rebuild that failed that is
+            // your mic alone.
+            if heard, session.state == .rebuilding {
+                session.tapRecovered(at: elapsed)
                 meeting.notes.note(.gapEnded, at: elapsed)
-                onEvent?(.gapEnded)
                 publish()
+                onEvent?(.gapEnded)
             }
             // A working tap is not the same thing as a room with people
             // talking in it: the verdict stays `.capturing` through every
             // pause. Only a chunk with sound in it, and only past the probe
             // window, moves the quiet clock — otherwise silence resets the
             // clock that is meant to be measuring it.
-            if chunk.themRMS > thresholds.silenceFloor, elapsed > probeUntil {
+            if heard, elapsed > probeUntil {
                 session.heardAudio(at: elapsed)
                 nudgePending = false
             }
@@ -668,6 +685,10 @@ final class MeetingCoordinator: ObservableObject {
     /// comes back as dead as the tap it replaced. One that throws is tried
     /// again, a little further apart each time. Stopped meanwhile, or heard
     /// again, and there is nothing of its own left to rebuild.
+    ///
+    /// When the tries in a row are used up the meeting does not end: most
+    /// of it is on the spool and your side is still arriving. It has a
+    /// problem instead, said on the lamp — never a window over the call.
     private func keepRebuilding(_ meeting: Meeting) async {
         var wait = thresholds.settleBeforeRebuild
         var failures = 0
@@ -689,11 +710,10 @@ final class MeetingCoordinator: ObservableObject {
                     wait = thresholds.rebuildSpacing[failures - 1]
                     continue
                 }
-                session.rebuildFailed()
+                session.problemBegan(.cannotHearTheCall)
+                meeting.notes.note(.problemBegan, at: elapsed)
                 publish()
-                onEvent?(.cannotHear)
-                // Most of a meeting is on the spool; write what there is.
-                stop(announcingNothingKept: false)
+                onEvent?(.problemBegan(.cannotHearTheCall))
                 return
             }
         }
@@ -1169,6 +1189,7 @@ final class MeetingCoordinator: ObservableObject {
 
     private func publish() {
         state = session.state
+        problem = session.problem
     }
 
     /// Returns once `done` is true, looking again each time a meeting starts,

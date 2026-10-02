@@ -484,8 +484,9 @@ final class MeetingRecordTests: XCTestCase {
         ])
     }
 
-    /// a tap that cannot be rebuilt ends the meeting with most of it on the
-    /// spool: the record has the gap that never closed, and the failure.
+    /// a tap that cannot be rebuilt is a problem the meeting records
+    /// through, not its end: stopped like that, the record has the gap that
+    /// never closed, each try that failed, and the problem.
     func testTheRecordKeepsATapThatCouldNotBeRebuilt() async throws {
         source.rebuilding = Unreadable()
         let clock = FakeClock()
@@ -498,7 +499,9 @@ final class MeetingRecordTests: XCTestCase {
 
         clock.advance(by: .seconds(3_498))
         c.probeTapIsAlive()
-        await awaitRecords(1)
+        await settle()
+        XCTAssertEqual(records.count, 0, "still recording")
+        c.stop()
         await c.untilWrittenOut()
 
         XCTAssertEqual(records.count, 1)
@@ -509,6 +512,7 @@ final class MeetingRecordTests: XCTestCase {
             .init(.rebuildFailed, atS: 3_498),
             .init(.rebuildFailed, atS: 3_498),
             .init(.rebuildFailed, atS: 3_498),
+            .init(.problemBegan, atS: 3_498),
         ])
         XCTAssertEqual(record.gaps, 1)
         XCTAssertEqual(record.gapsLostS, 2_415)

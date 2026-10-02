@@ -160,8 +160,13 @@ extension MeetingRecord {
         static let gapBegan = Label(rawValue: "gap-began")
         /// the rebuilt tap was heard again.
         static let gapEnded = Label(rawValue: "gap-ended")
-        /// the tap could not be rebuilt, and the meeting ended there.
+        /// a rebuild of the tap threw. it is tried again.
         static let rebuildFailed = Label(rawValue: "rebuild-failed")
+        /// the meeting went on with something wrong, named on the lamp: the
+        /// call could not be heard.
+        static let problemBegan = Label(rawValue: "problem-began")
+        /// and it was over.
+        static let problemCleared = Label(rawValue: "problem-cleared")
         /// a far side silent while something played was asked with the
         /// quiet probe, and the tap heard it: nothing was wrong.
         static let probeHeard = Label(rawValue: "probe-heard")
