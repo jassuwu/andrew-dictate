@@ -172,6 +172,13 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// whether anybody chose where meetings go — in settings, or by already
+    /// having transcripts where the old default pointed. a mac that never
+    /// did is not set up for meetings, unless a meeting model is on disk.
+    var meetingsFolderWasChosen: Bool {
+        userDefaults.string(forKey: Self.meetingsFolderKey) != nil
+    }
+
     /// one executable run detached after a transcript is closed, or nil.
     @Published var meetingHook: URL? {
         didSet {
