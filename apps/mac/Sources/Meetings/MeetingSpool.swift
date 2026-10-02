@@ -16,6 +16,11 @@ struct MeetingSpool: Sendable {
         /// to a property's default, and a manifest written before the ledger
         /// existed must still read — sweeping it would be losing a meeting.
         var attempts: Int?
+        /// The transcript this audio was written out into, once it has been
+        /// and the audio is still wanted: the transcript did not cover it.
+        /// A spool with one is not an orphan — its meeting is on disk, and
+        /// writing it out again would be a second file for one meeting.
+        var transcript: URL?
     }
 
     struct Handle: Equatable, Sendable {
@@ -92,6 +97,27 @@ struct MeetingSpool: Sendable {
         return updated
     }
 
+    /// Its meeting is written out, into `transcript`, and the audio stays:
+    /// `orphans()` stops offering it. False when the manifest could not be
+    /// read or rewritten — then the next launch would write it out again.
+    @discardableResult
+    func keep(_ handle: Handle, writtenTo transcript: URL) -> Bool {
+        guard let data = try? Data(contentsOf: handle.manifestURL),
+              var manifest = try? Self.decoder.decode(Manifest.self, from: data)
+        else {
+            return false
+        }
+        manifest.transcript = transcript
+        guard let updated = try? Self.encoder.encode(manifest),
+              (try? updated.write(to: handle.manifestURL, options: .atomic)) != nil
+        else {
+            return false
+        }
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: handle.manifestURL.path)
+        return true
+    }
+
     /// Out of the way, not away: `orphans()` stops offering it and nothing
     /// deletes it.
     func setAside(_ handle: Handle) {
@@ -134,7 +160,8 @@ struct MeetingSpool: Sendable {
     /// Spools with a manifest and audio, oldest first. A folder whose manifest
     /// cannot be read is junk and is swept; a manifest without audio is a
     /// meeting that has just begun and is left alone; one set aside as
-    /// unreadable is never offered again.
+    /// unreadable is never offered again, and nor is one whose meeting is
+    /// already written out.
     func orphans() -> [(handle: Handle, manifest: Manifest)] {
         let fm = FileManager.default
         // Names, not URLs: `contentsOfDirectory(at:)` hands back resolved
@@ -155,7 +182,9 @@ struct MeetingSpool: Sendable {
                 try? fm.removeItem(at: folder)
                 continue
             }
-            guard fm.fileExists(atPath: handle.audioURL.path) else {
+            guard fm.fileExists(atPath: handle.audioURL.path),
+                  manifest.transcript == nil
+            else {
                 continue
             }
             found.append((handle, manifest))

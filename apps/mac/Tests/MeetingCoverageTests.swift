@@ -116,7 +116,42 @@ final class MeetingCoverageTests: XCTestCase {
         XCTAssertEqual(told["complete"] as? Bool, false)
     }
 
+    /// The audio of a meeting that stayed thin is all there is to check the
+    /// file against, or to read it again from: it is kept. It is not a
+    /// spool a crash left, either — the next launch does not write the
+    /// meeting out a second time.
+    func testTheAudioOfAMeetingThatStayedThinIsKeptAndIsNotAnOrphan() async throws {
+        let (live, again) = stillThin()
+        transcribers.lineUp(live, again)
+
+        try await meeting(seconds: 2)
+
+        XCTAssertEqual(try keptSpools(), 1)
+        XCTAssertEqual(spool.orphans().count, 0)
+        let launch = coordinator()
+        launch.recoverOrphans()
+        await settle()
+        XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).count, 1)
+        XCTAssertEqual(try keptSpools(), 1)
+    }
+
     // MARK: - helpers
+
+    /// Spool folders with their audio still in them.
+    private func keptSpools() throws -> Int {
+        let root = dir.appendingPathComponent("spool")
+        return try FileManager.default.contentsOfDirectory(atPath: root.path)
+            .filter { !$0.hasPrefix(".") }
+            .filter {
+                FileManager.default.fileExists(
+                    atPath: root.appendingPathComponent($0).appendingPathComponent("audio.caf").path)
+            }
+            .count
+    }
+
+    private func settle(for seconds: Double = 0.3) async {
+        try? await Task.sleep(for: .seconds(seconds))
+    }
 
     /// A live reading of an hour of their talk that came to two words, and
     /// a reading again from the spool that came to three: more, and no
@@ -138,7 +173,10 @@ final class MeetingCoverageTests: XCTestCase {
     /// waits for it.
     private func toldTheHook(beside file: MeetingSummary) async throws -> [String: Any] {
         let url = file.fileURL.deletingLastPathComponent().appendingPathComponent("seen.json")
-        await waitFor { FileManager.default.fileExists(atPath: url.path) }
+        // `cat >` makes the file before it has written to it.
+        await waitFor {
+            (try? JSONSerialization.jsonObject(with: Data(contentsOf: url))) != nil
+        }
         let object = try JSONSerialization.jsonObject(with: Data(contentsOf: url))
         return try XCTUnwrap(object as? [String: Any])
     }

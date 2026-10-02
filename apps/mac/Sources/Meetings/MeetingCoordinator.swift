@@ -776,7 +776,16 @@ final class MeetingCoordinator: ObservableObject {
             onEvent?(.saveFailed(error.localizedDescription))
             return nil
         }
-        try? spool.finish(handle)
+        if covered.result == .thin {
+            // the only way to check the file, or read it again: kept until
+            // you delete it, and no longer a spool for the next launch to
+            // write out a second time.
+            if !spool.keep(handle, writtenTo: url) {
+                logger.error("could not mark a thin meeting's spool as written out")
+            }
+        } else {
+            try? spool.finish(handle)
+        }
         keepMeetingRecord?(record(.saved, toDisk: notes.stopped.map { now() - $0 }))
 
         let summary = (try? MeetingTranscriptFile.summary(of: url)) ?? MeetingSummary(
