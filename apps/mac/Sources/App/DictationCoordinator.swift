@@ -2268,7 +2268,7 @@ extension DictationCoordinator {
                 quietFor: meetings.coordinator.thresholds.quietNudgeAfter
             )
         case .saved(let summary):
-            liveTranscriptPanel?.dismissKeepingPreference()
+            dismissLiveTranscriptUnlessRecording()
             // the file *is* the feature, and the pill that names it is gone
             // in two seconds — often before you are back at the mac.
             lastMeeting = summary
@@ -2277,10 +2277,10 @@ extension DictationCoordinator {
             // a quit waiting on the transcript is answered by
             // `untilWrittenOut`, not here: this file may be one of two.
         case .saveFailed:
-            liveTranscriptPanel?.dismissKeepingPreference()
+            dismissLiveTranscriptUnlessRecording()
             meetings.notifier.saveFailed()
         case .nothingToKeep, .engineFailed:
-            liveTranscriptPanel?.dismissKeepingPreference()
+            dismissLiveTranscriptUnlessRecording()
         case .cannotHear:
             // the pill cannot be clicked, so naming the switch was a dead
             // end. this reopens the one surface allowed to ask for it, and
@@ -2304,6 +2304,16 @@ extension DictationCoordinator {
             }
             flashNotice(text, duration: duration)
         }
+    }
+
+    /// the panel belongs to the meeting being recorded. the end of one
+    /// that stopped earlier — or of a recovery — can land while the next is
+    /// recording, and closing it then would take it from that one.
+    private func dismissLiveTranscriptUnlessRecording() {
+        guard !meetings.isRecording else {
+            return
+        }
+        liveTranscriptPanel?.dismissKeepingPreference()
     }
 
     private func prepareMeetingModel(progress: @escaping @Sendable (Double) -> Void) async -> Bool {
