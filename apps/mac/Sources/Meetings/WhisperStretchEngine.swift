@@ -86,8 +86,18 @@ actor WhisperStretchEngine: StretchEngine {
         options.detectLanguage = true
         options.usePrefillPrompt = true
         options.skipSpecialTokens = true
-        options.withoutTimestamps = false
         options.temperature = 0
+        // A stretch is decoded as one window, whole. With timestamps on,
+        // WhisperKit moves on to the last timestamp whisper wrote and
+        // decodes whatever is after it as a window of its own, padded out
+        // to 30 s with silence — the input whisper makes things up on.
+        // Measured on large-v3 (2026-10-03): of six sentences of 7 to 19 s,
+        // cut as the cutter cuts them, half came back with a second window
+        // and "you", "Thank you." or "End of Episode One" after the last
+        // word, in twice the time. Without timestamps every one was a
+        // single window with nothing added, and "yes." and "okay." still
+        // came back.
+        options.withoutTimestamps = true
         // WhisperKit skips whatever is left in the last second of a window:
         // its default `windowClipTime` is 1 s, so a stretch of a second or
         // less is never decoded at all. Measured on large-v3: "yes." (0.6 s)
