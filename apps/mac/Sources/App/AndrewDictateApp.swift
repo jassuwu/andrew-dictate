@@ -95,6 +95,28 @@ struct AndrewDictateApp: App {
         return "Andrew Dictate"
     }
 
+    /// `record a meeting`, and under it `record with ▸` when another meeting
+    /// model is on this mac: the models other than the default, for this one
+    /// meeting. the submenu is the same menu's second line, so it comes and
+    /// goes with it and never shows while a meeting records.
+    @ViewBuilder
+    private var recordAMeeting: some View {
+        Button("record a meeting") {
+            coordinator.startMeeting()
+        }
+
+        let others = coordinator.recordWithChoices
+        if !others.isEmpty {
+            Menu("record with") {
+                ForEach(others, id: \.model) { choice in
+                    Button(choice.title) {
+                        coordinator.startMeeting(model: choice.model)
+                    }
+                }
+            }
+        }
+    }
+
     var body: some Scene {
         MenuBarExtra {
             // two menu bar icons that look identical is a bad time. the badge
@@ -147,9 +169,7 @@ struct AndrewDictateApp: App {
                         .foregroundStyle(.secondary)
                         .disabled(true)
 
-                    Button("record a meeting") {
-                        coordinator.startMeeting()
-                    }
+                    recordAMeeting
                 }
 
                 // a spool the app died on is being written out in the
@@ -205,9 +225,7 @@ struct AndrewDictateApp: App {
                 // (ADR 0049). it is named after the call that is on, if one
                 // is, and then it sits under that call's line above.
                 if coordinator.unrecordedCall == nil {
-                    Button("record a meeting") {
-                        coordinator.startMeeting()
-                    }
+                    recordAMeeting
                 }
 
                 // one row, and only while it is needed: the tap would not

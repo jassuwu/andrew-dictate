@@ -2175,12 +2175,20 @@ extension DictationCoordinator {
     /// one surface that knows how to ask (SPEC §5). the meeting is named
     /// after the call that is on, if one is, so the file, its front matter
     /// and the hook say `zoom` (ADR 0047); `name` is the call the pill
-    /// asked about.
-    func startMeeting(name: String? = nil) {
+    /// asked about. `model` is `record with`: this one meeting is heard by
+    /// it instead of the default, and only the menu passes one — the pill's
+    /// button and the hotkey always use the default.
+    func startMeeting(name: String? = nil, model: MeetingModel? = nil) {
         guard !meetings.isRecording else { return }
-        guard installedMeetingModels.contains(settings.meetingModel) else {
-            meetingWaitsOnSetup = true
-            runOnboardingAgain(scope: .meetingsOnly)
+        guard installedMeetingModels.contains(model ?? settings.meetingModel) else {
+            if let model {
+                // the menu listed it when it was drawn, and it has gone since.
+                // setup fetches the default, so this is only said.
+                flashNotice("\(model.shortName) is not on this mac")
+            } else {
+                meetingWaitsOnSetup = true
+                runOnboardingAgain(scope: .meetingsOnly)
+            }
             return
         }
         if state == .recording {
@@ -2193,7 +2201,15 @@ extension DictationCoordinator {
             await notifier.requestPermissionIfNeeded()
         }
         withdrawQuestions { !$0.isAboutARecording }
-        meetings.coordinator.start(name: name ?? meetings.currentCall)
+        meetings.coordinator.start(name: name ?? meetings.currentCall, model: model)
+    }
+
+    /// the lines of `record with ▸`, empty when the menu shows none.
+    var recordWithChoices: [RecordWith.Choice] {
+        RecordWith.choices(
+            installed: installedMeetingModels,
+            default: settings.meetingModel,
+            isRecording: meetings.isRecording)
     }
 
     func stopMeeting() {
