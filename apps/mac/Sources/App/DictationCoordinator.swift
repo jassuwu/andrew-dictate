@@ -346,9 +346,12 @@ final class DictationCoordinator: ObservableObject {
             self?.audioDevicesChanged(change)
         }
 
+        // a turn later: `@Published` says so in willSet, and the capture
+        // built for the new mode reads the setting itself.
         settings.$preRollEnabled
             .dropFirst()
             .removeDuplicates()
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.applyPreRoll()
             }
