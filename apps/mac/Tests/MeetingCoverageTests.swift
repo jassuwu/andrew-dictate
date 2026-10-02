@@ -92,7 +92,63 @@ final class MeetingCoverageTests: XCTestCase {
         XCTAssertEqual(events.filter { if case .saved = $0 { true } else { false } }.count, 1)
     }
 
+    // MARK: - still thin
+
+    /// Read again, and still far fewer words than the talk: the file is
+    /// written once, with the reading that has more in it, and says it is
+    /// not whole and why — in its front matter, and to the hook.
+    func testAReadingThatIsStillThinIsWrittenIncompleteWithItsReason() async throws {
+        hook = try script("#!/bin/sh\ncat > \"$ANDREW_FOLDER/seen.json\"\nexit 0\n")
+        let (live, again) = stillThin()
+        transcribers.lineUp(live, again)
+
+        try await meeting(seconds: 2)
+
+        let files = MeetingTranscriptFile.listAll(in: docs)
+        XCTAssertEqual(files.count, 1, "written once")
+        let file = try XCTUnwrap(files.first)
+        XCTAssertFalse(file.complete)
+        XCTAssertEqual(try frontMatter(of: file)["complete"], "false")
+        XCTAssertEqual(
+            try frontMatter(of: file)["reason"], "far fewer words than the talk that was heard")
+        XCTAssertEqual(try lines(of: file), ["[00:00:01] them 1: since when exactly"])
+        let told = try await toldTheHook(beside: file)
+        XCTAssertEqual(told["complete"] as? Bool, false)
+    }
+
     // MARK: - helpers
+
+    /// A live reading of an hour of their talk that came to two words, and
+    /// a reading again from the spool that came to three: more, and no
+    /// better.
+    private func stillThin() -> (FakeTranscriber, FakeTranscriber) {
+        let live = FakeTranscriber()
+        live.finalTurns = [.init(speaker: .them(nil), at: .seconds(1), text: "hmm right")]
+        live.tally = StretchTally(
+            decodedThem: 900, speechThem: .seconds(3_600), readThem: .seconds(3_600))
+        let again = FakeTranscriber()
+        again.batchTurns = [.init(speaker: .them(nil), at: .seconds(1), text: "since when exactly")]
+        again.tally = StretchTally(
+            decodedThem: 900, speechThem: .seconds(3_600), readThem: .seconds(3_600))
+        return (live, again)
+    }
+
+    /// What the hook was handed on stdin, as a hook that saves it beside the
+    /// transcript left it. The hook runs after the file is written, so this
+    /// waits for it.
+    private func toldTheHook(beside file: MeetingSummary) async throws -> [String: Any] {
+        let url = file.fileURL.deletingLastPathComponent().appendingPathComponent("seen.json")
+        await waitFor { FileManager.default.fileExists(atPath: url.path) }
+        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: url))
+        return try XCTUnwrap(object as? [String: Any])
+    }
+
+    private func script(_ text: String) throws -> URL {
+        let url = dir.appendingPathComponent("hook.sh")
+        try text.write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        return url
+    }
 
     /// A meeting `seconds` long, loud on both sides, stopped and written out.
     private func meeting(seconds: Int) async throws {

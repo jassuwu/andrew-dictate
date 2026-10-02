@@ -23,7 +23,8 @@ struct MeetingTurn: Equatable, Sendable {
 }
 
 /// A finished meeting, ready to become a file. The artifact is the transcript
-/// (ADR 0040): no audio survives, so everything worth knowing is in here.
+/// (ADR 0040): the audio is let go after it, so everything worth knowing is
+/// in here.
 struct MeetingTranscript: Equatable, Sendable {
     let app: String
     let started: Date
@@ -32,14 +33,15 @@ struct MeetingTranscript: Equatable, Sendable {
     let gaps: [MeetingSession.Gap]
     let recovered: Bool
     /// Why the file does not cover the meeting, in one sentence, for the front
-    /// matter. nil gets the default, that audio was lost in N gaps. Only
-    /// written when `complete` is false.
+    /// matter: the coverage check's, when it found the transcript thin. nil
+    /// gets the default, that audio was lost in N gaps. Only written when
+    /// `complete` is false.
     var reason: String? = nil
     let turns: [MeetingTurn]
 
     /// SPEC §4 extended: a transcript with holes says so, in its front matter
-    /// and in its body.
-    var complete: Bool { gaps.isEmpty }
+    /// and in its body, and so does one that does not cover what was said.
+    var complete: Bool { gaps.isEmpty && reason == nil }
 }
 
 /// The transcript on disk: `<parent>/meetings/2026-08/2026-08-29-1402-zoom.md`,

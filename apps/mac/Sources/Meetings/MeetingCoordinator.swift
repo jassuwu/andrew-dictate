@@ -752,6 +752,7 @@ final class MeetingCoordinator: ObservableObject {
             engine: model.rawValue,
             gaps: recording.gaps,
             recovered: recovered,
+            reason: covered.result == .thin ? covered.reason : nil,
             turns: split
         )
         func record(_ outcome: MeetingRecord.Outcome, toDisk: Duration? = nil) -> MeetingRecord {
@@ -780,7 +781,7 @@ final class MeetingCoordinator: ObservableObject {
 
         let summary = (try? MeetingTranscriptFile.summary(of: url)) ?? MeetingSummary(
             fileURL: url, app: app, started: started, duration: recording.duration,
-            complete: recording.isComplete, gapCount: recording.gaps.count,
+            complete: transcript.complete, gapCount: recording.gaps.count,
             recovered: recovered)
         onEvent?(.saved(summary))
 
@@ -789,7 +790,7 @@ final class MeetingCoordinator: ObservableObject {
             app: app,
             startedAt: started,
             durationS: Int(recording.duration.components.seconds),
-            complete: recording.isComplete,
+            complete: transcript.complete,
             gaps: recording.gaps.map { [$0.began.totalSeconds, $0.ended.totalSeconds] },
             recovered: recovered
         )
