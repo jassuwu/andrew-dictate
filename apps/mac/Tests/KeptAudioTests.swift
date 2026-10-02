@@ -84,7 +84,137 @@ final class KeptAudioTests: XCTestCase {
         XCTAssertEqual(records.first?.audioKeptUntil, writtenAt.addingTimeInterval(86_400))
     }
 
+    /// Compressed, not mixed: still two channels at the spool's 16 kHz, and
+    /// as private as the spool was — 0600 files in a 0700 folder.
+    func testKeptAudioIsTwoChannelsAt16kHzAndPrivate() async throws {
+        transcribers.lineUp(healthy())
+
+        try await meeting(seconds: 2)
+
+        let audio = try XCTUnwrap(try keptFiles().first { $0.pathExtension == "m4a" })
+        let file = try AVAudioFile(forReading: audio)
+        XCTAssertEqual(file.fileFormat.channelCount, 2)
+        XCTAssertEqual(file.fileFormat.sampleRate, 16_000)
+        XCTAssertEqual(file.fileFormat.streamDescription.pointee.mFormatID, kAudioFormatMPEG4AAC)
+        XCTAssertEqual(try permissions(of: audioFolder), 0o700)
+        for kept in try keptFiles() {
+            XCTAssertEqual(try permissions(of: kept), 0o600, kept.lastPathComponent)
+        }
+    }
+
+    // MARK: - the sweep
+
+    /// A day and a second later, the sweep deletes it without asking.
+    func testKeptAudioIsGoneOnceItsDayIsUpAndTheSweepHasRun() async throws {
+        transcribers.lineUp(healthy())
+        try await meeting(seconds: 2)
+        XCTAssertEqual(kept.all().count, 1)
+
+        wall.advance(by: 86_399)
+        kept.sweep()
+        XCTAssertEqual(kept.all().count, 1, "not yet")
+
+        wall.advance(by: 1)
+        kept.sweep()
+        XCTAssertEqual(try keptFiles(), [])
+    }
+
+    /// The end of every meeting sweeps too: the last one's day is up by the
+    /// time the next one is written out, and only the next one's is left.
+    func testTheEndOfTheNextMeetingSweepsWhatIsDue() async throws {
+        transcribers.lineUp(healthy(), healthy())
+        let c = coordinator()
+        try await meeting(seconds: 2, on: c)
+        let first = try XCTUnwrap(kept.all().first)
+
+        wall.advance(by: 2 * 86_400)
+        try await meeting(seconds: 2, on: c)
+
+        let left = kept.all()
+        XCTAssertEqual(left.count, 1)
+        XCTAssertNotEqual(left.first?.id, first.id)
+        XCTAssertEqual(left.first?.label.until, writtenAt.addingTimeInterval(3 * 86_400))
+    }
+
+    /// A thin meeting's audio has no date: a month on, the sweep still
+    /// leaves it, and the label says it waits for you.
+    func testAThinMeetingsAudioOutlivesItsDay() async throws {
+        transcribers.lineUp(thin(), thin())
+
+        try await meeting(seconds: 2)
+        wall.advance(by: 30 * 86_400)
+        kept.sweep()
+
+        XCTAssertEqual(try keptFiles().map(\.pathExtension), ["json", "m4a"])
+        let label = try keptLabel()
+        XCTAssertTrue(label["until"] is NSNull)
+        XCTAssertEqual(label["untilDeleted"] as? Bool, true)
+        XCTAssertEqual(records.first?.audioKept, true)
+        XCTAssertNil(records.first?.audioKeptUntil)
+    }
+
+    // MARK: - delete at once
+
+    /// Set to delete at once, a meeting that passes keeps nothing: the
+    /// spool goes the moment the file is written, as it always did.
+    func testDeleteAtOnceLeavesNoAudioAfterAPass() async throws {
+        keepAudio = .deleteAtOnce
+        transcribers.lineUp(healthy())
+
+        try await meeting(seconds: 2)
+
+        XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).count, 1)
+        XCTAssertEqual(try keptFiles(), [])
+        XCTAssertEqual(try spoolFolders(), 0)
+        XCTAssertEqual(records.first?.audioKept, false)
+    }
+
+    /// …but a thin one keeps its audio whatever the setting says.
+    func testDeleteAtOnceStillKeepsAThinMeetingsAudio() async throws {
+        keepAudio = .deleteAtOnce
+        transcribers.lineUp(thin(), thin())
+
+        try await meeting(seconds: 2)
+
+        XCTAssertEqual(try keptFiles().map(\.pathExtension), ["json", "m4a"])
+        XCTAssertEqual(try keptLabel()["untilDeleted"] as? Bool, true)
+    }
+
+    // MARK: - a conversion that fails
+
+    /// Compressing failed: the spool's own file is kept as it is, under the
+    /// same label, and the spool folder still goes. Audio is never lost to
+    /// a conversion.
+    func testAFailedCompressionKeepsTheSpoolsOwnFile() async throws {
+        transcribers.lineUp(healthy())
+        let failing = KeptAudio(
+            root: audioFolder, now: { [wall] in wall!.now },
+            compress: { _, _ in throw CocoaError(.fileWriteUnknown) })
+
+        try await meeting(seconds: 2, on: coordinator(kept: failing))
+
+        XCTAssertEqual(try keptFiles().map(\.pathExtension), ["caf", "json"])
+        let audio = try XCTUnwrap(try keptFiles().first { $0.pathExtension == "caf" })
+        XCTAssertEqual(try AVAudioFile(forReading: audio).length, 32_000)
+        XCTAssertEqual(try spoolFolders(), 0)
+        XCTAssertEqual(failing.all().count, 1)
+    }
+
     // MARK: - helpers
+
+    /// A live reading the check finds thin, and a reading again that is no
+    /// better.
+    private func thin() -> FakeTranscriber {
+        let reading = FakeTranscriber()
+        reading.tally = StretchTally(
+            decodedThem: 900, speechThem: .seconds(3_600), readThem: .seconds(3_600))
+        return reading
+    }
+
+    private func permissions(of url: URL) throws -> Int {
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        return try XCTUnwrap(attributes[.posixPermissions] as? Int)
+    }
 
     /// A live reading the coverage check passes.
     private func healthy() -> FakeTranscriber {
