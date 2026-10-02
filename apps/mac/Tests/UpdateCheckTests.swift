@@ -699,6 +699,78 @@ final class UpdateCheckTests: XCTestCase {
         XCTAssertNil(BrewUpgrade.reason(inStderr: "\n \n"))
     }
 
+    // MARK: - the real runner, run on /bin/sh (never brew)
+
+    private func shell(
+        _ script: String,
+        environment: [String: String] = [:],
+        timeout: TimeInterval = 10
+    ) async -> CommandResult {
+        await ProcessRunner().run(
+            Command(
+                executable: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", script],
+                environment: environment,
+                timeout: timeout
+            )
+        )
+    }
+
+    func testTheRunnerKeepsBothStreamsAndTheExitStatus() async {
+        let result = await shell("echo out; echo err >&2; exit 3")
+
+        XCTAssertEqual(
+            result,
+            CommandResult(ending: .exited(3), stdout: "out\n", stderr: "err\n")
+        )
+    }
+
+    /// more than a pipe holds, so a runner that read only at the end
+    /// would hang here instead of finishing.
+    func testTheRunnerFinishesAfterALotOfOutput() async {
+        let result = await shell(
+            "i=0; while [ $i -lt 3000 ]; do "
+                + "echo 'a line of brew output, give or take'; "
+                + "echo 'and its stderr twin' >&2; i=$((i+1)); done"
+        )
+
+        XCTAssertEqual(result.ending, .exited(0))
+        XCTAssertEqual(result.stdout.split(separator: "\n").count, 3000)
+        XCTAssertEqual(result.stderr.split(separator: "\n").count, 3000)
+    }
+
+    /// no terminal to ask on, and only the environment it was handed.
+    func testTheRunnerHasNoTerminalAndOnlyItsOwnEnvironment() async {
+        let result = await shell(
+            #"test -t 0 || echo no-tty; echo "${ONLY-unset} ${HOME-unset}""#,
+            environment: ["ONLY": "this"]
+        )
+
+        XCTAssertEqual(result.stdout, "no-tty\nthis unset\n")
+    }
+
+    func testTheRunnerStopsACommandAtItsDeadline() async {
+        let started = Date()
+
+        let result = await shell("exec sleep 30", timeout: 0.3)
+
+        XCTAssertEqual(result.ending, .timedOut)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 10)
+    }
+
+    func testTheRunnerSaysSoWhenThereIsNothingToRun() async {
+        let result = await ProcessRunner().run(
+            Command(
+                executable: root.appendingPathComponent("no-brew-here"),
+                arguments: [],
+                environment: [:],
+                timeout: 10
+            )
+        )
+
+        XCTAssertEqual(result.ending, .couldNotStart)
+    }
+
     /// a run's end only moves a line that is waiting on it.
     func testOnlyAnUpdatingLineIsFinished() {
         for state: UpdateOffer.LineState in [.available(brewLine), .restartToFinish, .failedCopied] {
