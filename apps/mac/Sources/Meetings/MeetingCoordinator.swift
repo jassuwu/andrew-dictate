@@ -914,6 +914,7 @@ final class MeetingCoordinator: ObservableObject {
             // lamp says why rather than that the mic is heard again.
             if session.problemCleared(.cannotHearYourMic) != nil {
                 meeting.notes.note(.micSilentCleared, at: elapsed)
+                logger.notice("problem over: the mic was muted")
                 publish()
             }
             // said once the meeting is, if it is not yet.
