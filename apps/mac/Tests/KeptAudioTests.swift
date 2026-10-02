@@ -306,6 +306,52 @@ final class KeptAudioTests: XCTestCase {
         XCTAssertEqual(try keptLabel()["until"] as? String, until)
     }
 
+    /// The app was killed after the audio was moved in and before the spool
+    /// was let go. The next launch finds the audio already there and takes
+    /// it as kept: moving it in again would fail on it at every launch, and
+    /// the spool would never be deleted.
+    func testAudioAlreadyMovedInIsTakenAsKeptAndTheSpoolGoes() async throws {
+        let transcript = docs.appendingPathComponent("meetings/2026-10/2026-10-02-1222-meeting.md")
+        let handle = try await spoolLeft(writtenTo: transcript)
+        let id = handle.folder.lastPathComponent
+        try FileManager.default.createDirectory(at: audioFolder, withIntermediateDirectories: true)
+        try KeptAudio.aac(handle.audioURL, audioFolder.appendingPathComponent("\(id).m4a"))
+        try Data(#"{"model":"parakeetV3","started":"2026-10-02T06:52:31Z","transcript":"\#(transcript.path)","until":null,"untilDeleted":true}"#.utf8)
+            .write(to: audioFolder.appendingPathComponent("\(id).json"))
+
+        let c = coordinator()
+        c.recoverOrphans()
+        await waitFor { (try? spoolFolders()) == 0 }
+
+        XCTAssertEqual(try spoolFolders(), 0)
+        XCTAssertEqual(try keptFiles().map(\.lastPathComponent), ["\(id).json", "\(id).m4a"])
+        XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).count, 0, "not written again")
+    }
+
+    /// The spool's own audio would not be deleted once its copy was in. The
+    /// spool stays whole, manifest and all — never audio with nothing left
+    /// to say whose it is, which a launch would set aside and `try again`
+    /// would write out as a second file — and goes at the next launch.
+    func testASpoolWhoseAudioWouldNotGoStaysWholeUntilItCan() async throws {
+        let transcript = docs.appendingPathComponent("meetings/2026-10/2026-10-02-1222-meeting.md")
+        let handle = try await spoolLeft(writtenTo: transcript)
+        let spool = MeetingSpool(root: dir.appendingPathComponent("spool"))
+        let manifest = try XCTUnwrap(spool.writtenOut().first?.manifest)
+        let fm = FileManager.default
+        try fm.setAttributes([.immutable: true], ofItemAtPath: handle.audioURL.path)
+        defer { try? fm.setAttributes([.immutable: false], ofItemAtPath: handle.audioURL.path) }
+
+        XCTAssertTrue(kept.adopt(handle, manifest: manifest), "the audio is kept")
+        XCTAssertTrue(fm.fileExists(atPath: handle.manifestURL.path), "and the spool is whole")
+        XCTAssertEqual(spool.orphans().count, 0)
+        XCTAssertEqual(spool.unreadableCount(), 0)
+
+        try fm.setAttributes([.immutable: false], ofItemAtPath: handle.audioURL.path)
+        XCTAssertTrue(kept.adopt(handle, manifest: manifest))
+        XCTAssertEqual(try spoolFolders(), 0)
+        XCTAssertEqual(try keptFiles().map(\.pathExtension), ["json", "m4a"])
+    }
+
     // MARK: - helpers
 
     /// A spool whose meeting was written out into `transcript`, marked to be

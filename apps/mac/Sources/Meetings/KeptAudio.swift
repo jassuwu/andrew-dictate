@@ -101,13 +101,15 @@ struct KeptAudio: Sendable {
     ///
     /// The label goes in first, so no audio is ever in the folder with
     /// nothing to say whose it is or when it goes. Then the audio, made
-    /// beside the spool and moved in whole; a conversion that fails moves
-    /// the spool's own file in instead. Only then is the spool removed.
-    /// False when the audio could not be moved in: the spool stays where it
-    /// is, and with it the audio.
+    /// beside the spool, opened again and checked to hold the whole meeting,
+    /// and moved in whole; a conversion that fails, or comes out short,
+    /// moves the spool's own file in instead. Audio already moved in by a
+    /// run that stopped before the spool went is taken as kept, when it
+    /// holds the meeting, rather than moved in a second time. Only then is
+    /// the spool let go, its audio first. False when the audio could not be
+    /// moved in: the spool stays where it is, and with it the audio.
     @discardableResult
     func keep(_ handle: MeetingSpool.Handle, label: Label) -> Bool {
-        let fm = FileManager.default
         let id = handle.folder.lastPathComponent
         do {
             try makeRoot()
@@ -116,7 +118,20 @@ struct KeptAudio: Sendable {
             Self.logger.error("could not label kept audio: \(error.localizedDescription, privacy: .public)")
             return false
         }
+        if let already = audioURL(id), Self.holdsAll(of: handle.audioURL, in: already) {
+            letGoOfTheSpool(handle)
+            return true
+        }
+        guard moveIn(handle, as: id) else { return false }
+        letGoOfTheSpool(handle)
+        return true
+    }
 
+    /// The spool's audio, compressed and checked, or as it was, in the
+    /// folder under `id`, in place of anything there that did not hold the
+    /// meeting. False when it could not be moved in.
+    private func moveIn(_ handle: MeetingSpool.Handle, as id: String) -> Bool {
+        let fm = FileManager.default
         let compressed = handle.folder.appendingPathComponent("audio.m4a")
         var audio: (from: URL, to: URL)
         do {
@@ -128,6 +143,15 @@ struct KeptAudio: Sendable {
             try? fm.removeItem(at: compressed)
             audio = (handle.audioURL, root.appendingPathComponent("\(id).caf"))
         }
+        guard fm.fileExists(atPath: audio.from.path) else {
+            Self.logger.error("a meeting's audio to keep is not where it was")
+            return false
+        }
+        // what is there for this meeting did not hold it, or the check
+        // above would have kept it: the original is still in the spool.
+        for ext in Self.audioExtensions {
+            try? fm.removeItem(at: root.appendingPathComponent("\(id).\(ext)"))
+        }
         do {
             try fm.moveItem(at: audio.from, to: audio.to)
         } catch {
@@ -135,8 +159,42 @@ struct KeptAudio: Sendable {
             return false
         }
         try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: audio.to.path)
-        try? fm.removeItem(at: handle.folder)
         return true
+    }
+
+    /// The spool, once its audio is kept: its audio first, so no part of
+    /// this leaves audio there without the manifest that says whose it is.
+    /// Audio that will not go leaves the spool whole and marked, and the
+    /// next launch, finding the audio already kept, lets it go then.
+    private func letGoOfTheSpool(_ handle: MeetingSpool.Handle) {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: handle.audioURL.path) {
+            do {
+                try fm.removeItem(at: handle.audioURL)
+            } catch {
+                Self.logger.error("a kept meeting's spool could not be deleted yet: \(error.localizedDescription, privacy: .public)")
+                return
+            }
+        }
+        try? fm.removeItem(at: handle.folder)
+    }
+
+    /// How far a kept copy's length may fall from the spool's and still
+    /// hold all of it: the encoder's last packet, and a little more.
+    static let lengthSlack = Duration.milliseconds(100)
+
+    /// Whether `kept` holds the whole of the spool's audio: both open, and
+    /// as long as each other, give or take `lengthSlack`. False when either
+    /// will not open.
+    static func holdsAll(of spool: URL, in kept: URL) -> Bool {
+        guard let original = try? AVAudioFile(forReading: spool),
+              let copy = try? AVAudioFile(forReading: kept)
+        else {
+            return false
+        }
+        let originalSeconds = Double(original.length) / original.fileFormat.sampleRate
+        let copySeconds = Double(copy.length) / copy.fileFormat.sampleRate
+        return abs(originalSeconds - copySeconds) <= lengthSlack.totalSeconds
     }
 
     /// A spool whose meeting is written out, and whose audio was on its way
