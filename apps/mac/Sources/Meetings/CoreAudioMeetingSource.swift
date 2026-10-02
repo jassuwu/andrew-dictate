@@ -58,9 +58,10 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     private let deviceUID: String
 
     // All guarded by `lock`, touched from the caller and the IO queue.
-    private var rig: Rig?
+    /// The rig whose buffers become chunks.
+    private var live: Rig?
+    private var rigsBuilt = 0
     private var continuation: AsyncStream<MeetingAudioChunk>.Continuation?
-    private var assembler: ChunkAssembler?
     private var framesDelivered: Int64 = 0
     private var lastDelivery: ContinuousClock.Instant?
     private var player: AVAudioPlayer?
@@ -90,17 +91,23 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             self.framesDelivered = 0
             self.lastDelivery = ContinuousClock.now
         }
-        try await onHAL { try self.build() }
+        let rig = try await onHAL { try self.build() }
+        lock.withLock { live = rig }
         keepAskingWhatIsPlaying()
         playProbeTone()
         return stream
     }
 
     func rebuild() async throws {
-        try await onHAL {
-            self.teardown()
-            try self.build()
+        let old = lock.withLock { () -> Rig? in
+            defer { live = nil }
+            return live
         }
+        let rig = try await onHAL {
+            if let old { self.teardown(old) }
+            return try self.build()
+        }
+        lock.withLock { live = rig }
         skipTheTimeNothingWasDelivered()
         // The tone again: a rebuilt tap must prove itself like a new one.
         playProbeTone()
@@ -159,7 +166,13 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
     func stop() async {
         stopAskingWhatIsPlaying()
-        try? await onHAL { self.teardown() }
+        let rig = lock.withLock { () -> Rig? in
+            defer { live = nil }
+            return live
+        }
+        if let rig {
+            try? await onHAL { self.teardown(rig) }
+        }
         let continuation = lock.withLock { () -> AsyncStream<MeetingAudioChunk>.Continuation? in
             defer { self.continuation = nil }
             return self.continuation
@@ -204,8 +217,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     // MARK: - building the rig
 
     /// `work` on the HAL queue, awaited.
-    private func onHAL(_ work: @escaping @Sendable () throws -> Void) async throws {
-        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+    private func onHAL<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { (done: CheckedContinuation<T, Error>) in
             hal.async {
                 done.resume(with: Result { try work() })
             }
@@ -228,8 +241,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         }
     }
 
-    /// Only ever on the HAL queue.
-    private func build() throws {
+    /// A rig on the default input, started. Only ever on the HAL queue.
+    private func build() throws -> Rig {
         // Everything, ours included: the probe tone (ADR 0021) is played by
         // *this* process, and a tap that left us out could never hear it.
         // The cost is a third of a second of our own start sound at the
@@ -248,6 +261,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             AudioHardwareDestroyProcessTap(tapID)
             throw Failure.noMicrophone
         }
+        let mic = MicHandoff.Mic(uid: micUID, name: CoreAudioProperties.name(micDevice) ?? micUID)
         let micChannels = CoreAudioProperties.inputChannels(micDevice).reduce(0, +)
 
         destroyStaleAggregate()
@@ -274,14 +288,19 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             throw error
         }
 
-        let rate = CoreAudioProperties.nominalSampleRate(aggregateID)
-        let assembler = ChunkAssembler(inputRate: rate > 0 ? rate : 48_000)
-        lock.withLock { self.assembler = assembler }
+        // Read for this rig, not once for the source: the next mic may run
+        // at another rate.
+        let nominal = CoreAudioProperties.nominalSampleRate(aggregateID)
+        let rate = nominal > 0 ? nominal : 48_000
+        let id = lock.withLock { () -> Int in
+            rigsBuilt += 1
+            return rigsBuilt
+        }
 
         var procID: AudioDeviceIOProcID?
         let status = AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, queue) {
             [weak self] _, inputData, _, _, _ in
-            self?.ingest(inputData, micChannels: micChannels)
+            self?.ingest(inputData, from: id)
         }
         guard status == noErr, let procID else {
             AudioHardwareDestroyAggregateDevice(aggregateID)
@@ -289,25 +308,21 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             throw Failure.coreAudio("AudioDeviceCreateIOProcIDWithBlock", status)
         }
 
-        let rig = Rig(tapID: tapID, aggregateID: aggregateID, procID: procID)
-        lock.withLock { self.rig = rig }
-
+        let rig = Rig(
+            id: id, uid: deviceUID, mic: mic, tapID: tapID, aggregateID: aggregateID,
+            procID: procID, micChannels: micChannels, rate: rate)
         do {
             try check(AudioDeviceStart(aggregateID, procID), "AudioDeviceStart")
         } catch {
-            teardown()
+            teardown(rig)
             throw error
         }
-        logger.info("tap up: the whole mac, at \(rate, privacy: .public) Hz, through \(self.deviceUID, privacy: .public)")
+        logger.info("tap up: the whole mac and \(mic.name, privacy: .public), at \(rate, privacy: .public) Hz, through \(self.deviceUID, privacy: .public)")
+        return rig
     }
 
     /// Only ever on the HAL queue, or inside `build`, which is.
-    private func teardown() {
-        let rig = lock.withLock { () -> Rig? in
-            defer { self.rig = nil; self.assembler = nil }
-            return self.rig
-        }
-        guard let rig else { return }
+    private func teardown(_ rig: Rig) {
         AudioDeviceStop(rig.aggregateID, rig.procID)
         queue.sync {}
         AudioDeviceDestroyIOProcID(rig.aggregateID, rig.procID)
@@ -333,11 +348,25 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
     // MARK: - the IO proc
 
-    private func ingest(_ inputData: UnsafePointer<AudioBufferList>, micChannels: Int) {
+    /// A buffer from rig `id`. Read only if it is the live rig's: one being
+    /// torn down may still call back once more.
+    private func ingest(_ inputData: UnsafePointer<AudioBufferList>, from id: Int) {
         let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
         guard let first = list.first, first.mData != nil, first.mNumberChannels > 0 else { return }
         let frames = Int(first.mDataByteSize) / MemoryLayout<Float>.size / Int(first.mNumberChannels)
         guard frames > 0 else { return }
+        let layout = list.reduce(0) { $0 + Int($1.mNumberChannels) }
+
+        let (rig, continuation) = lock.withLock {
+            () -> (Rig?, AsyncStream<MeetingAudioChunk>.Continuation?) in
+            guard let live, live.id == id else { return (nil, nil) }
+            return (live, self.continuation)
+        }
+        guard let rig, let continuation else { return }
+        // A rig whose mic went from under it can keep calling back with the
+        // tap's channels where the mic's were. That is not `you`.
+        if rig.layout == nil { rig.layout = layout }
+        guard rig.layout == layout else { return }
 
         // Sub-device channels come first, taps after (002 §4, confirmed by
         // the spike): the first `micChannels` flat channels are the mic.
@@ -352,7 +381,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             let channels = Int(buffer.mNumberChannels)
             let available = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size / max(channels, 1)
             for channel in 0..<channels {
-                let isMic = flatIndex < micChannels
+                let isMic = flatIndex < rig.micChannels
                 flatIndex += 1
                 let n = min(frames, available)
                 if isMic {
@@ -370,9 +399,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             : MicMix.mono(micChannelSamples)
         if tapCount > 1 { for f in 0..<frames { tap[f] /= tapCount } }
 
-        let (assembler, continuation) = lock.withLock { (self.assembler, self.continuation) }
-        guard let assembler, let continuation else { return }
-        for (you, them) in assembler.push(you: mic, them: tap) {
+        for (you, them) in rig.assembler.push(you: mic, them: tap) {
             let at = lock.withLock { () -> Duration in
                 let at = Duration.seconds(Double(framesDelivered) / MeetingAudioChunk.sampleRate)
                 framesDelivered += Int64(them.count)
@@ -387,10 +414,42 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         guard status == noErr else { throw Failure.coreAudio(call, status) }
     }
 
-    private struct Rig {
+    /// One build of the rig: the tap and the mic in their aggregate, the IO
+    /// proc on it, and what reading its buffers takes. All its own: the
+    /// next rig may be on a mic with another rate or another channel count.
+    ///
+    /// `@unchecked Sendable`: the ids are plain integers the HAL owns, and
+    /// the assembler and the layout are only ever touched on the IO queue.
+    private final class Rig: @unchecked Sendable {
+        let id: Int
+        let uid: String
+        let mic: MicHandoff.Mic
         let tapID: AudioObjectID
         let aggregateID: AudioObjectID
         let procID: AudioDeviceIOProcID
+        /// How many of the flat channels, from the first, are the mic's.
+        let micChannels: Int
+        let rate: Double
+        let assembler: ChunkAssembler
+        /// How many channels its first buffer carried, the mic's and the
+        /// tap's together.
+        var layout: Int?
+
+        init(
+            id: Int, uid: String, mic: MicHandoff.Mic, tapID: AudioObjectID,
+            aggregateID: AudioObjectID, procID: AudioDeviceIOProcID,
+            micChannels: Int, rate: Double
+        ) {
+            self.id = id
+            self.uid = uid
+            self.mic = mic
+            self.tapID = tapID
+            self.aggregateID = aggregateID
+            self.procID = procID
+            self.micChannels = micChannels
+            self.rate = rate
+            assembler = ChunkAssembler(inputRate: rate)
+        }
     }
 }
 
@@ -479,7 +538,18 @@ private enum CoreAudioProperties {
     }
 
     static func deviceUID(_ device: AudioObjectID) -> String? {
-        var address = address(kAudioDevicePropertyDeviceUID)
+        string(kAudioDevicePropertyDeviceUID, of: device)
+    }
+
+    /// The name the mac shows for it: "MacBook Pro Microphone".
+    static func name(_ device: AudioObjectID) -> String? {
+        string(kAudioObjectPropertyName, of: device)
+    }
+
+    private static func string(
+        _ selector: AudioObjectPropertySelector, of device: AudioObjectID
+    ) -> String? {
+        var address = address(selector)
         var value: CFString? = nil
         var size = UInt32(MemoryLayout<CFString?>.size)
         let status = withUnsafeMutablePointer(to: &value) {
