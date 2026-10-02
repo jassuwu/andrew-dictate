@@ -405,6 +405,21 @@ final class MeetingTranscriptTests: XCTestCase {
                 in: parent.appendingPathComponent("nope")).count, 0)
     }
 
+    // MARK: - the note for agents
+
+    /// An agent told "a meeting happened" opens the folder cold. The note is
+    /// the one file in it that says what the rest are.
+    func testWritingATranscriptLeavesANoteBesideTheMonths() throws {
+        try MeetingTranscriptFile.write(
+            meeting(turns: []), in: parent, timeZone: tz)
+
+        let note = parent.appendingPathComponent("meetings/README.md")
+        let text = try String(contentsOf: note, encoding: .utf8)
+        XCTAssertEqual(text.components(separatedBy: "\n").first, "# meeting transcripts")
+        XCTAssertTrue(text.contains("meetings/YYYY-MM/YYYY-MM-DD-HHmm-app.md"))
+        XCTAssertEqual(permissions(of: note), 0o600)
+    }
+
     // MARK: - who can read it
 
     /// The one file that holds other people's words was the one file left at

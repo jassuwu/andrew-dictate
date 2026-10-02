@@ -56,6 +56,40 @@ enum MeetingTranscriptFile {
 
     private static let paragraphSpan = Duration.seconds(60)
 
+    /// Sits in `meetings/` beside the month folders. Never a meeting: it has
+    /// no front matter, so `listAll` passes over it.
+    static let noteName = "README.md"
+
+    // one literal, not a chain: CI's Xcode gives up on a long `+` of strings.
+    private static let noteText = """
+    # meeting transcripts
+
+    written by andrew dictate. one file per meeting, never changed after it is written.
+
+    ## where things are
+
+    meetings/YYYY-MM/YYYY-MM-DD-HHmm-app.md
+
+    names sort by time, so the newest meeting is the last file in the last folder. `app` is the call app, or `meeting`.
+
+    ## the top of each file
+
+    - `app`: the call app.
+    - `started`, `ended`: local time with offset.
+    - `duration_s`: length in seconds.
+    - `engine`: the speech model that wrote it.
+    - `speakers`: who appears in the file. `you` is the mic. `them`, `them 1`, `them 2` are the other side.
+    - `words`: how many words the transcript has.
+    - `complete`: false if any audio was lost or the transcript does not cover what was said. `reason` says why.
+    - `gaps`: stretches of lost audio, as [start, end] in seconds from the start.
+    - `recovered`: true if the app wrote this at a later launch, after a crash.
+
+    ## the rest
+
+    one paragraph per speaker turn: `[hh:mm:ss] speaker: text`. times count from the start of the meeting.
+
+    """
+
     // MARK: - naming
 
     static func slug(_ app: String) -> String {
@@ -185,7 +219,21 @@ enum MeetingTranscriptFile {
             try? fileManager.setAttributes(
                 [.posixPermissions: 0o700], ofItemAtPath: folder.path)
         }
+        leaveNote(in: month.deletingLastPathComponent(), fileManager: fileManager)
         return url
+    }
+
+    /// The note beside the month folders, for an agent that is told "a
+    /// meeting happened" and has nothing else to go on. Written once and
+    /// never again: if it is there, it is whatever its owner made of it.
+    /// `try?` for the same reason as the permissions: the transcript is
+    /// already on disk, and a note is not worth a `.saveFailed`.
+    private static func leaveNote(in folder: URL, fileManager: FileManager) {
+        let note = folder.appendingPathComponent(noteName, isDirectory: false)
+        guard !fileManager.fileExists(atPath: note.path) else { return }
+        try? noteText.write(to: note, atomically: true, encoding: .utf8)
+        try? fileManager.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: note.path)
     }
 
     /// The transcripts already on disk, written before the app locked them
