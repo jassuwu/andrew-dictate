@@ -19,11 +19,13 @@ the domain model. one term, one meaning. if a word isn't here, it doesn't get us
 | **streaming** | the engine transcribes while you are still talking, so key-up only finishes the tail. invisible: the text still lands once, at key-up, in one paste, and must match what the whole utterance would have produced. never live typing into the target app. |
 | **learned entry** | a dictionary entry the app added itself: you made the same sound-alike swap to text we inserted twice. announced once, undone in one click, owned by you like any other entry. |
 | **prewarm** | loading + compiling the engine at launch so the hotkey path never touches model loading. |
-| **wake** | a throwaway pass through the engine at key-down, so it is warm at key-up. prewarm loads the engine; wake keeps it from idling. skipped while the engine is busy, so it never stands in front of a take. |
+| **wake** | a throwaway pass through the engine at key-down, so it is warm at key-up. prewarm loads the engine; wake keeps it from idling. skipped while the engine is busy, so it never stands in front of an utterance. |
 | **onboarding** | the only place that asks macOS for permissions. first run: two grants + model download, ending with a working hotkey — and it returns whenever the app can no longer do its job. |
 | **setup** | whether the app can dictate *right now*: both grants live, model ready. a fact about the present, re-asked; never a stored claim that it once succeeded. |
 | **capture** | the mic as the app holds it between presses: one `AVAudioEngine` on its own queue, bound to the default input, reused press after press until the hardware changes, then replaced — never rebuilt in place. |
 | **pre-roll** | optional ~300ms rolling in-memory mic buffer (user toggle) so the first word is never clipped. discarded continuously; never written anywhere. |
+| **mic turn** | the machine's hold on the capture for one utterance: started at key-down, stopped at its end. one capture serves many mic turns. |
+| **chord** | another key going down while the dictation key is held. inside the first second it is a shortcut (fn+arrow) and the utterance is thrown away quietly; after that, or over a locked recording, it ends the utterance and keeps it. |
 | **locked recording** | double-tap the dictation key to record hands-free; a single tap ends it and inserts as normal. |
 | **capture ceiling** | five minutes of one utterance. the capture stops accepting frames; the take is kept and still inserted. |
 | **dictation** | one delivered utterance, kept: raw + inserted text, time, engine, key-up→inserted. your own speech. deleted only by you. |
