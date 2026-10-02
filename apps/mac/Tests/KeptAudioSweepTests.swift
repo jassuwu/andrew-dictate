@@ -20,7 +20,7 @@ final class KeptAudioSweepTests: XCTestCase {
         coordinatorsBuilt = 0
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         try? FileManager.default.removeItem(at: dir)
     }
 

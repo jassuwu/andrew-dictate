@@ -24,7 +24,7 @@ final class MeetingCoverageTests: XCTestCase {
         hook = nil
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         try? FileManager.default.removeItem(at: dir)
     }
 
