@@ -45,11 +45,24 @@ enum CoverageCheck {
     /// Talk runs at two or three words a second. Read speech that came to
     /// under half a word a second was heard and mostly not written down.
     static let fewestWordsPerSecond = 0.5
+    /// The far side louder than the silence floor in the spool for this
+    /// long, with nothing of it cut, is a call the transcriber never heard.
+    /// Shorter, and it can be a notification and a ringing tone.
+    static let farSideHeard = Duration.seconds(60)
 
     static let couldNotBeRead = "some of what was said could not be read"
     static let fewerWords = "far fewer words than the talk that was heard"
+    static let farSideNotRead = "the other side was heard and nothing of it was read"
 
+    /// The far side first: a transcriber that was never fed has nothing
+    /// unread and no words to count, and only the spool can tell.
     static func verdict(you: Side, them: Side, farSideLoud: Duration) -> Verdict {
+        if farSideLoud >= farSideHeard {
+            let nothingOfThem = them.speech.map { $0 == .zero } ?? (them.words == 0)
+            if nothingOfThem {
+                return .thin(reason: farSideNotRead)
+            }
+        }
         for side in [you, them] {
             guard let speech = side.speech, let read = side.read,
                   speech >= enoughSpeechToJudge

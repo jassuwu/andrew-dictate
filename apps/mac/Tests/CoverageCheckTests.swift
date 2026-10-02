@@ -88,6 +88,53 @@ final class CoverageCheckTests: XCTestCase {
             .pass)
     }
 
+    // MARK: - the far side heard, and nothing of it cut
+
+    /// The spool has a minute of them, and the transcriber cut not a second
+    /// of speech from it: it was never fed.
+    func testAMinuteOfTheFarSideInTheSpoolWithNothingOfItCutIsThin() {
+        XCTAssertEqual(
+            CoverageCheck.verdict(you: Self.quiet, them: Self.quiet, farSideLoud: .seconds(60)),
+            .thin(reason: "the other side was heard and nothing of it was read"))
+    }
+
+    func testUnderAMinuteOfTheFarSideIsTooLittleToSayItWasMissed() {
+        XCTAssertEqual(
+            CoverageCheck.verdict(you: Self.quiet, them: Self.quiet, farSideLoud: .seconds(59.9)),
+            .pass)
+    }
+
+    /// A call where they talked and the transcript has them: the minute of
+    /// far side in the spool is accounted for.
+    func testTheFarSideHeardAndReadIsCovered() {
+        let them = CoverageCheck.Side(speech: .seconds(40), read: .seconds(40), words: 100)
+
+        XCTAssertEqual(
+            CoverageCheck.verdict(you: Self.quiet, them: them, farSideLoud: .seconds(600)),
+            .pass)
+    }
+
+    // MARK: - a transcriber that keeps no count
+
+    /// Without a count, the far side is judged on its words alone: loud for
+    /// a minute and not one word of theirs is the same hollow file.
+    func testWithNoCountTheFarSideHeardWithNoWordsOfTheirsIsThin() {
+        let uncounted = CoverageCheck.Side(speech: nil, read: nil, words: 0)
+
+        XCTAssertEqual(
+            CoverageCheck.verdict(you: uncounted, them: uncounted, farSideLoud: .seconds(300)),
+            .thin(reason: "the other side was heard and nothing of it was read"))
+    }
+
+    func testWithNoCountTheFarSideHeardWithWordsOfTheirsPasses() {
+        let you = CoverageCheck.Side(speech: nil, read: nil, words: 0)
+        let them = CoverageCheck.Side(speech: nil, read: nil, words: 3)
+
+        XCTAssertEqual(
+            CoverageCheck.verdict(you: you, them: them, farSideLoud: .seconds(300)),
+            .pass)
+    }
+
     // MARK: -
 
     private static let quiet = CoverageCheck.Side(speech: .zero, read: .zero, words: 0)
