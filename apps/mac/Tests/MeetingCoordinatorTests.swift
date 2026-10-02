@@ -454,6 +454,50 @@ final class MeetingCoordinatorTests: XCTestCase {
         XCTAssertFalse(events.contains(.nothingToKeep), "\(events)")
     }
 
+    /// The same, with the first one's last decode still running while the
+    /// second is under way: the second's own engine hears it and its own
+    /// spool keeps it.
+    func testASecondMeetingIsHeardAndSpooledWhileTheFirstStillDecodes() async throws {
+        let first = FakeTranscriber(finalTurns: [
+            .init(speaker: .you, at: .seconds(1), text: "the first meeting")])
+        let second = FakeTranscriber(finalTurns: [
+            .init(speaker: .them(nil), at: .seconds(1), text: "the second meeting")])
+        first.holds = true
+        transcribers.lineUp(first, second)
+        let c = coordinator(starting: [
+            Date(timeIntervalSince1970: 1_787_000_000),
+            Date(timeIntervalSince1970: 1_787_003_600),
+        ])
+
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+        c.stop()
+        await held(first)
+
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        first.release()
+        await settle()
+        source.send(loud(at: .zero))
+        source.send(loud(at: .seconds(1)))
+        await settle()
+        XCTAssertEqual(second.fed, 2)
+
+        c.stop()
+        await settle(for: 1.0)
+
+        let newest = try XCTUnwrap(
+            MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).first)
+        XCTAssertEqual(newest.started, Date(timeIntervalSince1970: 1_787_003_600))
+        let body = try String(contentsOf: newest.fileURL, encoding: .utf8)
+        // `them 1`, not `them`: the diarizer had the second's far side to
+        // listen to, so the spool kept it.
+        XCTAssertTrue(body.contains("[00:00:01] them 1: the second meeting"), body)
+        XCTAssertEqual(MeetingSpool(root: dir.appendingPathComponent("spool")).orphans().count, 0)
+    }
+
     // MARK: - helpers
 
     private func loud(at: Duration) -> MeetingAudioChunk {
