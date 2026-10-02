@@ -61,4 +61,19 @@ final class BadgeLookTests: XCTestCase {
             )
         }
     }
+
+    /// a meeting you asked for is already under way while its model loads.
+    func testGettingReadyOutranksDictating() {
+        for isDictating in [false, true] {
+            XCTAssertEqual(
+                BadgeLook(
+                    needsSetup: false,
+                    isDictating: isDictating,
+                    meeting: .gettingReady
+                ),
+                .gettingReady,
+                "dictating: \(isDictating)"
+            )
+        }
+    }
 }

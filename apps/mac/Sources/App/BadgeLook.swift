@@ -45,9 +45,10 @@ enum BadgeLook: Equatable, Sendable, CaseIterable {
         // long meeting is the one to show.
         case .recording:
             self = .recordingMeeting
+        case .gettingReady:
+            self = .gettingReady
         case .none,
-             .callNotRecorded,
-             .gettingReady:
+             .callNotRecorded:
             self = .idle
         }
     }
