@@ -12,6 +12,8 @@ final class MeetingTapHealthTests: XCTestCase {
     private var events: [MeetingEvent] = []
     private var records: [MeetingRecord] = []
     private var awake: Wakefulness!
+    /// The coordinator `play` waits on.
+    private weak var playing: MeetingCoordinator?
 
     override func setUp() async throws {
         dir = FileManager.default.temporaryDirectory
@@ -64,6 +66,7 @@ final class MeetingTapHealthTests: XCTestCase {
         )
         c.onEvent = { [weak self] in self?.events.append($0) }
         c.keepMeetingRecord = { [weak self] in self?.records.append($0) }
+        playing = c
         return c
     }
 
@@ -754,12 +757,18 @@ final class MeetingTapHealthTests: XCTestCase {
                      at: at)
     }
 
-    /// Each chunk, and time for the coordinator to have taken it in before
-    /// the next: a tone the source plays in answer lands in between.
+    /// Each chunk, once the coordinator has taken in the one before — a
+    /// fixed sleep let a loaded runner queue several, and a quiet probe's
+    /// window pass before its tone could land — and a moment after it for a
+    /// tone the source plays in answer to arrive in between.
     private func play(_ chunks: MeetingAudioChunk...) async {
         for chunk in chunks {
             source.send(chunk)
-            try? await Task.sleep(for: .milliseconds(80))
+            let end = chunk.at + chunk.duration
+            for _ in 0..<200 where (playing?.elapsed ?? end) < end {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            try? await Task.sleep(for: .milliseconds(40))
         }
     }
 
@@ -891,6 +900,10 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     }
     private var _quietProbeCannotPlay = false
 
+    /// On the main actor, with the coordinator that asks: the tone is in
+    /// the stream the moment the ask runs, not after a hop to another
+    /// thread that a loaded runner can leave waiting.
+    @MainActor
     func playQuietProbe() async throws {
         let (hears, cannotPlay, at) = lock.withLock { () -> (Bool, Bool, Duration) in
             _quietProbes += 1
