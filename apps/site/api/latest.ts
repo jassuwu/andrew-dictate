@@ -11,7 +11,9 @@
 // counts live in upstash redis; scripts/checkins.ts reads them back, and
 // apps/site/COUNTING.md says how to switch counting on.
 //
-// the file imports nothing relative, on purpose: it is deployed as it is.
+// the file imports nothing relative, on purpose: vercel deploys it by itself
+// and there is nothing for its build to resolve. scripts/checkins.ts imports
+// from it, so the key names the writer uses are the ones the reader reads.
 
 const RELEASES_LATEST =
   "https://github.com/jassuwu/andrew-dictate/releases/latest";
