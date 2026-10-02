@@ -408,7 +408,10 @@ final class MeetingCoordinator: ObservableObject {
     /// quarter of an hour of the neural engine at login is not a silent
     /// success, it is a job nobody asked for.
     func recoverOrphans() {
-        let orphans = spool.orphans()
+        // a meeting started in the seconds before this runs has a spool
+        // that looks just like one a crash left behind. it is not one.
+        let ours = [current?.handle].compactMap { $0 }
+        let orphans = spool.orphans().filter { !ours.contains($0.handle) }
         guard !orphans.isEmpty else { return }
         Task { [weak self] in
             guard let self else { return }

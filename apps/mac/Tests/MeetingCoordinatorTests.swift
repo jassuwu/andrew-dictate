@@ -651,7 +651,43 @@ final class MeetingCoordinatorTests: XCTestCase {
             ["zoom", "meet", "teams"])
     }
 
+    /// Recovery runs a few seconds after launch, and a meeting started in
+    /// those seconds has a spool on disk that looks just like one a crash
+    /// left. It is not one: it stays where it is, and the meeting is saved
+    /// as itself.
+    func testAMeetingStartedJustBeforeRecoveryIsNotAnOrphan() async throws {
+        let live = FakeTranscriber(finalTurns: [
+            .init(speaker: .you, at: .seconds(1), text: "live words")])
+        transcribers.lineUp(live)
+        let c = coordinator()
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+
+        c.recoverOrphans()
+        await settle()
+        XCTAssertFalse(events.contains(.recovering(app: "zoom")), "\(events)")
+        XCTAssertEqual(try spoolFolders(), 1)
+
+        source.send(loud(at: .seconds(1)))
+        await settle()
+        c.stop()
+        await settle(for: 1.0)
+
+        let all = MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs"))
+        XCTAssertEqual(all.map(\.recovered), [false])
+        let body = try String(contentsOf: try XCTUnwrap(all.first).fileURL, encoding: .utf8)
+        XCTAssertTrue(body.contains("[00:00:01] you: live words"), body)
+    }
+
     // MARK: - helpers
+
+    private func spoolFolders() throws -> Int {
+        try FileManager.default.contentsOfDirectory(
+            atPath: dir.appendingPathComponent("spool").path
+        ).filter { !$0.hasPrefix(".") }.count
+    }
 
     /// A spool a crash left behind, with a second of audio on it.
     private func orphan(_ app: String, started: Date) async throws {
