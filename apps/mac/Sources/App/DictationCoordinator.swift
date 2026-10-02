@@ -231,6 +231,8 @@ final class DictationCoordinator: ObservableObject {
     /// A quit is waiting on a meeting's transcript to be written.
     private var quitWaitingOnMeeting = false
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
+    /// between `com.apple.screenIsLocked` and its unlock.
+    private var screenLockedByNotification = false
     private var distributedNotificationObservers: [NSObjectProtocol] = []
 
     init(settings: AppSettings = .shared) {
@@ -1193,6 +1195,11 @@ final class DictationCoordinator: ObservableObject {
                         self?.captureSlot.suspend()
                     } else {
                         self?.handleSystemResume()
+                        // woken onto the lock screen, the unlock is what
+                        // brings you back, not the wake.
+                        if self?.isScreenLocked == false {
+                            self?.machine.systemResumed()
+                        }
                     }
                 }
             }
@@ -1210,12 +1217,14 @@ final class DictationCoordinator: ObservableObject {
             ) { [weak self] notification in
                 let isLock = notification.name == lockedName
                 Task { @MainActor [weak self] in
+                    self?.screenLockedByNotification = isLock
                     if isLock {
                         self?.handleCaptureInterruption(
                             reason: .systemPaused
                         )
                     } else {
                         self?.handleSystemResume()
+                        self?.machine.systemResumed()
                     }
                 }
             }
@@ -1382,6 +1391,17 @@ final class DictationCoordinator: ObservableObject {
     ) {
         machine.captureInterrupted(reason)
         hotkeyMonitor.reset()
+    }
+
+    /// the login window is over the session. the lock notification can
+    /// land after the wake it came with, so the window server is asked as
+    /// well: `CGSSessionScreenIsLocked` is only there while it is up.
+    private var isScreenLocked: Bool {
+        guard !screenLockedByNotification else {
+            return true
+        }
+        let session = CGSessionCopyCurrentDictionary() as? [String: Any]
+        return session?["CGSSessionScreenIsLocked"] as? Bool ?? false
     }
 
     private func handleSystemResume() {
