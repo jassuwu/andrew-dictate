@@ -48,6 +48,11 @@ struct MeetingSourceEvent: Equatable, Sendable {
         /// There was no default input a meeting could use, so it moved to
         /// the built-in mic.
         case micFellBack
+        /// The mic is muted on the mac, or its input volume is at nothing:
+        /// silent on purpose, which is not a fault.
+        case micMuted
+        /// And it is not any more.
+        case micUnmuted
     }
 
     let kind: Kind
@@ -62,6 +67,8 @@ struct MeetingSourceEvent: Equatable, Sendable {
         case .micChanged: .micChanged
         case .micHandoffFailed: .micHandoffFailed
         case .micFellBack: .micFellBack
+        case .micMuted: .micMuted
+        case .micUnmuted: .micUnmuted
         }
     }
 }
@@ -74,6 +81,10 @@ extension MeetingRecord.Label {
     static let micHandoffFailed = MeetingRecord.Label(rawValue: "mic-handoff-failed")
     /// no default input would do, so the meeting moved to the built-in mic.
     static let micFellBack = MeetingRecord.Label(rawValue: "mic-fell-back")
+    /// the mic was muted on the mac, or turned all the way down.
+    static let micMuted = MeetingRecord.Label(rawValue: "mic-muted")
+    /// and it was not any more.
+    static let micUnmuted = MeetingRecord.Label(rawValue: "mic-unmuted")
 }
 
 /// The capture layer. Starting it plays the start sound — that is the probe

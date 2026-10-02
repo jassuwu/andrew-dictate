@@ -69,7 +69,14 @@ enum MeetingEvent: Equatable, Sendable {
     /// Something is wrong that the meeting records through: said on the
     /// lamp, and in the menu until it clears.
     case problemBegan(MeetingSession.Problem)
+    /// Over. A mic problem a mute ends is not this: `micMuted` says it,
+    /// because "hearing your mic again" would not be true.
     case problemCleared(MeetingSession.Problem)
+    /// The mac's input was muted, or turned all the way down: your side is
+    /// silent, on purpose as far as anyone can tell. Not a problem, but it
+    /// is said, because it is also what a mute nobody meant looks like.
+    case micMuted
+    case micUnmuted
     case nudge
     case writingItOut
     /// The coverage check found the transcript thin, and the meeting is
@@ -109,6 +116,9 @@ enum MeetingEvent: Equatable, Sendable {
         case .gapEnded: "hearing them again"
         case .problemBegan(let problem): Self.began(problem)
         case .problemCleared(let problem): Self.cleared(problem)
+        case .micMuted: "your mic is muted"
+        // you did it, and you know.
+        case .micUnmuted: nil
         case .nudge: nil
         case .recovering(let app): "found an unsaved \(app) recording — writing it out…"
         case .writingItOut: "writing it out…"
@@ -444,6 +454,7 @@ final class MeetingCoordinator: ObservableObject {
                 for await event in sourceEvents {
                     guard let self, current === meeting else { return }
                     meeting.notes.note(event.label, at: event.at)
+                    heard(event, in: meeting)
                 }
             }
             // No output to play the start sound on: the tap was given
@@ -455,7 +466,7 @@ final class MeetingCoordinator: ObservableObject {
                 health.probeToneCouldNotPlay(at: elapsed)
                 meeting.notes.note(.probeUnplayable, at: elapsed)
                 publish()
-                onEvent?(.started)
+                started(meeting)
             }
             for await chunk in chunks {
                 // a chunk that lands after its meeting stopped is dropped,
@@ -713,7 +724,7 @@ final class MeetingCoordinator: ObservableObject {
             if session.state == .provingItCanHear {
                 session.heardTheProbe()
                 publish()
-                onEvent?(.started)
+                started(meeting)
             }
             // A lost tap is back once it hears something — its own start
             // sound, as a rule. A chunk of nothing proves only that
@@ -761,6 +772,40 @@ final class MeetingCoordinator: ObservableObject {
         if !nudgePending, session.shouldNudge(at: elapsed) {
             nudgePending = true
             onEvent?(.nudge)
+        }
+    }
+
+    /// The meeting is recording: the tap was heard, or could not be asked.
+    /// What was already known about it is said after, so the lamp's
+    /// `recording a meeting` does not cover it.
+    private func started(_ meeting: Meeting) {
+        onEvent?(.started)
+        if micWatch.isMuted {
+            onEvent?(.micMuted)
+        }
+    }
+
+    /// What the source did by itself that the meeting answers to, besides
+    /// noting it.
+    private func heard(_ event: MeetingSourceEvent, in meeting: Meeting) {
+        switch event.kind {
+        case .micMuted:
+            micWatch.muted(true)
+            // silent on purpose: a mic problem standing is over, and the
+            // lamp says why rather than that the mic is heard again.
+            if session.problemCleared(.cannotHearYourMic) != nil {
+                meeting.notes.note(.micSilentCleared, at: elapsed)
+                publish()
+            }
+            // said once the meeting is, if it is not yet.
+            if session.state == .recording || session.state == .rebuilding {
+                onEvent?(.micMuted)
+            }
+        case .micUnmuted:
+            micWatch.muted(false)
+            onEvent?(.micUnmuted)
+        case .micChanged, .micHandoffFailed, .micFellBack:
+            break
         }
     }
 

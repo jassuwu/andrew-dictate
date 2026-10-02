@@ -500,6 +500,10 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             logger.error("mic: couldn't move to \(name, privacy: .public) at \(seconds, privacy: .public) s")
         case .micFellBack:
             logger.notice("mic: fell back to \(name, privacy: .public) at \(seconds, privacy: .public) s")
+        case .micMuted:
+            logger.notice("mic: \(name, privacy: .public) muted at \(seconds, privacy: .public) s")
+        case .micUnmuted:
+            logger.notice("mic: \(name, privacy: .public) unmuted at \(seconds, privacy: .public) s")
         }
         told?.yield(MeetingSourceEvent(kind: kind, mic: mic?.name, at: at))
     }

@@ -111,6 +111,51 @@ final class MeetingProblemsTests: XCTestCase {
         XCTAssertEqual(records.first?.events, [])
     }
 
+    /// The mac's input muted on purpose is silent on purpose. It ends a
+    /// problem that stood, and the lamp says why; while it lasts the call
+    /// can talk as long as it likes and nothing is said; the record notes
+    /// both ends of it.
+    func testAMutedMicIsNotAFaultAndEndsTheProblemThatStood() async throws {
+        source.micName = "MacBook Pro Microphone"
+        let c = coordinator()
+        c.start()
+        await source.awaitStart()
+        await play(both(at: .zero))
+        for s in 1...10 {
+            await play(theyTalk(at: .seconds(s)))
+        }
+        XCTAssertEqual(c.problems, [.cannotHearYourMic("MacBook Pro Microphone")])
+
+        source.tell(.init(kind: .micMuted, mic: "MacBook Pro Microphone", at: .seconds(11)))
+        await until { c.problems.isEmpty }
+        XCTAssertEqual(c.problems, [])
+        XCTAssertEqual(events.last, .micMuted)
+        XCTAssertEqual(events.last?.hudText, "your mic is muted")
+
+        for s in 11...25 {
+            await play(theyTalk(at: .seconds(s)))
+        }
+        XCTAssertEqual(c.problems, [], "muted is not a fault")
+
+        source.tell(.init(kind: .micUnmuted, mic: "MacBook Pro Microphone", at: .seconds(26)))
+        await until { events.last == .micUnmuted }
+        XCTAssertNil(events.last?.hudText)
+        await play(both(at: .seconds(26)))
+        XCTAssertEqual(events, [
+            .started, .problemBegan(.cannotHearYourMic("MacBook Pro Microphone")),
+            .micMuted, .micUnmuted,
+        ])
+
+        c.stop()
+        await c.untilWrittenOut()
+        XCTAssertEqual(records.first?.events, [
+            .init(.init(rawValue: "mic-silent"), atS: 11),
+            .init(.init(rawValue: "mic-muted"), atS: 11),
+            .init(.init(rawValue: "mic-silent-cleared"), atS: 11),
+            .init(.init(rawValue: "mic-unmuted"), atS: 26),
+        ])
+    }
+
     // MARK: - helpers
 
     /// A second of both sides talking.

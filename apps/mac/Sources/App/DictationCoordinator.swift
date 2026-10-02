@@ -2596,7 +2596,7 @@ extension DictationCoordinator {
             liveTranscriptPanel?.dismissKeepingPreference()
             runOnboardingAgain(scope: .meetingsOnly, openAt: .permissions)
         case .recovering, .gapBegan, .gapEnded, .problemBegan, .problemCleared,
-             .writingItOut, .readingAgain, .hookFailed,
+             .micMuted, .micUnmuted, .writingItOut, .readingAgain, .hookFailed,
              .transcribingAgain, .transcribedAgain, .couldNotTranscribeAgain:
             break
         }

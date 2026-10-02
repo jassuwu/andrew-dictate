@@ -22,9 +22,10 @@ struct MicWatch: Equatable, Sendable {
     /// The mic has been silent past `after` while the far side talked. It
     /// stays so until the mic is heard, or muted.
     private(set) var unheard = false
+    /// The mac says the mic is muted.
+    private(set) var isMuted = false
     private var silentSince: Duration?
     private var theyLastTalked: Duration?
-    private var muted = false
 
     init(after: Duration, floor: Float) {
         self.after = after
@@ -35,7 +36,7 @@ struct MicWatch: Equatable, Sendable {
     /// was, and whether the far side was talking in it — heard above its
     /// own floor, and not one of our tones.
     mutating func observe(you rms: Float, theyTalked: Bool, from start: Duration, to end: Duration) {
-        guard !muted else { return }
+        guard !isMuted else { return }
         if theyTalked {
             theyLastTalked = end
         }
@@ -54,7 +55,7 @@ struct MicWatch: Equatable, Sendable {
 
     /// The mac says the mic is muted, or is not any more.
     mutating func muted(_ muted: Bool) {
-        self.muted = muted
+        isMuted = muted
         silentSince = nil
         theyLastTalked = nil
         unheard = false
