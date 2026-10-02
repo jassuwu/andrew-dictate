@@ -188,6 +188,31 @@ final class MeetingTapHealthTests: XCTestCase {
         ])
     }
 
+    /// The quiet probe is our own tone, not anyone speaking. Heard every
+    /// few seconds through a long silence, it must not buy the meeting
+    /// another quiet hour: the nudge still comes once, on time.
+    func testAQuietProbeHeardIsNotSomebodySpeaking() async throws {
+        source.anythingIsPlaying = true
+        source.hearsTheQuietProbe = true
+        let c = coordinator(thresholds: .init(
+            probeTimeout: .seconds(1), silenceTimeout: .seconds(5),
+            silenceFloor: 0.001, quietNudgeAfter: .seconds(30),
+            quietProbeWindow: .seconds(2)))
+        c.start()
+        await source.awaitStart()
+        await play(loud(at: .zero))
+
+        for s in 2...45 {
+            await play(quiet(at: .seconds(s)))
+        }
+
+        // asked at 6.1, 12.1, 18.1, 24.1, 30.1, 36.1 and 42.1, and heard
+        // each time; the nudge at 31.1.
+        XCTAssertEqual(source.quietProbes, 7)
+        XCTAssertEqual(source.rebuilds, 0)
+        XCTAssertEqual(events, [.started, .nudge])
+    }
+
     // MARK: - helpers
 
     private func savedFile() throws -> MeetingSummary {
@@ -295,8 +320,24 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
                    them: (0..<n).map { sin(Float($0) * 0.05) * 0.3 }, at: at))
     }
 
+    /// While set, the quiet probe comes back through the tap a moment after
+    /// it is asked for, the way it does on a working one.
+    var hearsTheQuietProbe: Bool {
+        get { lock.withLock { _hearsTheQuietProbe } }
+        set { lock.withLock { _hearsTheQuietProbe = newValue } }
+    }
+    private var _hearsTheQuietProbe = false
+
     func playQuietProbe() async throws {
-        lock.withLock { _quietProbes += 1 }
+        let (hears, at) = lock.withLock { () -> (Bool, Duration) in
+            _quietProbes += 1
+            return (_hearsTheQuietProbe, nextAt)
+        }
+        guard hears else { return }
+        let n = 4_800
+        send(.init(you: Array(repeating: 0, count: n),
+                   them: (0..<n).map { sin(Float($0) * 2 * .pi * 1_000 / 16_000) * 0.01 },
+                   at: at))
     }
 
     func stop() async {
