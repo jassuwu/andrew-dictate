@@ -24,6 +24,9 @@ struct MeetingThresholds: Sendable {
     /// A rebuild that throws is tried again after each of these: three
     /// tries in a row, two seconds then five apart. Provisional.
     var rebuildSpacing: [Duration] = [.seconds(2), .seconds(5)]
+    /// Once those are used up the meeting has a problem, and the tap is
+    /// tried once every this long until it is back. Provisional.
+    var retryWhileTheProblemStands: Duration = .seconds(30)
 
     /// Tries in a row before the meeting stops waiting on the tap.
     var rebuildAttempts: Int { rebuildSpacing.count + 1 }
@@ -602,10 +605,7 @@ final class MeetingCoordinator: ObservableObject {
             // something calls back, and after a rebuild that failed that is
             // your mic alone.
             if heard, session.state == .rebuilding {
-                session.tapRecovered(at: elapsed)
-                meeting.notes.note(.gapEnded, at: elapsed)
-                publish()
-                onEvent?(.gapEnded)
+                tapIsBack(meeting)
             }
             // A working tap is not the same thing as a room with people
             // talking in it: the verdict stays `.capturing` through every
@@ -672,6 +672,23 @@ final class MeetingCoordinator: ObservableObject {
         rebuildTap(meeting)
     }
 
+    /// The gap closes where the tap was heard again. If it had been gone
+    /// long enough to be a problem, the problem is over too, and that is
+    /// the one thing the lamp says.
+    private func tapIsBack(_ meeting: Meeting) {
+        session.tapRecovered(at: elapsed)
+        meeting.notes.note(.gapEnded, at: elapsed)
+        guard session.problem == .cannotHearTheCall else {
+            publish()
+            onEvent?(.gapEnded)
+            return
+        }
+        session.problemCleared(.cannotHearTheCall)
+        meeting.notes.note(.problemCleared, at: elapsed)
+        publish()
+        onEvent?(.problemCleared(.cannotHearTheCall))
+    }
+
     private func rebuildTap(_ meeting: Meeting) {
         guard meeting.rebuild == nil else { return }
         meeting.rebuild = Task { [weak self] in
@@ -688,7 +705,8 @@ final class MeetingCoordinator: ObservableObject {
     ///
     /// When the tries in a row are used up the meeting does not end: most
     /// of it is on the spool and your side is still arriving. It has a
-    /// problem instead, said on the lamp — never a window over the call.
+    /// problem instead, said on the lamp — never a window over the call —
+    /// and the tap is tried now and then until one works.
     private func keepRebuilding(_ meeting: Meeting) async {
         var wait = thresholds.settleBeforeRebuild
         var failures = 0
@@ -704,19 +722,29 @@ final class MeetingCoordinator: ObservableObject {
             } catch {
                 logger.error("tap rebuild failed: \(error.localizedDescription, privacy: .public)")
                 guard isRebuilding(meeting) else { return }
-                meeting.notes.note(.rebuildFailed, at: elapsed)
                 failures += 1
+                // with the problem standing, the problem is the record: a
+                // try every half minute for an hour is not kept one by one.
+                if session.problem == nil {
+                    meeting.notes.note(.rebuildFailed, at: elapsed)
+                }
                 if failures < thresholds.rebuildAttempts {
                     wait = thresholds.rebuildSpacing[failures - 1]
-                    continue
+                } else {
+                    if session.problem == nil {
+                        cannotHearTheCall(meeting)
+                    }
+                    wait = thresholds.retryWhileTheProblemStands
                 }
-                session.problemBegan(.cannotHearTheCall)
-                meeting.notes.note(.problemBegan, at: elapsed)
-                publish()
-                onEvent?(.problemBegan(.cannotHearTheCall))
-                return
             }
         }
+    }
+
+    private func cannotHearTheCall(_ meeting: Meeting) {
+        session.problemBegan(.cannotHearTheCall)
+        meeting.notes.note(.problemBegan, at: elapsed)
+        publish()
+        onEvent?(.problemBegan(.cannotHearTheCall))
     }
 
     /// The meeting is still the one recorded, and its tap is still lost.

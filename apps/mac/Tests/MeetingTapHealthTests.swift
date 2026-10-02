@@ -278,10 +278,12 @@ final class MeetingTapHealthTests: XCTestCase {
 
         XCTAssertEqual(source.rebuilds, 3)
         let at = source.rebuiltAt
+        guard at.count == 3 else { return }
         XCTAssertGreaterThanOrEqual(at[1] - at[0], .milliseconds(100))
         XCTAssertGreaterThanOrEqual(at[2] - at[1], .milliseconds(200))
         XCTAssertEqual(events, [.started, .gapBegan, .gapEnded])
         XCTAssertEqual(c.state, .recording)
+        XCTAssertNil(c.problem)
 
         c.stop()
         await c.untilWrittenOut()
@@ -338,14 +340,66 @@ final class MeetingTapHealthTests: XCTestCase {
         ])
     }
 
-    /// A settle, then three tries in a row 100 ms and 200 ms apart.
+    /// With the problem standing the tap is tried again now and then, and
+    /// the first that works ends it: the problem clears, the gap closes
+    /// where the rebuilt tap heard its start sound, and the lamp says the
+    /// call is heard again.
+    func testWithTheProblemStandingALaterRebuildThatWorksClearsIt() async throws {
+        // three in a row, then the first try with the problem standing.
+        source.rebuildsThatFail = 4
+        let clock = FakeClock()
+        let c = coordinator(thresholds: retrying, clock: clock)
+        c.start()
+        await source.awaitStart()
+        await play(loud(at: .zero), loud(at: .seconds(1)))
+
+        clock.advance(by: .seconds(60))
+        source.skip(to: .seconds(60))
+        c.probeTapIsAlive()
+        await until { c.problem != nil }
+        await until { c.problem == nil }
+
+        XCTAssertEqual(source.rebuilds, 5)
+        let at = source.rebuiltAt
+        guard at.count == 5 else { return }
+        XCTAssertGreaterThanOrEqual(at[3] - at[2], .milliseconds(300))
+        XCTAssertGreaterThanOrEqual(at[4] - at[3], .milliseconds(300))
+        XCTAssertEqual(c.state, .recording)
+        XCTAssertEqual(events, [
+            .started, .gapBegan,
+            .problemBegan(.cannotHearTheCall), .problemCleared(.cannotHearTheCall),
+        ])
+        XCTAssertEqual(events.last?.hudText, "hearing the call again")
+
+        c.stop()
+        await c.untilWrittenOut()
+        let saved = try savedFile()
+        XCTAssertEqual(saved.gapCount, 1)
+        let body = try String(contentsOf: saved.fileURL, encoding: .utf8)
+        XCTAssertTrue(body.contains("- [2.0, 60.3]"), body)
+        // the tries in a row are each kept; the one with the problem
+        // standing is the problem's, and not kept again.
+        XCTAssertEqual(records.first?.events, [
+            .init(.gapBegan, atS: 2),
+            .init(.rebuildFailed, atS: 60),
+            .init(.rebuildFailed, atS: 60),
+            .init(.rebuildFailed, atS: 60),
+            .init(.problemBegan, atS: 60),
+            .init(.gapEnded, atS: 60.3),
+            .init(.problemCleared, atS: 60.3),
+        ])
+    }
+
+    /// A settle, then three tries in a row 100 ms and 200 ms apart, then
+    /// one every 300 ms with the problem standing.
     private var retrying: MeetingThresholds {
         .init(
             probeTimeout: .seconds(1), silenceTimeout: .seconds(5),
             silenceFloor: 0.001, quietNudgeAfter: .seconds(3_600),
             quietProbeWindow: .seconds(2),
             settleBeforeRebuild: .milliseconds(50),
-            rebuildSpacing: [.milliseconds(100), .milliseconds(200)])
+            rebuildSpacing: [.milliseconds(100), .milliseconds(200)],
+            retryWhileTheProblemStands: .milliseconds(300))
     }
 
     // MARK: - helpers
