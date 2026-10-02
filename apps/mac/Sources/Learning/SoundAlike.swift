@@ -1,7 +1,7 @@
 import Foundation
 
 /// whether two spellings are one sound: what separates a mishearing you
-/// fixed from a word you changed your mind about.
+/// corrected from a word you changed your mind about.
 ///
 /// a cut-down metaphone over the whole phrase, then edit distance between
 /// the keys. the phrase and not each word, because a mishearing does not

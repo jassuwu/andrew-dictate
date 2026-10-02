@@ -7,18 +7,26 @@ enum UpdateOffer {
         case homebrew
         case dmg
 
-        static let caskroom = URL(
-            fileURLWithPath: "/opt/homebrew/Caskroom/andrew-dictate",
-            isDirectory: true
-        )
+        /// beside each brew `BrewUpgrade` knows to run: /opt/homebrew, and
+        /// /usr/local — a rosetta brew moved over from an intel mac, which
+        /// installs this arm64 app as readily.
+        static let caskrooms = BrewUpgrade.candidates.map { brew in
+            brew.deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appending(
+                    path: "Caskroom/andrew-dictate",
+                    directoryHint: .isDirectory
+                )
+        }
 
-        /// brew put it there, brew replaces it. apple silicon only, so
-        /// /opt/homebrew is the only caskroom there is.
+        /// brew put it there, brew replaces it — whichever brew that was.
         static func detect(
-            caskroom: URL = Install.caskroom,
+            caskrooms: [URL] = Install.caskrooms,
             fileManager: FileManager = .default
         ) -> Install {
-            fileManager.fileExists(atPath: caskroom.path(percentEncoded: false))
+            caskrooms.contains {
+                fileManager.fileExists(atPath: $0.path(percentEncoded: false))
+            }
                 ? .homebrew
                 : .dmg
         }
@@ -28,7 +36,7 @@ enum UpdateOffer {
     /// that, running the brew upgrade itself and copying the command only
     /// when it fails.
     enum Action: Equatable, Sendable {
-        case brewUpgrade(String)
+        case brewUpgrade
         case openReleasePage(URL)
     }
 
@@ -51,7 +59,7 @@ enum UpdateOffer {
     static func action(for install: Install) -> Action {
         switch install {
         case .homebrew:
-            .brewUpgrade(UpdateCheck.upgradeCommand)
+            .brewUpgrade
         case .dmg:
             .openReleasePage(releasesPage)
         }
@@ -107,16 +115,17 @@ enum UpdateOffer {
 
     static let checkInterval: TimeInterval = 24 * 60 * 60
 
-    /// once a day, and never while a dictation or a meeting is running:
-    /// the check waits for the next idle moment instead. a last check dated
-    /// in the future means the clock moved back, so it does not count.
+    /// once a day, and never while the app is busy — a take, a model
+    /// load, a meeting: the check waits for the next idle moment instead.
+    /// a last check dated in the future means the clock moved back, so it
+    /// does not count.
     static func shouldCheck(
         now: Date,
         lastChecked: Date?,
         enabled: Bool,
-        dictating: Bool
+        busy: Bool
     ) -> Bool {
-        guard enabled, !dictating else {
+        guard enabled, !busy else {
             return false
         }
         guard let lastChecked, lastChecked <= now else {

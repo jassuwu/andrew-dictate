@@ -169,18 +169,15 @@ final class UpdateCheckTests: XCTestCase {
 
     // MARK: - the update line: what clicking it does
 
-    /// brew put it there, so brew replaces it — with the exact tap line.
-    func testABrewInstallIsOfferedTheUpgradeCommand() {
+    /// brew put it there, so brew replaces it.
+    func testABrewInstallIsOfferedTheUpgrade() {
         let line = UpdateOffer.line(
             latest: "0.9.5",
             running: "0.9.4",
             install: .homebrew
         )
 
-        XCTAssertEqual(
-            line?.action,
-            .brewUpgrade("brew upgrade --cask jassuwu/tap/andrew-dictate")
-        )
+        XCTAssertEqual(line?.action, .brewUpgrade)
     }
 
     /// a dmg user handed a brew line would paste an error into terminal.
@@ -203,15 +200,47 @@ final class UpdateCheckTests: XCTestCase {
 
     func testTheInstallIsHomebrewOnlyWhenTheCaskroomHasIt() throws {
         let caskroom = root.appendingPathComponent("andrew-dictate")
-        XCTAssertEqual(UpdateOffer.Install.detect(caskroom: caskroom), .dmg)
+        XCTAssertEqual(UpdateOffer.Install.detect(caskrooms: [caskroom]), .dmg)
 
         try FileManager.default.createDirectory(
             at: caskroom,
             withIntermediateDirectories: true
         )
         XCTAssertEqual(
-            UpdateOffer.Install.detect(caskroom: caskroom),
+            UpdateOffer.Install.detect(caskrooms: [caskroom]),
             .homebrew
+        )
+    }
+
+    /// a brew at /usr/local — moved over from an intel mac, run under
+    /// rosetta — keeps its caskroom there, and the upgrade runs that brew
+    /// as readily as the one at /opt/homebrew.
+    func testACaskroomUnderEitherBrewPrefixIsAHomebrewInstall() throws {
+        let appleSilicon = root.appendingPathComponent("opt/Caskroom/andrew-dictate")
+        let rosetta = root.appendingPathComponent("usr-local/Caskroom/andrew-dictate")
+        XCTAssertEqual(
+            UpdateOffer.Install.detect(caskrooms: [appleSilicon, rosetta]),
+            .dmg
+        )
+
+        try FileManager.default.createDirectory(
+            at: rosetta,
+            withIntermediateDirectories: true
+        )
+        XCTAssertEqual(
+            UpdateOffer.Install.detect(caskrooms: [appleSilicon, rosetta]),
+            .homebrew
+        )
+    }
+
+    /// the caskrooms are where the brews the upgrade looks for keep theirs.
+    func testTheCaskroomsSitBesideEveryBrewTheUpgradeRuns() {
+        XCTAssertEqual(
+            UpdateOffer.Install.caskrooms.map { $0.path(percentEncoded: false) },
+            [
+                "/opt/homebrew/Caskroom/andrew-dictate/",
+                "/usr/local/Caskroom/andrew-dictate/",
+            ]
         )
     }
 
@@ -229,7 +258,7 @@ final class UpdateCheckTests: XCTestCase {
                 now: noon,
                 lastChecked: nil,
                 enabled: true,
-                dictating: false
+                busy: false
             )
         )
     }
@@ -241,7 +270,7 @@ final class UpdateCheckTests: XCTestCase {
                 now: noon,
                 lastChecked: noon.addingTimeInterval(-hours(23)),
                 enabled: true,
-                dictating: false
+                busy: false
             )
         )
         XCTAssertTrue(
@@ -249,7 +278,7 @@ final class UpdateCheckTests: XCTestCase {
                 now: noon,
                 lastChecked: noon.addingTimeInterval(-hours(24)),
                 enabled: true,
-                dictating: false
+                busy: false
             )
         )
     }
@@ -261,18 +290,18 @@ final class UpdateCheckTests: XCTestCase {
                 now: noon,
                 lastChecked: noon.addingTimeInterval(hours(48)),
                 enabled: true,
-                dictating: false
+                busy: false
             )
         )
     }
 
-    func testItNeverAsksWhileDictating() {
+    func testItNeverAsksWhileBusy() {
         XCTAssertFalse(
             UpdateOffer.shouldCheck(
                 now: noon,
                 lastChecked: nil,
                 enabled: true,
-                dictating: true
+                busy: true
             )
         )
     }
@@ -283,7 +312,7 @@ final class UpdateCheckTests: XCTestCase {
                 now: noon,
                 lastChecked: nil,
                 enabled: false,
-                dictating: false
+                busy: false
             )
         )
     }
@@ -415,13 +444,13 @@ final class UpdateCheckTests: XCTestCase {
     @MainActor
     func testItWaitsOutADictation() async {
         let world = CheckWorld(now: noon)
-        world.dictating = true
+        world.busy = true
 
         await world.check.tick()
         await world.check.menuOpened()
         XCTAssertTrue(world.asked.isEmpty)
 
-        world.dictating = false
+        world.busy = false
         await world.check.tick()
         XCTAssertEqual(world.asked.count, 1)
     }
@@ -473,7 +502,7 @@ final class UpdateCheckTests: XCTestCase {
 
     private let brewLine = UpdateOffer.Line(
         version: "0.9.5",
-        action: .brewUpgrade("brew upgrade --cask jassuwu/tap/andrew-dictate")
+        action: .brewUpgrade
     )
 
     private let optBrew = URL(fileURLWithPath: "/opt/homebrew/bin/brew")
@@ -1065,7 +1094,7 @@ final class UpdateCheckTests: XCTestCase {
 private final class CheckWorld {
     let settings: AppSettings
     var now: Date
-    var dictating = false
+    var busy = false
     var answer: UpdateOffer.Answer = .latest("0.9.4")
     private(set) var asked: [URLRequest] = []
     private(set) lazy var check: DailyUpdateCheck = makeCheck()
@@ -1089,7 +1118,7 @@ private final class CheckWorld {
             onDiskVersion: { nil },
             install: .dmg,
             now: { [unowned self] in now },
-            isDictating: { [unowned self] in dictating },
+            isBusy: { [unowned self] in busy },
             ask: { [unowned self] request in
                 asked.append(request)
                 return answer

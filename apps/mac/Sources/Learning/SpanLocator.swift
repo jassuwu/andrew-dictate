@@ -3,8 +3,8 @@ import Foundation
 /// finds the words we inserted again, inside a bounded read around where we
 /// put them.
 ///
-/// the anchors are our first and last words: whatever you fixed between
-/// them, they hold still. a fix to an anchor itself falls back to what is
+/// the anchors are our first and last words: whatever you corrected between
+/// them, they hold still. a correction to an anchor itself falls back to what is
 /// still known — where we put the first word, or the end of the field after
 /// the last — and with neither anchor found the dictation is given up on.
 /// everything outside the anchors is looked at here and dropped; only our
@@ -36,7 +36,7 @@ enum SpanLocator {
         let expectedCoreStart = expectedStart + firstWord.range.location
 
         // the first word nearest where we put it; failing that, whatever
-        // word now starts exactly there — the one you fixed.
+        // word now starts exactly there — the one you corrected.
         let startByWord = nearest(
             theirs.indices.filter { theirs[$0].matches(firstWord) },
             in: theirs,
@@ -76,7 +76,7 @@ enum SpanLocator {
         } else if reachesFieldEnd, let last = theirs.indices.last {
             endIndex = last
         } else {
-            // your own text may follow the word you fixed, and there is no
+            // your own text may follow the word you corrected, and there is no
             // telling where ours stopped.
             return nil
         }
@@ -119,7 +119,7 @@ enum SpanLocator {
     }
 
     /// the words a person points at, as fix-a-word splits them: "jaz.gg"
-    /// is two, so a fix to "jaz" leaves "gg" standing as an anchor.
+    /// is two, so a correction to "jaz" leaves "gg" standing as an anchor.
     private static let word = CleanupRegex.compile(
         "[\\p{L}\\p{N}]+(?:['’-][\\p{L}\\p{N}]+)*"
     )

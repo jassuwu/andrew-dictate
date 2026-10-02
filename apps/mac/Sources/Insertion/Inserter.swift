@@ -162,6 +162,13 @@ final class PasteInserter: Inserter {
         // reason handed back, no ⌘V and no restore.
         await paster.paste(text, reasonForLeavingOnPasteboard: { reason })
     }
+
+    /// a copy you asked for from the menu, in turn with the dictations'
+    /// pastes: never between one's snapshot of your clipboard and its
+    /// restore.
+    func copy(_ text: String) async {
+        await paster.copy(text)
+    }
 }
 
 /// the defaults on `FocusAnchor`'s own methods are injection points for

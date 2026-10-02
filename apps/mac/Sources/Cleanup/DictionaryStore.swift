@@ -102,9 +102,13 @@ final class DictionaryStore: ObservableObject {
 
     private let fileURL: URL
 
+    /// in the app's folder. the remover takes both together.
+    static let fileName = "dictionary.json"
+    static let neverLearnFileName = "never-learn.json"
+
     private var neverLearnURL: URL {
         fileURL.deletingLastPathComponent()
-            .appendingPathComponent("never-learn.json", isDirectory: false)
+            .appendingPathComponent(Self.neverLearnFileName, isDirectory: false)
     }
 
     init(fileURL: URL? = nil) {
@@ -472,6 +476,6 @@ final class DictionaryStore: ObservableObject {
 
     private static func defaultFileURL() -> URL {
         AppIdentity.supportDirectory
-            .appendingPathComponent("dictionary.json", isDirectory: false)
+            .appendingPathComponent(fileName, isDirectory: false)
     }
 }

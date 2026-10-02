@@ -4,7 +4,7 @@ the domain model. one term, one meaning. if a word isn't here, it doesn't get us
 
 | term | meaning |
 |---|---|
-| **utterance** | one press-to-release audio capture. the atomic unit of the whole app. only you throw one away (`esc`); sleep, the lock, the mic changing and the capture ceiling end it but keep it. |
+| **utterance** | the audio from one press to its release. the atomic unit of the whole app. only you throw one away (`esc`); sleep, the lock, the mic changing and the capture ceiling end it but keep it. |
 | **transcript** | raw text produced by the engine for one utterance. never mutated in place. |
 | **engine** | the ASR backend that turns audio into a transcript. parakeet via FluidAudio for dictation, whisper via WhisperKit for meetings. **code-only term** — every user-facing surface calls it the *speech model*. |
 | **cleaner** | the deterministic pass. eight staged transforms, always on, no model. renders speech as writing; never decides you meant something else. |
@@ -19,11 +19,13 @@ the domain model. one term, one meaning. if a word isn't here, it doesn't get us
 | **streaming** | the engine transcribes while you are still talking, so key-up only finishes the tail. invisible: the text still lands once, at key-up, in one paste, and must match what the whole utterance would have produced. never live typing into the target app. |
 | **learned entry** | a dictionary entry the app added itself: you made the same sound-alike swap to text we inserted twice. announced once, undone in one click, owned by you like any other entry. |
 | **prewarm** | loading + compiling the engine at launch so the hotkey path never touches model loading. |
+| **wake** | a throwaway pass through the engine at key-down, so it is warm at key-up. prewarm loads the engine; wake keeps it from idling. skipped while the engine is busy, so it never stands in front of a take. |
 | **onboarding** | the only place that asks macOS for permissions. first run: two grants + model download, ending with a working hotkey — and it returns whenever the app can no longer do its job. |
 | **setup** | whether the app can dictate *right now*: both grants live, model ready. a fact about the present, re-asked; never a stored claim that it once succeeded. |
+| **capture** | the mic as the app holds it between presses: one `AVAudioEngine` on its own queue, bound to the default input, reused press after press until the hardware changes, then replaced — never rebuilt in place. |
 | **pre-roll** | optional ~300ms rolling in-memory mic buffer (user toggle) so the first word is never clipped. discarded continuously; never written anywhere. |
 | **locked recording** | double-tap the dictation key to record hands-free; a single tap ends it and inserts as normal. |
-| **capture ceiling** | five minutes of one utterance. capture stops accepting frames; the take is kept and still inserted. |
+| **capture ceiling** | five minutes of one utterance. the capture stops accepting frames; the take is kept and still inserted. |
 | **dictation** | one delivered utterance, kept: raw + inserted text, time, engine, key-up→inserted. your own speech. deleted only by you. |
 | **meeting recording** | a local recording of one named app plus your mic, from `record a meeting` to `stop`. holds other people's words, so it is its own noun with its own rules (ADR 0022). what survives is the transcript. |
 | **tap** | the Core Audio process tap on the app you named. its channel is *them*. proved alive by hearing the start sound; never asked. |

@@ -3,38 +3,36 @@ import AppKit
 
 /// the field a dictation was just pasted into, as AX sees it — asked for a
 /// range at a time and never for its whole value.
-@MainActor
-final class AXSpanReader: SpanReader {
+///
+/// every element it asks is given `timeout` first: AX's default is six
+/// seconds, and an app that has stopped answering must cost a tenth of one.
+/// focus is asked of the app's own element, never the system-wide one: a
+/// timeout set on that is the whole process's, the inserter's reads
+/// included.
+///
+/// not tied to the main actor: the two questions about focus are a round
+/// trip to another app each, and are asked off the main thread. everything
+/// it holds is set once and never changed.
+final class AXSpanReader: @unchecked Sendable {
+    /// the span is read on the main thread, a few times a second at most.
+    static let timeout: Float = 0.1
+
     let element: AXUIElement
     let processIdentifier: pid_t
 
     private init(element: AXUIElement, processIdentifier: pid_t) {
         self.element = element
         self.processIdentifier = processIdentifier
-        // every read is on the main thread: an app that has stopped
-        // answering costs a tenth of a second, not a beachball.
-        _ = AXUIElementSetMessagingTimeout(element, 0.1)
     }
 
-    /// the focused text element, right after a paste the inserter checked
-    /// went where we left it. nil for a password field — never watched —
-    /// for one of our own windows, and for anything AX won't name.
-    static func focused() -> AXSpanReader? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
-            AXUIElementCreateSystemWide(),
-            kAXFocusedUIElementAttribute as CFString,
-            &value
-        ) == .success,
-            let value,
-            CFGetTypeID(value) == AXUIElementGetTypeID() else {
-            return nil
-        }
-        let element = value as! AXUIElement
-
-        var processIdentifier: pid_t = 0
-        guard AXUIElementGetPid(element, &processIdentifier) == .success,
-              processIdentifier != ProcessInfo.processInfo.processIdentifier,
+    /// the focused text element of the app in front, right after a paste
+    /// the inserter checked went where we left it. nil for a password
+    /// field — never watched — for one of our own windows, and for anything
+    /// AX won't name. blocks for the round trips: ask it off the main
+    /// thread.
+    static func focused(in processIdentifier: pid_t) -> AXSpanReader? {
+        guard processIdentifier != ProcessInfo.processInfo.processIdentifier,
+              let element = focusedElement(of: processIdentifier),
               !isSecure(element) else {
             return nil
         }
@@ -42,6 +40,16 @@ final class AXSpanReader: SpanReader {
             element: element,
             processIdentifier: processIdentifier
         )
+    }
+
+    /// still the element focus is in, inside its app. whether that app is
+    /// still in front is AppKit's to say, and the watcher asks it first.
+    /// blocks for the round trip: ask it off the main thread.
+    func isStillFocused() -> Bool {
+        guard let focused = Self.focusedElement(of: processIdentifier) else {
+            return false
+        }
+        return CFEqual(element, focused)
     }
 
     func caretLocation() -> Int? {
@@ -91,19 +99,30 @@ final class AXSpanReader: SpanReader {
         return value as? String
     }
 
-    /// still the element focus is in. the watch ends the moment it isn't.
-    func isStillFocused() -> Bool {
+    /// the app's element, with the short timeout. the watcher listens on
+    /// it for focus moving inside the app.
+    static func application(_ processIdentifier: pid_t) -> AXUIElement {
+        let application = AXUIElementCreateApplication(processIdentifier)
+        _ = AXUIElementSetMessagingTimeout(application, timeout)
+        return application
+    }
+
+    /// the app's focused element, with the short timeout set before
+    /// anything else is asked of it.
+    private static func focusedElement(of processIdentifier: pid_t) -> AXUIElement? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
-            AXUIElementCreateSystemWide(),
+            application(processIdentifier),
             kAXFocusedUIElementAttribute as CFString,
             &value
         ) == .success,
             let value,
             CFGetTypeID(value) == AXUIElementGetTypeID() else {
-            return false
+            return nil
         }
-        return CFEqual(element, value)
+        let element = value as! AXUIElement
+        _ = AXUIElementSetMessagingTimeout(element, timeout)
+        return element
     }
 
     private static func isSecure(_ element: AXUIElement) -> Bool {
@@ -118,3 +137,8 @@ final class AXSpanReader: SpanReader {
         return (value as? String) == (kAXSecureTextFieldSubrole as String)
     }
 }
+
+/// apart from the class, so the main actor the protocol is tied to isn't
+/// inferred for the reader as a whole: the follower reads the span on the
+/// main thread, the focus questions are asked off it.
+extension AXSpanReader: SpanReader {}

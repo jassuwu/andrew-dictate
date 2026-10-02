@@ -117,7 +117,7 @@ struct Remover {
         case .dictations:
             supportDirectory.appendingPathComponent("dictations.jsonl")
         case .dictionary:
-            supportDirectory.appendingPathComponent("dictionary.json")
+            supportDirectory.appendingPathComponent(DictionaryStore.fileName)
         case .meetingLeftovers:
             // two things, one item: the spool folder and hooks.log. the
             // folder is the url; the log goes with it in `remove`.
@@ -130,15 +130,19 @@ struct Remover {
     }
 
     /// files that go with an item without being its url: the meeting
-    /// hook's log, and the press log, which is evidence about your
-    /// dictations and has no reason to outlive them.
+    /// hook's log; the press log, which is evidence about your dictations
+    /// and has no reason to outlive them; and the never-learn list, the
+    /// learned rows you turned down, which belongs to the dictionary they
+    /// were turned down from.
     private func companions(of item: RemovalPlan.Item) -> [URL] {
         switch item {
         case .dictations:
-            [supportDirectory.appendingPathComponent("presses.jsonl")]
+            [supportDirectory.appendingPathComponent(PressLogStore.fileName)]
+        case .dictionary:
+            [supportDirectory.appendingPathComponent(DictionaryStore.neverLearnFileName)]
         case .meetingLeftovers:
             [supportDirectory.appendingPathComponent("hooks.log")]
-        case .dictionary, .settings, .speechModels, .permissions:
+        case .settings, .speechModels, .permissions:
             []
         }
     }

@@ -121,12 +121,15 @@ final class DictationCoordinator: ObservableObject {
 
     private let hotkeyMonitor: HotkeyMonitor
     private let transcriptionEngine: ParakeetEngine
+    /// the machine's, and the menu's copies go through it too, so they
+    /// take their turn with a paste.
+    private let inserter: PasteInserter
     /// key-down to outcome. this object wires it and wears what it says.
     private let machine: UtteranceMachine
-    /// a minute of watching each delivered dictation for a word you fix
-    /// (ADR 0046). built on the first delivery.
-    private lazy var fixLearning: FixLearning = {
-        let learning = FixLearning(
+    /// a minute of watching each delivered dictation for a word you
+    /// correct (ADR 0046). built on the first delivery.
+    private lazy var learningFromCorrections: LearningFromCorrections = {
+        let learning = LearningFromCorrections(
             store: dictionaryStore,
             fullCleanup: { [settings] in settings.cleanupEnabled }
         )
@@ -136,6 +139,9 @@ final class DictationCoordinator: ObservableObject {
         return learning
     }()
     private var undoableLearningExpiry: Task<Void, Never>?
+    /// `learned: <word>` not yet said: the pill had a take, a meeting or
+    /// another sentence when the entry was learned.
+    private var learnedAnnouncements = LearnedAnnouncements()
     /// the capture each press records with. a device change, a mic that
     /// wedged or the mac going to sleep is answered with a fresh one, never
     /// by rebuilding this one in place.
@@ -272,9 +278,11 @@ final class DictationCoordinator: ObservableObject {
             version: settings.engineVersion
         )
         self.transcriptionEngine = transcriptionEngine
+        let inserter = PasteInserter()
+        self.inserter = inserter
         machine = UtteranceMachine(
             engine: transcriptionEngine,
-            inserter: PasteInserter(),
+            inserter: inserter,
             dictionary: { dictionaryStore.entries },
             coolDuration: HUDWaveMotion.coolDuration
         )
@@ -640,7 +648,8 @@ final class DictationCoordinator: ObservableObject {
     /// said once, in the pill, as you wrote it — and undoable from the menu
     /// for two minutes.
     private func announceLearned(_ entry: DictionaryEntry) {
-        sayWhenIdle("learned: \(entry.right)")
+        learnedAnnouncements.learned(entry)
+        sayLearnedIfQuiet()
         undoableLearning = entry
         undoableLearningExpiry?.cancel()
         undoableLearningExpiry = Task { @MainActor [weak self] in
@@ -651,6 +660,24 @@ final class DictationCoordinator: ObservableObject {
             }
             self?.undoableLearning = nil
         }
+    }
+
+    /// the pill says what was learned once it is free: idle, no meeting,
+    /// no other sentence up. asked again whenever one of those ends, so a
+    /// word learned mid-meeting is said after it — however long it ran.
+    private func sayLearnedIfQuiet() {
+        let entries = dictionaryStore.entries
+        guard let message = learnedAnnouncements.due(
+            canSay: state == .idle
+                && !meetings.isRecording
+                && activeFeedbackGeneration == nil,
+            stillThere: { learned in
+                entries.contains { $0.id == learned.id }
+            }
+        ) else {
+            return
+        }
+        flashNotice(message, duration: 2)
     }
 
     /// The dashboard's numbers, straight from the same store the copied
@@ -680,16 +707,14 @@ final class DictationCoordinator: ObservableObject {
     /// is not a claim about the app anyone runs — and a number a reader can
     /// reproduce on their own mac is worth more than one in a README.
     func copyTimings() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(
-            timelineStore.formattedReport(
-                conditions: .current(
-                    engine: activeEngineVersion.displayName
-                )
-            ),
-            forType: .string
+        let report = timelineStore.formattedReport(
+            conditions: .current(
+                engine: activeEngineVersion.displayName
+            )
         )
+        Task { [inserter] in
+            await inserter.copy(report)
+        }
     }
 
     /// "copy diagnostics": who is running what, then the last fifty
@@ -717,10 +742,10 @@ final class DictationCoordinator: ObservableObject {
                 presses: try? store.recent(PressDiagnostics.pressCount)
             )
             // silent, like any copy: the pill is for what needs saying.
-            Task { @MainActor in
-                let pasteboard = NSPasteboard.general
-                pasteboard.clearContents()
-                pasteboard.setString(text, forType: .string)
+            // through the paster, so it can't land inside a dictation's
+            // snapshot and restore.
+            Task { @MainActor [weak self] in
+                await self?.inserter.copy(text)
             }
         }
     }
@@ -1631,7 +1656,7 @@ final class DictationCoordinator: ObservableObject {
     private func beginRecording(locked: Bool) {
         // the last dictation's watch ends with this press, whatever the
         // press does next: only that dictation's span, only until the next.
-        fixLearning.stopWatching()
+        learningFromCorrections.stopWatching()
         // ADR 0023: refused during a meeting, and it says why. you started
         // the recording, so a dead hotkey is not a mystery — but a silent
         // one would still be spec §4's forbidden shape.
@@ -1859,6 +1884,7 @@ final class DictationCoordinator: ObservableObject {
         activeFeedbackGeneration = nil
         hudViewModel.clearFeedback()
         synchronizeHUD()
+        sayLearnedIfQuiet()
     }
 
     /// the machine's state, worn by the panel and mirrored for the menu.
@@ -1890,6 +1916,13 @@ final class DictationCoordinator: ObservableObject {
         }
 
         synchronizeHUD(fastDismiss: fastHUDDismiss)
+        if newState == .idle {
+            // a turn later: a pill the take owes lands with this change,
+            // and goes first.
+            Task { @MainActor [weak self] in
+                self?.sayLearnedIfQuiet()
+            }
+        }
     }
 
     private func synchronizeHUD(fastDismiss: Bool = false) {
@@ -1974,7 +2007,7 @@ extension DictationCoordinator {
             lastTranscript = inserted
             lastHeard = heard
         case let .delivered(heard, inserted):
-            fixLearning.delivered(heard: heard, inserted: inserted)
+            learningFromCorrections.delivered(heard: heard, inserted: inserted)
         case let .retryOffered(offered):
             canRetryLastFailure = offered
         case .microphoneDropped:
@@ -2178,6 +2211,17 @@ extension DictationCoordinator {
         built.$state
             .removeDuplicates()
             .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &meetingCancellables)
+        // a word learned during the meeting is said once it is over. a
+        // turn later: @Published sinks run before the new state is stored.
+        built.$state
+            .removeDuplicates()
+            .filter { $0 == .idle }
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.sayLearnedIfQuiet()
+                }
+            }
             .store(in: &meetingCancellables)
         built.$elapsed
             .map { $0.components.seconds }

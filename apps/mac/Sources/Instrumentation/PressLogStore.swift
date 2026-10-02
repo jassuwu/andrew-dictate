@@ -14,6 +14,8 @@ import Foundation
 /// so it is 0600 and it goes when you wipe your history.
 struct PressLogStore: Sendable {
     static let capacity = 200
+    /// in the app's folder. the remover takes it with your dictations.
+    static let fileName = "presses.jsonl"
 
     /// one file, more than one hand on it: the coordinator appends from its
     /// queue while settings may be wiping it. an append is a read and a
@@ -28,7 +30,7 @@ struct PressLogStore: Sendable {
 
     static func defaultFileURL() -> URL {
         AppIdentity.supportDirectory
-            .appendingPathComponent("presses.jsonl", isDirectory: false)
+            .appendingPathComponent(fileName, isDirectory: false)
     }
 
     /// rewrites the file each time: two hundred short lines is cheaper to
