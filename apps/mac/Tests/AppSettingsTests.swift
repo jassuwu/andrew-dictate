@@ -301,6 +301,50 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertNil(userDefaults.data(forKey: "AndrewDictate.meetingShortcut"))
     }
 
+    func testSettingsRefuseAMeetingShortcutThatHoldsTheDictationKey() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let settings = AppSettings(userDefaults: userDefaults)
+        XCTAssertTrue(settings.setHotkeyBinding(.rightOption))
+
+        let refusal = settings.setMeetingShortcut(
+            MeetingShortcut(keyCode: 46, modifiers: [.option, .command], keyName: "M"))
+
+        XCTAssertEqual(refusal, .includesTheDictationKey(.rightOption))
+        XCTAssertNil(settings.meetingShortcut)
+        XCTAssertNil(AppSettings(userDefaults: userDefaults).meetingShortcut)
+    }
+
+    /// a refused shortcut leaves the one already set alone.
+    func testARefusedMeetingShortcutKeepsTheOneThatWasSet() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let settings = AppSettings(userDefaults: userDefaults)
+        let kept = MeetingShortcut(keyCode: 46, modifiers: [.control, .option], keyName: "M")
+        XCTAssertNil(settings.setMeetingShortcut(kept))
+
+        let refusal = settings.setMeetingShortcut(
+            MeetingShortcut(keyCode: 46, modifiers: [.shift], keyName: "M"))
+
+        XCTAssertEqual(refusal, .needsAModifier)
+        XCTAssertEqual(settings.meetingShortcut, kept)
+    }
+
+    /// the other direction of the same rule: the dictation key cannot move
+    /// onto a modifier the meeting shortcut holds.
+    func testTheDictationKeyCannotMoveOntoAModifierTheMeetingShortcutHolds() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let settings = AppSettings(userDefaults: userDefaults)
+        XCTAssertNil(settings.setMeetingShortcut(
+            MeetingShortcut(keyCode: 46, modifiers: [.control, .option], keyName: "M")))
+
+        XCTAssertFalse(settings.setHotkeyBinding(.rightOption))
+        XCTAssertEqual(settings.dictationHotkey, .fn)
+        XCTAssertTrue(settings.setHotkeyBinding(.rightCommand))
+        XCTAssertEqual(settings.dictationHotkey, .rightCommand)
+    }
+
     /// a meeting model is stored by name in two places: settings, and the
     /// manifest of every spool a crash leaves behind. both names from
     /// before parakeet could listen to meetings still read back as what

@@ -488,13 +488,25 @@ final class AppSettings: ObservableObject {
         guard HotkeyBinding.supported.contains(binding) else {
             return false
         }
+        // the same rule from the other side: the meeting shortcut stays
+        // one the dictation key's handling would not swallow.
+        guard meetingShortcut?.refusal(againstDictationKey: binding) == nil else {
+            return false
+        }
 
         dictationHotkey = binding
         return true
     }
 
-    func setMeetingShortcut(_ shortcut: MeetingShortcut?) {
+    /// nil clears it. a shortcut the dictation key would swallow is not
+    /// stored, and the answer says why, in the words the row shows.
+    @discardableResult
+    func setMeetingShortcut(_ shortcut: MeetingShortcut?) -> MeetingShortcut.Refusal? {
+        if let refusal = shortcut?.refusal(againstDictationKey: dictationHotkey) {
+            return refusal
+        }
         meetingShortcut = shortcut
+        return nil
     }
 
     /// "not a mistake", and it never comes back.
