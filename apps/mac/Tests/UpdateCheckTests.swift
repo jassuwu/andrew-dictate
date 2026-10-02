@@ -510,6 +510,36 @@ final class UpdateCheckTests: XCTestCase {
         XCTAssertEqual(click, UpdateOffer.Click(state: .updating, effect: nil))
     }
 
+    private let releasesPage = URL(
+        string: "https://github.com/jassuwu/andrew-dictate/releases/latest"
+    )!
+
+    /// a dmg install opens the page the dmg is on; the line stays put.
+    func testClickingADmgLineOpensTheReleasesPage() {
+        let line = UpdateOffer.Line(
+            version: "0.9.5",
+            action: .openReleasePage(releasesPage)
+        )
+
+        let click = UpdateOffer.click(.available(line), busy: false, brew: optBrew)
+
+        XCTAssertEqual(
+            click,
+            UpdateOffer.Click(state: .available(line), effect: .open(releasesPage))
+        )
+    }
+
+    /// a caskroom with no brew at either prefix cannot be upgraded from
+    /// here, so it is treated as the dmg install it might as well be.
+    func testABrewLineWithNoBrewOpensTheReleasesPage() {
+        let click = UpdateOffer.click(.available(brewLine), busy: false, brew: nil)
+
+        XCTAssertEqual(
+            click,
+            UpdateOffer.Click(state: .available(brewLine), effect: .open(releasesPage))
+        )
+    }
+
     // MARK: - the hand-off: what the click does today
 
     /// the menu closes on the click, so the pill says what happened.

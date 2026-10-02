@@ -179,6 +179,7 @@ enum UpdateOffer {
     enum Effect: Equatable, Sendable {
         /// `brew upgrade` with the brew at this path.
         case upgrade(brew: URL)
+        case open(URL)
     }
 
     struct Click: Equatable, Sendable {
@@ -188,15 +189,24 @@ enum UpdateOffer {
 
     /// a click on the line as it is shown. `busy` — a take, a model load or
     /// a meeting — refuses every click quietly, the way the check waits.
-    /// `brew` is where brew lives.
+    /// `brew` is where brew lives; nil, at neither prefix, makes a brew
+    /// install a dmg one, since there is nothing here to run.
     static func click(
         _ state: LineState,
         busy: Bool,
         brew: URL?
     ) -> Click {
-        guard !busy, case .available = state, let brew else {
+        guard !busy, case let .available(line) = state else {
             return Click(state: state, effect: nil)
         }
-        return Click(state: .updating, effect: .upgrade(brew: brew))
+        switch line.action {
+        case .brewUpgrade:
+            guard let brew else {
+                return Click(state: state, effect: .open(releasesPage))
+            }
+            return Click(state: .updating, effect: .upgrade(brew: brew))
+        case let .openReleasePage(page):
+            return Click(state: state, effect: .open(page))
+        }
     }
 }
