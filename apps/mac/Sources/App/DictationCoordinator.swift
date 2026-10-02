@@ -104,6 +104,11 @@ final class DictationCoordinator: ObservableObject {
     /// cleared by the next meeting that starts.
     @Published private(set) var meetingsNeedAttention = false
 
+    /// a call is on and nothing is recording it (ADR 0047): the menu's first
+    /// line, and what the menu bar icon shows. nil with no call, while one
+    /// is being recorded, and on a mac that has no meeting model.
+    @Published private(set) var unrecordedCall: String?
+
     /// the meeting that just ended, for as long as it is the thing you came
     /// back to the menu for.
     @Published private(set) var lastMeeting: MeetingSummary?
@@ -875,6 +880,7 @@ final class DictationCoordinator: ObservableObject {
         // walking away cancels the errand: nothing starts later out of
         // nowhere.
         meetingWaitsOnSetup = false
+        watchForCallsIfSetUp()
         flushHeldFeedback()
     }
 
@@ -2160,7 +2166,7 @@ extension DictationCoordinator {
             await notifier.requestPermissionIfNeeded()
         }
         withdrawQuestions { !$0.isAboutARecording }
-        meetings.coordinator.start(name: name)
+        meetings.coordinator.start(name: name ?? meetings.currentCall)
     }
 
     func stopMeeting() {
@@ -2253,6 +2259,9 @@ extension DictationCoordinator {
         meetings.onNotifierBuilt = { [weak self] notifier in
             self?.wire(notifier)
         }
+        meetings.onCallMonitorBuilt = { [weak self] monitor in
+            self?.wire(monitor)
+        }
         // recovery loads the meeting model and can run for a quarter of an
         // hour. five seconds of head start keeps it off the dictation
         // model's prewarm, so the first fn press is not slower for it. the
@@ -2289,6 +2298,24 @@ extension DictationCoordinator {
         notifier.onShowFile = { url in
             NSWorkspace.shared.activateFileViewerSelecting([url])
         }
+    }
+
+    /// the call watcher suggests; the pill asks. the app never acts on a
+    /// suggestion by itself (ADR 0047).
+    private func wire(_ monitor: CallMonitor) {
+        monitor.onSuggestion = { [weak self] suggestion in
+            self?.ask(MeetingQuestion(suggestion))
+        }
+        monitor.onCallsChanged = { [weak self] in
+            self?.unrecordedCall = self?.meetings.unrecordedCall
+        }
+    }
+
+    /// a meeting model arrived, from setup or from the first press of
+    /// record: from now on a call can be offered.
+    private func watchForCallsIfSetUp() {
+        guard !installedMeetingModels.isEmpty else { return }
+        meetings.watchForCalls()
     }
 
     /// the coordinator's half of the wiring, run once, the moment it is
@@ -2334,6 +2361,19 @@ extension DictationCoordinator {
             .map { $0.components.seconds }
             .removeDuplicates()
             .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &meetingCancellables)
+        // the call watcher hears a recording start or stop at once, so the
+        // menu's call line goes the moment you press record. a turn later,
+        // for the same willSet reason.
+        built.$state
+            .map { $0 != .idle }
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.meetings.recordingChanged()
+                }
+            }
             .store(in: &meetingCancellables)
         // same reason as the two above: the menu watches this object, and
         // the recovery line lives on the one nested inside it.
@@ -2433,6 +2473,9 @@ extension DictationCoordinator {
             Task { @MainActor in self?.meetingModelDownloads[model] = value }
         }
         meetingModelDownloads[model] = nil
+        if ok {
+            watchForCallsIfSetUp()
+        }
         return ok
     }
 }
