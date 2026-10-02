@@ -43,6 +43,10 @@ struct CallWatcher {
     private var call: Call?
     private var qualifyingSince: Duration?
 
+    /// The app whose call is on now, recorded or not. The recording's file is
+    /// named after it.
+    var currentCall: String? { call?.app }
+
     mutating func observe(
         _ apps: [App],
         isRecording: Bool,

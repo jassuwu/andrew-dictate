@@ -78,6 +78,31 @@ final class CallWatcherTests: XCTestCase {
         XCTAssertEqual(watcher.observe([zoom], isRecording: true, at: .seconds(10)), [])
     }
 
+    // MARK: - what the watcher can be asked
+
+    /// The recording's file is named after the call, so the app asks at the
+    /// moment you press record.
+    func testTheCurrentCallIsNamedFromTheMomentItBegins() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(0))
+        XCTAssertNil(watcher.currentCall)
+
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(3))
+        XCTAssertEqual(watcher.currentCall, "zoom")
+    }
+
+    func testTheCurrentCallIsNamedWhetherOrNotItIsBeingRecorded() {
+        var watcher = watcher()
+        let meet = app("chrome")
+
+        _ = watcher.observe([meet], isRecording: true, at: .seconds(0))
+        _ = watcher.observe([meet], isRecording: true, at: .seconds(3))
+
+        XCTAssertEqual(watcher.currentCall, "chrome")
+    }
+
     /// A browser tab playing music is not a call, and neither is a podcast.
     func testAudioAloneIsNotACall() {
         var watcher = watcher()
