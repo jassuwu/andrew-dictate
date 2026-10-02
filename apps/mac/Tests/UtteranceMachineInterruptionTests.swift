@@ -232,6 +232,49 @@ final class UtteranceMachineInterruptionTests: XCTestCase {
         XCTAssertEqual(pills, [Self.copiedBeforeTheLock])
     }
 
+    /// esc is still the one way to throw a take away: nothing is copied,
+    /// and nothing waits to be said.
+    func testEscStillThrowsTheTakeAway() async {
+        let m = machine()
+        m.keyDown()
+        await pass(.seconds(2))
+
+        XCTAssertTrue(m.escape())
+        await settle()
+
+        XCTAssertEqual(mic.cancels, 1)
+        XCTAssertEqual(mic.stops, 0)
+        XCTAssertEqual(engine.heard, [])
+        XCTAssertEqual(inserter.copied, [])
+        XCTAssertEqual(outcomes, [.cancelled])
+
+        m.captureInterrupted(.systemPaused)
+        m.systemResumed()
+        await settle()
+        XCTAssertEqual(inserter.copied, [])
+        XCTAssertEqual(pills, [])
+        XCTAssertEqual(outcomes, [.cancelled])
+    }
+
+    /// the lock touched the last take, not the next one: a take after you
+    /// are back pastes as any other.
+    func testTheTakeAfterTheLockPastesAgain() async {
+        let m = machine()
+        m.keyDown()
+        await pass(.seconds(1))
+        m.captureInterrupted(.systemPaused)
+        await settle { !self.outcomes.isEmpty }
+        m.systemResumed()
+        await pass(.seconds(1))
+
+        await hold(m, for: .seconds(1))
+        await settle { self.inserter.inserted.count == 1 }
+
+        XCTAssertEqual(inserter.copied, ["Hello."])
+        XCTAssertEqual(inserter.inserted, ["Hello."])
+        XCTAssertEqual(outcomes, [.leftOnPasteboard(.locked), .delivered])
+    }
+
     /// keys only reach the app from a session someone is sitting at. a
     /// press is proof the mac is back even if the unlock never said so:
     /// what was held is said, and nothing after it is held.
