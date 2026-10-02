@@ -83,23 +83,30 @@ enum AudioProcessList {
     }
 }
 
-/// Whether anyone is using the default mic, said once when asked and again
-/// every time it changes. What tells the call reader there is anything to
-/// read.
+/// Whether anyone is using any mic, said once when asked and again every
+/// time it changes. What tells the call reader there is anything to read.
 protocol MicUseSignal: AnyObject, Sendable {
     func start(onChange: @escaping @Sendable (Bool) -> Void)
     func stop()
 }
 
-/// Listens to the default input's `DeviceIsRunningSomewhere`: the one bit
-/// the HAL keeps for "someone, anyone, is recording from this mic". It
-/// cannot say who, and it counts us, so it only starts the reader; the
-/// reader tells us apart by pid. The listener moves with the default input.
+/// Listens to `DeviceIsRunningSomewhere` on every input device: the one bit
+/// the HAL keeps for "someone, anyone, is using this device". Every one, not
+/// the default: a call app set to a usb mic or airpods while the mac's
+/// default is its own mic is a call all the same. It cannot say who, and it
+/// counts us, so it only starts the reader; the reader tells us apart by
+/// pid. The device list is listened to as well, so a mic plugged in, or
+/// airpods connecting, is listened to from the moment it is there.
+///
+/// A device that plays as well as it listens, a headset, runs for music
+/// too, and the bit cannot say which: then the reader finds nobody else on
+/// the mic, and reads rarely.
 ///
 /// Every Core Audio call, the adding and removing of listeners included,
 /// runs on its own queue; the listener blocks are delivered on it too, so
 /// that queue is the only place its state is touched. The blocks hold it
-/// weakly; `stop()` is how it lets go of the HAL.
+/// weakly; `stop()` is how it lets go of the HAL. Listening costs nothing
+/// until the HAL calls.
 final class MicInUseListener: MicUseSignal, @unchecked Sendable {
     private let queue = DispatchQueue(
         label: "\(AppIdentity.bundleID).mic-in-use", qos: .utility)
@@ -107,36 +114,38 @@ final class MicInUseListener: MicUseSignal, @unchecked Sendable {
 
     // on `queue` only
     private var report: (@Sendable (Bool) -> Void)?
-    private var device = AudioObjectID(kAudioObjectUnknown)
-    private var deviceBlock: AudioObjectPropertyListenerBlock?
-    private var defaultBlock: AudioObjectPropertyListenerBlock?
+    private var listBlock: AudioObjectPropertyListenerBlock?
+    /// Every input device listened to, with the block it was given.
+    private var inputs: [AudioObjectID: AudioObjectPropertyListenerBlock] = [:]
     private var lastSaid: Bool?
 
     func start(onChange: @escaping @Sendable (Bool) -> Void) {
         queue.async { [self] in
             guard report == nil else { return }
             report = onChange
-            var address = Self.address(kAudioHardwarePropertyDefaultInputDevice)
+            var address = Self.address(kAudioHardwarePropertyDevices)
             let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-                self?.followTheDefaultInput()
+                self?.followTheInputs()
             }
             if AudioObjectAddPropertyListenerBlock(Self.system, &address, queue, block) == noErr {
-                defaultBlock = block
+                listBlock = block
             } else {
-                callLogger.error("couldn't watch the default input")
+                callLogger.error("couldn't watch the device list")
             }
-            followTheDefaultInput()
+            followTheInputs()
         }
     }
 
     func stop() {
         queue.async { [self] in
-            detachFromDevice()
-            if let defaultBlock {
-                var address = Self.address(kAudioHardwarePropertyDefaultInputDevice)
-                AudioObjectRemovePropertyListenerBlock(Self.system, &address, queue, defaultBlock)
+            for input in Array(inputs.keys) {
+                detach(from: input)
             }
-            defaultBlock = nil
+            if let listBlock {
+                var address = Self.address(kAudioHardwarePropertyDevices)
+                AudioObjectRemovePropertyListenerBlock(Self.system, &address, queue, listBlock)
+            }
+            listBlock = nil
             report = nil
             lastSaid = nil
         }
@@ -149,52 +158,73 @@ final class MicInUseListener: MicUseSignal, @unchecked Sendable {
             mElement: kAudioObjectPropertyElementMain)
     }
 
-    /// On the queue: the listener off the old default input, onto the new
-    /// one, and what the new one is doing said at once.
-    private func followTheDefaultInput() {
+    /// On the queue: off the inputs that went, onto the ones that came, and
+    /// what they are doing said at once. A list that cannot be read leaves
+    /// the listeners as they were.
+    private func followTheInputs() {
         guard report != nil else { return }
-        let next = Self.defaultInput()
-        if next != device {
-            detachFromDevice()
-            device = next
-            if next != kAudioObjectUnknown {
-                var address = Self.address(kAudioDevicePropertyDeviceIsRunningSomewhere)
-                let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-                    self?.say()
-                }
-                if AudioObjectAddPropertyListenerBlock(next, &address, queue, block) == noErr {
-                    deviceBlock = block
-                } else {
-                    callLogger.error("couldn't watch the default input for use")
-                }
+        if let present = Self.inputDevices().map(Set.init) {
+            for input in Array(inputs.keys) where !present.contains(input) {
+                detach(from: input)
+            }
+            for input in present where inputs[input] == nil {
+                attach(to: input)
             }
         }
         say()
     }
 
-    private func detachFromDevice() {
-        if let deviceBlock, device != kAudioObjectUnknown {
-            var address = Self.address(kAudioDevicePropertyDeviceIsRunningSomewhere)
-            AudioObjectRemovePropertyListenerBlock(device, &address, queue, deviceBlock)
+    private func attach(to input: AudioObjectID) {
+        var address = Self.address(kAudioDevicePropertyDeviceIsRunningSomewhere)
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            self?.say()
         }
-        deviceBlock = nil
-        device = AudioObjectID(kAudioObjectUnknown)
+        if AudioObjectAddPropertyListenerBlock(input, &address, queue, block) == noErr {
+            inputs[input] = block
+        } else {
+            callLogger.error("couldn't watch an input for use")
+        }
     }
 
-    /// No default input is a mic nobody is using.
+    private func detach(from input: AudioObjectID) {
+        guard let block = inputs.removeValue(forKey: input) else { return }
+        var address = Self.address(kAudioDevicePropertyDeviceIsRunningSomewhere)
+        AudioObjectRemovePropertyListenerBlock(input, &address, queue, block)
+    }
+
+    /// No input at all is a mic nobody is using.
     private func say() {
-        let inUse = device != kAudioObjectUnknown && Self.isRunningSomewhere(device)
+        let inUse = inputs.keys.contains(where: Self.isRunningSomewhere)
         guard inUse != lastSaid else { return }
         lastSaid = inUse
         report?(inUse)
     }
 
-    private static func defaultInput() -> AudioObjectID {
-        var address = address(kAudioHardwarePropertyDefaultInputDevice)
-        var device = AudioObjectID(kAudioObjectUnknown)
-        var size = UInt32(MemoryLayout<AudioObjectID>.size)
-        let status = AudioObjectGetPropertyData(system, &address, 0, nil, &size, &device)
-        return status == noErr ? device : AudioObjectID(kAudioObjectUnknown)
+    /// Every device with an input stream, or nil when the list cannot be
+    /// read.
+    private static func inputDevices() -> [AudioObjectID]? {
+        var address = address(kAudioHardwarePropertyDevices)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size) == noErr else {
+            return nil
+        }
+        guard size > 0 else { return [] }
+        var devices = [AudioObjectID](
+            repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &devices) == noErr else {
+            return nil
+        }
+        return devices.filter(hasInput)
+    }
+
+    private static func hasInput(_ device: AudioObjectID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreams,
+            mScope: kAudioObjectPropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        let status = AudioObjectGetPropertyDataSize(device, &address, 0, nil, &size)
+        return status == noErr && size > 0
     }
 
     private static func isRunningSomewhere(_ device: AudioObjectID) -> Bool {

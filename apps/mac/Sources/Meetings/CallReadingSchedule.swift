@@ -4,7 +4,7 @@ import Foundation
 /// stops asking (ADR 0047). Nobody on a call costs nothing: a listener says
 /// when the mic is taken, and only then does anything read.
 ///
-/// - While anyone holds the default mic, a meeting records, or the watcher
+/// - While anyone holds any mic, a meeting records, or the watcher
 ///   is following a call, it reads every two seconds and feeds the call
 ///   watcher what it read. A call goes on while its app holds the mic or
 ///   plays audio, so a participant whose app closed the mic on mute is still
