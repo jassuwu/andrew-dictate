@@ -318,7 +318,10 @@ final class UtteranceMachine {
     }
 
     /// the release of a held key, or the tap that ends a locked recording.
-    func keyUp() {
+    /// `eventAge` is how long ago the release happened, read off the key
+    /// event: the time it spent reaching us is the user's wait, not ours to
+    /// leave out of key-up → paste.
+    func keyUp(eventAge: Duration = .zero) {
         guard state == .recording,
               let microphone else {
             return
@@ -327,7 +330,11 @@ final class UtteranceMachine {
         setRecordingLocked(false)
 
         do {
-            let keyUp = clock.now
+            // never before key-down: an event clock that disagrees with
+            // ours must not make a press end before it began.
+            let released = clock.now - max(.zero, eventAge)
+            let keyUp = activeTimeline.map { max($0.keyDown, released) }
+                ?? released
             activeTimeline?.keyUp = keyUp
             press?.keyUp = keyUp
             press?.capped = capForcedEnd

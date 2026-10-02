@@ -751,6 +751,35 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertFalse(press.retry)
     }
 
+    /// key-up is when the finger lifted, not when the event reached us: a
+    /// busy main thread must not hide inside the published latency.
+    func testKeyUpIsWhenTheKeyWasReleasedNotWhenWeHeard() async {
+        let m = machine()
+        engine.reply = .success("on time")
+
+        m.keyDown()
+        await pass(.seconds(1))
+        m.keyUp(eventAge: .milliseconds(30))
+        await settle { !self.presses.isEmpty }
+
+        XCTAssertEqual(presses.first?.stages.keyUp, 970)
+        XCTAssertEqual(presses.first?.stages.samplesReady, 1_000)
+    }
+
+    /// an event older than the press itself is a clock that disagrees, and
+    /// a key cannot come up before it went down.
+    func testKeyUpNeverLandsBeforeKeyDown() async {
+        let m = machine()
+        engine.reply = .success("on time")
+
+        m.keyDown()
+        await pass(.seconds(1))
+        m.keyUp(eventAge: .seconds(5))
+        await settle { !self.presses.isEmpty }
+
+        XCTAssertEqual(presses.first?.stages.keyUp, 0)
+    }
+
     /// the record is what gets sent to jass, so no field of it may carry a
     /// word of what was said — not the engine's words, not the pasted ones.
     func testNoRecordCarriesAWordOfWhatWasSaid() async throws {
