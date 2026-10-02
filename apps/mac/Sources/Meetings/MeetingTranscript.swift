@@ -55,6 +55,9 @@ enum MeetingTranscriptFile {
     static let folderName = "meetings"
 
     private static let paragraphSpan = Duration.seconds(60)
+    /// The longest stretch a model is handed is about 25 s, so talk that
+    /// carries on has its turns begin closer together than this.
+    private static let sameBreath = Duration.seconds(30)
 
     /// Sits in `meetings/` beside the month folders. Never a meeting: it has
     /// no front matter, so `listAll` passes over it.
@@ -354,17 +357,23 @@ enum MeetingTranscriptFile {
     /// the live pass hands over fragments, and a person reads turns. A
     /// monologue starts a new paragraph a minute after the last one began, so
     /// there is always a time within a minute of whatever you are looking for.
+    /// So does talk that picks up again after a silence: a turn only has the
+    /// time it began, and one that begins more than `sameBreath` after the
+    /// one before it began was not said in the same breath.
     private static func paragraphs(of turns: [MeetingTurn]) -> [MeetingTurn] {
         var out: [MeetingTurn] = []
+        var lastBegan: Duration = .zero
         for turn in turns {
             if let last = out.last, last.speaker == turn.speaker,
-               turn.at - last.at < paragraphSpan {
+               turn.at - last.at < paragraphSpan,
+               turn.at - lastBegan <= sameBreath {
                 out[out.count - 1] = MeetingTurn(
                     speaker: last.speaker, at: last.at,
                     text: last.text + " " + turn.text)
             } else {
                 out.append(turn)
             }
+            lastBegan = turn.at
         }
         return out
     }

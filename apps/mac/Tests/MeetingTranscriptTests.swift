@@ -148,21 +148,41 @@ final class MeetingTranscriptTests: XCTestCase {
         let url = try MeetingTranscriptFile.write(
             meeting(turns: [
                 .init(speaker: .you, at: .seconds(5), text: "one"),
-                .init(speaker: .you, at: .seconds(40), text: "two"),
-                .init(speaker: .you, at: .seconds(64), text: "three"),
-                .init(speaker: .you, at: .seconds(70), text: "four"),
-                .init(speaker: .you, at: .seconds(130), text: "five"),
+                .init(speaker: .you, at: .seconds(30), text: "two"),
+                .init(speaker: .you, at: .seconds(55), text: "three"),
+                .init(speaker: .you, at: .seconds(64), text: "four"),
+                .init(speaker: .you, at: .seconds(70), text: "five"),
+                .init(speaker: .you, at: .seconds(130), text: "six"),
             ]),
             in: parent, timeZone: tz)
 
         XCTAssertEqual(
             try body(of: url),
             """
-            [00:00:05] you: one two three
+            [00:00:05] you: one two three four
 
-            [00:01:10] you: four
+            [00:01:10] you: five
 
-            [00:02:10] you: five
+            [00:02:10] you: six
+            """)
+    }
+
+    /// Talk that carries on is one paragraph; talk that picks up again after
+    /// a silence is a new one, with its own time.
+    func testAPauseStartsANewParagraph() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(turns: [
+                .init(speaker: .you, at: .seconds(5), text: "can you hear me"),
+                .init(speaker: .you, at: .seconds(50), text: "you dropped off."),
+            ]),
+            in: parent, timeZone: tz)
+
+        XCTAssertEqual(
+            try body(of: url),
+            """
+            [00:00:05] you: can you hear me
+
+            [00:00:50] you: you dropped off.
             """)
     }
 
