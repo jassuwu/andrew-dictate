@@ -8,6 +8,9 @@
 /// waiting on it after a moment of its own.
 @MainActor
 protocol MicCapture: AnyObject {
+    /// `onFirstBuffer` fires once, for the first buffer with frames in it,
+    /// whatever their level: to the machine that is the mic hearing you,
+    /// and it lights the lamp and plays the chime.
     func start(
         onFirstBuffer: @escaping @MainActor @Sendable (
             ContinuousClock.Instant
