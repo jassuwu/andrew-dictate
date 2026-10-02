@@ -4,6 +4,12 @@ extension MicDescription {
     /// the input macOS would hand a new recording right now. what the press
     /// log's diagnostics header names, next to what each press actually got.
     static func systemDefaultInput() -> MicDescription? {
+        defaultInputDevice().flatMap(MicDescription.init(device:))
+    }
+
+    /// the id of that input, nil when the mac has none. a call into the
+    /// audio server, so never on the main thread while a press is waiting.
+    static func defaultInputDevice() -> AudioObjectID? {
         var address = propertyAddress(kAudioHardwarePropertyDefaultInputDevice)
         var device = AudioObjectID(kAudioObjectUnknown)
         var size = UInt32(MemoryLayout<AudioObjectID>.size)
@@ -14,10 +20,11 @@ extension MicDescription {
             nil,
             &size,
             &device
-        ) == noErr else {
+        ) == noErr,
+              device != kAudioObjectUnknown else {
             return nil
         }
-        return MicDescription(device: device)
+        return device
     }
 
     /// a device's own name and how it is attached. nil for a device that

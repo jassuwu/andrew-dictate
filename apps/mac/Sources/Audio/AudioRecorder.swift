@@ -196,6 +196,9 @@ private final class CaptureEngine: @unchecked Sendable {
     private let reconfigured = OSAllocatedUnfairLock(initialState: false)
 
     // on `queue` only.
+    /// the system default input when the engine was built, which is the
+    /// device it was told to open.
+    private var requestedDevice: AudioObjectID?
     private var engine: AVAudioEngine?
     private var inputFormat: AVAudioFormat?
     private var captureStorage: AudioCaptureStorage?
@@ -357,8 +360,13 @@ private final class CaptureEngine: @unchecked Sendable {
             return (engine, captureStorage)
         }
 
+        guard let device = MicDescription.defaultInputDevice() else {
+            throw MicCaptureError.noInputDevice
+        }
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
+        Self.bind(inputNode, to: device)
+        // read after the binding: the format is the bound device's.
         let format = inputNode.outputFormat(forBus: 0)
 
         guard format.sampleRate > 0, format.channelCount > 0 else {
@@ -383,9 +391,39 @@ private final class CaptureEngine: @unchecked Sendable {
         }
 
         self.engine = engine
+        requestedDevice = device
         inputFormat = format
         captureStorage = storage
         return (engine, storage)
+    }
+
+    /// the press records through the mic the mac says is the mic right
+    /// now, told to the engine's input unit before anything reads its
+    /// format. left to itself the unit can race Core Audio through a device
+    /// change and settle on another input — the iphone's continuity mic
+    /// after a call took the airpods — and stay there.
+    private static func bind(
+        _ inputNode: AVAudioInputNode,
+        to device: AudioObjectID
+    ) {
+        guard let unit = inputNode.audioUnit else {
+            recorderLogger.error("the input has no audio unit to bind the default mic to")
+            return
+        }
+        var device = device
+        let status = AudioUnitSetProperty(
+            unit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &device,
+            UInt32(MemoryLayout<AudioObjectID>.size)
+        )
+        if status != noErr {
+            recorderLogger.error(
+                "couldn't bind the input to the default mic: \(status, privacy: .public)"
+            )
+        }
     }
 
     private func installCaptureTap(
@@ -421,7 +459,8 @@ private final class CaptureEngine: @unchecked Sendable {
     }
 
     /// the device the engine's input unit actually opened, read back once
-    /// it is running.
+    /// it is running. one that is not the device it was told to open is
+    /// the evidence of a race the binding lost.
     private func noteBoundDevice() {
         guard let unit = engine?.inputNode.audioUnit else {
             return
@@ -440,6 +479,16 @@ private final class CaptureEngine: @unchecked Sendable {
         }
         let description = MicDescription(device: device)
         bound.withLock { $0 = description }
+
+        if let requestedDevice, device != requestedDevice {
+            let wanted = MicDescription(device: requestedDevice)
+            recorderLogger.notice(
+                """
+                the input opened \(description?.name ?? "an unnamed device", privacy: .public) \
+                but the default mic was \(wanted?.name ?? "an unnamed device", privacy: .public)
+                """
+            )
+        }
     }
 
     private func tearDown() {
