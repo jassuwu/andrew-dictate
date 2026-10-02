@@ -1017,7 +1017,12 @@ final class MeetingCoordinator: ObservableObject {
     /// block at a time off the main actor. A spool it cannot read says
     /// nothing was, and the check goes on the transcriber's numbers.
     private func farSideLoud(in handle: MeetingSpool.Handle) async -> Duration {
-        let url = handle.audioURL
+        await farSideLoud(at: handle.audioURL)
+    }
+
+    /// The same of any audio file in the spool's shape: a meeting's kept
+    /// audio, when it is read again.
+    private func farSideLoud(at url: URL) async -> Duration {
         let floor = thresholds.silenceFloor
         let loud = Task.detached(priority: .utility) {
             try SpoolAudioFile.farSideLoud(in: url, above: floor)
@@ -1538,15 +1543,33 @@ extension MeetingCoordinator {
             let reading = Reading(
                 turns: Self.onTheMeetingsClock(turns, gaps: header.gaps),
                 tally: await transcriber.decodeTally())
+            // checked like any reading, and not read again: this was.
+            let covered = Covered(checking: reading, farSideLoud: await farSideLoud(at: url))
             let split = audio.them.isEmpty
                 ? reading.turns
                 : await splitSpeakers(in: reading.turns, them: audio.them, gaps: header.gaps)
+            let thin = covered.result == .thin
             let again = MeetingTranscript(
                 app: header.app, started: header.started, duration: header.duration,
                 engine: model.rawValue, gaps: header.gaps, recovered: header.recovered,
+                reason: thin ? covered.reason : nil,
+                nobodySpoke: !thin && reading.nobodySpoke,
                 turns: split)
             try MeetingTranscriptFile.replace(at: transcript, with: again, timeZone: header.timeZone)
-            await runHook(preferences().hook, telling: MeetingSavedEvent(
+
+            // audio kept until you deleted it because the file was thin is
+            // an ordinary meeting's once a reading covers it: it waits as
+            // long as the setting says, from now. every other date is as it
+            // was, and the audio is not deleted here either way.
+            let prefs = preferences()
+            var until = entry.label.until
+            if until == nil, !thin {
+                until = keptAudio.now().addingTimeInterval(prefs.keepAudio.keptFor ?? 0)
+            }
+            if !keptAudio.relabel(entry, model: model, until: until) {
+                logger.error("a meeting's audio could not be relabelled after its transcript was made again")
+            }
+            await runHook(prefs.hook, telling: MeetingSavedEvent(
                 transcript: transcript,
                 app: header.app,
                 startedAt: header.started,
