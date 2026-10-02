@@ -207,6 +207,70 @@ final class MeetingTranscriptTests: XCTestCase {
             """)
     }
 
+    func testTalkThatBeginsTwoSecondsAfterTheLastTurnEndedIsTheSameParagraph() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(turns: [
+                .init(speaker: .them(nil), at: .seconds(10), text: "hello", end: .seconds(14)),
+                .init(speaker: .them(nil), at: .seconds(16), text: "can we start", end: .seconds(19)),
+            ]),
+            in: parent, timeZone: tz)
+
+        XCTAssertEqual(try body(of: url), "[00:00:10] them: hello can we start")
+    }
+
+    /// The pause is measured from the end of the turn just before, and only
+    /// when that one says where it ended. One that does not is held to the 30 s
+    /// between beginnings, however the turns around it end.
+    func testATurnWithNoEndIsJudgedByWhereItBeganAndTheNextByWhereItEnded() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(turns: [
+                .init(speaker: .you, at: .seconds(5), text: "one"),
+                .init(speaker: .you, at: .seconds(34), text: "two", end: .seconds(36)),
+                .init(speaker: .you, at: .seconds(38), text: "three", end: .seconds(39)),
+                .init(speaker: .you, at: .seconds(45), text: "four"),
+                .init(speaker: .you, at: .seconds(70), text: "five"),
+                .init(speaker: .you, at: .seconds(101), text: "six"),
+            ]),
+            in: parent, timeZone: tz)
+
+        XCTAssertEqual(
+            try body(of: url),
+            """
+            [00:00:05] you: one two three
+
+            [00:00:45] you: four five
+
+            [00:01:41] you: six
+            """)
+    }
+
+    /// Talk with no pause in it is still cut every minute, so a long
+    /// monologue stays findable: each turn here begins a second after the one
+    /// before ended.
+    func testAMonologueWithNoPauseInItStillStartsANewParagraphEveryMinute() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(turns: [
+                .init(speaker: .you, at: .seconds(0), text: "a", end: .seconds(24)),
+                .init(speaker: .you, at: .seconds(25), text: "b", end: .seconds(49)),
+                .init(speaker: .you, at: .seconds(50), text: "c", end: .seconds(74)),
+                .init(speaker: .you, at: .seconds(75), text: "d", end: .seconds(99)),
+                .init(speaker: .you, at: .seconds(100), text: "e", end: .seconds(124)),
+                .init(speaker: .you, at: .seconds(125), text: "f", end: .seconds(149)),
+                .init(speaker: .you, at: .seconds(150), text: "g", end: .seconds(174)),
+            ]),
+            in: parent, timeZone: tz)
+
+        XCTAssertEqual(
+            try body(of: url),
+            """
+            [00:00:00] you: a b c
+
+            [00:01:15] you: d e f
+
+            [00:02:30] you: g
+            """)
+    }
+
     func testTwoFarSideVoicesAreNotMergedIntoOne() throws {
         let url = try MeetingTranscriptFile.write(
             meeting(turns: [
