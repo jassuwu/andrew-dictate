@@ -124,6 +124,32 @@ final class MeetingRecoveryTests: XCTestCase {
         XCTAssertEqual(spool.unreadableCount(), 0)
     }
 
+    /// Whisper large before turbo before parakeet: the one that translates
+    /// first, and the one that only knows english and the european
+    /// languages last.
+    func testTheModelsAnotherIsChosenFromAreTriedLargeThenTurboThenParakeet() async throws {
+        try await orphan("teams", started: started, model: .parakeetV3)
+        transcribers.installed = [.whisperLargeV3Turbo, .whisperLargeV3]
+        let c = coordinator()
+        c.recoverOrphans()
+        await awaitRecords(1)
+        XCTAssertEqual(transcribers.made, [.whisperLargeV3])
+
+        try await orphan("meet", started: started.addingTimeInterval(60), model: .whisperLargeV3)
+        transcribers.installed = [.parakeetV3, .whisperLargeV3Turbo]
+        c.recoverOrphans()
+        await awaitRecords(2)
+        XCTAssertEqual(transcribers.made, [.whisperLargeV3, .whisperLargeV3Turbo])
+
+        try await orphan("zoom", started: started.addingTimeInterval(120), model: .whisperLargeV3)
+        transcribers.installed = [.parakeetV3]
+        c.recoverOrphans()
+        await awaitRecords(3)
+        XCTAssertEqual(
+            transcribers.made, [.whisperLargeV3, .whisperLargeV3Turbo, .parakeetV3])
+        XCTAssertEqual(records.map(\.outcome), [.saved, .saved, .saved])
+    }
+
     // MARK: - helpers
 
     /// A spool a crash left behind, with a second of audio on it.
