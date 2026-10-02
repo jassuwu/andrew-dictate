@@ -110,6 +110,22 @@ final class UtteranceMachineHearingTests: XCTestCase {
         XCTAssertEqual(outcomes, [.brushed])
     }
 
+    /// let go before the chime was due: the take is over, and its start
+    /// chime would land after its end.
+    func testAReleaseBeforeTheChimeWasDueSilencesIt() async {
+        let m = machine()
+        engine.reply = .success("quick")
+
+        m.keyDown()
+        await pass(.milliseconds(30))
+        mic.hear()
+        await pass(.milliseconds(50))
+        m.keyUp()
+        await pass(.milliseconds(200))
+
+        XCTAssertFalse(chimes.contains(.start))
+    }
+
     // MARK: - helpers
 
     private var presses: [PressRecord] {

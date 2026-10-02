@@ -510,6 +510,9 @@ final class UtteranceMachine {
         }
 
         setRecordingLocked(false)
+        // let go inside the brush wait: a start chime still due would land
+        // after the take's end.
+        startCueTask?.cancel()
 
         // never before key-down: an event clock that disagrees with
         // ours must not make a press end before it began.
