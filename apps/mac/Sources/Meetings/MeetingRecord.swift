@@ -212,3 +212,31 @@ extension MeetingRecord {
         }
     }
 }
+
+// MARK: - names
+
+extension MeetingRecord.Outcome {
+    /// the outcome's name in the log, the file and the diagnostics.
+    var name: String {
+        switch self {
+        case .saved: "saved"
+        case .nothingKept: "nothing-kept"
+        case .modelFailed: "model-failed"
+        case .couldNotWrite: "couldnt-write"
+        case .couldNotRecover: "couldnt-recover"
+        case .setAside: "set-aside"
+        case .spoolUnreadable: "spool-unreadable"
+        }
+    }
+
+    /// the reason, for the one outcome that carries one.
+    var why: String? {
+        switch self {
+        case .nothingKept(.tapNeverHeard): "tap-never-heard"
+        case .nothingKept(.stoppedBeforeCapture): "stopped-before-capture"
+        case .saved, .modelFailed, .couldNotWrite, .couldNotRecover, .setAside,
+             .spoolUnreadable:
+            nil
+        }
+    }
+}
