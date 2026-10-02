@@ -832,6 +832,39 @@ final class MeetingCoordinatorTests: XCTestCase {
         XCTAssertFalse(c.isWritingOut)
     }
 
+    /// The model was still loading when the meeting was stopped, and the
+    /// next one has started. A load that fails after that is the stopped
+    /// meeting's, and the lamp does not say the model failed over the
+    /// recording that is going on now.
+    func testAModelThatFailsAfterItsMeetingStoppedSaysNothingOverTheNext() async throws {
+        let slow = FakeTranscriber()
+        slow.loadHolds = true
+        transcribers.lineUp(slow)
+        let c = coordinator()
+        c.start()
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+        for _ in 0..<200 where !slow.isLoading {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        c.stop()
+        await c.untilWrittenOut()
+
+        c.start()
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+        XCTAssertEqual(c.state, .recording)
+        events = []
+
+        slow.finishLoading(failing: Unreadable())
+        await settle()
+
+        XCTAssertEqual(events, [], "\(events)")
+        XCTAssertEqual(c.state, .recording)
+    }
+
     // MARK: - helpers
 
     private func spoolFolders() throws -> Int {
@@ -1124,7 +1157,33 @@ private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
         lock.withLock { !waiting.isEmpty }
     }
 
-    func begin() async throws {}
+    /// While set, `begin` — the model loading — waits for `finishLoading`,
+    /// which says whether it failed.
+    var loadHolds = false
+    private var loading: CheckedContinuation<(any Error)?, Never>?
+
+    func begin() async throws {
+        guard lock.withLock({ loadHolds }) else { return }
+        let failure = await withCheckedContinuation { continuation in
+            lock.withLock { loading = continuation }
+        }
+        if let failure { throw failure }
+    }
+
+    /// The model held in `begin` is done loading, or failed to.
+    func finishLoading(failing failure: (any Error)?) {
+        let continuation = lock.withLock { () -> CheckedContinuation<(any Error)?, Never>? in
+            loadHolds = false
+            defer { loading = nil }
+            return loading
+        }
+        continuation?.resume(returning: failure)
+    }
+
+    var isLoading: Bool {
+        lock.withLock { loading != nil }
+    }
+
     func feed(_ chunk: MeetingAudioChunk) async {
         lock.withLock { _fed += 1 }
     }

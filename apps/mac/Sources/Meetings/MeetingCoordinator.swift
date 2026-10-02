@@ -492,8 +492,7 @@ final class MeetingCoordinator: ObservableObject {
                 transcriber = try await makeTranscriber(model)
             } catch {
                 logger.error("meeting could not start: \(error.localizedDescription, privacy: .public)")
-                abandonKeepingSpool(meeting)
-                onEvent?(.engineFailed(error.localizedDescription))
+                modelFailed(meeting, error)
                 return
             }
             meeting.transcriber = transcriber
@@ -505,9 +504,7 @@ final class MeetingCoordinator: ObservableObject {
                 do {
                     try await loading.value
                 } catch {
-                    guard let self else { return }
-                    abandonKeepingSpool(meeting)
-                    onEvent?(.engineFailed(error.localizedDescription))
+                    self?.modelFailed(meeting, error)
                 }
             }
 
@@ -610,6 +607,16 @@ final class MeetingCoordinator: ObservableObject {
             await tapClosed.value
             await self?.writeOut(meeting, recording: recording, nothingKept: why)
         }
+    }
+
+    /// The meeting's model would not be made or would not load. Said only
+    /// while that meeting is the one recorded: one that has stopped is
+    /// being written out with what it has, and the lamp saying the model
+    /// failed would be over the next recording, which has a model of its own.
+    private func modelFailed(_ meeting: Meeting, _ error: any Error) {
+        guard current === meeting else { return }
+        abandonKeepingSpool(meeting)
+        onEvent?(.engineFailed(error.localizedDescription))
     }
 
     /// The engine is gone but the audio is not: capture ends, the spool
