@@ -123,6 +123,12 @@ final class UpdateHandOff: ObservableObject {
         )
         if finished == .failedCopied {
             logFailure(why(result, brew: brew, onDisk: onDisk))
+            // the clipboard is the inserter's while it pastes: a copy that
+            // lands between its write and the ⌘V would paste this line into
+            // someone's document. the line stays `updating…` until idle.
+            while isBusy() {
+                try? await Task.sleep(for: idlePoll)
+            }
             copy(UpdateCheck.upgradeCommand)
         }
         progress = finished

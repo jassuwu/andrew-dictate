@@ -936,6 +936,36 @@ final class UpdateCheckTests: XCTestCase {
         XCTAssertEqual(world.handOff.state(offering: brewLine), .restartToFinish)
     }
 
+    /// brew can fail in the middle of a take, and the clipboard is the
+    /// inserter's while it pastes: a copy landing between its write and the
+    /// ⌘V would paste the brew line into someone's document. the line says
+    /// `updating…` until the take is done, then copies.
+    @MainActor
+    func testAFailureDuringADictationCopiesOnlyOnceItIsOver() async throws {
+        let world = HandOffWorld()
+        world.runner.result = CommandResult(
+            ending: .exited(1),
+            stdout: "",
+            stderr: "Error: no\n"
+        )
+
+        let run = world.handOff.click(offering: brewLine)
+        world.busy = true
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertEqual(world.handOff.state(offering: brewLine), .updating)
+        XCTAssertNil(world.pasteboard.string(forType: .string))
+
+        world.busy = false
+        await run?.value
+
+        XCTAssertEqual(world.handOff.state(offering: brewLine), .failedCopied)
+        XCTAssertEqual(
+            world.pasteboard.string(forType: .string),
+            "brew upgrade --cask jassuwu/tap/andrew-dictate"
+        )
+    }
+
     /// the second click lands on `updating…`, which has nothing to add.
     @MainActor
     func testASecondClickWhileUpdatingIsIgnored() async {
