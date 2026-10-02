@@ -82,9 +82,7 @@ struct AboutView: View {
 
         version = shortVersion ?? "development"
         self.build = build ?? "development"
-        installedByHomebrew = FileManager.default.fileExists(
-            atPath: "/opt/homebrew/Caskroom/andrew-dictate"
-        )
+        installedByHomebrew = UpdateOffer.Install.detect() == .homebrew
     }
 
     var body: some View {
