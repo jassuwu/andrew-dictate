@@ -54,4 +54,23 @@ final class MeetingRecordAgainTests: XCTestCase {
 
         XCTAssertFalse(record.again)
     }
+
+    /// a rerun that left the file as it was: it failed, or it came out thin
+    /// over a whole transcript. its outcome has a name of its own.
+    func testATranscriptLeftAsItWasHasAnOutcomeOfItsOwn() throws {
+        let record = MeetingRecord(
+            outcome: .unchanged, app: "zoom", model: "parakeetV3", startedAt: noonish,
+            durationS: 3_600, again: true)
+
+        XCTAssertEqual(record.outcome.name, "unchanged")
+        XCTAssertTrue(record.line(in: kolkata).hasPrefix(
+            "at=2026-10-02T12:22:31+05:30 outcome=unchanged "), record.line(in: kolkata))
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        XCTAssertEqual(
+            try decoder.decode(MeetingRecord.self, from: encoder.encode(record)).outcome,
+            .unchanged)
+    }
 }

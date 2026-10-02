@@ -44,6 +44,10 @@ struct MeetingRecord: Equatable, Sendable, Codable {
         /// waits for a later launch. one being tried again from settings
         /// goes back aside instead, so the line that counts it still does.
         case waitingForModel
+        /// a transcript asked to be made again was left as it was: the new
+        /// reading failed, or came out thin over a whole transcript. the
+        /// audio stays.
+        case unchanged
     }
 
     enum NothingKept: Equatable, Sendable {
@@ -406,6 +410,7 @@ extension MeetingRecord.Outcome {
         case .spoolUnreadable: "spool-unreadable"
         case .setAsideUnreadable: "set-aside-unreadable"
         case .waitingForModel: "waiting-for-model"
+        case .unchanged: "unchanged"
         }
     }
 
@@ -416,7 +421,7 @@ extension MeetingRecord.Outcome {
         case .nothingKept(.stoppedBeforeCapture): "stopped-before-capture"
         case .nothingKept(.spoolEmpty): "spool-empty"
         case .saved, .savedThin, .modelFailed, .couldNotWrite, .couldNotRecover, .setAside,
-             .spoolUnreadable, .setAsideUnreadable, .waitingForModel:
+             .spoolUnreadable, .setAsideUnreadable, .waitingForModel, .unchanged:
             nil
         }
     }
@@ -432,6 +437,7 @@ extension MeetingRecord.Outcome {
         case ("spool-unreadable", nil): self = .spoolUnreadable
         case ("set-aside-unreadable", nil): self = .setAsideUnreadable
         case ("waiting-for-model", nil): self = .waitingForModel
+        case ("unchanged", nil): self = .unchanged
         case ("nothing-kept", "tap-never-heard"): self = .nothingKept(.tapNeverHeard)
         case ("nothing-kept", "stopped-before-capture"): self = .nothingKept(.stoppedBeforeCapture)
         case ("nothing-kept", "spool-empty"): self = .nothingKept(.spoolEmpty)
