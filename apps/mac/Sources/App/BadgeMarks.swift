@@ -22,6 +22,8 @@ enum BadgeMarks {
         case partRim
         /// recording a meeting: the whole rim.
         case rim
+        /// a meeting's problem: a red triangle with a black "!".
+        case warning
     }
 
     /// which mark each look wears.
@@ -32,7 +34,7 @@ enum BadgeMarks {
         case .callNotRecorded: .brackets
         case .gettingReady: .partRim
         case .recordingMeeting: .rim
-        case .meetingProblem: nil
+        case .meetingProblem: .warning
         case .needsSetup: .setupDot
         }
     }
@@ -90,6 +92,18 @@ enum BadgeMarks {
         static let reach: CGFloat = 5.5
     }
 
+    /// a red triangle in the bottom-right corner, its red inside that
+    /// quarter of the badge, with a black outline to part it from the gold
+    /// mic underneath.
+    enum Warning {
+        static let apex = NSPoint(x: 13, y: 9)
+        static let baseLeft = NSPoint(x: 9, y: 1)
+        static let baseRight = NSPoint(x: 17, y: 1)
+        static let outline: CGFloat = 1
+        static let stem = NSRect(x: 12.5, y: 4, width: 1, height: 2.5)
+        static let point = NSRect(x: 12.5, y: 2, width: 1, height: 1)
+    }
+
     // MARK: - drawing
 
     private static let gold = BrandUI.nsColor(BrandUI.goldRGB)
@@ -125,6 +139,8 @@ enum BadgeMarks {
         case .rim:
             gold.setStroke()
             rimPath(in: rect).stroke()
+        case .warning:
+            drawWarning(in: rect)
         }
     }
 
@@ -172,6 +188,38 @@ enum BadgeMarks {
         gold.setStroke()
         rimPath(in: rect).stroke()
         NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private static func drawWarning(in rect: NSRect) {
+        let origin = NSPoint(x: rect.minX, y: rect.minY)
+        let triangle = NSBezierPath()
+        triangle.move(to: Warning.apex.offset(by: origin))
+        triangle.line(to: Warning.baseRight.offset(by: origin))
+        triangle.line(to: Warning.baseLeft.offset(by: origin))
+        triangle.close()
+
+        // the outline is the stroke's outer half; the red fill covers the
+        // inner half, so the red keeps the exact corners above.
+        triangle.lineWidth = Warning.outline * 2
+        triangle.lineJoinStyle = .round
+        black.setStroke()
+        triangle.stroke()
+        red.setFill()
+        triangle.fill()
+
+        // the "!" sits on the triangle's centre line, which is half a
+        // pixel off the grid on a 1x screen: there it moves the half pixel
+        // rather than smear over two.
+        let scale = deviceScale()
+        black.setFill()
+        for part in [Warning.stem, Warning.point] {
+            NSBezierPath(
+                rect: snapped(
+                    part.offsetBy(dx: origin.x, dy: origin.y),
+                    scale: scale
+                )
+            ).fill()
+        }
     }
 
     private static func rimPath(in rect: NSRect) -> NSBezierPath {
@@ -246,5 +294,22 @@ enum BadgeMarks {
     /// pixel grid instead of smearing across two.
     private static func snapped(_ value: CGFloat, scale: CGFloat) -> CGFloat {
         (value * scale).rounded() / scale
+    }
+
+    private static func snapped(_ rect: NSRect, scale: CGFloat) -> NSRect {
+        let minX = snapped(rect.minX, scale: scale)
+        let minY = snapped(rect.minY, scale: scale)
+        return NSRect(
+            x: minX,
+            y: minY,
+            width: snapped(rect.maxX, scale: scale) - minX,
+            height: snapped(rect.maxY, scale: scale) - minY
+        )
+    }
+}
+
+private extension NSPoint {
+    func offset(by origin: NSPoint) -> NSPoint {
+        NSPoint(x: x + origin.x, y: y + origin.y)
     }
 }

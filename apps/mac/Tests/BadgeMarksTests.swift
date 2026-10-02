@@ -74,9 +74,30 @@ final class BadgeMarksTests: XCTestCase {
         }
     }
 
+    func testAProblemKeepsItsRedInTheBottomRightCorner() {
+        let bottomRight = NSRect(x: 9, y: 0, width: 9, height: 9)
+        for scale in scales {
+            let rendered = render(.meetingProblem, scale: scale)
+
+            XCTAssertTrue(rendered.has(red, in: bottomRight), "\(scale)x")
+            XCTAssertEqual(
+                rendered.count(of: red, outside: bottomRight),
+                0,
+                "\(scale)x"
+            )
+            // and the triangle carries its "!" in the brand black.
+            XCTAssertTrue(
+                rendered.has(black, in: NSRect(x: 12, y: 2, width: 2, height: 4.5)),
+                "\(scale)x"
+            )
+        }
+    }
+
     // MARK: - what is looked for, and where
 
     private let gold = BrandUI.goldRGB
+    private let red = BrandUI.attentionRGB
+    private let black = BrandUI.blackRGB
 
     /// two points deep along each edge, four long round its middle: where
     /// a rim lies and a corner bracket does not reach.
@@ -166,6 +187,13 @@ private struct Rendered: Equatable {
     /// mark itself, not an edge blended into the badge behind it.
     func has(_ rgb: [Double], in region: NSRect) -> Bool {
         pixels(in: region).contains { Self.matches($0, rgb) }
+    }
+
+    func count(of rgb: [Double], outside region: NSRect) -> Int {
+        let everywhere = NSRect(x: 0, y: 0, width: 18, height: 18)
+        let inside = pixels(in: region).filter { Self.matches($0, rgb) }.count
+        return pixels(in: everywhere).filter { Self.matches($0, rgb) }.count
+            - inside
     }
 
     /// every pixel whose centre lies in `region`, given in points, y up
