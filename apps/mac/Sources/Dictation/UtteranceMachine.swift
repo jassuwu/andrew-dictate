@@ -23,6 +23,11 @@ enum UtteranceEvent: Equatable, Sendable {
     /// an exceptional message, and how long it stays.
     case pill(String, duration: TimeInterval)
     case locked(Bool)
+    /// whether the display has to stay awake: true while the mic is live,
+    /// false the moment it is asked to stop or is thrown away. a long
+    /// dictation is minutes of talking with no hand on anything, and an
+    /// idle display that sleeps under it locks the mac.
+    case keepAwake(Bool)
     /// one utterance's stage timings, finished or cancelled.
     case timelineCompleted(UtteranceTimeline)
     /// a dictation worth keeping, for whoever keeps dictations.
@@ -135,8 +140,15 @@ final class UtteranceMachine {
     private let coolDuration: TimeInterval
 
     /// the mic of the press in flight, from key-down until it has been
-    /// told to stop or cancel.
-    private var capture: Capture?
+    /// told to stop or cancel. every ending goes through here — stopped,
+    /// cancelled or given up on — so the display's keep-awake follows it
+    /// and no ending can forget to let the display sleep.
+    private var capture: Capture? {
+        didSet {
+            keepDisplayAwake(capture.map { !$0.isEnding } ?? false)
+        }
+    }
+    private var isKeepingDisplayAwake = false
     private var captureSequence: UInt64 = 0
     /// the start still out, whichever press asked for it, and the deadline
     /// it has to meet.
@@ -1180,6 +1192,14 @@ final class UtteranceMachine {
         }
         isRecordingLocked = locked
         emit(.locked(locked))
+    }
+
+    private func keepDisplayAwake(_ awake: Bool) {
+        guard awake != isKeepingDisplayAwake else {
+            return
+        }
+        isKeepingDisplayAwake = awake
+        emit(.keepAwake(awake))
     }
 
     /// a pill that answers an input lands a run-loop turn after it, as it

@@ -193,6 +193,8 @@ final class DictationCoordinator: ObservableObject {
         at: Date
     )?
     private let timelineStore = UtteranceTimelineStore()
+    /// held while the mic is live (`keepDisplayAwake`).
+    private var displayAwakeActivity: (any NSObjectProtocol)?
     private var aboutWindowController: AboutWindowController?
     #if DEBUG
     private var lampLabWindowController: LampLabWindowController?
@@ -1752,6 +1754,8 @@ extension DictationCoordinator {
             }
         case let .locked(locked):
             hudViewModel.setRecordingLocked(locked)
+        case let .keepAwake(awake):
+            keepDisplayAwake(awake)
         case let .timelineCompleted(timeline):
             timelineStore.append(timeline)
         case let .archiveRecord(timeline, heard, inserted):
@@ -1767,6 +1771,27 @@ extension DictationCoordinator {
             captureSlot.drop()
         case let .pressEnded(record):
             keep(record)
+        }
+    }
+
+    /// an idle-display-sleep assertion, the one `pmset -g assertions` lists
+    /// as "dictating". ProcessInfo's activity rather than IOKit's call: the
+    /// same assertion underneath, with a token instead of an id and a
+    /// return code to check, and the system drops it if the app dies.
+    /// display only — keeping the system awake too is the display's doing,
+    /// and nothing here should outlive the mic.
+    private func keepDisplayAwake(_ awake: Bool) {
+        if awake {
+            guard displayAwakeActivity == nil else {
+                return
+            }
+            displayAwakeActivity = ProcessInfo.processInfo.beginActivity(
+                options: .idleDisplaySleepDisabled,
+                reason: "dictating"
+            )
+        } else if let activity = displayAwakeActivity {
+            ProcessInfo.processInfo.endActivity(activity)
+            displayAwakeActivity = nil
         }
     }
 
