@@ -116,6 +116,21 @@ same under 15 s of audio split by stage, and key-down → first audio by how the
 mic is attached. `gg.jass.dictate` is the release build; the dev build logs
 under `gg.jass.dictate.dev`.
 
+## 6. the mic
+
+```
+.build/release/fidelity mic
+```
+
+how soon the default input is heard after a press asks for it, built the way
+the app's capture is: cold (the engine built at the press, as the first press
+after a device change used to be) and warm (built and prepared ahead, as the app
+now does once the hardware settles), each timed to `start()` returning, to the
+first sink-node callback (what lights the lamp now) and to the first tap buffer
+(what used to). first it asks Core Audio whether `prepare()` alone started this
+process's input, which is what the mic indicator shows. the terminal needs
+microphone access.
+
 ## where things are
 
 recordings and prompts are your voice and your own words. they live outside the
