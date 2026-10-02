@@ -166,6 +166,54 @@ final class UpdateCheckTests: XCTestCase {
         )
     }
 
+    // MARK: - the update line: what clicking it does
+
+    /// brew put it there, so brew replaces it — with the exact tap line.
+    func testABrewInstallIsOfferedTheUpgradeCommand() {
+        let line = UpdateOffer.line(
+            latest: "0.9.5",
+            running: "0.9.4",
+            install: .homebrew
+        )
+
+        XCTAssertEqual(
+            line?.action,
+            .brewUpgrade("brew upgrade --cask jassuwu/tap/andrew-dictate")
+        )
+    }
+
+    /// a dmg user handed a brew line would paste an error into terminal.
+    func testADmgInstallIsSentToTheReleasesPage() {
+        let line = UpdateOffer.line(
+            latest: "0.9.5",
+            running: "0.9.4",
+            install: .dmg
+        )
+
+        XCTAssertEqual(
+            line?.action,
+            .openReleasePage(
+                URL(
+                    string: "https://github.com/jassuwu/andrew-dictate/releases/latest"
+                )!
+            )
+        )
+    }
+
+    func testTheInstallIsHomebrewOnlyWhenTheCaskroomHasIt() throws {
+        let caskroom = root.appendingPathComponent("andrew-dictate")
+        XCTAssertEqual(UpdateOffer.Install.detect(caskroom: caskroom), .dmg)
+
+        try FileManager.default.createDirectory(
+            at: caskroom,
+            withIntermediateDirectories: true
+        )
+        XCTAssertEqual(
+            UpdateOffer.Install.detect(caskroom: caskroom),
+            .homebrew
+        )
+    }
+
     /// a throwaway `Andrew Dictate.app`, with or without a readable plist.
     private func makeBundle(
         version: String?,
