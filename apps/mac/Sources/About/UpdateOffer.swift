@@ -70,9 +70,10 @@ enum UpdateOffer {
         case unreachable
     }
 
-    /// the running version as one query item, and nothing else. the user
-    /// agent is set rather than left to URLSession, whose default carries
-    /// the build number and the mac's darwin version.
+    /// the running version as one query item, and nothing else. two headers
+    /// are pinned rather than left to URLSession, whose defaults differ per
+    /// mac: the user agent carries the build and the darwin version, and
+    /// accept-language carries the region (`en-IN`).
     static func request(version: String) -> URLRequest {
         var components = URLComponents(
             url: endpoint,
@@ -87,6 +88,7 @@ enum UpdateOffer {
         request.httpMethod = "GET"
         request.httpShouldHandleCookies = false
         request.setValue("andrew-dictate", forHTTPHeaderField: "User-Agent")
+        request.setValue("en", forHTTPHeaderField: "Accept-Language")
         return request
     }
 

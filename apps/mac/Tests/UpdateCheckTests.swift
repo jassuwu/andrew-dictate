@@ -290,8 +290,10 @@ final class UpdateCheckTests: XCTestCase {
 
     // MARK: - the update check: what it sends and what it hears
 
-    /// the version, and nothing else: no id, no cookie, and a user agent
-    /// that names the app but not its build or the mac's os.
+    /// the version, and nothing else: no id, no cookie. the two headers
+    /// URLSession would fill per mac are pinned — its user agent carries
+    /// the build and the darwin version, its accept-language the region
+    /// (`en-IN`) — so every copy sends the same bytes but the version.
     func testTheRequestCarriesTheVersionAndNothingElse() {
         let request = UpdateOffer.request(version: "0.9.4")
 
@@ -302,7 +304,7 @@ final class UpdateCheckTests: XCTestCase {
         XCTAssertEqual(request.httpMethod, "GET")
         XCTAssertEqual(
             request.allHTTPHeaderFields,
-            ["User-Agent": "andrew-dictate"]
+            ["User-Agent": "andrew-dictate", "Accept-Language": "en"]
         )
         XCTAssertFalse(request.httpShouldHandleCookies)
         XCTAssertNil(request.httpBody)
