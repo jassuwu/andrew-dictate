@@ -185,6 +185,11 @@ final class DictationCoordinator: ObservableObject {
         label: "\(AppIdentity.bundleID).press-log",
         qos: .utility
     )
+    /// watches the main thread while a press is in flight. lazy, because
+    /// its stalls are noted on the machine's press.
+    private lazy var watchdog = MainThreadWatchdog { [weak self] milliseconds in
+        self?.machine.mainStalled(for: .milliseconds(milliseconds))
+    }
     private var wordFixerWindowController: WordFixerWindowController?
 
     // MARK: meetings (ADR 0023, 0040)
@@ -1674,6 +1679,13 @@ final class DictationCoordinator: ObservableObject {
         activeFeedbackGeneration = nil
         state = newState
         hudViewModel.update(state: newState)
+        // nothing ticks at idle: the watchdog follows a press and lingers
+        // a few seconds after it, then stops.
+        if newState == .idle {
+            watchdog.windDown()
+        } else {
+            watchdog.watch("\(newState)")
+        }
 
         synchronizeHUD(fastDismiss: fastHUDDismiss)
     }
