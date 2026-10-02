@@ -174,6 +174,14 @@ final class HUDViewModel: ObservableObject {
     /// recording lamp wears the ember: the key is down, the mic is not
     /// hearing you yet.
     @Published private(set) var isHearing = false
+    /// the meeting's light, while the lamp is the meeting's
+    /// (`HUDPresentation.stage`): off while a take has it. kept under a
+    /// pill, so the pill leaving shows it again.
+    @Published private(set) var meetingLight: HUDMeetingLight = .off
+    /// when it last changed: its rise and its cool-out run from here.
+    @Published private(set) var meetingLightChangedAt = Date()
+    /// the colour it was last lit in, so a problem goes out in red.
+    @Published private(set) var meetingPalette: LampPalette = .gold
 
     private var audioRecorder: AudioRecorder?
     private var levelSamplingTask: Task<Void, Never>?
@@ -245,6 +253,25 @@ final class HUDViewModel: ObservableObject {
         }
         waveTransitionStartedAt = Date()
         isHearing = true
+    }
+
+    /// what a meeting shows on the lamp. a pill over it stays where it is.
+    func showMeetingLight(_ light: HUDMeetingLight) {
+        guard light != meetingLight else {
+            return
+        }
+        meetingLightChangedAt = Date()
+        switch light {
+        case .ember, .steady:
+            meetingPalette = .gold
+        case .problem:
+            meetingPalette = .attention
+        case .off, .coolingOut:
+            break
+        }
+        withAnimation(Self.morph) {
+            meetingLight = light
+        }
     }
 
     /// not folded into `update(state:)`: the lock is set a beat after the
@@ -385,6 +412,8 @@ struct HUDView: View {
                         onElsewhere: { viewModel.onPillElsewhere?() }
                     )
                     .glassEffectID(Self.glassID, in: glassNamespace)
+                } else if viewModel.meetingLight != .off {
+                    meetingLamp(viewModel.meetingLight)
                 } else {
                     switch viewModel.state {
                     case .idle:
@@ -433,6 +462,51 @@ struct HUDView: View {
             loudness: viewModel.loudness,
             startedAt: viewModel.waveTransitionStartedAt,
             isLocked: viewModel.isRecordingLocked,
+            ground: LampGround.shipped,
+            glassID: Self.glassID,
+            glassNamespace: glassNamespace
+        )
+        .frame(
+            width: HUDLayoutEngine.waveSize.width,
+            height: HUDLayoutEngine.waveSize.height
+        )
+    }
+
+    /// a meeting's light: the same tube in the same place, its own looks.
+    /// nothing the room says reaches it.
+    @ViewBuilder
+    private func meetingLamp(_ light: HUDMeetingLight) -> some View {
+        switch light {
+        case .off:
+            EmptyView()
+        case .ember:
+            meetingLine(phase: .ember, palette: .gold)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Starting the meeting recording")
+        case .steady:
+            meetingLine(phase: .pilot, palette: .gold)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Recording a meeting")
+        case .problem:
+            meetingLine(phase: .pilot, palette: .attention)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("The meeting recording has a problem")
+        case .coolingOut:
+            meetingLine(phase: .cool, palette: viewModel.meetingPalette)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Stopped recording the meeting")
+        }
+    }
+
+    private func meetingLine(
+        phase: GoldRippleLine.Phase,
+        palette: LampPalette
+    ) -> some View {
+        LampLine(
+            phase: phase,
+            loudness: 0,
+            startedAt: viewModel.meetingLightChangedAt,
+            palette: palette,
             ground: LampGround.shipped,
             glassID: Self.glassID,
             glassNamespace: glassNamespace

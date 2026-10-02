@@ -309,6 +309,11 @@ final class DictationCoordinator: ObservableObject {
     /// detour, not a new question.
     private(set) var meetingWaitsOnSetup = false
     private var liveTranscriptPanel: LiveTranscriptPanel?
+    /// what the meeting is doing, as the lamp reads it (ticket 28), and the
+    /// light that gives, its cool-out included.
+    private var meetingFacts = HUDMeetingFacts()
+    private var meetingLight: HUDMeetingLight = .off
+    private var meetingLightCooling: Task<Void, Never>?
     private var meetingCancellables: Set<AnyCancellable> = []
     /// A quit is waiting on a meeting's transcript to be written.
     private var quitWaitingOnMeeting = false
@@ -2001,6 +2006,9 @@ final class DictationCoordinator: ObservableObject {
         activeFeedbackGeneration = nil
         state = newState
         hudViewModel.update(state: newState)
+        // a take has the lamp from the press to the cool-out; the meeting's
+        // light is back the moment it lets go.
+        showTheMeetingLight()
         // nothing ticks at idle: the watchdog follows a press and lingers
         // a few seconds after it, then stops.
         switch newState {
@@ -2038,7 +2046,8 @@ final class DictationCoordinator: ObservableObject {
                 state: self.state.lamp,
                 hasFeedback: self.activeFeedbackGeneration != nil,
                 isOnboarding: self.isOnboardingPresented,
-                prewarmPresentsHUD: self.prewarmPresentsHUD
+                prewarmPresentsHUD: self.prewarmPresentsHUD,
+                meetingLight: self.meetingLight
             ) else {
                 panel.dismiss(fast: fastDismiss)
                 return
@@ -2422,6 +2431,14 @@ extension DictationCoordinator {
         built.onLine = { [weak self] line in
             self?.liveTranscript.upsert(line)
         }
+        // the lamp follows the meeting. read from the value handed over: a
+        // @Published sink runs before the new state is stored.
+        built.$state
+            .removeDuplicates()
+            .sink { [weak self] state in
+                self?.meetingStateChanged(state)
+            }
+            .store(in: &meetingCancellables)
         built.recordHookRun = { [weak self] run in
             self?.settings.meetingHookLastRunAt = run.finishedAt
             self?.settings.meetingHookLastRunLabel = run.outcome.label
@@ -2557,6 +2574,70 @@ extension DictationCoordinator {
             default: duration = 2
             }
             flashNotice(text, duration: duration)
+        }
+    }
+
+    /// the lamp reads the meeting's state: the ember while it proves it can
+    /// hear, the steady light while it records (a rebuild included: the
+    /// pill says the gap), out with the cool-out when it stops. `cannotHear`
+    /// is a meeting ending, not one recording, and the pill says why.
+    private func meetingStateChanged(_ state: MeetingSession.State) {
+        switch state {
+        case .provingItCanHear:
+            meetingFacts.isRecording = true
+            meetingFacts.isProvingItCanHear = true
+        case .recording, .rebuilding:
+            meetingFacts.isRecording = true
+            meetingFacts.isProvingItCanHear = false
+        case .idle, .cannotHear:
+            meetingFacts.isRecording = false
+            meetingFacts.isProvingItCanHear = false
+        }
+        followTheMeeting()
+    }
+
+    /// the meeting's facts moved: its light follows, and a light that goes
+    /// out keeps the panel up for the cool-out before it lets go.
+    private func followTheMeeting() {
+        let next = HUDPresentation.meetingLight(meetingFacts, after: meetingLight)
+        guard next != meetingLight else {
+            return
+        }
+        meetingLight = next
+        meetingLightCooling?.cancel()
+        meetingLightCooling = nil
+        if next == .coolingOut {
+            meetingLightCooling = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(HUDWaveMotion.coolDuration))
+                guard !Task.isCancelled,
+                      let self,
+                      self.meetingLight == .coolingOut else {
+                    return
+                }
+                self.meetingLight = .off
+                self.showTheMeetingLight()
+                self.synchronizeHUD(fastDismiss: true)
+            }
+        }
+        showTheMeetingLight()
+        synchronizeHUD()
+    }
+
+    /// the view wears the meeting's light whenever the lamp is the
+    /// meeting's, a pill over it or not: the pill leaving shows what was
+    /// under it, and a take ending gives the lamp back.
+    private func showTheMeetingLight() {
+        let underThePill = HUDPresentation.stage(
+            state: state.lamp,
+            hasFeedback: false,
+            isOnboarding: false,
+            prewarmPresentsHUD: prewarmPresentsHUD,
+            meetingLight: meetingLight
+        )
+        if case let .meeting(light) = underThePill {
+            hudViewModel.showMeetingLight(light)
+        } else {
+            hudViewModel.showMeetingLight(.off)
         }
     }
 
