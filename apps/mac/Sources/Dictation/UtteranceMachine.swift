@@ -1039,12 +1039,12 @@ final class UtteranceMachine {
                         "five minutes — that's the cap. pasted what i had.",
                         duration: 2.4
                     )
-                } else if press?.micChanged == true,
-                          let notice = CaptureInterruptionNotice.message(
-                              for: .deviceChanged
-                          ) {
+                } else if press?.micChanged == true {
                     setState(.idle)
-                    flashFeedback(notice, duration: 2.4)
+                    flashFeedback(
+                        CaptureInterruptionNotice.message(for: .deviceChanged),
+                        duration: 2.4
+                    )
                 }
                 endPress(.delivered)
             case let .leftOnPasteboard(reason):
@@ -1134,7 +1134,7 @@ final class UtteranceMachine {
             // itself failed, so there is nothing sitting there to paste.
             "the clipboard is busy — nothing was copied"
         case .locked:
-            "copied — what you said before the lock · ⌘V to paste"
+            CaptureInterruptionNotice.message(for: .systemPaused)
         }
     }
 
