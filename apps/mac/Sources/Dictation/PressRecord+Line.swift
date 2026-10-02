@@ -49,6 +49,9 @@ extension PressRecord {
         if micChanged {
             fields.append("mic_changed=1")
         }
+        if timedOut {
+            fields.append("timed_out=1")
+        }
         if retry {
             fields.append("retry=1")
         }
