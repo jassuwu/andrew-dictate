@@ -44,6 +44,12 @@ enum UtteranceEvent: Equatable, Sendable {
     case retryOffered(Bool)
     /// the mic would not start; the next press must build a fresh one.
     case microphoneDropped
+    /// a take the engine never answered: a slow moment or a wedge, and
+    /// only the engine's keeper can ask it which, without waiting on it.
+    case engineSuspect
+    /// takes in a row the engine never answered: it has stopped, and only
+    /// a restart brings it back.
+    case engineUnresponsive
     /// how one press ended, whatever the ending: exactly one per press.
     case pressEnded(PressRecord)
 }
@@ -187,6 +193,14 @@ final class UtteranceMachine {
     private var isRecordingLocked = false
     private var activeFocusAnchor: (any InsertionAnchor)?
     private var pipelineTask: Task<Void, Never>?
+    /// how long the engine has left to answer the take in flight
+    /// (`TranscriptionDeadline`).
+    private var transcriptionDeadline: Task<Void, Never>?
+    /// takes in a row the engine never answered. one is worth a check; a
+    /// second, with nothing answered in between, is an engine that stopped.
+    private var unansweredTakes = 0
+    /// the mac is asleep or locked; stands in for ticket 06's flag until the merge.
+    var isAway = false
     /// the start chime, held back 120 ms so a discarded capture can cancel it
     private var startCueTask: Task<Void, Never>?
     private var retryBuffer = RetryBuffer()
@@ -288,6 +302,8 @@ final class UtteranceMachine {
                 invalidatePipeline()
                 setState(.idle)
                 endPress(.droppedAsHung)
+                // the same evidence a timeout leaves.
+                emit(.engineSuspect)
             }
         }
 
@@ -1040,6 +1056,7 @@ final class UtteranceMachine {
     ) {
         pipelineGeneration += 1
         let generation = pipelineGeneration
+        armTranscriptionDeadline(for: samples, generation: generation)
 
         pipelineTask = Task { [weak self] in
             await self?.transcribeAndInsert(
@@ -1048,6 +1065,105 @@ final class UtteranceMachine {
                 generation: generation
             )
         }
+    }
+
+    /// a wedged engine never answers, and a call into it can't be taken
+    /// back. the press stops waiting on it instead.
+    private func armTranscriptionDeadline(
+        for samples: [Float],
+        generation: Int
+    ) {
+        transcriptionDeadline?.cancel()
+        transcriptionDeadline = armDeadline(
+            after: TranscriptionDeadline.forSamples(samples.count)
+        ) { machine in
+            machine.transcriptionTimedOut(samples, generation: generation)
+        }
+    }
+
+    /// a deadline that doesn't run out while the mac is away. one that
+    /// comes due asleep or locked waits, and once the mac is back the
+    /// thing waited on gets a whole window of its own: nobody was there
+    /// to be kept waiting, and a wake is slow for everything.
+    private func armDeadline(
+        after window: Duration,
+        then expire: @escaping @MainActor (UtteranceMachine) -> Void
+    ) -> Task<Void, Never> {
+        Task { @MainActor [weak self, clock] in
+            var wasAway = false
+            while true {
+                try? await clock.sleep(for: window)
+                guard !Task.isCancelled, let self else {
+                    return
+                }
+                if self.isAway || wasAway {
+                    wasAway = self.isAway
+                    continue
+                }
+                expire(self)
+                return
+            }
+        }
+    }
+
+    /// the engine's answer. words or an error, either one came in time and
+    /// stops the deadline; one that comes after it is about a press that
+    /// has already ended.
+    private func transcribeInTime(
+        _ samples: [Float],
+        generation: Int
+    ) async throws -> String {
+        defer {
+            engineAnswered(generation: generation)
+        }
+        return try await engine.transcribe(samples)
+    }
+
+    private func engineAnswered(generation: Int) {
+        guard generation == pipelineGeneration else {
+            return
+        }
+        transcriptionDeadline?.cancel()
+        transcriptionDeadline = nil
+        unansweredTakes = 0
+    }
+
+    /// the engine never answered. the press ends now, out loud, with its
+    /// samples kept for a tap. it is the same ending as an engine that
+    /// threw, and the record says which.
+    private func transcriptionTimedOut(_ samples: [Float], generation: Int) {
+        guard generation == pipelineGeneration,
+              state == .transcribing else {
+            return
+        }
+
+        transcriptionDeadline = nil
+        pipelineLogger.error("the speech model didn't answer in time; giving up on it")
+        unansweredTakes += 1
+        // the engine after a restart starts with a clean slate.
+        let restart = unansweredTakes
+            >= TranscriptionDeadline.unansweredBeforeRestart
+        if restart {
+            unansweredTakes = 0
+        }
+        activeTimeline = nil
+        press?.timedOut = true
+        // kept either way: the sentence is no less theirs because the
+        // engine is the thing that broke.
+        armRetry(samples)
+        reportPipelineFailure(
+            restart
+                ? "speech model isn't responding — restarting it"
+                : "couldn't transcribe — tap to try again",
+            outcome: .couldNotTranscribe,
+            generation: generation,
+            duration: 4
+        )
+        // whatever the engine says later lands nowhere.
+        pipelineGeneration += 1
+        pipelineTask?.cancel()
+        pipelineTask = nil
+        emit(restart ? .engineUnresponsive : .engineSuspect)
     }
 
     private func transcribeAndInsert(
@@ -1060,7 +1176,10 @@ final class UtteranceMachine {
         }
 
         do {
-            let transcript = try await engine.transcribe(samples)
+            let transcript = try await transcribeInTime(
+                samples,
+                generation: generation
+            )
             try Task.checkCancellation()
             guard generation == pipelineGeneration else {
                 return

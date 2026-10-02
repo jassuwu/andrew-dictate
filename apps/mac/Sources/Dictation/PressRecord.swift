@@ -83,6 +83,9 @@ struct PressRecord: Equatable, Sendable, Codable {
     /// the mic changed under the take and ended it, not the finger. what
     /// it heard up to the change went on as a take of its own.
     var micChanged = false
+    /// the engine never answered, and the press stopped waiting on it: a
+    /// couldn't-transcribe that was a hang, not an error.
+    var timedOut = false
     /// a replay of samples the engine threw on, not a fresh recording.
     var retry: Bool
     /// the longest the main thread stalled while this press was in flight.
@@ -114,6 +117,7 @@ extension PressRecord {
         var words: Int?
         var capped = false
         var micChanged = false
+        var timedOut = false
         var mainStall: Duration?
 
         init(keyDown: Instant, startedAt: Date, retry: Bool = false) {
@@ -147,6 +151,7 @@ extension PressRecord {
                 engine: engine,
                 capped: capped,
                 micChanged: micChanged,
+                timedOut: timedOut,
                 retry: retry,
                 mainStallMs: mainStall.map(Self.milliseconds)
             )
@@ -187,6 +192,10 @@ extension PressRecord {
             micChanged: try container.decodeIfPresent(
                 Bool.self,
                 forKey: .micChanged
+            ) ?? false,
+            timedOut: try container.decodeIfPresent(
+                Bool.self,
+                forKey: .timedOut
             ) ?? false,
             retry: try container.decode(Bool.self, forKey: .retry),
             mainStallMs: try container.decodeIfPresent(Int.self, forKey: .mainStallMs)

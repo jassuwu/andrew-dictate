@@ -30,3 +30,28 @@ extension EnginePreparationState {
         }
     }
 }
+
+extension EnginePreparationState {
+    /// what a press of the dictation key does about a speech model that
+    /// can't take it yet.
+    enum EarlyPress: Equatable, Sendable {
+        /// nothing has asked for one: the press is the ask.
+        case startPreparing
+        /// the last load failed. usually a blip, so try again, out loud.
+        /// the alternative is a key that never answers again.
+        case retryPreparing
+        /// already on its way.
+        case wait
+    }
+
+    var earlyPress: EarlyPress {
+        switch self {
+        case .notStarted:
+            .startPreparing
+        case .failed:
+            .retryPreparing
+        case .downloading, .warmingUp, .ready:
+            .wait
+        }
+    }
+}

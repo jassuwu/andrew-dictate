@@ -1477,6 +1477,102 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
+    /// a take went unanswered. the engine is asked a second of silence
+    /// with a deadline of its own, and one that doesn't answer is
+    /// restarted. the probe is awaited, never waited on: the main thread
+    /// and the next press go on meanwhile.
+    private func checkEngineAnswers() {
+        // a restart, a switch or a first load is already building a fresh
+        // engine; a check already out is the same question.
+        guard isPrewarmed, engineHealthTask == nil else {
+            return
+        }
+
+        let engine = transcriptionEngine
+        let generation = engineGeneration
+        engineHealthTask = Task { @MainActor [weak self] in
+            let answered = await EngineProbe.answers(engine)
+            guard let self, !Task.isCancelled else {
+                return
+            }
+            // not cancelled, so still the check on record. it is over
+            // either way, or a switch made mid-check would leave every
+            // later check thinking one is still out.
+            self.engineHealthTask = nil
+            guard generation == self.engineGeneration else {
+                return
+            }
+            guard !answered else {
+                self.engineLogger.notice("the speech model answered its check")
+                return
+            }
+            self.engineLogger.error("the speech model didn't answer its check")
+            self.restartEngine()
+        }
+    }
+
+    /// a wedged engine can't be cancelled, only replaced: the loaded model
+    /// goes and the same one loads fresh, in the background. a press
+    /// meanwhile hears "loading the speech model…"; a restart that fails
+    /// leaves `.failed`, which the next press retries out loud. the lamp is
+    /// left alone: a pill may be saying why, and a take may be in flight.
+    private func restartEngine() {
+        guard isPrewarmed,
+              enginePrewarmTask == nil,
+              engineSwapTask == nil else {
+            return
+        }
+
+        engineLogger.error("restarting the speech model")
+        engineHealthTask?.cancel()
+        engineHealthTask = nil
+        engineGeneration += 1
+        let generation = engineGeneration
+        isPrewarmed = false
+        enginePreparationState = .warmingUp
+        let engine = transcriptionEngine
+        enginePrewarmTask = Task { @MainActor [weak self] in
+            await engine.unloadModels()
+            // removing the model cancels this mid-unload: loading it again
+            // would race the removal for the files.
+            guard !Task.isCancelled,
+                  generation == self?.engineGeneration else {
+                return
+            }
+            do {
+                try await engine.prewarm(progressHandler: nil)
+                try Task.checkCancellation()
+                guard let self,
+                      generation == self.engineGeneration else {
+                    return
+                }
+                self.enginePrewarmTask = nil
+                self.isPrewarmed = true
+                self.enginePreparationState = .ready
+                self.engineLogger.notice("the speech model restarted")
+            } catch is CancellationError {
+                return
+            } catch {
+                guard let self,
+                      generation == self.engineGeneration else {
+                    return
+                }
+                self.enginePrewarmTask = nil
+                self.enginePreparationState = .failed
+                self.engineLogger.error(
+                    """
+                    the speech model didn't restart: \
+                    \(error.localizedDescription, privacy: .public)
+                    """
+                )
+            }
+            // a press during the restart lit the ember; it settles now.
+            if let self, self.state == .prewarming {
+                self.machine.engineSettled()
+            }
+        }
+    }
+
     private func beginRecording(locked: Bool) {
         // ADR 0023: refused during a meeting, and it says why. you started
         // the recording, so a dead hotkey is not a mystery — but a silent
@@ -1519,8 +1615,8 @@ final class DictationCoordinator: ObservableObject {
             let notice = enginePreparationState.pressedEarlyNotice(
                 downloadSize: "about \(size)"
             )
-            switch enginePreparationState {
-            case .notStarted:
+            switch enginePreparationState.earlyPress {
+            case .startPreparing:
                 // a mac set up for meetings only has no model and no menu
                 // row offering one, so this keypress is both the consent the
                 // launch stopped assuming and the only way back in. say what
@@ -1537,14 +1633,14 @@ final class DictationCoordinator: ObservableObject {
                     )
                 }
                 requestEnginePreparation(asking: true)
-            case .failed:
+            case .retryPreparing:
                 // pressing the key is a statement of intent, and a failed
                 // model download is usually a blip. try again, out loud —
                 // the alternative is a lamp that breathes forever.
                 retryEnginePrewarm()
                 flashNotice("speech model failed — retrying")
                 return .refused(.modelNotReady)
-            case .downloading, .warmingUp, .ready:
+            case .wait:
                 break
             }
             if state != .prewarming {
@@ -1814,6 +1910,10 @@ extension DictationCoordinator {
             canRetryLastFailure = offered
         case .microphoneDropped:
             captureSlot.drop()
+        case .engineSuspect:
+            checkEngineAnswers()
+        case .engineUnresponsive:
+            restartEngine()
         case let .pressEnded(record):
             keep(record)
         }
