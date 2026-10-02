@@ -43,6 +43,30 @@ final class CallWatcherTests: XCTestCase {
         XCTAssertEqual(watcher.observe([zoom], isRecording: false, at: .seconds(3_600)), [])
     }
 
+    /// Continuously means continuously: two seconds of both, a blip of one,
+    /// and the three seconds start again.
+    func testTheStartClockRestartsWhenEitherHalfDrops() {
+        var watcher = watcher()
+        let both = app("zoom")
+        let micOnly = app("zoom", audio: false)
+        let audioOnly = app("zoom", mic: false)
+
+        _ = watcher.observe([both], isRecording: false, at: .seconds(0))
+        _ = watcher.observe([both], isRecording: false, at: .seconds(2))
+        XCTAssertEqual(watcher.observe([micOnly], isRecording: false, at: .seconds(3)), [])
+
+        _ = watcher.observe([both], isRecording: false, at: .seconds(4))
+        _ = watcher.observe([both], isRecording: false, at: .seconds(6))
+        XCTAssertEqual(watcher.observe([audioOnly], isRecording: false, at: .seconds(7)), [])
+
+        _ = watcher.observe([both], isRecording: false, at: .seconds(8))
+        XCTAssertEqual(watcher.observe([both], isRecording: false, at: .seconds(10)), [])
+        XCTAssertEqual(
+            watcher.observe([both], isRecording: false, at: .seconds(11)),
+            [.record("zoom")]
+        )
+    }
+
     /// A browser tab playing music is not a call, and neither is a podcast.
     func testAudioAloneIsNotACall() {
         var watcher = watcher()
