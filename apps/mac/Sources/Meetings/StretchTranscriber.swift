@@ -123,10 +123,10 @@ actor StretchTranscriber: MeetingTranscriber {
     }
 
     /// A whole spool, heard the way the meeting was: in the chunks the
-    /// capture layer hands over, through a fresh detector per side, each
-    /// stretch decoded as soon as it is cut so only one is in memory beside
-    /// the recording. A spool has no gaps in it, so its clock is its sample
-    /// count.
+    /// capture layer hands over, through a fresh detector per side. Each
+    /// stretch is decoded as soon as it is cut, so the speech is not copied
+    /// out whole beside a recording that is already all in memory. A spool
+    /// has no gaps in it, so its clock is its sample count.
     func transcribe(you: [Float], them: [Float]) async throws -> [MeetingTurn] {
         try await load()
         var turns: [MeetingTurn] = []
