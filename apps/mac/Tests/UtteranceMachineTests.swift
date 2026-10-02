@@ -94,6 +94,39 @@ final class UtteranceMachineTests: XCTestCase {
         ])
     }
 
+    // MARK: - where the words land
+
+    /// a second dictation into a running sentence gets no capital and a
+    /// space to stand apart from it — and the space is a delivery detail,
+    /// not part of what is kept.
+    func testDictatingIntoARunningSentenceJoinsIt() async {
+        let m = machine()
+        inserter.anchor = FakeAnchor(
+            targetBundleIdentifier: "com.apple.TextEdit",
+            before: "the build failed because"
+        )
+        engine.reply = .success("the cache was cold")
+
+        await hold(m, for: .seconds(1))
+        await settle { self.inserter.inserted.count == 1 }
+
+        XCTAssertEqual(inserter.inserted, [" the cache was cold."])
+        XCTAssertEqual(archived, [.init(heard: "the cache was cold", inserted: "the cache was cold.")])
+    }
+
+    /// the fixer's field is a correction, not a sentence: the dictionary
+    /// runs, full cleanup does not.
+    func testDictatingIntoOurOwnWindowSkipsFullCleanup() async {
+        let m = machine()
+        inserter.anchor = FakeAnchor(targetBundleIdentifier: "gg.jass.dictate.dev")
+        engine.reply = .success("cache")
+
+        await hold(m, for: .seconds(1))
+        await settle { self.inserter.inserted.count == 1 }
+
+        XCTAssertEqual(inserter.inserted, ["cache"])
+    }
+
     // MARK: - left on the pasteboard
 
     /// a password field gets the words, concealed, on the clipboard — and a
