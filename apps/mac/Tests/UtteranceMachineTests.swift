@@ -198,6 +198,7 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(inserter.inserted, [])
         XCTAssertEqual(completions, [])
         XCTAssertFalse(events.contains(.retryOffered(true)))
+        XCTAssertEqual(outcomes, [.heardNothing])
     }
 
     /// a key nobody meant to press asked no question, so it gets no answer.
@@ -212,6 +213,7 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(pills, [])
         XCTAssertEqual(states.last, .init(.idle, fast: true))
         XCTAssertEqual(inserter.inserted, [])
+        XCTAssertEqual(outcomes, [.brushed])
     }
 
     /// the hotkey's own cancel, before the chime: no sound at all.
@@ -228,6 +230,7 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(engine.heard, [])
         XCTAssertEqual(m.state, .idle)
         XCTAssertEqual(states.last, .init(.idle, fast: true))
+        XCTAssertEqual(outcomes, [.brushed])
     }
 
     // MARK: - couldn't transcribe

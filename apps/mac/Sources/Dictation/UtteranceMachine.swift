@@ -350,6 +350,7 @@ final class UtteranceMachine {
         activeTimeline = nil
         // a brush of the key should read as a flicker, not a cut
         setState(.idle, fastHUDDismiss: true)
+        endPress(.brushed)
     }
 
     /// whether `esc` was ours to take: only while there is something to
@@ -592,11 +593,13 @@ final class UtteranceMachine {
                         return
                     }
                     setState(.idle, fastHUDDismiss: true)
+                    endPress(.brushed)
                     return
                 }
                 // silence must not wear the success afterglow.
                 reportPipelineFailure(
                     "heard nothing",
+                    outcome: .heardNothing,
                     generation: generation
                 )
                 return
@@ -682,6 +685,7 @@ final class UtteranceMachine {
             armRetry(samples)
             reportPipelineFailure(
                 "couldn't transcribe — tap to try again",
+                outcome: .couldNotTranscribe,
                 generation: generation,
                 duration: 4
             )
@@ -693,6 +697,7 @@ final class UtteranceMachine {
     /// what went wrong in the same pill that carries "copied — …".
     private func reportPipelineFailure(
         _ message: String,
+        outcome: PressRecord.Outcome,
         generation: Int,
         duration: TimeInterval = 2.4
     ) {
@@ -703,6 +708,7 @@ final class UtteranceMachine {
 
         setState(.idle, fastHUDDismiss: true)
         flashFeedback(message, duration: duration)
+        endPress(outcome)
     }
 
     private func invalidatePipeline() {
