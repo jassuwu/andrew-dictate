@@ -196,6 +196,20 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// how long a meeting's audio stays on this mac once its transcript is
+    /// written (ADR 0048): one day unless someone chose otherwise.
+    @Published var keepMeetingAudio: KeepMeetingAudio {
+        didSet {
+            guard keepMeetingAudio != oldValue else {
+                return
+            }
+            userDefaults.set(
+                keepMeetingAudio.rawValue,
+                forKey: Self.keepMeetingAudioKey
+            )
+        }
+    }
+
     /// when the hook last ran, and how it went — "ok", "exit 3". kept
     /// because a hook that failed silently is a hook nobody can fix.
     @Published var meetingHookLastRunAt: Date? {
@@ -308,6 +322,7 @@ final class AppSettings: ObservableObject {
     private static let meetingModelKey = "AndrewDictate.meetingModel"
     private static let meetingsFolderKey = "AndrewDictate.meetingsFolder"
     private static let meetingHookKey = "AndrewDictate.meetingHook"
+    private static let keepMeetingAudioKey = "AndrewDictate.keepMeetingAudio"
     private static let meetingHookLastRunAtKey =
         "AndrewDictate.meetingHookLastRunAt"
     private static let meetingHookLastRunLabelKey =
@@ -420,6 +435,10 @@ final class AppSettings: ObservableObject {
         meetingHook = userDefaults
             .string(forKey: Self.meetingHookKey)
             .map { URL(fileURLWithPath: $0) }
+        // a choice this build has no name for is the default, never longer.
+        keepMeetingAudio = userDefaults
+            .string(forKey: Self.keepMeetingAudioKey)
+            .flatMap(KeepMeetingAudio.init(rawValue:)) ?? .default
         meetingHookLastRunAt = userDefaults
             .object(forKey: Self.meetingHookLastRunAtKey) as? Date
         meetingHookLastRunLabel = userDefaults
