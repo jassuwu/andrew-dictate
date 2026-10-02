@@ -1051,7 +1051,7 @@ private final class FakeMic: MicCapture {
         onFirstBuffer: @escaping @MainActor @Sendable (
             ContinuousClock.Instant
         ) -> Void
-    ) throws {
+    ) async throws {
         if failsToStart {
             throw MicFailure()
         }
@@ -1059,7 +1059,7 @@ private final class FakeMic: MicCapture {
         onFirstBuffer(clock.now)
     }
 
-    func stop() throws -> [Float] {
+    func stop() async throws -> [Float] {
         if failsToStop {
             throw MicFailure()
         }

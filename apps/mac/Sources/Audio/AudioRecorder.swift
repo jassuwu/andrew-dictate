@@ -220,7 +220,7 @@ final class AudioRecorder: MicCapture {
         onFirstBuffer: @escaping @MainActor @Sendable (
             ContinuousClock.Instant
         ) -> Void
-    ) throws {
+    ) async throws {
         guard !isRecording else {
             throw AudioRecorderError.alreadyRecording
         }
@@ -242,7 +242,7 @@ final class AudioRecorder: MicCapture {
         }
     }
 
-    func stop() throws -> [Float] {
+    func stop() async throws -> [Float] {
         guard isRecording else {
             throw AudioRecorderError.notRecording
         }

@@ -253,49 +253,68 @@ final class UtteranceMachine {
         // if by then the frontmost window is one of ours.
         let focusAnchor = inserter.captureAnchor()
 
-        do {
-            try microphone.start { [weak self] instant in
-                self?.recordFirstBuffer(
-                    at: instant,
-                    timelineID: timelineID
-                )
-            }
-            self.microphone = microphone
-            press?.mic = microphone.deviceDescription
-            activeFocusAnchor = focusAnchor
-            // the mic and the lamp start at key-down; only the chime waits,
-            // long enough to know the key is being held rather than caught.
-            // a brush of fn should make no sound at all.
-            startCueTask?.cancel()
-            startCueTask = Task { @MainActor [weak self, clock] in
-                try? await clock.sleep(for: .milliseconds(120))
-                guard !Task.isCancelled,
-                      let self else {
-                    return
+        // immediate: the start is asked for inside this key-down, not a
+        // run-loop turn later, and a mic that answers at once is recording
+        // before key-down returns.
+        Task.immediate { @MainActor [weak self] in
+            do {
+                try await microphone.start { [weak self] instant in
+                    self?.recordFirstBuffer(
+                        at: instant,
+                        timelineID: timelineID
+                    )
                 }
-                self.emit(.chime(.start))
+                self?.microphoneStarted(microphone, focusAnchor: focusAnchor)
+            } catch {
+                self?.microphoneFailedToStart(microphone, error: error)
             }
-            setState(.recording)
-        } catch {
-            audioLogger.error(
-                """
-                audio recording failed to start: \
-                \(error.localizedDescription, privacy: .public)
-                """
-            )
-            activeFocusAnchor = nil
-            activeTimeline = nil
-            // read before it is dropped: which mic refused is the evidence.
-            press?.mic = microphone.deviceDescription
-            // the device may have been yanked between the check and the tap.
-            // drop it so the next press rebuilds instead of retrying a corpse.
-            microphone.cancel()
-            self.microphone = nil
-            emit(.microphoneDropped)
-            setState(.idle)
-            flashNotice("couldn't start recording")
-            endPress(.couldNotStartRecording)
         }
+    }
+
+    private func microphoneStarted(
+        _ microphone: any MicCapture,
+        focusAnchor: (any InsertionAnchor)?
+    ) {
+        self.microphone = microphone
+        press?.mic = microphone.deviceDescription
+        activeFocusAnchor = focusAnchor
+        // the mic and the lamp start at key-down; only the chime waits,
+        // long enough to know the key is being held rather than caught.
+        // a brush of fn should make no sound at all.
+        startCueTask?.cancel()
+        startCueTask = Task { @MainActor [weak self, clock] in
+            try? await clock.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled,
+                  let self else {
+                return
+            }
+            self.emit(.chime(.start))
+        }
+        setState(.recording)
+    }
+
+    private func microphoneFailedToStart(
+        _ microphone: any MicCapture,
+        error: any Error
+    ) {
+        audioLogger.error(
+            """
+            audio recording failed to start: \
+            \(error.localizedDescription, privacy: .public)
+            """
+        )
+        activeFocusAnchor = nil
+        activeTimeline = nil
+        // read before it is dropped: which mic refused is the evidence.
+        press?.mic = microphone.deviceDescription
+        // the device may have been yanked between the check and the tap.
+        // drop it so the next press rebuilds instead of retrying a corpse.
+        microphone.cancel()
+        self.microphone = nil
+        emit(.microphoneDropped)
+        setState(.idle)
+        flashNotice("couldn't start recording")
+        endPress(.couldNotStartRecording)
     }
 
     func doubleTapped() {
@@ -329,45 +348,55 @@ final class UtteranceMachine {
 
         setRecordingLocked(false)
 
-        do {
-            // never before key-down: an event clock that disagrees with
-            // ours must not make a press end before it began.
-            let released = clock.now - max(.zero, eventAge)
-            let keyUp = activeTimeline.map { max($0.keyDown, released) }
-                ?? released
-            activeTimeline?.keyUp = keyUp
-            press?.keyUp = keyUp
-            press?.capped = capForcedEnd
-            let samples = try microphone.stop()
-            press?.samplesReady = clock.now
-            press?.samples = samples
-            // taken now rather than at key-down: the window worth protecting
-            // is key-up → paste, the ~600 ms when nobody is moving anything.
-            // key-down → paste spans the whole utterance, which is exactly
-            // when aiming at the field you actually want is normal.
-            let focusAnchor = inserter.captureAnchorUnlessOurs()
-                ?? activeFocusAnchor
-            activeFocusAnchor = nil
-            emit(.chime(.end))
-            setState(.transcribing)
-            startPipeline(
-                samples,
-                focusAnchor: focusAnchor
-            )
-        } catch {
-            audioLogger.error(
-                """
-                audio recording failed to stop: \
-                \(error.localizedDescription, privacy: .public)
-                """
-            )
-            activeFocusAnchor = nil
-            activeTimeline = nil
-            setState(.idle, fastHUDDismiss: true)
-            // they spoke and there is nothing to show for it. say so.
-            flashNotice("recording was lost")
-            endPress(.recordingLost)
+        // never before key-down: an event clock that disagrees with
+        // ours must not make a press end before it began.
+        let released = clock.now - max(.zero, eventAge)
+        let keyUp = activeTimeline.map { max($0.keyDown, released) }
+            ?? released
+        activeTimeline?.keyUp = keyUp
+        press?.keyUp = keyUp
+        press?.capped = capForcedEnd
+        Task.immediate { @MainActor [weak self] in
+            do {
+                let samples = try await microphone.stop()
+                self?.microphoneStopped(samples)
+            } catch {
+                self?.microphoneFailedToStop(error: error)
+            }
         }
+    }
+
+    private func microphoneStopped(_ samples: [Float]) {
+        press?.samplesReady = clock.now
+        press?.samples = samples
+        // taken now rather than at key-down: the window worth protecting
+        // is key-up → paste, the ~600 ms when nobody is moving anything.
+        // key-down → paste spans the whole utterance, which is exactly
+        // when aiming at the field you actually want is normal.
+        let focusAnchor = inserter.captureAnchorUnlessOurs()
+            ?? activeFocusAnchor
+        activeFocusAnchor = nil
+        emit(.chime(.end))
+        setState(.transcribing)
+        startPipeline(
+            samples,
+            focusAnchor: focusAnchor
+        )
+    }
+
+    private func microphoneFailedToStop(error: any Error) {
+        audioLogger.error(
+            """
+            audio recording failed to stop: \
+            \(error.localizedDescription, privacy: .public)
+            """
+        )
+        activeFocusAnchor = nil
+        activeTimeline = nil
+        setState(.idle, fastHUDDismiss: true)
+        // they spoke and there is nothing to show for it. say so.
+        flashNotice("recording was lost")
+        endPress(.recordingLost)
     }
 
     /// the hotkey's own cancel: a brush too short to be a hold, or a lock
