@@ -211,6 +211,28 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(lines, ["[00:00:00] you: hello"])
     }
 
+    /// Out of the coordinator's reach — it always asks the model to load,
+    /// and walks away from a meeting whose model would not — so asked of the
+    /// transcriber directly: with no model coming, finishing does not wait
+    /// for one.
+    func testAModelThatNeverLoadedDoesNotHoldUpTheFinish() async throws {
+        let neverAsked = stretches()
+        await neverAsked.feed(chunk(0, [you("hello", from: 0.0, to: 0.1)]))
+        let unasked = await finishInTime(neverAsked)
+        XCTAssertEqual(unasked?.isEmpty, true, "finished: \(String(describing: unasked))")
+
+        engine.refuseToLoad()
+        let refused = stretches()
+        do {
+            try await refused.begin()
+            XCTFail("the model was meant to refuse")
+        } catch {}
+        await refused.feed(chunk(0, [you("hello", from: 0.0, to: 0.1)]))
+        let failed = await finishInTime(refused)
+        XCTAssertEqual(failed?.isEmpty, true, "finished: \(String(describing: failed))")
+        XCTAssertEqual(handed(), [])
+    }
+
     // MARK: - an engine that fails
 
     func testAStretchTheEngineFailsOnOnceIsTriedAgain() async throws {
@@ -395,6 +417,15 @@ final class MeetingStretchTests: XCTestCase {
         String(format: "%.1f", duration.totalSeconds)
     }
 
+    /// `finish`, given five seconds. `nil` if it took longer: a finish that
+    /// hangs fails the test instead of hanging the suite.
+    private func finishInTime(_ transcriber: StretchTranscriber) async -> [MeetingTurn]? {
+        let finished = Finished()
+        Task { finished.turns = await transcriber.finish() }
+        await waitFor { finished.turns != nil }
+        return finished.turns
+    }
+
     /// Polls until `condition` holds or the time is up; the assertion after
     /// it says what was there instead.
     private func waitFor(_ seconds: Double = 5, _ condition: () -> Bool) async {
@@ -451,6 +482,16 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
 
 private struct Garbled: Error {}
 
+private final class Finished: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [MeetingTurn]?
+
+    var turns: [MeetingTurn]? {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
+    }
+}
+
 /// Knows a phrase by its loudness: the test plays phrase n at 0.1 × n, and a
 /// stretch is heard as the phrase whose loudness its peak is nearest to.
 /// Silence is heard as nothing at all.
@@ -460,6 +501,7 @@ private final class PhraseEngine: StretchEngine, @unchecked Sendable {
     private var decoded: [(phrase: String, samples: Int)] = []
     private var failures: [String: Int] = [:]
     private var isHeld = false
+    private var refuses = false
 
     func loudness(of phrase: String) -> Float {
         lock.withLock {
@@ -488,10 +530,15 @@ private final class PhraseEngine: StretchEngine, @unchecked Sendable {
         lock.withLock { isHeld = false }
     }
 
+    func refuseToLoad() {
+        lock.withLock { refuses = true }
+    }
+
     func load() async throws {
         while lock.withLock({ isHeld }) {
             try await Task.sleep(for: .milliseconds(10))
         }
+        if lock.withLock({ refuses }) { throw Garbled() }
     }
 
     func text(of samples: [Float]) async throws -> String {
