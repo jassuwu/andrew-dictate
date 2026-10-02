@@ -264,6 +264,12 @@ struct AndrewDictateApp: App {
                 coordinator.openAbout()
             }
 
+            // what a friend sends instead of a story: the last fifty
+            // presses and how each ended, never a word of what was said.
+            Button("copy diagnostics") {
+                coordinator.copyDiagnostics()
+            }
+
             Button("quit Andrew Dictate") {
                 NSApp.terminate(nil)
             }

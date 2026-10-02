@@ -598,6 +598,36 @@ final class DictationCoordinator: ObservableObject {
         )
     }
 
+    /// "copy diagnostics": who is running what, then the last fifty
+    /// presses. read through the press log's own queue, so a press that
+    /// ended a moment ago is already in it.
+    func copyDiagnostics() {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let system = ProcessInfo.processInfo.operatingSystemVersion
+        let setup = PressDiagnostics.Setup(
+            appVersion: info["CFBundleShortVersionString"] as? String ?? "?",
+            build: info["CFBundleVersion"] as? String ?? "?",
+            macOS: "\(system.majorVersion).\(system.minorVersion)."
+                + "\(system.patchVersion)",
+            engine: activeEngineVersion.rawValue,
+            defaultMic: MicDescription.systemDefaultInput()
+        )
+        let store = pressLog
+        pressLogQueue.async {
+            let text = PressDiagnostics.text(
+                setup: setup,
+                presses: try? store.recent(PressDiagnostics.pressCount)
+            )
+            Task { @MainActor [weak self] in
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(text, forType: .string)
+                // what makes it safe to send is worth saying out loud.
+                self?.sayWhenIdle("diagnostics copied — no words in it")
+            }
+        }
+    }
+
     func presentOnboardingIfNeeded() {
         guard setupPresentation(moment: .launchOrReopen) == .present else {
             isOnboardingPresented = false
