@@ -539,6 +539,31 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(lines, ["[00:00:01] them: are we all here"])
     }
 
+    /// "Yes", said over the far side: 0.16 s of tone and 0.3 s of pre-roll,
+    /// 0.46 s in all, nine frames to compare. Nine frames of loudness agree
+    /// by chance as easily as by being a copy — this one agrees at 0.84 with
+    /// what they were saying — so a stretch this short is kept, whatever the
+    /// comparison says.
+    func testAMicStretchTooShortToJudgeIsKept() async throws {
+        let transcriber = stretches()
+        let c = coordinator(transcriber)
+        c.start(tapping: zoom)
+        await source.awaitStart()
+
+        let theirs = them("are we all here", from: 1.3, to: 5.3, voice: .theirs)
+        await play([theirs, theirs.asBleed(), you("yes", from: 2.2, to: 2.36)], through: 7.0, on: c)
+        await waitForStretches(transcriber, 2)
+        await waitFor { c.liveLines.count == 2 }
+
+        XCTAssertEqual(live(c), ["you 1.9 yes", "them 1.0 are we all here"])
+        XCTAssertEqual(handed(), ["yes 7360", "are we all here 68800"])
+        let tally = await transcriber.tally
+        XCTAssertEqual(tally, StretchTally(decodedYou: 1, decodedThem: 1))
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, ["[00:00:01] them: are we all here", "[00:00:01] you: yes"])
+    }
+
     // MARK: - the decision alone
 
     /// Loudness for 40 frames of 50 ms — two seconds — none of them quiet. The

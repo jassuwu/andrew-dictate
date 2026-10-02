@@ -98,6 +98,9 @@ enum BleedJudge {
     // behave, and tried on synthetic speech. They want a real call or two on
     // the mac's own speakers before anyone trusts them.
 
+    /// A stretch shorter than this is not judged. It is a handful of frames,
+    /// and a handful of frames agree by chance as easily as by being a copy.
+    static let shortest = Duration.milliseconds(500)
     /// Quieter than this, a side is not talking: the room, not a voice.
     static let quiet: Float = 0.01
     /// The share of a stretch's frames the far side must have been talking
@@ -115,6 +118,7 @@ enum BleedJudge {
     static func verdict(
         mic: LoudnessTrail, far: LoudnessTrail, from: Duration, to: Duration
     ) -> Verdict {
+        guard to - from >= shortest else { return .keep }
         let frame = LoudnessTrail.frame
         let lead = StretchCutter.samples(in: reach) / frame
         // Whole frames inside the span: the ones either end splits are
