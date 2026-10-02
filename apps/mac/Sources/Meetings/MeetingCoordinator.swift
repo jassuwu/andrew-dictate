@@ -172,6 +172,9 @@ final class MeetingCoordinator: ObservableObject {
     /// The app of the spool being written out at launch, while it runs. The
     /// menu draws it; the pill only says it once.
     @Published private(set) var recovering: String?
+    /// The transcript being made again from its kept audio, while one is.
+    /// One at a time; history's rows say which.
+    @Published private(set) var transcribingAgain: URL?
 
     var onEvent: (@MainActor (MeetingEvent) -> Void)?
     var onLine: (@MainActor (LiveLine) -> Void)?
@@ -1529,95 +1532,190 @@ extension MeetingCoordinator {
 // MARK: - transcribing again
 
 extension MeetingCoordinator {
+    /// Why a transcript was left as it was, in the words the lamp uses.
+    /// What a model or the disk threw is said as it came.
     private enum AgainFailure: LocalizedError {
+        case recording
+        case busy
+        /// Its front matter would not read: there is nothing to keep the
+        /// meeting's facts from.
+        case unreadable
+        case noAudio
+        /// You threw it away while it was being redone.
+        case deleted
         /// The new reading did not cover what was said, over a transcript
         /// that did.
         case thin(MeetingModel, String)
 
         var errorDescription: String? {
             switch self {
+            case .recording: "a meeting is being recorded"
+            case .busy: "another one is running"
+            case .unreadable: "the transcript can't be read"
+            case .noAudio: "the audio is gone"
+            case .deleted: "the transcript was deleted"
             case .thin(let model, let reason): "\(model.shortName) read it thin: \(reason)"
             }
         }
     }
 
-    func transcribeAgain(_ transcript: URL, with model: MeetingModel) async {
-        onEvent?(.transcribingAgain(model))
-        let asked = now()
-        do {
-            let header = try MeetingTranscriptFile.header(of: transcript)
-            guard let entry = keptAudio.entry(for: transcript) else { return }
-            let url = entry.audio
-            let audio = try await Task.detached(priority: .utility) {
-                try SpoolAudioFile.read(url)
-            }.value
-            let transcriber = try await makeTranscriber(model)
-            let turns = try await transcriber.transcribe(you: audio.you, them: audio.them)
-            let reading = Reading(
-                turns: Self.onTheMeetingsClock(turns, gaps: header.gaps),
-                tally: await transcriber.decodeTally())
-            // checked like any reading, and not read again: this was.
-            let covered = Covered(checking: reading, farSideLoud: await farSideLoud(at: url))
-            let split = audio.them.isEmpty
-                ? reading.turns
-                : await splitSpeakers(in: reading.turns, them: audio.them, gaps: header.gaps)
-            let thin = covered.result == .thin
-            // a thin file is the one whose audio is kept until you delete it.
-            let wasThin = entry.label.until == nil && !header.complete
-            // a thin reading may stand in for a thin one — you asked, and
-            // the file says so — but never for a whole transcript, which is
-            // lost the moment it is replaced.
-            if thin, !wasThin {
-                throw AgainFailure.thin(model, covered.reason ?? "")
-            }
-            let again = MeetingTranscript(
-                app: header.app, started: header.started, duration: header.duration,
-                engine: model.rawValue, gaps: header.gaps, recovered: header.recovered,
-                reason: thin ? covered.reason : nil,
-                nobodySpoke: !thin && reading.nobodySpoke,
-                turns: split)
-            try MeetingTranscriptFile.replace(at: transcript, with: again, timeZone: header.timeZone)
+    /// What one go at it had found out by the time it ended, for the record
+    /// it leaves whichever way it ended.
+    private struct Attempt {
+        var header: MeetingTranscriptFile.Header?
+        var entry: KeptAudio.Entry?
+        var turns: [MeetingTurn] = []
+        var covered: Covered?
+    }
 
-            // audio kept until you deleted it because the file was thin is
-            // an ordinary meeting's once a reading covers it: it waits as
-            // long as the setting says, from now. every other date is as it
-            // was, and the audio is not deleted here either way.
-            let prefs = preferences()
-            var until = entry.label.until
-            if wasThin, !thin {
-                until = keptAudio.now().addingTimeInterval(prefs.keepAudio.keptFor ?? 0)
-            }
-            let audioKept = keptAudio.relabel(entry, model: model, until: until)
-            if !audioKept {
-                logger.error("a meeting's audio could not be relabelled after its transcript was made again")
-            }
-            keepMeetingRecord?(MeetingRecord(
-                thin ? .savedThin : .saved, app: header.app, model: model,
-                startedAt: header.started, duration: header.duration, gaps: header.gaps,
-                turns: split, toDisk: now() - asked, recovered: header.recovered,
-                tally: reading.tally,
-                coverage: .init(
-                    covered.result, reason: covered.reason, tally: reading.tally,
-                    farSideLoud: covered.farSideLoud),
-                audioKept: audioKept, audioKeptUntil: audioKept ? until : nil, again: true))
-            onEvent?(.transcribedAgain(
-                (try? MeetingTranscriptFile.summary(of: transcript)) ?? MeetingSummary(
-                    fileURL: transcript, app: header.app, started: header.started,
-                    duration: header.duration, complete: again.complete,
-                    gapCount: header.gaps.count, recovered: header.recovered),
-                model))
-            await runHook(prefs.hook, telling: MeetingSavedEvent(
-                transcript: transcript,
-                app: header.app,
-                startedAt: header.started,
-                durationS: Int(header.duration.components.seconds),
-                complete: again.complete,
-                gaps: header.gaps.map { [$0.began.totalSeconds, $0.ended.totalSeconds] },
-                recovered: header.recovered,
-                again: true))
+    /// A meeting's transcript read again from its kept audio by `model`, and
+    /// the file replaced where it is. One at a time, and not while a meeting
+    /// is recorded: a second model beside the recording's is the recording's
+    /// to pay for. Whatever goes wrong leaves the file as it was, says so on
+    /// the lamp, and leaves the audio for another try.
+    ///
+    /// The kept audio is read whole — `transcribe(you:them:)` takes the two
+    /// sides as arrays, as a recovery's does — so an hour of it is in memory
+    /// while it runs, as that is.
+    func transcribeAgain(_ transcript: URL, with model: MeetingModel) async {
+        if isRecording {
+            onEvent?(.couldNotTranscribeAgain(AgainFailure.recording.localizedDescription))
+            return
+        }
+        if transcribingAgain != nil {
+            onEvent?(.couldNotTranscribeAgain(AgainFailure.busy.localizedDescription))
+            return
+        }
+        transcribingAgain = transcript
+        onEvent?(.transcribingAgain(model))
+        let prefs = preferences()
+        let asked = now()
+        var attempt = Attempt()
+        let told: MeetingSavedEvent?
+        do {
+            told = try await remake(
+                transcript, with: model, prefs: prefs, asked: asked, attempt: &attempt)
         } catch {
+            told = nil
             logger.error("could not transcribe a meeting again: \(error.localizedDescription, privacy: .public)")
+            // a rerun that left the file as it was is still one, and its
+            // record says what it got as far as knowing. one that could not
+            // even read the file has nothing to say of the meeting.
+            if let header = attempt.header {
+                let covered = attempt.covered
+                keepMeetingRecord?(MeetingRecord(
+                    .unchanged, app: header.app, model: model, startedAt: header.started,
+                    duration: header.duration, gaps: header.gaps, turns: attempt.turns,
+                    recovered: header.recovered, tally: covered?.reading.tally,
+                    coverage: covered.map {
+                        MeetingRecord.Coverage(
+                            $0.result, reason: $0.reason, tally: $0.reading.tally,
+                            farSideLoud: $0.farSideLoud)
+                    },
+                    audioKept: attempt.entry != nil, audioKeptUntil: attempt.entry?.label.until,
+                    again: true))
+            }
             onEvent?(.couldNotTranscribeAgain(error.localizedDescription))
         }
+        // done before the hook, which can take minutes: the next one may go.
+        transcribingAgain = nil
+        if let told {
+            await runHook(prefs.hook, telling: told)
+        }
+    }
+
+    /// Everything but the hook. Returns what the hook is to be told.
+    private func remake(
+        _ transcript: URL,
+        with model: MeetingModel,
+        prefs: MeetingPreferences,
+        asked: ContinuousClock.Instant,
+        attempt: inout Attempt
+    ) async throws -> MeetingSavedEvent {
+        let header: MeetingTranscriptFile.Header
+        do {
+            header = try MeetingTranscriptFile.header(of: transcript)
+        } catch {
+            throw AgainFailure.unreadable
+        }
+        attempt.header = header
+        guard let entry = keptAudio.entry(for: transcript) else {
+            throw AgainFailure.noAudio
+        }
+        attempt.entry = entry
+        let url = entry.audio
+        let audio = try await Task.detached(priority: .utility) {
+            try SpoolAudioFile.read(url)
+        }.value
+        let transcriber = try await makeTranscriber(model)
+        let turns = try await transcriber.transcribe(you: audio.you, them: audio.them)
+        let reading = Reading(
+            turns: Self.onTheMeetingsClock(turns, gaps: header.gaps),
+            tally: await transcriber.decodeTally())
+        // checked like any reading, and not read again: this was.
+        let covered = Covered(checking: reading, farSideLoud: await farSideLoud(at: url))
+        let split = audio.them.isEmpty
+            ? reading.turns
+            : await splitSpeakers(in: reading.turns, them: audio.them, gaps: header.gaps)
+        attempt.turns = split
+        attempt.covered = covered
+
+        let thin = covered.result == .thin
+        // a thin file is the one whose audio is kept until you delete it.
+        let wasThin = entry.label.until == nil && !header.complete
+        // a thin reading may stand in for a thin one — you asked, and the
+        // file says so — but never for a whole transcript, which is lost
+        // the moment it is replaced.
+        if thin, !wasThin {
+            throw AgainFailure.thin(model, covered.reason ?? "")
+        }
+        let again = MeetingTranscript(
+            app: header.app, started: header.started, duration: header.duration,
+            engine: model.rawValue, gaps: header.gaps, recovered: header.recovered,
+            reason: thin ? covered.reason : nil,
+            nobodySpoke: !thin && reading.nobodySpoke,
+            turns: split)
+        do {
+            try MeetingTranscriptFile.replace(at: transcript, with: again, timeZone: header.timeZone)
+        } catch MeetingTranscriptFile.Failure.gone {
+            throw AgainFailure.deleted
+        }
+
+        // audio kept until you deleted it because the file was thin is an
+        // ordinary meeting's once a reading covers it: it waits as long as
+        // the setting says, from now. every other date is as it was, and
+        // the audio is not deleted here either way.
+        var until = entry.label.until
+        if wasThin, !thin {
+            until = keptAudio.now().addingTimeInterval(prefs.keepAudio.keptFor ?? 0)
+        }
+        let audioKept = keptAudio.relabel(entry, model: model, until: until)
+        if !audioKept {
+            logger.error("a meeting's audio could not be relabelled after its transcript was made again")
+        }
+        keepMeetingRecord?(MeetingRecord(
+            thin ? .savedThin : .saved, app: header.app, model: model,
+            startedAt: header.started, duration: header.duration, gaps: header.gaps,
+            turns: split, toDisk: now() - asked, recovered: header.recovered,
+            tally: reading.tally,
+            coverage: .init(
+                covered.result, reason: covered.reason, tally: reading.tally,
+                farSideLoud: covered.farSideLoud),
+            audioKept: audioKept, audioKeptUntil: audioKept ? until : nil, again: true))
+        onEvent?(.transcribedAgain(
+            (try? MeetingTranscriptFile.summary(of: transcript)) ?? MeetingSummary(
+                fileURL: transcript, app: header.app, started: header.started,
+                duration: header.duration, complete: again.complete,
+                gapCount: header.gaps.count, recovered: header.recovered),
+            model))
+        return MeetingSavedEvent(
+            transcript: transcript,
+            app: header.app,
+            startedAt: header.started,
+            durationS: Int(header.duration.components.seconds),
+            complete: again.complete,
+            gaps: header.gaps.map { [$0.began.totalSeconds, $0.ended.totalSeconds] },
+            recovered: header.recovered,
+            again: true)
     }
 }

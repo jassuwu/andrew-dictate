@@ -104,6 +104,92 @@ final class MeetingAgainTests: XCTestCase {
         XCTAssertEqual(transcribers.made, [.whisperLargeV3])
     }
 
+    // MARK: - when it cannot start
+
+    /// Nothing to read: its audio was deleted, or its day came. No model is
+    /// loaded for it, the file is as it was, and the lamp says why.
+    func testAMeetingWhoseAudioIsGoneCannotBeTranscribedAgain() async throws {
+        let file = try await existingMeeting()
+        let before = try Data(contentsOf: file)
+        kept.deleteAudio(of: file)
+
+        await coordinator().transcribeAgain(file, with: .whisperLargeV3)
+
+        XCTAssertEqual(try Data(contentsOf: file), before)
+        XCTAssertEqual(events, [
+            .transcribingAgain(.whisperLargeV3),
+            .couldNotTranscribeAgain("the audio is gone"),
+        ])
+        XCTAssertEqual(transcribers.made, [], "no model was loaded for nothing")
+    }
+
+    /// The tap is recording and a model is working: a second model beside
+    /// them is the recording's to pay for. It is refused, and says so.
+    func testItIsRefusedWhileAMeetingIsBeingRecorded() async throws {
+        let file = try await existingMeeting()
+        let before = try Data(contentsOf: file)
+        let c = coordinator()
+        c.start()
+        await source.awaitStart()
+        let made = transcribers.made
+
+        await c.transcribeAgain(file, with: .whisperLargeV3)
+
+        XCTAssertEqual(try Data(contentsOf: file), before)
+        XCTAssertEqual(events.last, .couldNotTranscribeAgain("a meeting is being recorded"))
+        XCTAssertFalse(events.contains(.transcribingAgain(.whisperLargeV3)))
+        XCTAssertEqual(transcribers.made, made, "nothing was made for it")
+        c.stop()
+        await c.untilWrittenOut()
+    }
+
+    /// One at a time: a second is refused while the first runs, and the
+    /// first is not disturbed.
+    func testItIsRefusedWhileAnotherIsRunningAndTheFirstFinishes() async throws {
+        let first = try await existingMeeting()
+        let again = FakeTranscriber()
+        again.batchTurns = [.init(speaker: .you, at: .seconds(1), text: "namaste")]
+        again.tally = passing
+        again.holds = true
+        transcribers.lineUp(again)
+        let c = coordinator()
+        let running = Task { await c.transcribeAgain(first, with: .whisperLargeV3) }
+        await waitFor { again.isWaiting }
+        XCTAssertEqual(c.transcribingAgain, first)
+
+        await c.transcribeAgain(first, with: .parakeetV3)
+
+        XCTAssertEqual(events.last, .couldNotTranscribeAgain("another one is running"))
+        XCTAssertEqual(transcribers.made, [.whisperLargeV3], "the second made nothing")
+        again.release()
+        await running.value
+        XCTAssertNil(c.transcribingAgain)
+        XCTAssertEqual(try lines(of: first), ["[00:00:01] you: namaste"])
+    }
+
+    /// Thrown into the trash while it was being redone: the file is not
+    /// made again for a transcript you no longer have.
+    func testAFileDeletedWhileItIsBeingReadIsNotMadeAgain() async throws {
+        let file = try await existingMeeting()
+        let again = FakeTranscriber()
+        again.batchTurns = [.init(speaker: .you, at: .seconds(1), text: "namaste")]
+        again.tally = passing
+        again.holds = true
+        transcribers.lineUp(again)
+        let c = coordinator()
+        let running = Task { await c.transcribeAgain(file, with: .whisperLargeV3) }
+        await waitFor { again.isWaiting }
+
+        try FileManager.default.removeItem(at: file)
+        again.release()
+        await running.value
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        XCTAssertEqual(events.last, .couldNotTranscribeAgain("the transcript was deleted"))
+        XCTAssertNotNil(kept.entry(for: file), "the rerun deletes no audio")
+        XCTAssertNil(c.transcribingAgain)
+    }
+
     // MARK: - the record
 
     /// One record per rerun, marked as one: the model it read with, how the
@@ -143,6 +229,53 @@ final class MeetingAgainTests: XCTestCase {
             bleed: 0, farSideLoudS: 2))
         XCTAssertEqual(record.audioKept, true)
         XCTAssertEqual(record.audioKeptUntil, Date(timeIntervalSince1970: 1_790_086_400))
+    }
+
+    /// A rerun that left the file as it was is still a rerun, and said so:
+    /// its outcome is its own, and what it knew of the reading goes with it.
+    func testARerunThatLeftTheFileAsItWasLeavesARecordSayingSo() async throws {
+        let file = try await existingMeeting(thin: true)
+        let again = FakeTranscriber()
+        again.batchFailure = FellOver()
+        transcribers.lineUp(again)
+
+        await coordinator().transcribeAgain(file, with: .whisperLargeV3)
+
+        XCTAssertEqual(records.count, 1)
+        let record = try XCTUnwrap(records.first)
+        XCTAssertTrue(record.again)
+        XCTAssertEqual(record.outcome, .unchanged)
+        XCTAssertEqual(record.model, "whisperLargeV3")
+        XCTAssertEqual(record.app, "zoom")
+        XCTAssertEqual(record.startedAt, started)
+        XCTAssertNil(record.coverage, "it never got as far as being read")
+        XCTAssertNil(record.toDiskS)
+        XCTAssertEqual(record.audioKept, true)
+        XCTAssertNil(record.audioKeptUntil)
+    }
+
+    /// The thin reading that was not let over a whole transcript has its
+    /// numbers in the record: it is exactly what the check was tuned on.
+    func testAThinReadingThatWasNotWrittenLeavesItsCoverageInTheRecord() async throws {
+        let until = Date(timeIntervalSince1970: 1_790_050_000)
+        let file = try await existingMeeting(audioUntil: until)
+        let again = FakeTranscriber()
+        again.batchTurns = [.init(speaker: .them(nil), at: .seconds(1), text: "hmm right")]
+        again.tally = StretchTally(
+            decodedThem: 900, speechThem: .seconds(3_600), readThem: .seconds(3_600))
+        transcribers.lineUp(again)
+
+        await coordinator().transcribeAgain(file, with: .whisperLargeV3Turbo)
+
+        let record = try XCTUnwrap(records.first)
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(record.outcome, .unchanged)
+        XCTAssertEqual(record.coverage, .init(
+            result: .thin, reason: "far fewer words than the talk that was heard",
+            speechYouS: 0, speechThemS: 3_600, unreadYouS: 0, unreadThemS: 0,
+            bleed: 0, farSideLoudS: 2))
+        XCTAssertEqual(record.them, .init(turns: 1, words: 2))
+        XCTAssertEqual(record.audioKeptUntil, until)
     }
 
     // MARK: - the lamp
@@ -296,6 +429,29 @@ final class MeetingAgainTests: XCTestCase {
         let entry = try XCTUnwrap(kept.entry(for: file))
         XCTAssertEqual(entry.label.until, until)
         XCTAssertEqual(entry.label.model, .parakeetV3, "the label still says what wrote the file")
+    }
+
+    /// The audio has nothing in it for a gap, so a turn read from it is
+    /// stamped on the audio's clock. It is moved back onto the meeting's, as
+    /// a reading again at the stop is, so the file still lines up with the
+    /// call.
+    func testTurnsAreStampedOnTheMeetingsClockPastAGap() async throws {
+        let gap = MeetingSession.Gap(began: .seconds(5), ended: .seconds(8))
+        let file = try await existingMeeting(gaps: [gap])
+        let again = FakeTranscriber()
+        again.batchTurns = [
+            .init(speaker: .you, at: .seconds(4), text: "before"),
+            .init(speaker: .them(nil), at: .seconds(10), text: "after"),
+        ]
+        again.tally = passing
+        transcribers.lineUp(again)
+
+        await coordinator().transcribeAgain(file, with: .whisperLargeV3)
+
+        XCTAssertEqual(try lines(of: file), [
+            "[00:00:04] you: before",
+            "[00:00:13] them 1: after",
+        ])
     }
 
     // MARK: - when it fails
@@ -608,6 +764,8 @@ private final class FakeTranscribers: @unchecked Sendable {
 private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
     private let lock = NSLock()
     private var _heard: [Int] = []
+    private var _holds = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
     var finalTurns: [MeetingTurn] = []
     var batchTurns: [MeetingTurn] = []
     var batchFailure: (any Error)?
@@ -627,6 +785,17 @@ private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
         lock.withLock { _heard }
     }
 
+    /// While set, reading the audio whole waits for the test to `release()`
+    /// it: a rerun still running.
+    var holds: Bool {
+        get { lock.withLock { _holds } }
+        set { lock.withLock { _holds = newValue } }
+    }
+
+    var isWaiting: Bool {
+        lock.withLock { !waiting.isEmpty }
+    }
+
     func begin() async throws {}
     func feed(_ chunk: MeetingAudioChunk) async {}
     func finish() async -> [MeetingTurn] { finalTurns }
@@ -634,8 +803,40 @@ private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
     func transcribe(you: [Float], them: [Float]) async throws -> [MeetingTurn] {
         lock.withLock { _heard = [you.count, them.count] }
         onTranscribe?()
+        await heldUntilReleased()
         if let batchFailure { throw batchFailure }
         return batchTurns
+    }
+
+    func release() {
+        let released = lock.withLock {
+            _holds = false
+            let released = waiting
+            waiting = []
+            return released
+        }
+        for continuation in released {
+            continuation.resume()
+        }
+    }
+
+    private func heldUntilReleased() async {
+        guard holds else { return }
+        // the hold is checked again in the same lock that registers the
+        // wait: a release landing between the two would otherwise leave
+        // this waiting on a release that already happened.
+        await withCheckedContinuation { continuation in
+            let goNow = lock.withLock {
+                guard _holds else {
+                    return true
+                }
+                waiting.append(continuation)
+                return false
+            }
+            if goNow {
+                continuation.resume()
+            }
+        }
     }
 }
 
