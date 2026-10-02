@@ -98,7 +98,7 @@ struct FluidDiarizer: MeetingDiarizer {
                 abs(Double($0.startTimeSeconds) - at) < abs(Double($1.startTimeSeconds) - at)
             }
             guard let covering, let number = numbers[covering.speakerId] else { return turn }
-            return MeetingTurn(speaker: .them(number), at: turn.at, text: turn.text)
+            return turn.said(by: .them(number))
         }
     }
 }

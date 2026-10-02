@@ -1048,29 +1048,11 @@ final class MeetingCoordinator: ObservableObject {
             let transcriber = try await makeTranscriber(model)
             let turns = try await transcriber.transcribe(you: audio.you, them: audio.them)
             return Reading(
-                turns: Self.onTheMeetingsClock(turns, gaps: gaps),
+                turns: SpoolClock.onTheMeetingsClock(turns, gaps: gaps),
                 tally: await transcriber.decodeTally())
         } catch {
             logger.error("could not read a thin meeting again: \(error.localizedDescription, privacy: .public)")
             return nil
-        }
-    }
-
-    /// A spool has nothing in it for a gap, so a turn read from it is
-    /// stamped on the spool's clock. Moved on over every gap that began
-    /// before it, it is back on the meeting's — the reverse of what
-    /// `splitSpeakers` does for the diarizer.
-    private static func onTheMeetingsClock(
-        _ turns: [MeetingTurn],
-        gaps: [MeetingSession.Gap]
-    ) -> [MeetingTurn] {
-        guard !gaps.isEmpty else { return turns }
-        return turns.map { turn in
-            var at = turn.at
-            for gap in gaps where at >= gap.began {
-                at += gap.duration
-            }
-            return MeetingTurn(speaker: turn.speaker, at: at, text: turn.text)
         }
     }
 
@@ -1192,40 +1174,16 @@ final class MeetingCoordinator: ObservableObject {
         }
     }
 
-    /// The diarizer hears the spool, and a gap is time nothing was written to
-    /// it: after one, a turn stamped on the meeting's clock sits past the end
-    /// of the audio and every speaker after it would be guessed from the last
-    /// segment. So the lookup gets times shifted back over the gaps before
-    /// them, and the file keeps the stamps the meeting actually had.
+    /// The diarizer hears the spool, so it is asked about the turns on the
+    /// spool's clock, and the file keeps the stamps the meeting actually
+    /// had (`SpoolClock`).
     private func splitSpeakers(
         in turns: [MeetingTurn],
         them: [Float],
         gaps: [MeetingSession.Gap]
     ) async -> [MeetingTurn] {
-        guard !gaps.isEmpty else {
-            return await diarizer.split(them: them, turns: turns)
-        }
-        let shifted = turns.map { turn in
-            MeetingTurn(
-                speaker: turn.speaker,
-                at: max(.zero, turn.at - Self.lost(before: turn.at, in: gaps)),
-                text: turn.text)
-        }
-        let split = await diarizer.split(them: them, turns: shifted)
-        guard split.count == turns.count else { return split }
-        return zip(turns, split).map {
-            MeetingTurn(speaker: $1.speaker, at: $0.at, text: $0.text)
-        }
-    }
-
-    private static func lost(
-        before at: Duration,
-        in gaps: [MeetingSession.Gap]
-    ) -> Duration {
-        gaps.reduce(.zero) { total, gap in
-            guard at > gap.began else { return total }
-            return total + (min(at, gap.ended) - gap.began)
-        }
+        let split = await diarizer.split(them: them, turns: SpoolClock.onTheSpool(turns, gaps: gaps))
+        return SpoolClock.speakers(of: split, onto: turns)
     }
 
     private func recover(
@@ -1661,7 +1619,7 @@ extension MeetingCoordinator {
         let transcriber = try await makeTranscriber(model)
         let turns = try await transcriber.transcribe(you: audio.you, them: audio.them)
         let reading = Reading(
-            turns: Self.onTheMeetingsClock(turns, gaps: header.gaps),
+            turns: SpoolClock.onTheMeetingsClock(turns, gaps: header.gaps),
             tally: await transcriber.decodeTally())
         // checked like any reading, and not read again: this was.
         let covered = Covered(checking: reading, farSideLoud: await farSideLoud(at: url))
