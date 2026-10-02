@@ -181,7 +181,6 @@ final class DictationCoordinator: ObservableObject {
     private lazy var liveTranscript = LiveTranscriptModel(app: "", elapsed: .zero)
     @Published private(set) var meetingModelDownloads: [MeetingModel: Double] = [:]
     @Published private(set) var isLiveTranscriptShown = false
-    private let meetingNotifier = MeetingNudgeNotifier()
     /// the app `record a meeting ▸ zoom` named, held while setup runs. the
     /// click already happened; setup is the detour, not a new question.
     private var pendingMeetingApp: RunningApp?
@@ -232,7 +231,7 @@ final class DictationCoordinator: ObservableObject {
         }
         audioRecorder = recorder
         feedbackSounds = FeedbackSounds(settings: settings)
-        meetings = LazyMeetings {
+        meetings = LazyMeetings(coordinator: {
             MeetingCoordinator(
                 source: CoreAudioMeetingSource(),
                 makeTranscriber: { try await MeetingEngines.makeTranscriber(for: $0) },
@@ -245,7 +244,9 @@ final class DictationCoordinator: ObservableObject {
                     )
                 }
             )
-        }
+        }, notifier: {
+            MeetingNudgeNotifier()
+        })
 
         let viewModel = HUDViewModel(
             state: .prewarming,
@@ -1743,14 +1744,14 @@ extension DictationCoordinator {
         liveTranscript.clear()
         liveTranscript.app = MeetingApps.displayName(app)
         liveTranscript.elapsed = .zero
-        Task { [meetingNotifier] in
-            await meetingNotifier.requestPermissionIfNeeded()
+        Task { [notifier = meetings.notifier] in
+            await notifier.requestPermissionIfNeeded()
         }
         meetings.coordinator.start(tapping: app)
     }
 
     func stopMeeting() {
-        meetingNotifier.withdraw()
+        meetings.withdrawNudge()
         meetings.stop()
     }
 
@@ -1801,14 +1802,8 @@ extension DictationCoordinator {
         meetings.onCoordinatorBuilt = { [weak self] built in
             self?.wire(built)
         }
-        meetingNotifier.onKeepGoing = { [weak self] in
-            self?.meetings.keepGoing()
-        }
-        meetingNotifier.onStop = { [weak self] in
-            self?.stopMeeting()
-        }
-        meetingNotifier.onShowFile = { url in
-            NSWorkspace.shared.activateFileViewerSelecting([url])
+        meetings.onNotifierBuilt = { [weak self] notifier in
+            self?.wire(notifier)
         }
         // recovery loads the meeting model and can run for a quarter of an
         // hour. five seconds of head start keeps it off the dictation
@@ -1827,6 +1822,20 @@ extension DictationCoordinator {
     /// without walking the transcripts folder.
     private var hasMeetingsSetUp: Bool {
         !installedMeetingModels.isEmpty || settings.meetingsFolderWasChosen
+    }
+
+    /// the notifier's buttons. a nudge or a stop from a banner the last run
+    /// left behind finds no meeting, and does nothing.
+    private func wire(_ notifier: MeetingNudgeNotifier) {
+        notifier.onKeepGoing = { [weak self] in
+            self?.meetings.keepGoing()
+        }
+        notifier.onStop = { [weak self] in
+            self?.stopMeeting()
+        }
+        notifier.onShowFile = { url in
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
     }
 
     /// the coordinator's half of the wiring, run once, the moment it is
@@ -1876,7 +1885,7 @@ extension DictationCoordinator {
             }
         case .nudge:
             // only a built coordinator says anything, so this builds nothing
-            meetingNotifier.ask(
+            meetings.notifier.ask(
                 app: meetingAppName,
                 quietFor: meetings.coordinator.thresholds.quietNudgeAfter
             )
@@ -1886,14 +1895,14 @@ extension DictationCoordinator {
             // in two seconds — often before you are back at the mac.
             lastMeeting = summary
             lastMeetingSavedAt = Date()
-            meetingNotifier.saved(summary)
+            meetings.notifier.saved(summary)
             // the transcript has landed, so a quit that was waiting on it
             // can go through. the hook runs after this and may not finish;
             // the file it was told about is already written.
             finishQuitting()
         case .saveFailed:
             liveTranscriptPanel?.dismissKeepingPreference()
-            meetingNotifier.saveFailed()
+            meetings.notifier.saveFailed()
             // nothing more will be written, so a quit waiting on the file
             // goes through here too.
             finishQuitting()
