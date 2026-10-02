@@ -172,12 +172,22 @@ actor StretchTranscriber: MeetingTranscriber {
         return Self.inOrder(turns)
     }
 
+    /// A whole spool already in memory: walked a block at a time like one
+    /// read off the disk, each block a slice of the two sides taken when it
+    /// is asked for.
+    func transcribe(you: [Float], them: [Float]) async throws -> [MeetingTurn] {
+        try await transcribe(blocks: Self.blocks(of: you, them))
+    }
+
     /// A whole spool, heard the way the meeting was: in the chunks the
     /// capture layer hands over, through a fresh detector per side, and the
     /// far side coming back through the mic let go the same way. Each stretch
-    /// is decoded as soon as it is cut, so the speech is not copied out whole
-    /// beside a recording that is already all in memory. A spool has no gaps
-    /// in it, so its clock is its sample count.
+    /// is decoded as soon as it is cut, and the next block is read only once
+    /// the one before it has been heard, so no more of the spool is in
+    /// memory than a meeting holds as it is recorded: a block, the quiet
+    /// the cutters keep, the stretch being decoded and the minute of
+    /// loudness the trails keep. A spool has no gaps in it, so its clock is
+    /// its sample count.
     ///
     /// The two sides are walked together, a chunk at a time: a `you` stretch
     /// is held against how loud the far side was while it was said, and that
@@ -187,46 +197,31 @@ actor StretchTranscriber: MeetingTranscriber {
     /// written out, that would read as a meeting where nobody spoke, and the
     /// spool — the only copy of what was said — would go with it. Thrown, it
     /// stays for the next launch. A spool nobody spoke in has nothing to
-    /// fail on, and comes back with no turns.
-    func transcribe(you: [Float], them: [Float]) async throws -> [MeetingTurn] {
+    /// fail on, and comes back with no turns. A block that could not be read
+    /// throws too.
+    func transcribe(blocks: AsyncThrowingStream<SpoolBlock, any Error>) async throws -> [MeetingTurn] {
         try await load()
-        var turns: [MeetingTurn] = []
-        var cut = 0
         let failedBefore = tally.failed
-        let youDetector = makeDetector()
-        let themDetector = makeDetector()
-        var youCutter = StretchCutter(side: .you, ceiling: ceiling)
-        var themCutter = StretchCutter(side: .them, ceiling: ceiling)
-        var mic = LoudnessTrail()
-        var far = LoudnessTrail()
-        var start = 0
-        while start < max(you.count, them.count) {
-            let at = StretchCutter.duration(of: start)
-            let youChunk = Self.chunk(of: you, from: start)
-            let themChunk = Self.chunk(of: them, from: start)
-            mic.hear(youChunk, at: at)
-            far.hear(themChunk, at: at)
-            var stretches: [Stretch] = []
-            if !youChunk.isEmpty {
-                let edges = await youDetector.hear(youChunk)
-                stretches += withoutBleed(
-                    youCutter.take(youChunk, at: at, edges: edges), mic: mic, far: far)
+        var spool = SpoolHearing(
+            youDetector: makeDetector(), themDetector: makeDetector(), ceiling: ceiling)
+        var steps = SpoolSteps(length: Self.spoolChunk)
+        for try await block in blocks {
+            steps.add(block)
+            while let step = steps.next() {
+                await hear(step, in: &spool)
             }
-            if !themChunk.isEmpty {
-                let edges = await themDetector.hear(themChunk)
-                stretches += themCutter.take(themChunk, at: at, edges: edges)
-            }
-            cut += stretches.count
-            turns += await decodeAlone(stretches)
-            start += Self.spoolChunk
         }
-        let last = withoutBleed(youCutter.flush(), mic: mic, far: far) + themCutter.flush()
-        cut += last.count
-        turns += await decodeAlone(last)
-        if cut > 0, tally.failed - failedBefore == cut {
-            throw Failure.nothingDecoded(stretches: cut)
+        steps.end()
+        while let step = steps.next() {
+            await hear(step, in: &spool)
         }
-        return Self.inOrder(turns)
+        let last = withoutBleed(spool.you.flush(), mic: spool.mic, far: spool.far) + spool.them.flush()
+        spool.cut += last.count
+        spool.turns += await decodeAlone(last)
+        if spool.cut > 0, tally.failed - failedBefore == spool.cut {
+            throw Failure.nothingDecoded(stretches: spool.cut)
+        }
+        return Self.inOrder(spool.turns)
     }
 
     func decodeTally() async -> StretchTally? {
@@ -250,6 +245,26 @@ actor StretchTranscriber: MeetingTranscriber {
             you.take(chunk.you, at: chunk.at, edges: youEdges),
             mic: micLoudness, far: farLoudness)
             + them.take(theirs, at: chunk.at, edges: themEdges))
+    }
+
+    /// One step of a spool, through that spool's own detectors, cutters and
+    /// trails, and whatever it cut decoded there and then.
+    private func hear(_ step: SpoolSteps.Step, in spool: inout SpoolHearing) async {
+        let at = StretchCutter.duration(of: step.start)
+        spool.mic.hear(step.you, at: at)
+        spool.far.hear(step.them, at: at)
+        var stretches: [Stretch] = []
+        if !step.you.isEmpty {
+            let edges = await spool.youDetector.hear(step.you)
+            stretches += withoutBleed(
+                spool.you.take(step.you, at: at, edges: edges), mic: spool.mic, far: spool.far)
+        }
+        if !step.them.isEmpty {
+            let edges = await spool.themDetector.hear(step.them)
+            stretches += spool.them.take(step.them, at: at, edges: edges)
+        }
+        spool.cut += stretches.count
+        spool.turns += await decodeAlone(stretches)
     }
 
     /// A `you` stretch that is only the far side coming back through the mic
@@ -376,11 +391,22 @@ actor StretchTranscriber: MeetingTranscriber {
         return Self.turn(words, from: stretch)
     }
 
-    /// The chunk of a spool's side that begins at `start`: the last may be
-    /// short, and a side that has ended is empty.
-    private static func chunk(of samples: [Float], from start: Int) -> [Float] {
-        guard start < samples.count else { return [] }
-        return Array(samples[start..<min(start + spoolChunk, samples.count)])
+    /// Two sides in memory as blocks of a spool, sliced as each is asked
+    /// for. A side shorter than the other has ended, and its blocks are
+    /// short, then empty.
+    private static func blocks(of you: [Float], _ them: [Float]) -> AsyncThrowingStream<SpoolBlock, any Error> {
+        let next = OSAllocatedUnfairLock(initialState: 0)
+        return AsyncThrowingStream(unfolding: {
+            let start = next.withLock { start in
+                defer { start += spoolChunk }
+                return start
+            }
+            guard start < max(you.count, them.count) else { return nil }
+            func slice(_ side: [Float]) -> [Float] {
+                start < side.count ? Array(side[start..<min(start + spoolChunk, side.count)]) : []
+            }
+            return (slice(you), slice(them))
+        })
     }
 
     /// The words in what the engine said, or nil when there are none.
@@ -422,5 +448,77 @@ actor StretchTranscriber: MeetingTranscriber {
         turns.enumerated()
             .sorted { ($0.element.at, $0.offset) < ($1.element.at, $1.offset) }
             .map(\.element)
+    }
+}
+
+/// One spool's hearing, fresh for it: a detector, a cutter and a loudness
+/// trail per side, the stretches cut so far and the turns they came to.
+private struct SpoolHearing {
+    let youDetector: any SpeechDetector
+    let themDetector: any SpeechDetector
+    var you: StretchCutter
+    var them: StretchCutter
+    var mic = LoudnessTrail()
+    var far = LoudnessTrail()
+    var cut = 0
+    var turns: [MeetingTurn] = []
+
+    init(youDetector: any SpeechDetector, themDetector: any SpeechDetector, ceiling: Duration) {
+        self.youDetector = youDetector
+        self.themDetector = themDetector
+        you = StretchCutter(side: .you, ceiling: ceiling)
+        them = StretchCutter(side: .them, ceiling: ceiling)
+    }
+}
+
+/// Blocks of a spool, as long as the disk hands them over, as the steps a
+/// meeting is heard in: `length` samples of each side at a time, both from
+/// the same sample. A side shorter than the other in a block has ended
+/// there — a spool with one channel has no far side at all — and its steps
+/// are short, then empty, from there on. What it holds is the block it was
+/// last given, and less than a step of the one before.
+private struct SpoolSteps {
+    struct Step {
+        /// The spool's sample it begins at.
+        let start: Int
+        let you: [Float]
+        let them: [Float]
+    }
+
+    let length: Int
+    private var you: [Float] = []
+    private var them: [Float] = []
+    private var youEnded = false
+    private var themEnded = false
+    private var start = 0
+
+    init(length: Int) {
+        self.length = length
+    }
+
+    mutating func add(_ block: SpoolBlock) {
+        you += block.you
+        them += block.them
+        if block.you.count < block.them.count { youEnded = true }
+        if block.them.count < block.you.count { themEnded = true }
+    }
+
+    /// No more blocks are coming.
+    mutating func end() {
+        youEnded = true
+        themEnded = true
+    }
+
+    /// The next step, once each side has a whole one or has ended.
+    mutating func next() -> Step? {
+        guard you.count >= length || youEnded,
+              them.count >= length || themEnded,
+              !you.isEmpty || !them.isEmpty
+        else { return nil }
+        let step = Step(start: start, you: Array(you.prefix(length)), them: Array(them.prefix(length)))
+        you.removeFirst(step.you.count)
+        them.removeFirst(step.them.count)
+        start += length
+        return step
     }
 }
