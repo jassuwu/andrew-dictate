@@ -207,10 +207,9 @@ private final class CaptureEngine: @unchecked Sendable {
     private static let conversionBufferCapacity: AVAudioFrameCount = 16_384
 
     let levelStorage = AudioLevelStorage()
-    let capNotifier = AudioCapNotifier()
-    let capApproachingNotifier = AudioCapNotifier()
-    /// the same main-actor hop as the cap's, for the engine reconfiguring.
-    let configurationChangeNotifier = AudioCapNotifier()
+    let capNotifier = AudioEventNotifier()
+    let capApproachingNotifier = AudioEventNotifier()
+    let configurationChangeNotifier = AudioEventNotifier()
 
     private let queue: DispatchQueue
     private let preRollEnabled: Bool
@@ -628,8 +627,8 @@ private final class CaptureEngine: @unchecked Sendable {
     private static func makeCaptureStorage(
         format: AVAudioFormat,
         preRollEnabled: Bool,
-        capNotifier: AudioCapNotifier,
-        capApproachingNotifier: AudioCapNotifier
+        capNotifier: AudioEventNotifier,
+        capApproachingNotifier: AudioEventNotifier
     ) throws -> AudioCaptureStorage {
         let tapFrameCapacity = AVAudioFrameCount(
             max(1_024, ceil(format.sampleRate * tapDuration))
@@ -793,9 +792,10 @@ private final class AudioFirstBufferNotifier: @unchecked Sendable {
     }
 }
 
-/// armed for the capture's whole life, unlike the one-shot first-buffer
-/// notifier: the storage itself guarantees one trip per utterance.
-private final class AudioCapNotifier: @unchecked Sendable {
+/// something the capture says on the main actor: the cap, the warning
+/// before it, the engine reconfiguring. set once and left set for the
+/// capture's whole life, unlike the one-shot first-buffer notifier.
+private final class AudioEventNotifier: @unchecked Sendable {
     typealias Callback = @MainActor @Sendable () -> Void
 
     private let lock = NSLock()
@@ -877,8 +877,8 @@ private final class AudioCaptureStorage: @unchecked Sendable {
     private let bytesPerFrame: Int
     private let preRollBuffer: AVAudioPCMBuffer?
     private let preRollPrefixBuffer: AVAudioPCMBuffer?
-    private let capNotifier: AudioCapNotifier
-    private let capApproachingNotifier: AudioCapNotifier
+    private let capNotifier: AudioEventNotifier
+    private let capApproachingNotifier: AudioEventNotifier
 
     private var captured: [AVAudioPCMBuffer] = []
     private var nextPoolIndex = 0
@@ -897,8 +897,8 @@ private final class AudioCaptureStorage: @unchecked Sendable {
         maximumFrameCount: Int,
         capWarningLeadFrameCount: Int,
         preRollFrameCapacity: Int,
-        capNotifier: AudioCapNotifier,
-        capApproachingNotifier: AudioCapNotifier
+        capNotifier: AudioEventNotifier,
+        capApproachingNotifier: AudioEventNotifier
     ) throws {
         var pool: [AVAudioPCMBuffer] = []
         pool.reserveCapacity(poolCount)
