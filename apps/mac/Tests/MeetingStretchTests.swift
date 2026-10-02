@@ -648,12 +648,31 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(handed().count, 3)
     }
 
+    /// The start sound is at the head of every spool, in the far side: the
+    /// tap heard it as the meeting began. Read again from the spool it is
+    /// still our own sound and not anyone speaking, so the far side reaches
+    /// the engine silent for as long as it lasts and a tenth of a second
+    /// more, as it did while the meeting ran.
+    func testASpoolsStartSoundIsNotReadAsTheFarSide() async throws {
+        _ = try await spoolLeftBehind([
+            startSound(scale: 1),
+            them("are we all here", from: 1.3, to: 2.5),
+        ])
+
+        let c = coordinator(stretches())
+        c.recoverOrphans()
+
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, ["[00:00:01] them: are we all here"])
+        XCTAssertEqual(handed(), ["are we all here 26400"])
+    }
+
     /// The spool is cut the same way, so its turns know where they ended too:
-    /// "okay so" ends at 0.5 s and "and the budget" begins at 4.0, a pause of
-    /// 3.5 s, though they begin only 4.0 s apart.
+    /// "okay so" ends at 0.85 s, post-roll and all, and "and the budget"
+    /// begins at 4.0, a pause of 3.15 s, though they begin only 3.7 s apart.
     func testASpoolsSpeechAfterALongSilenceIsAParagraphOfItsOwn() async throws {
         _ = try await spoolLeftBehind([
-            them("okay so", from: 0.3, to: 0.5),
+            them("okay so", from: 0.6, to: 0.7),
             them("and the budget", from: 4.3, to: 5.0),
         ])
 
@@ -1181,13 +1200,13 @@ final class MeetingStretchTests: XCTestCase {
     }
 
     /// The start sound as the tap hears it, from the start of the meeting
-    /// for as long as the sound file runs: a phrase of its own, played at
-    /// three times the loudness the engine knows it by, so a stretch with
-    /// any of it in is heard as no phrase at all.
-    private func startSound() -> Said {
+    /// for as long as the sound file runs: a phrase of its own. By default
+    /// it is played at three times the loudness the engine knows it by, so
+    /// a stretch with any of it in is heard as no phrase at all.
+    private func startSound(scale: Float = 3) -> Said {
         Said(
             side: .them, phrase: "start sound", from: 0,
-            to: OurTones.startSound.totalSeconds, scale: 3)
+            to: OurTones.startSound.totalSeconds, scale: scale)
     }
 
     /// The mic with nothing on it: a tone a thirtieth as loud as the first

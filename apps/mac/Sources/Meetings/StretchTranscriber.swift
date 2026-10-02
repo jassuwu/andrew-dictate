@@ -98,6 +98,10 @@ actor StretchTranscriber: MeetingTranscriber {
     /// same steps the meeting was.
     private static let spoolChunk = 1_600
 
+    /// The far side a spool opens with that is the start sound, in samples.
+    private static let startSoundInASpool = StretchCutter.samples(
+        in: OurTones.silenced(for: OurTones.startSound))
+
     /// A stretch this quiet, over all of it, is room noise: a real recording
     /// with nothing on the mic measured about 0.003. Provisional, to be
     /// tuned against real meetings.
@@ -249,19 +253,26 @@ actor StretchTranscriber: MeetingTranscriber {
 
     /// One step of a spool, through that spool's own detectors, cutters and
     /// trails, and whatever it cut decoded there and then.
+    ///
+    /// A spool opens on the start sound, in the far side, and it is heard
+    /// the way the meeting heard it: whole in the trail, as silence by the
+    /// detector and the cutter. The start sound after a rebuild and the
+    /// quiet probe are where the spool alone cannot say, and are read as
+    /// they are.
     private func hear(_ step: SpoolSteps.Step, in spool: inout SpoolHearing) async {
         let at = StretchCutter.duration(of: step.start)
         spool.mic.hear(step.you, at: at)
         spool.far.hear(step.them, at: at)
+        let theirs = OurTones.silencing(step.them, first: Self.startSoundInASpool - step.start)
         var stretches: [Stretch] = []
         if !step.you.isEmpty {
             let edges = await spool.youDetector.hear(step.you)
             stretches += withoutBleed(
                 spool.you.take(step.you, at: at, edges: edges), mic: spool.mic, far: spool.far)
         }
-        if !step.them.isEmpty {
-            let edges = await spool.themDetector.hear(step.them)
-            stretches += spool.them.take(step.them, at: at, edges: edges)
+        if !theirs.isEmpty {
+            let edges = await spool.themDetector.hear(theirs)
+            stretches += spool.them.take(theirs, at: at, edges: edges)
         }
         spool.cut += stretches.count
         spool.turns += await decodeAlone(stretches)
