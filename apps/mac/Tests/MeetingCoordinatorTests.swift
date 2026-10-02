@@ -8,6 +8,9 @@ final class MeetingCoordinatorTests: XCTestCase {
     private var transcribers: FakeTranscribers!
     private var events: [MeetingEvent] = []
     private var hookRuns: [HookRun] = []
+    /// What settings say right now, read whenever the coordinator asks.
+    private var meetingsFolder: URL!
+    private var meetingModel: MeetingModel = .whisperLargeV3Turbo
     private var hook: URL?
 
     private let zoom = RunningApp(name: "zoom.us", bundleID: "us.zoom.xos", pid: 42)
@@ -21,6 +24,8 @@ final class MeetingCoordinatorTests: XCTestCase {
         transcribers = FakeTranscribers(otherwise: transcriber)
         events = []
         hookRuns = []
+        meetingsFolder = dir.appendingPathComponent("docs")
+        meetingModel = .whisperLargeV3Turbo
         hook = nil
     }
 
@@ -37,7 +42,6 @@ final class MeetingCoordinatorTests: XCTestCase {
         clock: FakeClock = FakeClock(),
         starting dates: [Date] = []
     ) -> MeetingCoordinator {
-        let folder = dir.appendingPathComponent("docs")
         let dates = StartDates(dates)
         let c = MeetingCoordinator(
             source: source,
@@ -48,8 +52,8 @@ final class MeetingCoordinatorTests: XCTestCase {
             thresholds: thresholds,
             now: { clock.now },
             date: { dates.next() },
-            preferences: { [hook] in
-                MeetingPreferences(folder: folder, hook: hook, model: .whisperLargeV3Turbo)
+            preferences: { [unowned self] in
+                MeetingPreferences(folder: meetingsFolder, hook: hook, model: meetingModel)
             }
         )
         c.onEvent = { [weak self] in self?.events.append($0) }
@@ -541,6 +545,31 @@ final class MeetingCoordinatorTests: XCTestCase {
 
         XCTAssertFalse(source.openedWhileClosing)
         XCTAssertEqual(c.state, .recording)
+    }
+
+    /// Settings changed mid-meeting are for the next one: this meeting's
+    /// file goes where it started out going, names the model that heard
+    /// it, and tells the hook it started with.
+    func testSettingsChangedMidMeetingAreForTheNextOne() async throws {
+        let c = coordinator()
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+
+        meetingsFolder = dir.appendingPathComponent("elsewhere")
+        meetingModel = .whisperLargeV3
+        hook = try script("#!/bin/sh\nexit 0\n")
+        c.stop()
+        await settle(for: 1.0)
+
+        XCTAssertEqual(
+            MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("elsewhere")).count, 0)
+        let saved = try XCTUnwrap(
+            MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).first)
+        let body = try String(contentsOf: saved.fileURL, encoding: .utf8)
+        XCTAssertTrue(body.contains("engine: whisperLargeV3Turbo\n"), body)
+        XCTAssertEqual(hookRuns.count, 0)
     }
 
     // MARK: - helpers

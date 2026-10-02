@@ -191,8 +191,9 @@ final class MeetingCoordinator: ObservableObject {
 
     func start(tapping app: RunningApp) {
         guard session.state == .idle else { return }
-        let prefs = preferences()
-        let meeting = Meeting(app: MeetingApps.displayName(app), started: date())
+        let meeting = Meeting(
+            app: MeetingApps.displayName(app), started: date(),
+            preferences: preferences())
         current = meeting
 
         session.start()
@@ -216,13 +217,14 @@ final class MeetingCoordinator: ObservableObject {
             // Ours to get right: the spool and the engine. A failure here is
             // the app's, not the permission's, and is told as such.
             let transcriber: any MeetingTranscriber
+            let model = meeting.preferences.model
             do {
                 let handle = try spool.begin(.init(
                     app: meeting.app, started: meeting.started,
-                    engine: prefs.model.rawValue, model: prefs.model))
+                    engine: model.rawValue, model: model))
                 meeting.handle = handle
                 meeting.audioFile = try SpoolAudioFile(url: handle.audioURL)
-                transcriber = try await makeTranscriber(prefs.model)
+                transcriber = try await makeTranscriber(model)
             } catch {
                 logger.error("meeting could not start: \(error.localizedDescription, privacy: .public)")
                 abandonKeepingSpool(meeting)
@@ -545,10 +547,13 @@ final class MeetingCoordinator: ObservableObject {
         let turns = await meeting.transcriber?.finish() ?? []
         meeting.transcriber = nil
         meeting.audioFile = nil
+        // the settings as they were at the start: a folder, model or hook
+        // changed since is for the next meeting.
+        let prefs = meeting.preferences
         await finish(
             turns: turns, recording: recording, handle: handle,
-            app: meeting.app, started: meeting.started, model: preferences().model,
-            recovered: false)
+            app: meeting.app, started: meeting.started, model: prefs.model,
+            folder: prefs.folder, hook: prefs.hook, recovered: false)
     }
 
     private func finish(
@@ -558,6 +563,8 @@ final class MeetingCoordinator: ObservableObject {
         app: String,
         started: Date,
         model: MeetingModel,
+        folder: URL,
+        hook: URL?,
         recovered: Bool
     ) async {
         let them = (try? SpoolAudioFile.read(handle.audioURL))?.them ?? []
@@ -575,10 +582,9 @@ final class MeetingCoordinator: ObservableObject {
             turns: split
         )
 
-        let prefs = preferences()
         let url: URL
         do {
-            url = try MeetingTranscriptFile.write(transcript, in: prefs.folder)
+            url = try MeetingTranscriptFile.write(transcript, in: folder)
         } catch {
             // The spool stays: it is the only copy, and next launch will
             // find it and try again. Said out loud — "writing it out…" was
@@ -596,7 +602,7 @@ final class MeetingCoordinator: ObservableObject {
             recovered: recovered)
         onEvent?(.saved(summary))
 
-        guard let hook = prefs.hook else { return }
+        guard let hook else { return }
         let event = MeetingSavedEvent(
             transcript: url,
             app: app,
@@ -661,6 +667,9 @@ final class MeetingCoordinator: ObservableObject {
         do {
             let transcriber = try await makeTranscriber(manifest.model)
             let turns = try await transcriber.transcribe(you: audio.you, them: audio.them)
+            // a spool from a past run has no settings of its own; it goes
+            // where meetings go now.
+            let prefs = preferences()
             await finish(
                 turns: turns,
                 recording: .init(duration: duration, gaps: []),
@@ -668,6 +677,8 @@ final class MeetingCoordinator: ObservableObject {
                 app: manifest.app,
                 started: manifest.started,
                 model: manifest.model,
+                folder: prefs.folder,
+                hook: prefs.hook,
                 recovered: true)
         } catch {
             // Only logging it meant the same quarter of an hour was spent on
@@ -706,6 +717,9 @@ extension MeetingCoordinator {
         /// The app as shown to people: "zoom", "chrome".
         let app: String
         let started: Date
+        /// Read once, at the start: the folder, the model and the hook this
+        /// meeting is written out with, whatever settings say by the end.
+        let preferences: MeetingPreferences
         /// Set once the spool is open, and nil for good if it never was.
         var handle: MeetingSpool.Handle?
         var audioFile: SpoolAudioFile?
@@ -717,9 +731,10 @@ extension MeetingCoordinator {
         /// A rebuild of its tap, while one is in flight.
         var rebuild: Task<Void, Never>?
 
-        init(app: String, started: Date) {
+        init(app: String, started: Date, preferences: MeetingPreferences) {
             self.app = app
             self.started = started
+            self.preferences = preferences
         }
     }
 }
