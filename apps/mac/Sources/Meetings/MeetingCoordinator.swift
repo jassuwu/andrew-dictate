@@ -779,14 +779,17 @@ final class MeetingCoordinator: ObservableObject {
         var refused: (any Error)?
         var written = false
         if let audioFile = meeting.audioFile {
+            // as many frames as both sides have: what `append` writes.
+            meeting.spooling = min(chunk.you.count, chunk.them.count)
             do {
                 try await audioFile.append(chunk)
                 written = true
-                // as many frames as both sides have: what `append` wrote.
-                meeting.spooled += min(chunk.you.count, chunk.them.count)
+                meeting.spooled += meeting.spooling
+                meeting.spooling = 0
                 // what the spool kept, the speaker split hears, as it goes.
                 speakers(of: meeting).hear(chunk)
             } catch {
+                meeting.spooling = 0
                 refused = error
             }
         }
@@ -1769,6 +1772,10 @@ extension MeetingCoordinator {
         /// clock is. It stops with the spool, not with the tap — the old tap
         /// through the settle and the mic alone are spooled like any audio.
         var spooled = 0
+        /// Frames of the chunk being written to the spool: its meeting time
+        /// is already counted, so a gap that begins or a stop that comes
+        /// while it is written comes after it.
+        var spooling = 0
         /// Its gaps as they began and ended, each with where the spool's
         /// clock was then, so its turns can be found on the spool.
         var gaps: [MeetingSpool.Gap] = []
@@ -1780,7 +1787,7 @@ extension MeetingCoordinator {
         }
 
         var spooledSoFar: Duration {
-            StretchCutter.duration(of: spooled)
+            StretchCutter.duration(of: spooled + spooling)
         }
 
         func gapBegan(at began: Duration) {
