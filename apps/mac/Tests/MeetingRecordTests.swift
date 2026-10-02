@@ -165,6 +165,22 @@ final class MeetingRecordTests: XCTestCase {
         XCTAssertNil(record.toDiskS)
     }
 
+    /// a tap that will not open at all is the same news as one that never
+    /// heard the start sound, and is told the same way.
+    func testATapThatCouldNotBeOpenedLeavesARecordSayingItWasNeverHeard() async throws {
+        source.opening = Unreadable()
+        let c = coordinator(starting: [started])
+
+        c.start(tapping: zoom)
+        await awaitRecords(1)
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records.first?.outcome, .nothingKept(.tapNeverHeard))
+        XCTAssertEqual(records.first?.durationS, 0)
+        XCTAssertEqual(c.state, .idle)
+    }
+
     /// stopped while the start sound was still being waited for: nothing
     /// had been captured, and nothing is wrong with the tap that anyone knows.
     func testAMeetingStoppedBeforeAnythingWasCapturedLeavesARecordSayingSo() async throws {
@@ -420,12 +436,15 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     private var startsSeen = 0
     private var nextAt: Duration = .zero
     var rebuilds = 0
+    /// what opening the tap does, while it is set: the permission is off.
+    var opening: (any Error)?
 
     private var continuation: AsyncStream<MeetingAudioChunk>.Continuation? {
         lock.withLock { _continuation }
     }
 
     func start(tapping app: RunningApp) async throws -> AsyncStream<MeetingAudioChunk> {
+        if let opening { throw opening }
         let (stream, continuation) = AsyncStream<MeetingAudioChunk>.makeStream()
         lock.withLock {
             _continuation = continuation
