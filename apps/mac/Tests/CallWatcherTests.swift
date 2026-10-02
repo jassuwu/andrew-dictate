@@ -291,6 +291,72 @@ final class CallWatcherTests: XCTestCase {
         XCTAssertEqual(watcher.currentCall, "zoom")
     }
 
+    /// One call at a time. A second app that looks like a call changes
+    /// nothing: not the name on the recording, not the question, not when the
+    /// first call ends.
+    func testASecondAppIsIgnoredWhileTheFirstCallIsOn() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+        let chrome = app("chrome")
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(0))
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(3))
+
+        XCTAssertEqual(
+            watcher.observe([zoom, chrome], isRecording: false, at: .seconds(10)),
+            []
+        )
+        XCTAssertEqual(
+            watcher.observe([zoom, chrome], isRecording: false, at: .seconds(20)),
+            []
+        )
+        XCTAssertEqual(watcher.currentCall, "zoom")
+
+        // And the second app going quiet is not the first call ending.
+        _ = watcher.observe([zoom], isRecording: true, at: .seconds(30))
+        XCTAssertEqual(watcher.observe([zoom], isRecording: true, at: .seconds(300)), [])
+        XCTAssertEqual(watcher.currentCall, "zoom")
+    }
+
+    /// Only the first app's own silence ends its call, however busy the
+    /// second one is.
+    func testTheFirstCallEndsOnItsOwnAppsSilenceNotTheSecondAppsActivity() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+        let chrome = app("chrome")
+        _ = watcher.observe([zoom], isRecording: true, at: .seconds(0))
+        _ = watcher.observe([zoom], isRecording: true, at: .seconds(3))
+
+        _ = watcher.observe([chrome], isRecording: true, at: .seconds(100))
+        XCTAssertEqual(watcher.observe([chrome], isRecording: true, at: .seconds(129)), [])
+        XCTAssertEqual(
+            watcher.observe([chrome], isRecording: true, at: .seconds(130)),
+            [.stop("zoom")]
+        )
+    }
+
+    /// When the first call ends, a second app that is still going is not
+    /// yet a call: it earns the threshold from there, and then it is asked
+    /// about like any other.
+    func testASecondAppStillGoingWhenTheFirstCallEndsStartsItsOwnThreshold() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+        let chrome = app("chrome")
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(0))
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(3))
+        _ = watcher.observe([zoom, chrome], isRecording: false, at: .seconds(10))
+
+        _ = watcher.observe([chrome], isRecording: false, at: .seconds(100))
+        XCTAssertEqual(watcher.observe([chrome], isRecording: false, at: .seconds(130)), [])
+        XCTAssertNil(watcher.currentCall)
+
+        XCTAssertEqual(watcher.observe([chrome], isRecording: false, at: .seconds(132)), [])
+        XCTAssertEqual(
+            watcher.observe([chrome], isRecording: false, at: .seconds(133)),
+            [.record("chrome")]
+        )
+        XCTAssertEqual(watcher.currentCall, "chrome")
+    }
+
     // MARK: - stopping mid-call
 
     /// You pressed stop on purpose. Asking whether to record the same call
