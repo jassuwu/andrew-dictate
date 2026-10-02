@@ -1451,12 +1451,16 @@ final class DictationCoordinator: ObservableObject {
         let generation = engineGeneration
         engineHealthTask = Task { @MainActor [weak self] in
             let answered = await EngineProbe.answers(engine)
-            guard let self,
-                  !Task.isCancelled,
-                  generation == self.engineGeneration else {
+            guard let self, !Task.isCancelled else {
                 return
             }
+            // not cancelled, so still the check on record. it is over
+            // either way, or a switch made mid-check would leave every
+            // later check thinking one is still out.
             self.engineHealthTask = nil
+            guard generation == self.engineGeneration else {
+                return
+            }
             guard !answered else {
                 self.engineLogger.notice("the speech model answered its check")
                 return
@@ -1488,6 +1492,12 @@ final class DictationCoordinator: ObservableObject {
         let engine = transcriptionEngine
         enginePrewarmTask = Task { @MainActor [weak self] in
             await engine.unloadModels()
+            // removing the model cancels this mid-unload: loading it again
+            // would race the removal for the files.
+            guard !Task.isCancelled,
+                  generation == self?.engineGeneration else {
+                return
+            }
             do {
                 try await engine.prewarm(progressHandler: nil)
                 try Task.checkCancellation()
