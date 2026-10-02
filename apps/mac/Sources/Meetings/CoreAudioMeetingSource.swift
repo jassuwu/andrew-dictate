@@ -936,7 +936,10 @@ private final class FirstAnswer: @unchecked Sendable {
 extension CoreAudioMeetingSource {
     /// The quiet probe's level: the peak of the tone, in dBFS. Provisional —
     /// whether a person hears it is for the owner's ears to tune. -40 dBFS
-    /// is a peak of 0.01, ten times the tap's silence floor of 0.001.
+    /// is a peak of 0.01, ten times the tap's silence floor of 0.001; the
+    /// tap hears it at 0.007 rms, seven times the floor, and before the
+    /// system volume, so the margin does not shrink when you turn the mac
+    /// down (measurement 02: -50 reads only twice the floor).
     static let quietProbeLevel: Float = -40
     /// A third of a second of 1 kHz: long enough to fill a few of the tap's
     /// tenth-of-a-second chunks, short enough to pass for nothing.
