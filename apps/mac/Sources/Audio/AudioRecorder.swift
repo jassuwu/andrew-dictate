@@ -473,7 +473,12 @@ private final class CaptureEngine: @unchecked Sendable {
         ) { [storage, levelStorage, firstBufferNotifier] buffer, _ in
             if storage.appendCopy(of: buffer) {
                 levelStorage.update(from: buffer)
-                firstBufferNotifier.notify(at: ContinuousClock.now)
+                // frames, not loudness: a device that delivers is alive,
+                // even if its first frames are zeros. an empty buffer
+                // delivered nothing, and the chime must not promise it did.
+                if buffer.frameLength > 0 {
+                    firstBufferNotifier.notify(at: ContinuousClock.now)
+                }
             }
         }
     }
