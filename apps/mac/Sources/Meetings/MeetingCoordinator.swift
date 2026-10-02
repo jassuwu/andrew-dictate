@@ -66,6 +66,9 @@ enum MeetingEvent: Equatable, Sendable {
     /// Only ever at the start — what goes wrong once recording has begun is
     /// a problem, and never opens a window over the call.
     case cannotHear
+    /// The app may not use the microphone: asked before anything was
+    /// built, and the meeting does not start.
+    case micNotAllowed
     /// A spool the app died on is being written out, unasked, at launch. It
     /// loads a 2.9 gb model and can run for a quarter of an hour: the lamp
     /// stays quiet for successes, and this is not one.
@@ -118,6 +121,7 @@ enum MeetingEvent: Equatable, Sendable {
         // for it, rather than naming a switch you then have to go and find.
         // the tap is the whole mac, so the mac is what it cannot hear.
         case .cannotHear: "can't hear the mac — opening setup"
+        case .micNotAllowed: "the mic isn't allowed — opening setup"
         case .gapBegan: "lost \(Self.themWord) — rebuilding"
         case .gapEnded: "hearing them again"
         case .problemBegan(let problem): Self.began(problem)
@@ -149,6 +153,17 @@ enum MeetingEvent: Equatable, Sendable {
             return "\(said) · \(summary.gapCount) \(summary.gapCount == 1 ? "gap" : "gaps")"
         }
         return summary.complete ? said : "\(said) · incomplete, audio kept"
+    }
+
+    /// A start that failed on a switch in system settings opens setup at
+    /// it: the one surface allowed to ask for it. Nothing else opens a
+    /// window — a problem mid-call never does, and a mic that would not
+    /// start has no switch to point at.
+    var opensSetup: Bool {
+        switch self {
+        case .cannotHear, .micNotAllowed: true
+        default: false
+        }
     }
 
     /// A recovery nobody asked for is about a meeting they had yesterday, so
@@ -417,6 +432,17 @@ final class MeetingCoordinator: ObservableObject {
         meeting.capture = Task { [weak self] in
             guard let self else { return }
 
+            // Asked before anything is built or loaded: without the mic
+            // there is no meeting to record, and no spool or model for it.
+            guard await source.micAllowed() else {
+                guard current === meeting else { return }
+                logger.error("the mic is not allowed; the meeting does not start")
+                onEvent?(.micNotAllowed)
+                stop(nothingKept: .micNotAllowed)
+                return
+            }
+            guard current === meeting else { return }
+
             // Ours to get right: the spool and the engine. A failure here is
             // the app's, not the permission's, and is told as such.
             let transcriber: any MeetingTranscriber
@@ -466,7 +492,7 @@ final class MeetingCoordinator: ObservableObject {
                 session.neverHeardTheProbe()
                 publish()
                 onEvent?(.cannotHear)
-                stop(announcingNothingKept: false)
+                stop(nothingKept: .tapNeverHeard)
                 return
             }
             // what the source does by itself, a mic it moved to, goes in the
@@ -500,13 +526,14 @@ final class MeetingCoordinator: ObservableObject {
     }
 
     func stop() {
-        stop(announcingNothingKept: true)
+        stop(nothingKept: .stoppedBeforeCapture)
     }
 
-    /// `announcingNothingKept` is false when the lamp has just said "can't
-    /// hear" — a second line saying nothing was kept would be the same news
-    /// twice.
-    private func stop(announcingNothingKept: Bool) {
+    /// `why` is what the record says if nothing was captured: you stopped
+    /// first, or the start failed. Only the first is said on the lamp — a
+    /// failed start has just said what failed, and a second line saying
+    /// nothing was kept would be the same news twice.
+    private func stop(nothingKept why: MeetingRecord.NothingKept) {
         guard let meeting = current else { return }
         // A tap that never came back leaves an open gap; closing it at the
         // wall makes the file cover the whole call instead of stopping where
@@ -519,9 +546,7 @@ final class MeetingCoordinator: ObservableObject {
         let tapClosed = closeTheTap(of: meeting)
         Task { [weak self] in
             await tapClosed.value
-            await self?.writeOut(
-                meeting, recording: recording,
-                announcingNothingKept: announcingNothingKept)
+            await self?.writeOut(meeting, recording: recording, nothingKept: why)
         }
     }
 
@@ -787,7 +812,7 @@ final class MeetingCoordinator: ObservableObject {
                 onEvent?(.cannotHear)
                 // Nothing was ever heard, so there is nothing to keep and no
                 // meeting to keep running: the menu must not say "recording".
-                stop(announcingNothingKept: false)
+                stop(nothingKept: .tapNeverHeard)
             }
         case .silentWhileSomethingPlays:
             if session.state == .recording {
@@ -1129,18 +1154,18 @@ final class MeetingCoordinator: ObservableObject {
     private func writeOut(
         _ meeting: Meeting,
         recording: MeetingSession.Recording?,
-        announcingNothingKept: Bool
+        nothingKept why: MeetingRecord.NothingKept
     ) async {
         guard let recording, let handle = meeting.handle else {
             if let handle = meeting.handle { spool.discard(handle) }
             keepMeetingRecord?(MeetingRecord(
-                .nothingKept(announcingNothingKept ? .stoppedBeforeCapture : .tapNeverHeard),
+                .nothingKept(why),
                 app: meeting.app, model: meeting.preferences.model,
                 startedAt: meeting.started, duration: meeting.notes.ran,
                 events: meeting.notes.events,
                 spoolWriteFailures: meeting.notes.spoolWriteFailures))
             writingOut.removeAll { $0 === meeting }
-            if announcingNothingKept { onEvent?(.nothingToKeep) }
+            if why == .stoppedBeforeCapture { onEvent?(.nothingToKeep) }
             return
         }
 

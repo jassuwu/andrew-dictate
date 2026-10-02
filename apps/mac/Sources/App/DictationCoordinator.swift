@@ -2587,14 +2587,16 @@ extension DictationCoordinator {
             meetings.notifier.saveFailed()
         case .nothingToKeep, .engineFailed:
             dismissLiveTranscriptUnlessRecording()
-        case .cannotHear:
+        case .cannotHear, .micNotAllowed:
             // the pill cannot be clicked, so naming the switch was a dead
             // end. this reopens the one surface allowed to ask for it, and
             // leaves a way back in the menu for anyone who closes it. only
             // ever at the start: a problem mid-call is the lamp's alone.
-            meetingsNeedAttention = true
             liveTranscriptPanel?.dismissKeepingPreference()
-            runOnboardingAgain(scope: .meetingsOnly, openAt: .permissions)
+            if event.opensSetup {
+                meetingsNeedAttention = true
+                runOnboardingAgain(scope: .meetingsOnly, openAt: .permissions)
+            }
         case .recovering, .gapBegan, .gapEnded, .problemBegan, .problemCleared,
              .micMuted, .micUnmuted, .writingItOut, .readingAgain, .hookFailed,
              .transcribingAgain, .transcribedAgain, .couldNotTranscribeAgain:

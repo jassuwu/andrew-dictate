@@ -158,6 +158,19 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
     // MARK: - MeetingAudioSource
 
+    /// Asked of the mac every time, never remembered: a grant can be taken
+    /// back in system settings at any moment. Nobody asked yet, and this
+    /// asks, because a meeting is what wants it. A status this build has no
+    /// name for is not taken as a no.
+    func micAllowed() async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: true
+        case .notDetermined: await AVCaptureDevice.requestAccess(for: .audio)
+        case .denied, .restricted: false
+        @unknown default: true
+        }
+    }
+
     func start() async throws -> AsyncStream<MeetingAudioChunk> {
         let (stream, continuation) = AsyncStream<MeetingAudioChunk>.makeStream(
             bufferingPolicy: .unbounded)

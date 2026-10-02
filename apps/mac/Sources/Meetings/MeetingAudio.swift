@@ -93,6 +93,12 @@ extension MeetingRecord.Label {
 /// in a way that cannot be rebuilt. There is no app to name: the far side is
 /// everything the mac plays (ADR 0049).
 protocol MeetingAudioSource: Sendable {
+    /// Whether this app may use the microphone, asked of the mac before
+    /// anything is built — and asked for, if nobody has been asked yet. A
+    /// meeting does not start without it: a grant taken back in system
+    /// settings would otherwise record your side as silence, and nothing
+    /// re-checks a setup that was for meetings only.
+    func micAllowed() async -> Bool
     func start() async throws -> AsyncStream<MeetingAudioChunk>
     /// 002 §6's response to a tap that went all-zero: tear down, rebuild.
     func rebuild() async throws
@@ -130,6 +136,7 @@ protocol MeetingAudioSource: Sendable {
 }
 
 extension MeetingAudioSource {
+    func micAllowed() async -> Bool { true }
     var anythingIsPlaying: Bool? { nil }
     var micName: String? { nil }
     var sourceEvents: AsyncStream<MeetingSourceEvent> {

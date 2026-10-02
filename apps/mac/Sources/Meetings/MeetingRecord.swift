@@ -60,6 +60,8 @@ struct MeetingRecord: Equatable, Sendable, Codable {
         /// a recovery found audio that reads and has nothing in it: a
         /// meeting that never captured a sample.
         case spoolEmpty
+        /// the app may not use the microphone, so nothing was built.
+        case micNotAllowed
     }
 
     /// what one side of the call said, as counts.
@@ -470,6 +472,7 @@ extension MeetingRecord.Outcome {
         case .nothingKept(.tapNeverHeard): "tap-never-heard"
         case .nothingKept(.stoppedBeforeCapture): "stopped-before-capture"
         case .nothingKept(.spoolEmpty): "spool-empty"
+        case .nothingKept(.micNotAllowed): "mic-not-allowed"
         case .saved, .savedThin, .modelFailed, .couldNotWrite, .couldNotRecover, .setAside,
              .spoolUnreadable, .setAsideUnreadable, .waitingForModel, .unchanged:
             nil
@@ -491,6 +494,7 @@ extension MeetingRecord.Outcome {
         case ("nothing-kept", "tap-never-heard"): self = .nothingKept(.tapNeverHeard)
         case ("nothing-kept", "stopped-before-capture"): self = .nothingKept(.stoppedBeforeCapture)
         case ("nothing-kept", "spool-empty"): self = .nothingKept(.spoolEmpty)
+        case ("nothing-kept", "mic-not-allowed"): self = .nothingKept(.micNotAllowed)
         default: return nil
         }
     }

@@ -233,6 +233,28 @@ final class MeetingProblemsTests: XCTestCase {
         ])
     }
 
+    // MARK: - a start that fails
+
+    /// The mic permission was taken back in system settings — or never
+    /// given, by a setup for meetings only. Asked before anything is
+    /// built: the meeting does not start, the lamp says the mic is not
+    /// allowed, and setup is opened at it.
+    func testAMicThatIsNotAllowedRefusesTheStartAndOpensSetup() async throws {
+        source.micAllowed = false
+        let c = coordinator()
+        c.start()
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(c.state, .idle)
+        XCTAssertEqual(events, [.micNotAllowed])
+        XCTAssertEqual(events.first?.hudText, "the mic isn't allowed — opening setup")
+        XCTAssertEqual(events.first?.opensSetup, true)
+        XCTAssertEqual(source.starts, 0, "nothing was built")
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records.first?.outcome, .nothingKept(.micNotAllowed))
+        XCTAssertEqual(records.first?.outcome.why, "mic-not-allowed")
+    }
+
     // MARK: - several at once
 
     /// The disk nearly full from the start, and the mic gone silent while
@@ -325,7 +347,7 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     private var chunks: AsyncStream<MeetingAudioChunk>.Continuation?
     private var told: AsyncStream<MeetingSourceEvent>.Continuation?
     private var events = AsyncStream<MeetingSourceEvent> { $0.finish() }
-    private var starts = 0
+    private var _starts = 0
     private var startsSeen = 0
 
     var micName: String? {
@@ -338,6 +360,22 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
         lock.withLock { events }
     }
 
+    /// How many times the tap was opened.
+    var starts: Int {
+        lock.withLock { _starts }
+    }
+
+    /// Whether the app may use the mic: false is a permission taken back.
+    var micAllowed: Bool {
+        get { lock.withLock { _micAllowed } }
+        set { lock.withLock { _micAllowed = newValue } }
+    }
+    private var _micAllowed = true
+
+    func micAllowed() async -> Bool {
+        micAllowed
+    }
+
     func start() async throws -> AsyncStream<MeetingAudioChunk> {
         let (stream, chunks) = AsyncStream<MeetingAudioChunk>.makeStream()
         let (events, told) = AsyncStream<MeetingSourceEvent>.makeStream()
@@ -345,7 +383,7 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
             self.chunks = chunks
             self.told = told
             self.events = events
-            starts += 1
+            _starts += 1
         }
         return stream
     }
@@ -377,7 +415,7 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     func awaitStart() async {
         for _ in 0..<200 {
             let opened = lock.withLock {
-                guard starts > startsSeen else { return false }
+                guard _starts > startsSeen else { return false }
                 startsSeen += 1
                 return true
             }
