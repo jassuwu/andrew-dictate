@@ -221,6 +221,16 @@ final class HotkeyLogicTests: XCTestCase {
         XCTAssertLessThanOrEqual(sentence.count, 90)
     }
 
+    // MARK: - the meeting shortcut
+
+    /// one key, both ways: a press starts a meeting when none is recording
+    /// and stops the one that is. a meeting still writing out its file is
+    /// not recording, so a press then starts the next one.
+    func testTheMeetingShortcutStartsWhenNothingRecordsAndStopsWhenAMeetingDoes() {
+        XCTAssertEqual(MeetingShortcut.press(whileRecording: false), .start)
+        XCTAssertEqual(MeetingShortcut.press(whileRecording: true), .stop)
+    }
+
     private func lockedDetector() -> TapLockDetector {
         var detector = TapLockDetector()
         _ = detector.modifierPressed(at: 1.0)

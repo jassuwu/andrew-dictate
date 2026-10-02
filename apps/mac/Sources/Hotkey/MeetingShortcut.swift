@@ -21,4 +21,14 @@ struct MeetingShortcut: Codable, Hashable, Sendable {
     /// what the key said when it was recorded, kept like the dictation key
     /// keeps its display name: the layout can change, the row should not.
     let keyName: String
+
+    /// What a press of the shortcut does.
+    enum Press: Equatable, Sendable {
+        case start
+        case stop
+    }
+
+    static func press(whileRecording isRecording: Bool) -> Press {
+        isRecording ? .stop : .start
+    }
 }
