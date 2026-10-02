@@ -19,6 +19,83 @@ struct CorrectionLearner {
         let fixed: String
     }
 
+    /// builds the cleaner a candidate entry is tried in: the app's own, with
+    /// your cleanup setting, so the entry is checked against the pipeline
+    /// that will run it.
+    private let cleaner: ([DictionaryEntry]) -> DeterministicCleaner
+
+    /// what the engine heard and what we inserted, for the dictation being
+    /// watched. in memory only, and only while it is watched.
+    private var watched: (heard: String, inserted: String)?
+
+    /// how many dictations ended with each fix. in memory only: a restart
+    /// forgets a one-off, so nothing taken from your text reaches the disk
+    /// until it is an entry you can see.
+    private var tally: [LearningKey: Int] = [:]
+
+    /// the fixes the watched dictation stands at right now — its one vote.
+    private var votes: Set<LearningKey> = []
+
+    init(cleaner: @escaping ([DictionaryEntry]) -> DeterministicCleaner) {
+        self.cleaner = cleaner
+    }
+
+    /// a delivered dictation, watched from now. whatever it ends as is one
+    /// vote, cast for its last version.
+    mutating func watch(heard: String, inserted: String) {
+        watched = (heard, inserted)
+        votes = []
+    }
+
+    /// the watched span as it reads now that you have paused. the answer is
+    /// the entries to add — marked learned — and is usually nothing.
+    mutating func settle(
+        edited: String,
+        dictionary: [DictionaryEntry],
+        neverLearn: Set<LearningKey>
+    ) -> [DictionaryEntry] {
+        guard let watched else {
+            return []
+        }
+        let fixes = Self.swaps(inserted: watched.inserted, edited: edited)
+            .compactMap {
+                Self.entry(
+                    for: $0,
+                    heard: watched.heard,
+                    dictionary: dictionary,
+                    cleaner: cleaner
+                )
+            }
+            .filter { !neverLearn.contains(LearningKey($0)) }
+        let now = Set(fixes.map(LearningKey.init))
+
+        // a fix you have since changed or taken back is no longer this
+        // dictation's vote.
+        for withdrawn in votes.subtracting(now) {
+            let left = (tally[withdrawn] ?? 1) - 1
+            tally[withdrawn] = left > 0 ? left : nil
+        }
+
+        var learned: [DictionaryEntry] = []
+        for fix in fixes {
+            let key = LearningKey(fix)
+            guard !votes.contains(key) else {
+                continue
+            }
+            let count = (tally[key] ?? 0) + 1
+            guard count >= 2 else {
+                tally[key] = count
+                continue
+            }
+            tally[key] = nil
+            learned.append(
+                DictionaryEntry(wrong: fix.wrong, right: fix.right, learned: true)
+            )
+        }
+        votes = now
+        return learned
+    }
+
     /// three words a side, in one place. "cypher d" for "CypherD" is two,
     /// "jaz dot gg" is three; a fourth word changed in the same spot is a
     /// sentence being rewritten.

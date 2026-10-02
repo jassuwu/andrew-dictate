@@ -167,4 +167,74 @@ final class CorrectionLearnerTests: XCTestCase {
             dictionary: [DictionaryEntry(wrong: "jay son", right: "jason")]
         ))
     }
+
+    // MARK: - only on the second identical swap
+
+    private func learner() -> CorrectionLearner {
+        CorrectionLearner(cleaner: { DeterministicCleaner(entries: $0) })
+    }
+
+    /// one dictation of "send it to jaz dot dev", fixed to `fix`.
+    private func fixJaz(
+        _ learner: inout CorrectionLearner,
+        to fix: String,
+        dictionary: [DictionaryEntry] = [],
+        neverLearn: Set<LearningKey> = []
+    ) -> [DictionaryEntry] {
+        learner.watch(heard: "send it to jaz dot dev", inserted: "Send it to jaz.dev")
+        return learner.settle(
+            edited: "Send it to \(fix)",
+            dictionary: dictionary,
+            neverLearn: neverLearn
+        )
+    }
+
+    func testTheFirstFixTeachesNothingAndTheSecondIdenticalOneIsLearned() {
+        var learner = learner()
+
+        XCTAssertEqual(fixJaz(&learner, to: "jass.dev"), [])
+        let learned = fixJaz(&learner, to: "jass.dev")
+
+        XCTAssertEqual(learned.map(\.wrong), ["jaz dot dev"])
+        XCTAssertEqual(learned.map(\.right), ["jass.dev"])
+        XCTAssertEqual(learned.map(\.learned), [true])
+    }
+
+    /// the span is read again every time it goes quiet: one dictation is
+    /// one vote however often it is read.
+    func testOneDictationReadTwiceIsStillOneFix() {
+        var learner = learner()
+        learner.watch(heard: "send it to jaz dot dev", inserted: "Send it to jaz.dev")
+
+        XCTAssertEqual(learner.settle(edited: "Send it to jass.dev", dictionary: [], neverLearn: []), [])
+        XCTAssertEqual(learner.settle(edited: "Send it to jass.dev", dictionary: [], neverLearn: []), [])
+    }
+
+    /// "jas.dev" on the way to "jass.dev" was a pause in your typing, not a
+    /// fix: a dictation counts as the last thing you left it as.
+    func testAFixChangedBeforeTheDictationEndsCountsOnlyAsItsLastVersion() {
+        var learner = learner()
+        learner.watch(heard: "send it to jaz dot dev", inserted: "Send it to jaz.dev")
+        _ = learner.settle(edited: "Send it to jas.dev", dictionary: [], neverLearn: [])
+        _ = learner.settle(edited: "Send it to jass.dev", dictionary: [], neverLearn: [])
+
+        XCTAssertEqual(fixJaz(&learner, to: "jas.dev"), [])
+        XCTAssertEqual(fixJaz(&learner, to: "jass.dev").map(\.right), ["jass.dev"])
+    }
+
+    func testTwoDifferentFixesOfOneWordDoNotAddUp() {
+        var learner = learner()
+
+        XCTAssertEqual(fixJaz(&learner, to: "jass.dev"), [])
+        XCTAssertEqual(fixJaz(&learner, to: "jazz.dev"), [])
+    }
+
+    /// undo is for good: the same pair fixed twice more stays unlearned.
+    func testAPairYouUndidIsNeverLearnedAgain() {
+        var learner = learner()
+        let undone: Set<LearningKey> = [LearningKey(wrong: "jaz dot dev", right: "jass.dev")]
+
+        XCTAssertEqual(fixJaz(&learner, to: "jass.dev", neverLearn: undone), [])
+        XCTAssertEqual(fixJaz(&learner, to: "jass.dev", neverLearn: undone), [])
+    }
 }
