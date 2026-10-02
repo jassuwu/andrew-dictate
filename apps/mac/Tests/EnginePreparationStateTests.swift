@@ -56,4 +56,25 @@ final class EnginePreparationStateTests: XCTestCase {
             )
         )
     }
+
+    // MARK: - what an early press does about it
+
+    /// a failed load — a download that dropped, a restart that didn't come
+    /// back — is usually a blip, and the key is the user asking: the next
+    /// press tries again rather than leaving the key dead for good.
+    func testAPressAfterAFailedLoadTriesAgain() {
+        XCTAssertEqual(EnginePreparationState.failed.earlyPress, .retryPreparing)
+    }
+
+    /// nobody asked for the model yet: the press is the ask.
+    func testAPressBeforeAnyLoadStartsOne() {
+        XCTAssertEqual(EnginePreparationState.notStarted.earlyPress, .startPreparing)
+    }
+
+    /// one already on its way is waited on, not started over.
+    func testAPressWhileItLoadsWaits() {
+        XCTAssertEqual(EnginePreparationState.downloading(progress: 0.4).earlyPress, .wait)
+        XCTAssertEqual(EnginePreparationState.warmingUp.earlyPress, .wait)
+        XCTAssertEqual(EnginePreparationState.ready.earlyPress, .wait)
+    }
 }

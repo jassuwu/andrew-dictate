@@ -1564,8 +1564,8 @@ final class DictationCoordinator: ObservableObject {
             let notice = enginePreparationState.pressedEarlyNotice(
                 downloadSize: "about \(size)"
             )
-            switch enginePreparationState {
-            case .notStarted:
+            switch enginePreparationState.earlyPress {
+            case .startPreparing:
                 // a mac set up for meetings only has no model and no menu
                 // row offering one, so this keypress is both the consent the
                 // launch stopped assuming and the only way back in. say what
@@ -1582,14 +1582,14 @@ final class DictationCoordinator: ObservableObject {
                     )
                 }
                 requestEnginePreparation(asking: true)
-            case .failed:
+            case .retryPreparing:
                 // pressing the key is a statement of intent, and a failed
                 // model download is usually a blip. try again, out loud —
                 // the alternative is a lamp that breathes forever.
                 retryEnginePrewarm()
                 flashNotice("speech model failed — retrying")
                 return .refused(.modelNotReady)
-            case .downloading, .warmingUp, .ready:
+            case .wait:
                 break
             }
             if state != .prewarming {
