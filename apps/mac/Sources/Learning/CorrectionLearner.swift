@@ -14,6 +14,9 @@ struct CorrectionLearner {
     struct Swap: Equatable, Sendable {
         let from: String
         let to: String
+        /// what we inserted with this one swap made and nothing else: what
+        /// an entry has to reproduce from the engine's words.
+        let fixed: String
     }
 
     /// three words a side, in one place. "cypher d" for "CypherD" is two,
@@ -25,7 +28,8 @@ struct CorrectionLearner {
     /// them. insertions, deletions and rewrites are your writing and say
     /// nothing about what the engine heard.
     static func swaps(inserted: String, edited: String) -> [Swap] {
-        regions(WordDiff.diff(inserted, edited)).compactMap { region in
+        let insertedWords = WordDiff.words(inserted)
+        return regions(WordDiff.diff(inserted, edited)).compactMap { region in
             guard (1...mostWordsInASwap).contains(region.removed.count),
                   (1...mostWordsInASwap).contains(region.added.count) else {
                 return nil
@@ -41,13 +45,77 @@ struct CorrectionLearner {
                   SoundAlike.soundsAlike(from, to) else {
                 return nil
             }
-            return Swap(from: from, to: to)
+            let fixed = insertedWords[..<region.start]
+                + region.added
+                + insertedWords[(region.start + region.removed.count)...]
+            return Swap(
+                from: from,
+                to: to,
+                fixed: fixed.joined(separator: " ")
+            )
         }
+    }
+
+    /// the entry that makes this swap for you next time, keyed on the
+    /// engine's own words — the dictionary reads those, before the parsers
+    /// turn "jaz dot dev" into "jaz.dev". nil when no run of them does it.
+    ///
+    /// an entry is only offered if cleaning what was heard with it, beside
+    /// the rules you already have, gives back the text you fixed: the
+    /// guarantee fix-a-word makes (ADR 0024), that an entry built from a
+    /// dictation fires on that dictation. a word one of your own entries
+    /// wrote never matches, so the learner never writes over your rules.
+    static func entry(
+        for swap: Swap,
+        heard: String,
+        dictionary: [DictionaryEntry],
+        cleaner: ([DictionaryEntry]) -> DeterministicCleaner
+    ) -> DictionaryEntry? {
+        let asHeard = TranscriptCorrection(
+            transcript: cleaner(dictionary).asHeard(heard)
+        )
+        let taught = Set(dictionary.map { DictionaryStore.matchKey($0.wrong) })
+        let wanted = spellingRuns(swap.fixed)
+        let opening = spelling(swap.from).first
+
+        // shortest first: "jaz" alone would leave "dot dev" behind, so the
+        // run that works with the fewest words is the one the swap meant.
+        for length in 1...mostHeardWordsInASwap {
+            for first in asHeard.spans.indices {
+                let last = first + length - 1
+                guard last < asHeard.spans.count,
+                      let wrong = asHeard.phrase(from: first, through: last)
+                else {
+                    break
+                }
+                // a parser can turn "seven" into "7", but never changes a
+                // word's first letter: a cheap way past most of the runs.
+                if let opening, opening.isLetter,
+                   spelling(wrong).first != opening {
+                    continue
+                }
+                guard !taught.contains(DictionaryStore.matchKey(wrong)) else {
+                    continue
+                }
+                let candidate = DictionaryEntry(wrong: wrong, right: swap.to)
+                let cleaned = cleaner(dictionary + [candidate]).clean(heard)
+                if spellingRuns(cleaned) == wanted {
+                    return candidate
+                }
+            }
+        }
+        return nil
     }
 
     // MARK: - pieces
 
+    /// "jaz dot dev" is one written word and three heard ones, and an
+    /// address can run longer: the most heard words one swap can stand for.
+    private static let mostHeardWordsInASwap = 8
+
     private struct Region {
+        /// where the removed words began, among the words we inserted.
+        var start: Int
         var removed: [String] = []
         var added: [String] = []
     }
@@ -55,16 +123,19 @@ struct CorrectionLearner {
     /// the diff's runs of change between unchanged words.
     private static func regions(_ tokens: [WordDiff.Token]) -> [Region] {
         var regions: [Region] = []
-        var current = Region()
+        var current = Region(start: 0)
+        var position = 0
         for token in tokens {
             switch token.change {
             case .same:
                 if !current.removed.isEmpty || !current.added.isEmpty {
                     regions.append(current)
                 }
-                current = Region()
+                position += 1
+                current = Region(start: position)
             case .removed:
                 current.removed.append(token.text)
+                position += 1
             case .added:
                 current.added.append(token.text)
             }
@@ -73,6 +144,14 @@ struct CorrectionLearner {
             regions.append(current)
         }
         return regions
+    }
+
+    /// the words as lowercased runs of letters and digits — what two texts
+    /// share once case, spacing and punctuation are set aside.
+    private static func spellingRuns(_ text: String) -> [String] {
+        text.lowercased()
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .map(String.init)
     }
 
     /// the stop, comma or bracket the cleaner put around a word is the

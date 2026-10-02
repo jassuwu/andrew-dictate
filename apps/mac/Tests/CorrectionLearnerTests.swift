@@ -91,4 +91,80 @@ final class CorrectionLearnerTests: XCTestCase {
         XCTAssertEqual(swaps("Pick the large one.", "Pick the larger one."), [])
         XCTAssertEqual(swaps("Ship the build.", "Shipped the build."), [])
     }
+
+    // MARK: - the entry fires on what the engine heard
+
+    private func entry(
+        heard: String,
+        inserted: String,
+        edited: String,
+        dictionary: [DictionaryEntry] = []
+    ) -> DictionaryEntry? {
+        guard let swap = CorrectionLearner.swaps(
+            inserted: inserted,
+            edited: edited
+        ).first else {
+            return nil
+        }
+        return CorrectionLearner.entry(
+            for: swap,
+            heard: heard,
+            dictionary: dictionary,
+            cleaner: { DeterministicCleaner(entries: $0) }
+        )
+    }
+
+    /// the dictionary reads the engine's words before the parsers do, so
+    /// an entry keyed on "jaz.dev" would never fire on "jaz dot dev" — the
+    /// fault ADR 0024 exists to rule out. the entry is keyed on what was
+    /// heard.
+    func testTheEntryIsKeyedOnTheWordsTheEngineHeard() {
+        let learned = entry(
+            heard: "send it to jaz dot dev",
+            inserted: "Send it to jaz.dev",
+            edited: "Send it to jass.dev"
+        )
+
+        XCTAssertEqual(learned?.wrong, "jaz dot dev")
+        XCTAssertEqual(learned?.right, "jass.dev")
+        XCTAssertEqual(
+            DeterministicCleaner(entries: learned.map { [$0] } ?? [])
+                .clean("send it to jaz dot dev"),
+            "Send it to jass.dev"
+        )
+    }
+
+    /// the engine wrote the domain itself: the entry is the word as heard.
+    func testAWordTheEngineWroteAsIsIsKeyedAsIs() {
+        let learned = entry(
+            heard: "send it to jaz.gg",
+            inserted: "Send it to jaz.gg.",
+            edited: "Send it to jass.gg."
+        )
+
+        XCTAssertEqual(learned?.wrong, "jaz.gg")
+        XCTAssertEqual(learned?.right, "jass.gg")
+    }
+
+    func testAMultiWordSwapBecomesOneEntry() {
+        let learned = entry(
+            heard: "i watched android dictates on the train",
+            inserted: "I watched Android dictates on the train.",
+            edited: "I watched Andrew Tate's on the train."
+        )
+
+        XCTAssertEqual(learned?.wrong, "android dictates")
+        XCTAssertEqual(learned?.right, "Andrew Tate's")
+    }
+
+    /// a word one of your own entries wrote is yours, not the engine's: the
+    /// learner never writes a rule over a rule you made.
+    func testAWordYourOwnEntryWroteTeachesNothing() {
+        XCTAssertNil(entry(
+            heard: "parse the jay son first",
+            inserted: "Parse the jason first.",
+            edited: "Parse the JSON first.",
+            dictionary: [DictionaryEntry(wrong: "jay son", right: "jason")]
+        ))
+    }
 }
