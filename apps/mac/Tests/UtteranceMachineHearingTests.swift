@@ -80,6 +80,36 @@ final class UtteranceMachineHearingTests: XCTestCase {
         XCTAssertEqual(chimes, [.start])
     }
 
+    /// a mic heard at once still waits out the brush: the chime comes 120
+    /// ms after the press, not with the first audio.
+    func testAMicHeardAtOnceStillChimesOnlyOnceTheKeyIsHeld() async {
+        let m = machine()
+
+        m.keyDown()
+        await pass(.milliseconds(30))
+        mic.hear()
+        await pass(.milliseconds(60))
+        XCTAssertEqual(chimes, [])
+
+        await pass(.milliseconds(30))
+        XCTAssertEqual(chimes, [.start])
+    }
+
+    /// a brush of fn makes no sound, even with the mic already hearing it.
+    func testABrushTheMicHeardMakesNoSound() async {
+        let m = machine()
+
+        m.keyDown()
+        await pass(.milliseconds(30))
+        mic.hear()
+        await pass(.milliseconds(50))
+        m.keyCancelled()
+        await pass(.milliseconds(200))
+
+        XCTAssertEqual(chimes, [])
+        XCTAssertEqual(outcomes, [.brushed])
+    }
+
     // MARK: - helpers
 
     private var presses: [PressRecord] {
