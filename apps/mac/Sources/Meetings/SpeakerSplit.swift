@@ -23,9 +23,15 @@ final class SpeakerSplit {
         var skipped: Int
     }
 
-    /// How long a stop waits for the last pieces. They take a second or two
+    /// How long a stop waits for the last pieces. They take under a second
     /// (ticket 23's bench); this is for a diarizer that never answers.
     nonisolated static let patience = Duration.seconds(10)
+
+    /// Pieces that may wait behind the one being heard while the meeting
+    /// records. A piece of a minute takes well under a second, so five
+    /// waiting is a diarizer that has stopped keeping up, and five are as
+    /// much as a stop should have to catch up on.
+    static let mostWaiting = 5
 
     private let hearing: (any SpeakerHearing)?
     private var pieces: SpeakerPieces
@@ -83,7 +89,15 @@ final class SpeakerSplit {
             filling.append(contentsOf: take)
             rest = rest.dropFirst(take.count)
             for piece in pieces.spool(take.count) {
-                send(piece, filling, priority: .background)
+                if outstanding > Self.mostWaiting {
+                    // the diarizer is this far behind: the piece is let go
+                    // rather than kept waiting, so one that cannot keep up
+                    // costs these turns their numbers, and not the meeting
+                    // its memory or the stop a backlog.
+                    logger.error("a piece of the far side was let go: the speaker split is behind")
+                } else {
+                    send(piece, filling, priority: .background)
+                }
                 filling = []
                 filling.reserveCapacity(pieces.length)
             }

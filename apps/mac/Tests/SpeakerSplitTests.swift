@@ -95,6 +95,32 @@ final class SpeakerSplitTests: XCTestCase {
         hearing.release()
     }
 
+    /// The diarizer is stuck on the first piece while the meeting goes on.
+    /// `mostWaiting` pieces wait behind it and no more: the next ones are
+    /// let go, so a diarizer that cannot keep up costs their turns a number
+    /// and not the meeting its memory, nor the stop a backlog.
+    func testWhileTheDiarizerIsStuckOnlySoManyPiecesWaitAndTheRestAreLetGo() async {
+        let waiting = SpeakerSplit.mostWaiting
+        let hearing = FakeHearing()
+        hearing.hold(at: at(0))
+        hearing.speak([(from: .zero, number: 1), (from: at(waiting * 1_000), number: 2)])
+        let split = SpeakerSplit(hearing, pieces: SpeakerPieces(length: 1_000))
+        spool((waiting + 3) * 1_000, into: split)
+        await hearing.heard(1)
+        hearing.release()
+
+        let (turns, report) = await split.split([
+            them(500),
+            them(waiting * 1_000 + 500),
+            them((waiting + 1) * 1_000 + 500),
+            them((waiting + 2) * 1_000 + 500),
+        ])
+
+        XCTAssertEqual(hearing.pieces.map(\.samples), (0...waiting).map { $0 * 1_000..<($0 + 1) * 1_000 })
+        XCTAssertEqual(turns.map(\.speaker.label), ["them 1", "them 2", "them", "them"])
+        XCTAssertEqual(report?.skipped, 2)
+    }
+
     /// No hearing — the diarizer's models are not on this mac: nothing is
     /// kept, nothing is handed over, the turns are as they were and there is
     /// nothing for the record.
@@ -200,6 +226,7 @@ private final class FakeHearing: SpeakerHearing, @unchecked Sendable {
 
     func release() {
         lock.withLock {
+            holding = nil
             defer { held = nil }
             return held
         }?.resume()
@@ -214,8 +241,17 @@ private final class FakeHearing: SpeakerHearing, @unchecked Sendable {
             return (true, false)
         }
         if holds {
+            // the hold is checked in the same lock that registers the
+            // wait, so a release cannot slip in between.
             await withCheckedContinuation { continuation in
-                lock.withLock { held = continuation }
+                let goNow = lock.withLock { () -> Bool in
+                    guard holding == at else { return true }
+                    held = continuation
+                    return false
+                }
+                if goNow {
+                    continuation.resume()
+                }
             }
         }
         if thrown {
