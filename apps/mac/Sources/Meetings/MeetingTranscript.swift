@@ -87,7 +87,7 @@ enum MeetingTranscriptFile {
     private static let noteText = """
     # meeting transcripts
 
-    written by andrew dictate. one file per meeting, never changed after it is written.
+    written by andrew dictate. one file per meeting, not changed after it is written, unless you have the meeting transcribed again: then the file is replaced where it is, and a hook is run for it again with `again: true`.
 
     ## where things are
 

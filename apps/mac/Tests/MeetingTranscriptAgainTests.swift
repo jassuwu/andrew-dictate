@@ -153,6 +153,23 @@ final class MeetingTranscriptAgainTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.deletingLastPathComponent().path))
     }
 
+    /// the note an agent reads first promised a file that never changes;
+    /// it says when one does.
+    func testTheNoteSaysTheFileChangesOnlyWhenTheMeetingIsTranscribedAgain() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(gaps: [], recovered: false), in: parent, timeZone: kolkata)
+
+        let note = try String(
+            contentsOf: url.deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent(MeetingTranscriptFile.noteName),
+            encoding: .utf8)
+
+        XCTAssertTrue(
+            note.contains("not changed after it is written, unless you have the meeting transcribed again"),
+            note)
+        XCTAssertFalse(note.contains("never changed"), note)
+    }
+
     // MARK: -
 
     private func meeting(
