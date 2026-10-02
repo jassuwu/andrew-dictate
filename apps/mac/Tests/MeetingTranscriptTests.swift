@@ -105,6 +105,7 @@ final class MeetingTranscriptTests: XCTestCase {
         speakers: [you]
         words: 1
         complete: false
+        reason: audio was lost in 1 gap
         gaps:
         - [41.2, 63.0]
         recovered: true
@@ -254,6 +255,54 @@ final class MeetingTranscriptTests: XCTestCase {
             meeting(turns: []), in: parent, timeZone: tz)
 
         XCTAssertEqual(try frontMatter(of: url)["words"], "0")
+    }
+
+    func testAnIncompleteTranscriptSaysWhyWithOneGap() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(
+                gaps: [.init(began: .seconds(41), ended: .seconds(63))],
+                turns: []),
+            in: parent, timeZone: tz)
+
+        let front = try frontMatter(of: url)
+        XCTAssertEqual(front["complete"], "false")
+        XCTAssertEqual(front["reason"], "audio was lost in 1 gap")
+    }
+
+    func testTheDefaultReasonCountsTheGaps() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(
+                gaps: [
+                    .init(began: .seconds(41), ended: .seconds(63)),
+                    .init(began: .seconds(200), ended: .seconds(215)),
+                ],
+                turns: []),
+            in: parent, timeZone: tz)
+
+        XCTAssertEqual(try frontMatter(of: url)["reason"], "audio was lost in 2 gaps")
+    }
+
+    func testAReasonGivenByTheCallerReplacesTheDefault() throws {
+        let url = try MeetingTranscriptFile.write(
+            MeetingTranscript(
+                app: "zoom", started: started(), duration: .seconds(600),
+                engine: "e", gaps: [.init(began: .seconds(41), ended: .seconds(63))],
+                recovered: false, reason: "the meeting model changed halfway",
+                turns: []),
+            in: parent, timeZone: tz)
+
+        XCTAssertEqual(
+            try frontMatter(of: url)["reason"], "the meeting model changed halfway")
+    }
+
+    func testACompleteTranscriptHasNoReason() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(turns: [.init(speaker: .you, at: .seconds(1), text: "hi")]),
+            in: parent, timeZone: tz)
+
+        let front = try frontMatter(of: url)
+        XCTAssertEqual(front["complete"], "true")
+        XCTAssertNil(front["reason"])
     }
 
     // MARK: - round trip

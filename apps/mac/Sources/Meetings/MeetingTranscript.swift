@@ -31,6 +31,10 @@ struct MeetingTranscript: Equatable, Sendable {
     let engine: String
     let gaps: [MeetingSession.Gap]
     let recovered: Bool
+    /// Why the file does not cover the meeting, in one sentence, for the front
+    /// matter. nil gets the default, that audio was lost in N gaps. Only
+    /// written when `complete` is false.
+    var reason: String? = nil
     let turns: [MeetingTurn]
 
     /// SPEC §4 extended: a transcript with holes says so, in its front matter
@@ -111,6 +115,9 @@ enum MeetingTranscriptFile {
             "words: \(wordCount(of: transcript))",
             "complete: \(transcript.complete)",
         ]
+        if !transcript.complete {
+            lines.append("reason: \(transcript.reason ?? lostAudio(transcript.gaps.count))")
+        }
         if transcript.gaps.isEmpty {
             lines.append("gaps: []")
         } else {
@@ -274,6 +281,10 @@ enum MeetingTranscriptFile {
     }
 
     // MARK: - formatting
+
+    private static func lostAudio(_ gapCount: Int) -> String {
+        "audio was lost in \(gapCount) \(gapCount == 1 ? "gap" : "gaps")"
+    }
 
     /// The labels the body uses, each once, in the order they first speak.
     private static func speakers(of transcript: MeetingTranscript) -> [String] {
