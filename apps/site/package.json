@@ -10,6 +10,7 @@
     "build": "astro build",
     "preview": "astro preview",
     "test": "bun test",
+    "checkins": "bun run scripts/checkins.ts",
     "astro": "astro"
   },
   "dependencies": {
