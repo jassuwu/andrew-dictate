@@ -27,6 +27,8 @@ final class HUDPanel: NSPanel {
     /// told when the pointer goes over a pill with a button, and when it
     /// leaves: its countdown stops while a hand is on it.
     var onPointerOverPill: ((Bool) -> Void)?
+    /// out of every screen capture (`HUDPresentation.hidesFromCapture`).
+    private(set) var isHiddenFromCapture = false
 
     override var canBecomeKey: Bool {
         false
@@ -64,6 +66,16 @@ final class HUDPanel: NSPanel {
         contentView = hostingView
         setContentSize(size)
         hostingView.frame = NSRect(origin: .zero, size: size)
+    }
+
+    /// in or out of screen capture. set before `present()`, so a panel that
+    /// comes up hidden is never in a single frame of a share.
+    func hideFromCapture(_ hidden: Bool) {
+        guard hidden != isHiddenFromCapture else {
+            return
+        }
+        isHiddenFromCapture = hidden
+        sharingType = CaptureExclusion.sharingType(hidden: hidden)
     }
 
     func present() {

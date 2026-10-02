@@ -258,7 +258,8 @@ final class DictationCoordinator: ObservableObject {
     private var heldFeedback: (
         message: String,
         duration: TimeInterval,
-        at: Date
+        at: Date,
+        aboutAMeeting: Bool
     )?
     /// the pill's questions about meetings (ADR 0047): the one up and the
     /// one waiting for the pill. a question is the one pill that waits its
@@ -314,6 +315,9 @@ final class DictationCoordinator: ObservableObject {
     private var meetingFacts = HUDMeetingFacts()
     private var meetingLight: HUDMeetingLight = .off
     private var meetingLightCooling: Task<Void, Never>?
+    /// the feedback generation of the sentence a meeting said, while it is
+    /// on the pill: that pill is hidden from screen capture.
+    private var meetingPillGeneration: UInt64?
     private var meetingCancellables: Set<AnyCancellable> = []
     /// A quit is waiting on a meeting's transcript to be written.
     private var quitWaitingOnMeeting = false
@@ -861,7 +865,11 @@ final class DictationCoordinator: ObservableObject {
             return
         }
         guard installedMeetingModels.contains(settings.meetingModel) else {
-            flashNotice("still downloading the meeting model", duration: 2)
+            flashNotice(
+                "still downloading the meeting model",
+                duration: 2,
+                aboutAMeeting: true
+            )
             return
         }
         startMeeting()
@@ -936,7 +944,11 @@ final class DictationCoordinator: ObservableObject {
         ) {
         case .flashNow:
             heldFeedback = nil
-            flashNotice(held.message, duration: held.duration)
+            flashNotice(
+                held.message,
+                duration: held.duration,
+                aboutAMeeting: held.aboutAMeeting
+            )
         case .hold:
             synchronizeHUD()
         case .drop:
@@ -1019,7 +1031,8 @@ final class DictationCoordinator: ObservableObject {
             heldFeedback = (
                 message: message,
                 duration: 1.2,
-                at: Date()
+                at: Date(),
+                aboutAMeeting: isMeetingPillUp
             )
         }
         isOnboardingPresented = true
@@ -1491,12 +1504,19 @@ final class DictationCoordinator: ObservableObject {
         flashNotice(message, duration: duration)
     }
 
+    /// `aboutAMeeting`: the pill is hidden from screen capture, like the
+    /// meeting's light (`HUDPresentation.hidesFromCapture`).
     private func flashNotice(
         _ message: String,
-        duration: TimeInterval = 1.6
+        duration: TimeInterval = 1.6,
+        aboutAMeeting: Bool = false
     ) {
         Task { @MainActor [weak self] in
-            await self?.flashFeedback(message, duration: duration)
+            await self?.flashFeedback(
+                message,
+                duration: duration,
+                aboutAMeeting: aboutAMeeting
+            )
         }
     }
 
@@ -1896,9 +1916,14 @@ final class DictationCoordinator: ObservableObject {
 
     private func flashFeedback(
         _ message: String,
-        duration: TimeInterval
+        duration: TimeInterval,
+        aboutAMeeting: Bool = false
     ) async {
-        guard let shown = showFeedback(message, duration: duration) else {
+        guard let shown = showFeedback(
+            message,
+            duration: duration,
+            aboutAMeeting: aboutAMeeting
+        ) else {
             return
         }
         await expireFeedback(shown)
@@ -1909,7 +1934,8 @@ final class DictationCoordinator: ObservableObject {
     /// follows. nil when the setup window is holding it instead.
     private func showFeedback(
         _ message: String,
-        duration: TimeInterval
+        duration: TimeInterval,
+        aboutAMeeting: Bool = false
     ) -> ShownFeedback? {
         // the setup window force-dismissed the panel, so the sleep-then-
         // clear would run against something nobody can see and the
@@ -1921,7 +1947,8 @@ final class DictationCoordinator: ObservableObject {
             heldFeedback = (
                 message: message,
                 duration: duration,
-                at: Date()
+                at: Date(),
+                aboutAMeeting: aboutAMeeting
             )
             return nil
         }
@@ -1934,6 +1961,7 @@ final class DictationCoordinator: ObservableObject {
         let feedbackToken = feedbackGeneration
         let stateToken = stateGeneration
         activeFeedbackGeneration = feedbackToken
+        meetingPillGeneration = aboutAMeeting ? feedbackToken : nil
         hudViewModel.showFeedback(message)
         announce(message)
         synchronizeHUD()
@@ -2059,6 +2087,14 @@ final class DictationCoordinator: ObservableObject {
                 HUDLayoutEngine.layout(
                     for: self.hudViewModel.content,
                     screenWidth: screenWidth
+                )
+            )
+            panel.hideFromCapture(
+                HUDPresentation.hidesFromCapture(
+                    meetingLight: self.meetingLight,
+                    meetingPillIsUp: self.isMeetingPillUp,
+                    isHiddenNow: panel.isHiddenFromCapture,
+                    isOnScreen: panel.isVisible
                 )
             )
             panel.present()
@@ -2208,7 +2244,7 @@ extension DictationCoordinator {
             return
         }
         if state == .recording {
-            flashNotice("finish dictating first")
+            flashNotice("finish dictating first", aboutAMeeting: true)
             return
         }
         liveTranscript.clear()
@@ -2573,7 +2609,7 @@ extension DictationCoordinator {
             case .writingItOut, .readingAgain, .recovering, .transcribingAgain: duration = 6
             default: duration = 2
             }
-            flashNotice(text, duration: duration)
+            flashNotice(text, duration: duration, aboutAMeeting: true)
         }
     }
 
@@ -2639,6 +2675,15 @@ extension DictationCoordinator {
         } else {
             hudViewModel.showMeetingLight(.off)
         }
+    }
+
+    /// a pill about a meeting is up: any question (each is about a
+    /// meeting), or a sentence a meeting said.
+    private var isMeetingPillUp: Bool {
+        guard let active = activeFeedbackGeneration else {
+            return false
+        }
+        return isQuestionUp || active == meetingPillGeneration
     }
 
     /// the panel belongs to the meeting being recorded. the end of one
