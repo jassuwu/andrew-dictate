@@ -78,20 +78,10 @@ enum MeetingEngines {
 
     /// Downloads (or verifies) the model, reporting 0…1. False means it did
     /// not finish; the caller shows "try again".
-    ///
-    /// The voice model the stretches are cut with comes down too, first:
-    /// it is 1 mb, and a meeting must never wait on the network to start.
-    /// It failing is not the meeting model failing — a meeting without it
-    /// hears speech by loudness and fetches it then.
     static func prepare(
         _ model: MeetingModel,
         progress: @escaping @Sendable (Double) -> Void
     ) async -> Bool {
-        do {
-            try await SileroVoice.fetch()
-        } catch {
-            logger.error("the voice model did not download: \(error.localizedDescription, privacy: .public)")
-        }
         do {
             if let variant = model.whisperVariant {
                 _ = try await WhisperKit.download(

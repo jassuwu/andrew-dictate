@@ -10,12 +10,10 @@ private let voiceLogger = Logger(subsystem: AppIdentity.loggingSubsystem, catego
 /// Silero, FluidAudio's voice activity model, loaded once for a meeting
 /// and shared by both its sides, each of which gets a detector of its own.
 ///
-/// Loaded from disk and from nowhere else: setup fetches it beside the
-/// meeting model, so no meeting waits on the network at its start. A mac
-/// without it, or one it will not load on, hears speech by loudness instead
-/// — said once in the log, and never a reason for a meeting to fail. A
-/// meeting that finds it missing fetches it, in the background, for the
-/// next one.
+/// It ships inside the app (1 mb, MIT, the licence beside it), so nothing
+/// is fetched for it and no meeting waits on the network at its start. A
+/// copy that will not load hears speech by loudness instead — said once in
+/// the log, and never a reason for a meeting to fail.
 final class SileroVoice: Sendable {
     private let loading: Task<VadManager?, Never>
 
@@ -35,41 +33,25 @@ final class SileroVoice: Sendable {
         get async { await loading.value }
     }
 
-    // MARK: - on disk
+    // MARK: - in the app
 
-    /// Beside the other FluidAudio models, where FluidAudio itself would
-    /// put it, so removal has one place to look.
-    static var modelURL: URL {
-        AppIdentity.sharedModelDirectory
-            .appendingPathComponent(Repo.vad.folderName, isDirectory: true)
-            .appendingPathComponent(ModelNames.VAD.sileroVadFile, isDirectory: true)
-    }
-
-    static var isOnDisk: Bool {
-        FileManager.default.fileExists(atPath: modelURL.path)
-    }
-
-    /// Fetches the model if it is not here yet: about 1 mb, for setup.
-    static func fetch() async throws {
-        guard !isOnDisk else { return }
-        try await ModelHub.download(.vad, to: AppIdentity.sharedModelDirectory)
+    /// The model in the app's resources, in a folder of its own beside its
+    /// licence. It is the one FluidAudio's `VadManager` is written for, so
+    /// moving FluidAudio's pin in `project.yml` means checking this too.
+    static var modelURL: URL? {
+        Bundle.main.url(
+            forResource: ModelNames.VAD.sileroVad,
+            withExtension: "mlmodelc",
+            subdirectory: "Voice")
     }
 
     private static func load() async -> VadManager? {
-        guard isOnDisk else {
-            voiceLogger.notice("the voice model is not on this mac: this meeting hears speech by loudness, and the model is fetched for the next")
-            // not waited for: this meeting has already started without it.
-            Task.detached(priority: .utility) {
-                do {
-                    try await fetch()
-                } catch {
-                    voiceLogger.error("the voice model did not download: \(error.localizedDescription, privacy: .public)")
-                }
-            }
+        guard let modelURL else {
+            voiceLogger.error("the voice model is not in the app, so this meeting hears speech by loudness")
             return nil
         }
-        // FluidAudio's own loader would download the model again if it found
-        // it damaged — at the start of a meeting. Loaded by hand, a damaged
+        // FluidAudio's own loader would fetch the model if it found it
+        // damaged — at the start of a meeting. Loaded by hand, a damaged
         // model is a model that did not load.
         do {
             let configuration = MLModelConfiguration()

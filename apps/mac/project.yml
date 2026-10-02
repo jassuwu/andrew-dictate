@@ -11,7 +11,9 @@ packages:
     # pinned, not ranged: the generated .xcodeproj is gitignored, so its
     # Package.resolved never reaches CI and `from:` let every release
     # resolve whatever was newest that morning. 0.15.6 arrived unable to
-    # compile for x86_64 and took a release build with it.
+    # compile for x86_64 and took a release build with it. the voice model
+    # in Sources/Resources/Voice is the one this version's VadManager is
+    # written for: moving the pin means checking it.
     exactVersion: 0.15.5
   WhisperKit:
     url: https://github.com/argmaxinc/WhisperKit
@@ -32,6 +34,12 @@ targets:
         buildPhase: resources
       # copied as a folder so ATSApplicationFontsPath can point at it.
       - path: Sources/Resources/Fonts
+        type: folder
+        buildPhase: resources
+      # silero's voice model and its licence, copied as they are: a folder,
+      # so xcode does not recompile the compiled model. SileroVoice looks
+      # for it as `Voice` in the app's resources.
+      - path: Sources/Resources/Voice
         type: folder
         buildPhase: resources
     dependencies:
