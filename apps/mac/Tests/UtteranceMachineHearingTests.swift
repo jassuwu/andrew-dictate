@@ -292,6 +292,51 @@ final class UtteranceMachineHearingTests: XCTestCase {
         XCTAssertEqual(outcomes, [.brushed])
     }
 
+    /// a mic that sent a whisper did its job: quiet speech the engine made
+    /// nothing of is still "heard nothing", and the mic is kept.
+    func testAQuietTakeThatSaysNothingIsStillHeardNothing() async {
+        let m = machine()
+        mic.samples = (0..<16_000).map { $0.isMultiple(of: 2) ? 0.000_1 : -0.000_1 }
+        engine.reply = .success("")
+
+        m.keyDown()
+        mic.hear()
+        await pass(.seconds(1))
+        m.keyUp()
+        await settle { !self.pills.isEmpty }
+
+        XCTAssertEqual(pills, [Pill("heard nothing", 2.4)])
+        XCTAssertEqual(engine.heard.count, 1)
+        XCTAssertFalse(events.contains(.microphoneDropped))
+        XCTAssertEqual(retryOffers, [])
+        XCTAssertEqual(outcomes, [.heardNothing])
+    }
+
+    /// the engine throwing is not the mic's fault: the samples are kept and
+    /// the next press while the pill is up replays them.
+    func testAFailedTranscriptionStillArmsARetry() async {
+        let m = machine()
+        engine.reply = .failure(EngineFailure())
+
+        m.keyDown()
+        mic.hear()
+        await pass(.seconds(1))
+        m.keyUp()
+        await settle { !self.pills.isEmpty }
+
+        XCTAssertEqual(pills, [Pill("couldn't transcribe — tap to try again", 4)])
+        XCTAssertFalse(events.contains(.microphoneDropped))
+        XCTAssertEqual(retryOffers, [true])
+        XCTAssertEqual(outcomes, [.couldNotTranscribe])
+
+        engine.reply = .success("the build failed")
+        m.keyDown()
+        XCTAssertEqual(m.state, .transcribing)
+        XCTAssertEqual(mic.starts, 1)
+        await settle { self.inserter.inserted.count == 1 }
+        XCTAssertEqual(inserter.inserted, ["The build failed."])
+    }
+
     // MARK: - helpers
 
     private var presses: [PressRecord] {
