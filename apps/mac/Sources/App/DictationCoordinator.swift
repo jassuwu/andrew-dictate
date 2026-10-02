@@ -119,9 +119,27 @@ final class DictationCoordinator: ObservableObject {
     private let transcriptionEngine: ParakeetEngine
     /// key-down to outcome. this object wires it and wears what it says.
     private let machine: UtteranceMachine
-    /// var, not let: the input node can be missing at launch (headset off,
-    /// dock unplugged) and arrive later. one failed build must not be final.
-    private var audioRecorder: AudioRecorder?
+    /// the capture each press records with. a device change, a mic that
+    /// wedged or the mac going to sleep is answered with a fresh one, never
+    /// by rebuilding this one in place.
+    private lazy var captureSlot = CaptureSlot(
+        clock: ContinuousUtteranceClock(),
+        isInUse: { [weak self] in
+            self?.machine.state == .recording
+        },
+        keepsListening: { [weak self] in
+            self?.settings.preRollEnabled ?? false
+        },
+        make: { [weak self] in
+            let recorder = AudioRecorder(
+                preRollEnabled: self?.settings.preRollEnabled ?? false
+            )
+            self?.wire(recorder)
+            // the wave follows whichever capture is current.
+            self?.hudViewModel.useRecorder(recorder)
+            return recorder
+        }
+    )
     private let feedbackSounds: FeedbackSounds
     private let hudViewModel: HUDViewModel
     private var hudPanelStorage: HUDPanel?
@@ -157,7 +175,6 @@ final class DictationCoordinator: ObservableObject {
     private var engineSwitchState: EngineSwitchState
     private var enginePreparationRequested: Bool
     private var settingsCancellables: Set<AnyCancellable> = []
-    private var isApplyingPreRollSetting = false
     private var isApplyingEngineVersionSetting = false
     private var onboardingWindowController: OnboardingWindowController?
     private var isOnboardingPresented: Bool
@@ -235,21 +252,6 @@ final class DictationCoordinator: ObservableObject {
             coolDuration: HUDWaveMotion.coolDuration
         )
 
-        let recorder: AudioRecorder?
-        do {
-            recorder = try AudioRecorder(
-                preRollEnabled: settings.preRollEnabled
-            )
-        } catch {
-            recorder = nil
-            audioLogger.error(
-                """
-                audio recorder init failed: \
-                \(error.localizedDescription, privacy: .public)
-                """
-            )
-        }
-        audioRecorder = recorder
         feedbackSounds = FeedbackSounds(settings: settings)
         meetings = LazyMeetings(coordinator: {
             MeetingCoordinator(
@@ -270,7 +272,7 @@ final class DictationCoordinator: ObservableObject {
 
         let viewModel = HUDViewModel(
             state: .prewarming,
-            audioRecorder: recorder
+            audioRecorder: nil
         )
         hudViewModel = viewModel
 
@@ -307,9 +309,9 @@ final class DictationCoordinator: ObservableObject {
         monitor.onEscape = { [weak self] in
             self?.machine.escape() ?? false
         }
-        if let recorder {
-            wire(recorder)
-        }
+        // built ahead of the first press, off the main thread, and with
+        // pre-roll on, listening.
+        captureSlot.prepare()
 
         settings.$preRollEnabled
             .dropFirst()
@@ -780,11 +782,17 @@ final class DictationCoordinator: ObservableObject {
     }
 
     func requestMicrophoneAccess() async -> Bool {
-        if let audioRecorder {
-            return await audioRecorder.requestMicrophoneAccess()
+        let granted = await AVCaptureDevice.requestAccess(for: .audio)
+
+        if granted {
+            audioLogger.notice("microphone permission granted")
+            // with pre-roll on, the mic could not listen until now.
+            captureSlot.prepare()
+        } else {
+            audioLogger.notice("microphone permission denied")
         }
 
-        return await AVCaptureDevice.requestAccess(for: .audio)
+        return granted
     }
 
     func retryEnginePrewarm() {
@@ -871,39 +879,16 @@ final class DictationCoordinator: ObservableObject {
         controller.present()
     }
 
+    /// a capture is built for one mode or the other, so switching throws it
+    /// away — never under a live take — and with pre-roll on, a fresh one
+    /// starts listening.
     private func applyPreRoll(_ enabled: Bool) {
-        guard !isApplyingPreRollSetting,
-              let audioRecorder else {
-            return
-        }
-
-        isApplyingPreRollSetting = true
-        defer { isApplyingPreRollSetting = false }
-
         machine.abandonRecording()
-
-        do {
-            try audioRecorder.applyPreRoll(enabled)
-        } catch {
-            audioLogger.error(
-                """
-                pre-roll setting failed to apply: \
-                \(error.localizedDescription, privacy: .public)
-                """
-            )
-            let appliedMode = audioRecorder.isPreRollEnabled
-            Task { [weak self] in
-                guard let self,
-                      self.settings.preRollEnabled != appliedMode else {
-                    return
-                }
-                self.settings.preRollEnabled = appliedMode
-            }
-        }
+        captureSlot.listeningChanged()
     }
 
     private func prepareProductiveWaitWork() {
-        audioRecorder?.prepareGraph()
+        captureSlot.prepare()
     }
 
     private func replaceEngine(with version: EngineVersion) {
@@ -1189,8 +1174,13 @@ final class DictationCoordinator: ObservableObject {
                         self?.handleCaptureInterruption(
                             reason: .systemPaused
                         )
+                        // nothing listens through a sleep, pre-roll
+                        // included: the capture goes, and waking builds
+                        // the next one once the hardware has settled.
+                        self?.captureSlot.suspend()
                     } else {
                         self?.handleSystemResume()
+                        self?.captureSlot.deviceChanged()
                     }
                 }
             }
@@ -1335,39 +1325,12 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
-    /// the recorder can fail to build at launch — no input device yet — and
-    /// that answer was kept forever. ask again when the user asks to record:
-    /// by then the headset may well be back on.
-    private func ensureAudioRecorder() -> AudioRecorder? {
-        if let audioRecorder {
-            return audioRecorder
-        }
-
-        do {
-            let recorder = try AudioRecorder(
-                preRollEnabled: settings.preRollEnabled
-            )
-            wire(recorder)
-            audioRecorder = recorder
-            hudViewModel.useRecorder(recorder)
-            audioLogger.notice("audio recorder rebuilt on demand")
-            return recorder
-        } catch {
-            audioLogger.error(
-                """
-                audio recorder still unavailable: \
-                \(error.localizedDescription, privacy: .public)
-                """
-            )
-            return nil
-        }
-    }
-
-    /// the launch recorder and one rebuilt on demand answer to the same
-    /// three things from underneath.
+    /// every capture the slot builds answers to the same three things from
+    /// underneath.
     private func wire(_ recorder: AudioRecorder) {
-        recorder.onInterruption = { [weak self] reason in
-            self?.handleCaptureInterruption(reason: reason)
+        recorder.onConfigurationChange = { [weak self] in
+            self?.captureSlot.deviceChanged()
+            self?.handleCaptureInterruption(reason: .deviceChanged)
         }
         recorder.onCapReached = { [weak self] in
             self?.handleCaptureCapReached()
@@ -1539,11 +1502,9 @@ final class DictationCoordinator: ObservableObject {
             announcePermissionGap("microphone access is off")
             return .refused(.microphonePermissionOff)
         }
-        guard let audioRecorder = ensureAudioRecorder() else {
-            flashNotice("no microphone available")
-            return .refused(.noMicrophone)
-        }
-        return .ready(audioRecorder)
+        // no audio here: the capture is opened on its own queue when the
+        // machine starts it, and a missing mic answers from there.
+        return .ready(captureSlot.captureForPress())
     }
 
     /// the menu's door to the samples the engine threw on; a press while the
@@ -1777,8 +1738,7 @@ extension DictationCoordinator {
         case let .retryOffered(offered):
             canRetryLastFailure = offered
         case .microphoneDropped:
-            audioRecorder = nil
-            hudViewModel.useRecorder(nil)
+            captureSlot.drop()
         case let .pressEnded(record):
             keep(record)
         }
