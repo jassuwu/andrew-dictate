@@ -111,18 +111,16 @@ final class MeetingCoordinator: ObservableObject {
     /// One transcriber per meeting, built for the model chosen at the time —
     /// the setting can change between meetings, not during one.
     private let makeTranscriber: @Sendable (MeetingModel) async throws -> any MeetingTranscriber
-    private var transcriber: (any MeetingTranscriber)?
     private let diarizer: any MeetingDiarizer
     private let spool: MeetingSpool
     private let preferences: @MainActor () -> MeetingPreferences
     private let hookRunner: HookRunner
     private let logger = Logger(subsystem: AppIdentity.loggingSubsystem, category: "meeting")
 
+    /// The meeting being recorded, from `start` until it stops.
+    private var current: Meeting?
     private var session: MeetingSession
     private var health: TapHealthMonitor
-    private var handle: MeetingSpool.Handle?
-    private var audioFile: SpoolAudioFile?
-    private var startedAt = Date()
     private var captureTask: Task<Void, Never>?
     private var linesTask: Task<Void, Never>?
     private var nudgePending = false
@@ -195,13 +193,14 @@ final class MeetingCoordinator: ObservableObject {
     func start(tapping app: RunningApp) {
         guard session.state == .idle else { return }
         let prefs = preferences()
+        let meeting = Meeting(app: MeetingApps.displayName(app), started: date())
+        current = meeting
 
         session.start()
         health = Self.freshMonitor(thresholds)
         self.app = app
         elapsed = .zero
         liveLines = []
-        startedAt = date()
         startedOn = now()
         lastChunkArrived = now()
         nudgePending = false
@@ -211,7 +210,6 @@ final class MeetingCoordinator: ObservableObject {
         startWatchdog()
         publish()
 
-        let appName = MeetingApps.displayName(app)
         captureTask = Task { [weak self] in
             guard let self else { return }
 
@@ -220,10 +218,10 @@ final class MeetingCoordinator: ObservableObject {
             let transcriber: any MeetingTranscriber
             do {
                 let handle = try spool.begin(.init(
-                    app: appName, started: startedAt,
+                    app: meeting.app, started: meeting.started,
                     engine: prefs.model.rawValue, model: prefs.model))
-                self.handle = handle
-                audioFile = try SpoolAudioFile(url: handle.audioURL)
+                meeting.handle = handle
+                meeting.audioFile = try SpoolAudioFile(url: handle.audioURL)
                 transcriber = try await makeTranscriber(prefs.model)
             } catch {
                 logger.error("meeting could not start: \(error.localizedDescription, privacy: .public)")
@@ -231,7 +229,7 @@ final class MeetingCoordinator: ObservableObject {
                 abandonKeepingSpool()
                 return
             }
-            self.transcriber = transcriber
+            meeting.transcriber = transcriber
             listenForLines(transcriber)
             // Loading whisper takes ten-odd seconds; the tap opens now and
             // the transcriber buffers what it is fed until ready.
@@ -255,13 +253,13 @@ final class MeetingCoordinator: ObservableObject {
                 loading.cancel()
                 session.neverHeardTheProbe()
                 publish()
-                onEvent?(.cannotHear(app: appName))
+                onEvent?(.cannotHear(app: meeting.app))
                 stop(announcingNothingKept: false)
                 return
             }
             for await chunk in chunks {
                 guard !Task.isCancelled else { break }
-                await ingest(chunk)
+                await ingest(chunk, into: meeting)
             }
         }
     }
@@ -274,14 +272,13 @@ final class MeetingCoordinator: ObservableObject {
     /// hear" — a second line saying nothing was kept would be the same news
     /// twice.
     private func stop(announcingNothingKept: Bool) {
-        guard session.state != .idle, let app else { return }
+        guard session.state != .idle, let meeting = current else { return }
         captureTask?.cancel()
         captureTask = nil
         linesTask?.cancel()
         linesTask = nil
         watchdogTask?.cancel()
         watchdogTask = nil
-        let appName = MeetingApps.displayName(app)
 
         Task { [weak self] in
             guard let self else { return }
@@ -291,24 +288,25 @@ final class MeetingCoordinator: ObservableObject {
             // stopping where the audio did.
             let recording = session.finish(at: max(elapsed, wallElapsed))
             startedOn = nil
+            if current === meeting { current = nil }
             publish()
 
-            guard let recording, let handle else {
-                if let handle { spool.discard(handle) }
-                self.handle = nil
-                audioFile = nil
-                transcriber = nil
+            // From here on the meeting is written out from what it holds
+            // itself: the next one can start in the meantime, with a spool,
+            // an engine and a start of its own.
+            guard let recording, let handle = meeting.handle else {
+                if let handle = meeting.handle { spool.discard(handle) }
                 if announcingNothingKept { onEvent?(.nothingToKeep) }
                 return
             }
 
             onEvent?(.writingItOut)
-            let turns = await transcriber?.finish() ?? []
-            transcriber = nil
-            audioFile = nil
+            let turns = await meeting.transcriber?.finish() ?? []
+            meeting.transcriber = nil
+            meeting.audioFile = nil
             await finish(
                 turns: turns, recording: recording, handle: handle,
-                app: appName, started: startedAt, model: preferences().model,
+                app: meeting.app, started: meeting.started, model: preferences().model,
                 recovered: false)
         }
     }
@@ -325,9 +323,7 @@ final class MeetingCoordinator: ObservableObject {
         watchdogTask?.cancel()
         watchdogTask = nil
         startedOn = nil
-        transcriber = nil
-        audioFile = nil
-        handle = nil
+        current = nil
         Task { [source] in await source.stop() }
         _ = session.finish(at: elapsed)
         publish()
@@ -407,10 +403,10 @@ final class MeetingCoordinator: ObservableObject {
 
     // MARK: - audio
 
-    private func ingest(_ chunk: MeetingAudioChunk) async {
+    private func ingest(_ chunk: MeetingAudioChunk, into meeting: Meeting) async {
         elapsed = chunk.at + chunk.duration
         lastChunkArrived = now()
-        if let audioFile {
+        if let audioFile = meeting.audioFile {
             try? await audioFile.append(chunk)
         }
 
@@ -431,7 +427,7 @@ final class MeetingCoordinator: ObservableObject {
             if session.state == .provingItCanHear {
                 session.heardTheProbe()
                 publish()
-                if let app { onEvent?(.started(app: MeetingApps.displayName(app))) }
+                onEvent?(.started(app: meeting.app))
             }
             session.tapRecovered(at: elapsed)
             if wasRebuilding { onEvent?(.gapEnded); publish() }
@@ -448,7 +444,7 @@ final class MeetingCoordinator: ObservableObject {
             if session.state == .provingItCanHear {
                 session.neverHeardTheProbe()
                 publish()
-                if let app { onEvent?(.cannotHear(app: MeetingApps.displayName(app))) }
+                onEvent?(.cannotHear(app: meeting.app))
                 // Nothing was ever heard, so there is nothing to keep and no
                 // meeting to keep running: the menu must not say "recording".
                 stop(announcingNothingKept: false)
@@ -463,7 +459,7 @@ final class MeetingCoordinator: ObservableObject {
         }
 
         if session.state == .recording || session.state == .rebuilding {
-            await transcriber?.feed(chunk)
+            await meeting.transcriber?.feed(chunk)
         }
 
         if !nudgePending, session.shouldNudge(at: elapsed) {
@@ -546,12 +542,10 @@ final class MeetingCoordinator: ObservableObject {
             // the last thing the lamp showed, and silence after it would
             // read as done (SPEC §4).
             logger.error("could not write the transcript: \(error.localizedDescription, privacy: .public)")
-            self.handle = nil
             onEvent?(.saveFailed(error.localizedDescription))
             return
         }
         try? spool.finish(handle)
-        self.handle = nil
 
         let summary = (try? MeetingTranscriptFile.summary(of: url)) ?? MeetingSummary(
             fileURL: url, app: app, started: started, duration: recording.duration,
@@ -656,5 +650,27 @@ final class MeetingCoordinator: ObservableObject {
             probeTimeout: t.probeTimeout,
             silenceTimeout: t.silenceTimeout,
             silenceFloor: t.silenceFloor)
+    }
+}
+
+extension MeetingCoordinator {
+    /// One meeting's own things: the spool it writes to, the engine that
+    /// listens to it, and what it started as. A meeting that has stopped
+    /// keeps them until it is written out, and the next one is handed its
+    /// own, so the two have nothing to reach into each other for.
+    @MainActor
+    private final class Meeting {
+        /// The app as shown to people: "zoom", "chrome".
+        let app: String
+        let started: Date
+        /// Set once the spool is open, and nil for good if it never was.
+        var handle: MeetingSpool.Handle?
+        var audioFile: SpoolAudioFile?
+        var transcriber: (any MeetingTranscriber)?
+
+        init(app: String, started: Date) {
+            self.app = app
+            self.started = started
+        }
     }
 }

@@ -407,6 +407,53 @@ final class MeetingCoordinatorTests: XCTestCase {
             "zoom · 1h 42m · recovered · 2026-09-05-1402-zoom.md")
     }
 
+    // MARK: - one meeting, one file
+
+    /// Stop, then start again while the first is still being written out:
+    /// back to back, the way a calendar runs. Each gets its own file, its
+    /// own start and its own words — the second used to be lost, and the
+    /// first stamped with the second's start.
+    func testAMeetingStartedWhileTheLastIsWritingOutGetsItsOwnFile() async throws {
+        let first = FakeTranscriber(finalTurns: [
+            .init(speaker: .you, at: .seconds(1), text: "the first meeting")])
+        let second = FakeTranscriber(finalTurns: [
+            .init(speaker: .you, at: .seconds(1), text: "the second meeting")])
+        first.holds = true
+        transcribers.lineUp(first, second)
+        let c = coordinator(starting: [
+            Date(timeIntervalSince1970: 1_787_000_000),
+            Date(timeIntervalSince1970: 1_787_003_600),
+        ])
+
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        source.send(loud(at: .seconds(1)))
+        await settle()
+        c.stop()
+        await held(first)
+
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        source.send(loud(at: .seconds(1)))
+        await settle()
+        first.release()
+        await settle()
+        c.stop()
+        await settle(for: 1.0)
+
+        let all = MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs"))
+        XCTAssertEqual(all.map(\.started), [
+            Date(timeIntervalSince1970: 1_787_003_600),
+            Date(timeIntervalSince1970: 1_787_000_000),
+        ])
+        let bodies = try all.map { try String(contentsOf: $0.fileURL, encoding: .utf8) }
+        XCTAssertEqual(bodies.map { $0.contains("[00:00:01] you: the second meeting") }, [true, false])
+        XCTAssertEqual(bodies.map { $0.contains("[00:00:01] you: the first meeting") }, [false, true])
+        XCTAssertFalse(events.contains(.nothingToKeep), "\(events)")
+    }
+
     // MARK: - helpers
 
     private func loud(at: Duration) -> MeetingAudioChunk {
