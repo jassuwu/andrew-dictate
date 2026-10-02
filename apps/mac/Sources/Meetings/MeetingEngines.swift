@@ -105,10 +105,12 @@ enum MeetingEngines {
     /// Downloads (or verifies) the model, reporting 0…1. False means it did
     /// not finish; the caller shows "try again".
     ///
-    /// What a whisper meeting reads besides the model comes down after it,
-    /// so that no meeting waits on the network at its start: the tokenizer.
-    /// It failing is logged and is not the model failing: a meeting without
-    /// it says so rather than fetching it.
+    /// What a meeting reads besides the model comes down after it, so that
+    /// no meeting waits on the network at its start or its end: whisper's
+    /// tokenizer for a whisper model, and the speaker-split models for every
+    /// model. Either failing is logged and is not the model failing: a
+    /// meeting without the split has plain `them`, and one without a
+    /// tokenizer says so rather than fetching it.
     static func prepare(
         _ model: MeetingModel,
         progress: @escaping @Sendable (Double) -> Void
@@ -134,6 +136,11 @@ enum MeetingEngines {
             try await fetchTokenizer(for: model)
         } catch {
             logger.error("whisper's tokenizer did not download: \(error.localizedDescription, privacy: .public)")
+        }
+        do {
+            try await FluidDiarizer.fetch()
+        } catch {
+            logger.error("the speaker-split models did not download: \(error.localizedDescription, privacy: .public)")
         }
         progress(1)
         return isInstalled(model)
