@@ -121,6 +121,8 @@ targets:
       - Sources/About/UpdateOffer.swift
       - Sources/About/DailyUpdateCheck.swift
       - Sources/About/UpdateHandOff.swift
+      - Sources/About/CommandRunner.swift
+      - Sources/About/BrewUpgrade.swift
       - path: Sources/Meetings
         excludes:
           - LiveTranscriptView.swift
@@ -133,6 +135,7 @@ targets:
       - Sources/Settings/MeetingsListModel.swift
       - Sources/Onboarding/OnboardingMeetingSetup.swift
       - Sources/App/AppIdentity.swift
+      - Sources/App/AppRelaunch.swift
       - Sources/App/Capabilities.swift
       - Sources/App/CaptureInterruptionNotice.swift
       - Sources/App/EnginePreparationState.swift

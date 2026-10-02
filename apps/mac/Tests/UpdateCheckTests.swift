@@ -469,54 +469,565 @@ final class UpdateCheckTests: XCTestCase {
         XCTAssertEqual(relaunched.line?.title, "update to 0.9.5")
     }
 
-    // MARK: - the hand-off: what the click does today
+    // MARK: - the update line: one click, from available to restart
 
-    /// the menu closes on the click, so the pill says what happened.
-    @MainActor
-    func testABrewLineCopiesTheCommandAndSaysSo() {
-        let pasteboard = NSPasteboard.withUniqueName()
-        defer { pasteboard.releaseGlobally() }
-        var opened: [URL] = []
-        var said: [String] = []
-        let handOff = ManualHandOff(
-            pasteboard: pasteboard,
-            open: { opened.append($0) },
-            confirm: { said.append($0) }
+    private let brewLine = UpdateOffer.Line(
+        version: "0.9.5",
+        action: .brewUpgrade("brew upgrade --cask jassuwu/tap/andrew-dictate")
+    )
+
+    private let optBrew = URL(fileURLWithPath: "/opt/homebrew/bin/brew")
+
+    /// the click runs brew where it lives, and the line says so at once.
+    func testClickingABrewLineStartsTheUpgrade() {
+        let click = UpdateOffer.click(
+            .available(brewLine),
+            busy: false,
+            brew: optBrew
         )
 
-        handOff.perform(
-            .brewUpgrade("brew upgrade --cask jassuwu/tap/andrew-dictate")
+        XCTAssertEqual(click.state, .updating)
+        XCTAssertEqual(click.effect, .upgrade(brew: optBrew))
+        XCTAssertEqual(click.state.title, "updating…")
+        XCTAssertFalse(click.state.isEnabled)
+    }
+
+    /// a take or a meeting running: the click is refused the way the check
+    /// waits, quietly. the line stays as it was.
+    func testABusyAppRefusesTheClick() {
+        let click = UpdateOffer.click(
+            .available(brewLine),
+            busy: true,
+            brew: optBrew
+        )
+
+        XCTAssertEqual(click, UpdateOffer.Click(state: .available(brewLine), effect: nil))
+    }
+
+    func testAClickWhileUpdatingDoesNothing() {
+        let click = UpdateOffer.click(.updating, busy: false, brew: optBrew)
+
+        XCTAssertEqual(click, UpdateOffer.Click(state: .updating, effect: nil))
+    }
+
+    private let releasesPage = URL(
+        string: "https://github.com/jassuwu/andrew-dictate/releases/latest"
+    )!
+
+    /// a dmg install opens the page the dmg is on; the line stays put.
+    func testClickingADmgLineOpensTheReleasesPage() {
+        let line = UpdateOffer.Line(
+            version: "0.9.5",
+            action: .openReleasePage(releasesPage)
+        )
+
+        let click = UpdateOffer.click(.available(line), busy: false, brew: optBrew)
+
+        XCTAssertEqual(
+            click,
+            UpdateOffer.Click(state: .available(line), effect: .open(releasesPage))
+        )
+    }
+
+    /// a caskroom with no brew at either prefix cannot be upgraded from
+    /// here, so it is treated as the dmg install it might as well be.
+    func testABrewLineWithNoBrewOpensTheReleasesPage() {
+        let click = UpdateOffer.click(.available(brewLine), busy: false, brew: nil)
+
+        XCTAssertEqual(
+            click,
+            UpdateOffer.Click(state: .available(brewLine), effect: .open(releasesPage))
+        )
+    }
+
+    /// brew exited clean and /Applications holds something newer than this
+    /// process: the only step left is a restart.
+    func testAnUpgradeThatLandedOffersTheRestart() {
+        let state = UpdateOffer.finished(
+            .updating,
+            ending: .exited(0),
+            onDisk: "0.9.5",
+            running: "0.9.4"
+        )
+
+        XCTAssertEqual(state, .restartToFinish)
+        XCTAssertEqual(state.title, "restart to finish")
+        XCTAssertTrue(state.isEnabled)
+    }
+
+    func testAFailedOrTimedOutUpgradeIsTheCopiedLine() {
+        for ending: CommandResult.Ending in [.exited(1), .timedOut, .couldNotStart] {
+            let state = UpdateOffer.finished(
+                .updating,
+                ending: ending,
+                onDisk: "0.9.5",
+                running: "0.9.4"
+            )
+
+            XCTAssertEqual(state, .failedCopied, "\(ending)")
+            XCTAssertEqual(state.title, "couldn't update — command copied")
+            XCTAssertTrue(state.isEnabled)
+        }
+    }
+
+    /// exit 0 is not proof: brew is happy to upgrade nothing. only the
+    /// bundle in /Applications reading newer than this process is.
+    func testACleanExitWithTheOldVersionOnDiskIsAFailure() {
+        for onDisk in ["0.9.4", "0.9.3", nil] {
+            XCTAssertEqual(
+                UpdateOffer.finished(
+                    .updating,
+                    ending: .exited(0),
+                    onDisk: onDisk,
+                    running: "0.9.4"
+                ),
+                .failedCopied,
+                onDisk ?? "nil"
+            )
+        }
+    }
+
+    func testClickingRestartToFinishRelaunches() {
+        XCTAssertEqual(
+            UpdateOffer.click(.restartToFinish, busy: false, brew: optBrew),
+            UpdateOffer.Click(state: .restartToFinish, effect: .relaunch)
+        )
+    }
+
+    /// the clipboard has had a day since: a click puts the command back.
+    func testClickingTheCopiedLineCopiesTheCommandAgain() {
+        XCTAssertEqual(
+            UpdateOffer.click(.failedCopied, busy: false, brew: optBrew),
+            UpdateOffer.Click(
+                state: .failedCopied,
+                effect: .copy("brew upgrade --cask jassuwu/tap/andrew-dictate")
+            )
+        )
+    }
+
+    /// a relaunch would end the take, and the clipboard is the inserter's
+    /// while it pastes.
+    func testABusyAppRefusesTheRestartAndTheCopy() {
+        for state: UpdateOffer.LineState in [.restartToFinish, .failedCopied] {
+            XCTAssertEqual(
+                UpdateOffer.click(state, busy: true, brew: optBrew),
+                UpdateOffer.Click(state: state, effect: nil)
+            )
+        }
+    }
+
+    /// a run's end only moves a line that is waiting on it.
+    func testOnlyAnUpdatingLineIsFinished() {
+        for state: UpdateOffer.LineState in [.available(brewLine), .restartToFinish, .failedCopied] {
+            XCTAssertEqual(
+                UpdateOffer.finished(
+                    state,
+                    ending: .exited(1),
+                    onDisk: nil,
+                    running: "0.9.4"
+                ),
+                state
+            )
+        }
+    }
+
+    // MARK: - the brew run: what is run, where, with what
+
+    /// the copied command and the run command are the same words, so the
+    /// fallback never teaches something other than what was tried.
+    func testTheRunIsTheCopiedCommandAtAnAbsolutePath() {
+        let command = BrewUpgrade.command(
+            brew: URL(fileURLWithPath: "/usr/local/bin/brew"),
+            environment: ["HOME": "/Users/someone", "PATH": "/usr/bin:/bin"]
+        )
+
+        XCTAssertEqual(command.executable.path, "/usr/local/bin/brew")
+        XCTAssertEqual(
+            command.arguments,
+            ["upgrade", "--cask", "jassuwu/tap/andrew-dictate"]
+        )
+        XCTAssertEqual(
+            "brew " + command.arguments.joined(separator: " "),
+            UpdateCheck.upgradeCommand
+        )
+        XCTAssertEqual(command.timeout, 600)
+    }
+
+    /// an app launched by launchd has a PATH with no brew in it, and brew
+    /// run with no terminal must never stop to ask.
+    func testTheRunHasBrewsPrefixOnThePathAndNeverAsks() {
+        let command = BrewUpgrade.command(
+            brew: URL(fileURLWithPath: "/opt/homebrew/bin/brew"),
+            environment: ["HOME": "/Users/someone", "PATH": "/usr/bin:/bin"]
         )
 
         XCTAssertEqual(
-            pasteboard.string(forType: .string),
-            "brew upgrade --cask jassuwu/tap/andrew-dictate"
+            command.environment,
+            [
+                "HOME": "/Users/someone",
+                "PATH": "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin",
+                "HOMEBREW_NO_ENV_HINTS": "1",
+                "HOMEBREW_NO_INSTALL_CLEANUP": "1",
+                "NONINTERACTIVE": "1",
+            ]
         )
-        XCTAssertEqual(said, ["copied — paste it in terminal"])
-        XCTAssertTrue(opened.isEmpty)
     }
 
-    /// the browser opening is the confirmation; the clipboard is left alone.
+    /// /opt/homebrew first, /usr/local after it, and a file that is there
+    /// but cannot be run is not brew.
+    func testBrewIsFoundAtTheFirstPrefixThatHasIt() throws {
+        let opt = root.appendingPathComponent("opt/bin/brew")
+        let local = root.appendingPathComponent("local/bin/brew")
+        let candidates = [opt, local]
+        XCTAssertNil(BrewUpgrade.locate(candidates: candidates))
+
+        try makeFile(at: local, executable: true)
+        XCTAssertEqual(BrewUpgrade.locate(candidates: candidates), local)
+
+        try makeFile(at: opt, executable: false)
+        XCTAssertEqual(BrewUpgrade.locate(candidates: candidates), local)
+
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: opt.path
+        )
+        XCTAssertEqual(BrewUpgrade.locate(candidates: candidates), opt)
+    }
+
+    func testTheShippedPrefixesAreAppleSiliconsThenIntels() {
+        XCTAssertEqual(
+            BrewUpgrade.candidates.map(\.path),
+            ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]
+        )
+    }
+
+    /// brew says why last, then trails blank lines behind it.
+    func testTheReasonIsBrewsLastNonEmptyStderrLine() {
+        XCTAssertEqual(
+            BrewUpgrade.reason(
+                inStderr: "==> Upgrading 1 outdated package:\n"
+                    + "Error: Download failed on Cask 'andrew-dictate'\n\n   \n"
+            ),
+            "Error: Download failed on Cask 'andrew-dictate'"
+        )
+        XCTAssertNil(BrewUpgrade.reason(inStderr: ""))
+        XCTAssertNil(BrewUpgrade.reason(inStderr: "\n \n"))
+    }
+
+    // MARK: - the real runner, run on /bin/sh (never brew)
+
+    private func shell(
+        _ script: String,
+        environment: [String: String] = [:],
+        timeout: TimeInterval = 10
+    ) async -> CommandResult {
+        await ProcessRunner().run(
+            Command(
+                executable: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", script],
+                environment: environment,
+                timeout: timeout
+            )
+        )
+    }
+
+    func testTheRunnerKeepsBothStreamsAndTheExitStatus() async {
+        let result = await shell("echo out; echo err >&2; exit 3")
+
+        XCTAssertEqual(
+            result,
+            CommandResult(ending: .exited(3), stdout: "out\n", stderr: "err\n")
+        )
+    }
+
+    /// more than a pipe holds, so a runner that read only at the end
+    /// would hang here instead of finishing.
+    func testTheRunnerFinishesAfterALotOfOutput() async {
+        let result = await shell(
+            "i=0; while [ $i -lt 3000 ]; do "
+                + "echo 'a line of brew output, give or take'; "
+                + "echo 'and its stderr twin' >&2; i=$((i+1)); done"
+        )
+
+        XCTAssertEqual(result.ending, .exited(0))
+        XCTAssertEqual(result.stdout.split(separator: "\n").count, 3000)
+        XCTAssertEqual(result.stderr.split(separator: "\n").count, 3000)
+    }
+
+    /// no terminal to ask on, and only the environment it was handed.
+    func testTheRunnerHasNoTerminalAndOnlyItsOwnEnvironment() async {
+        let result = await shell(
+            #"test -t 0 || echo no-tty; echo "${ONLY-unset} ${HOME-unset}""#,
+            environment: ["ONLY": "this"]
+        )
+
+        XCTAssertEqual(result.stdout, "no-tty\nthis unset\n")
+    }
+
+    func testTheRunnerStopsACommandAtItsDeadline() async {
+        let started = Date()
+
+        let result = await shell("exec sleep 30", timeout: 0.3)
+
+        XCTAssertEqual(result.ending, .timedOut)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 10)
+    }
+
+    func testTheRunnerSaysSoWhenThereIsNothingToRun() async {
+        let result = await ProcessRunner().run(
+            Command(
+                executable: root.appendingPathComponent("no-brew-here"),
+                arguments: [],
+                environment: [:],
+                timeout: 10
+            )
+        )
+
+        XCTAssertEqual(result.ending, .couldNotStart)
+    }
+
+    // MARK: - the hand-off: one click, carried out
+
+    /// the line follows brew: updating while it runs, then the restart.
+    @MainActor
+    func testABrewUpgradeThatLandsEndsOnRestartToFinish() async {
+        let world = HandOffWorld()
+        world.onDisk = "0.9.5"
+
+        let run = world.handOff.click(offering: brewLine)
+        XCTAssertEqual(world.handOff.state(offering: brewLine), .updating)
+        await run?.value
+
+        XCTAssertEqual(
+            world.runner.commands,
+            [
+                BrewUpgrade.command(
+                    brew: URL(fileURLWithPath: "/opt/homebrew/bin/brew"),
+                    environment: world.environment
+                ),
+            ]
+        )
+        XCTAssertEqual(
+            world.handOff.state(offering: brewLine)?.title,
+            "restart to finish"
+        )
+        XCTAssertNil(world.pasteboard.string(forType: .string))
+
+        world.handOff.click(offering: brewLine)
+        XCTAssertEqual(world.relaunches, 1)
+    }
+
+    /// the command waits on the clipboard for the terminal, and the log
+    /// keeps brew's reason, which is about a cask and never the user.
+    @MainActor
+    func testAFailedUpgradeCopiesTheCommandAndLogsBrewsReason() async {
+        let world = HandOffWorld()
+        world.runner.result = CommandResult(
+            ending: .exited(1),
+            stdout: "==> Upgrading 1 outdated package:\n",
+            stderr: "==> Downloading\n"
+                + "Error: Download failed on Cask 'andrew-dictate'\n\n"
+        )
+
+        await world.handOff.click(offering: brewLine)?.value
+
+        XCTAssertEqual(
+            world.handOff.state(offering: brewLine)?.title,
+            "couldn't update — command copied"
+        )
+        XCTAssertEqual(
+            world.pasteboard.string(forType: .string),
+            "brew upgrade --cask jassuwu/tap/andrew-dictate"
+        )
+        XCTAssertEqual(
+            world.logged,
+            ["brew upgrade exited 1: Error: Download failed on Cask 'andrew-dictate'"]
+        )
+        XCTAssertEqual(world.relaunches, 0)
+    }
+
+    /// a brew stopped at ten minutes is a failure like any other.
+    @MainActor
+    func testATimedOutUpgradeIsAFailure() async {
+        let world = HandOffWorld()
+        world.onDisk = "0.9.5"
+        world.runner.result = CommandResult(
+            ending: .timedOut,
+            stdout: "",
+            stderr: "==> Downloading https://github.com/…/AndrewDictate-0.9.5.dmg\n"
+        )
+
+        await world.handOff.click(offering: brewLine)?.value
+
+        XCTAssertEqual(world.handOff.state(offering: brewLine), .failedCopied)
+        XCTAssertEqual(
+            world.pasteboard.string(forType: .string),
+            "brew upgrade --cask jassuwu/tap/andrew-dictate"
+        )
+        XCTAssertEqual(
+            world.logged,
+            ["brew upgrade was stopped after 600 s: "
+                + "==> Downloading https://github.com/…/AndrewDictate-0.9.5.dmg"]
+        )
+    }
+
+    /// brew said yes and upgraded nothing — a tap it had not refreshed,
+    /// say. /Applications still holding this version is the tell.
+    @MainActor
+    func testACleanExitThatLeftTheOldVersionIsAFailure() async {
+        let world = HandOffWorld()
+        world.onDisk = "0.9.4"
+        world.runner.result = CommandResult(
+            ending: .exited(0),
+            stdout: "",
+            stderr: "Warning: Not upgrading andrew-dictate, the latest version is already installed\n"
+        )
+
+        await world.handOff.click(offering: brewLine)?.value
+
+        XCTAssertEqual(world.handOff.state(offering: brewLine), .failedCopied)
+        XCTAssertEqual(
+            world.pasteboard.string(forType: .string),
+            "brew upgrade --cask jassuwu/tap/andrew-dictate"
+        )
+        XCTAssertEqual(
+            world.logged,
+            ["brew upgrade exited 0, but /Applications still holds 0.9.4: "
+                + "Warning: Not upgrading andrew-dictate, the latest version is already installed"]
+        )
+    }
+
+    @MainActor
+    func testABrewThatCouldNotStartIsAFailure() async {
+        let world = HandOffWorld()
+        world.runner.result = CommandResult(
+            ending: .couldNotStart,
+            stdout: "",
+            stderr: ""
+        )
+
+        await world.handOff.click(offering: brewLine)?.value
+
+        XCTAssertEqual(world.handOff.state(offering: brewLine), .failedCopied)
+        XCTAssertEqual(
+            world.logged,
+            ["brew upgrade could not start /opt/homebrew/bin/brew"]
+        )
+    }
+
+    /// a take or a meeting running: the click is refused as quietly as the
+    /// check waits. no brew, no page, no relaunch, the line as it was.
+    @MainActor
+    func testItNeverStartsWhileDictatingOrRecording() async {
+        let world = HandOffWorld()
+        world.busy = true
+
+        XCTAssertNil(world.handOff.click(offering: brewLine))
+        XCTAssertEqual(world.handOff.state(offering: brewLine), .available(brewLine))
+        XCTAssertTrue(world.runner.commands.isEmpty)
+
+        world.busy = false
+        world.onDisk = "0.9.5"
+        await world.handOff.click(offering: brewLine)?.value
+        world.busy = true
+        world.handOff.click(offering: brewLine)
+
+        XCTAssertEqual(world.relaunches, 0)
+        XCTAssertEqual(world.handOff.state(offering: brewLine), .restartToFinish)
+    }
+
+    /// brew can fail in the middle of a take, and the clipboard is the
+    /// inserter's while it pastes: a copy landing between its write and the
+    /// ⌘V would paste the brew line into someone's document. the line says
+    /// `updating…` until the take is done, then copies.
+    @MainActor
+    func testAFailureDuringADictationCopiesOnlyOnceItIsOver() async throws {
+        let world = HandOffWorld()
+        world.runner.result = CommandResult(
+            ending: .exited(1),
+            stdout: "",
+            stderr: "Error: no\n"
+        )
+
+        let run = world.handOff.click(offering: brewLine)
+        world.busy = true
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertEqual(world.handOff.state(offering: brewLine), .updating)
+        XCTAssertNil(world.pasteboard.string(forType: .string))
+
+        world.busy = false
+        await run?.value
+
+        XCTAssertEqual(world.handOff.state(offering: brewLine), .failedCopied)
+        XCTAssertEqual(
+            world.pasteboard.string(forType: .string),
+            "brew upgrade --cask jassuwu/tap/andrew-dictate"
+        )
+    }
+
+    /// the second click lands on `updating…`, which has nothing to add.
+    @MainActor
+    func testASecondClickWhileUpdatingIsIgnored() async {
+        let world = HandOffWorld()
+        world.onDisk = "0.9.5"
+
+        let first = world.handOff.click(offering: brewLine)
+        let second = world.handOff.click(offering: brewLine)
+        await first?.value
+
+        XCTAssertNil(second)
+        XCTAssertEqual(world.runner.commands.count, 1)
+        XCTAssertEqual(world.handOff.state(offering: brewLine), .restartToFinish)
+    }
+
+    /// once clicked, the click's outcome is the line — even if the daily
+    /// check has since heard nothing, or something newer.
+    @MainActor
+    func testTheClickOutlastsWhatTheCheckHearsNext() async {
+        let world = HandOffWorld()
+        world.onDisk = "0.9.5"
+
+        await world.handOff.click(offering: brewLine)?.value
+
+        XCTAssertEqual(world.handOff.state(offering: nil), .restartToFinish)
+    }
+
+    /// the browser opening is the confirmation; the clipboard is left
+    /// alone and the line stays as it was.
     @MainActor
     func testADmgLineOpensTheReleasesPage() {
-        let pasteboard = NSPasteboard.withUniqueName()
-        defer { pasteboard.releaseGlobally() }
-        var opened: [URL] = []
-        var said: [String] = []
-        let handOff = ManualHandOff(
-            pasteboard: pasteboard,
-            open: { opened.append($0) },
-            confirm: { said.append($0) }
+        let world = HandOffWorld()
+        let line = UpdateOffer.Line(
+            version: "0.9.5",
+            action: .openReleasePage(releasesPage)
         )
-        let page = URL(
-            string: "https://github.com/jassuwu/andrew-dictate/releases/latest"
-        )!
 
-        handOff.perform(.openReleasePage(page))
+        let run = world.handOff.click(offering: line)
 
-        XCTAssertEqual(opened, [page])
-        XCTAssertNil(pasteboard.string(forType: .string))
-        XCTAssertTrue(said.isEmpty)
+        XCTAssertNil(run)
+        XCTAssertEqual(world.opened, [releasesPage])
+        XCTAssertTrue(world.runner.commands.isEmpty)
+        XCTAssertNil(world.pasteboard.string(forType: .string))
+        XCTAssertEqual(world.handOff.state(offering: line), .available(line))
+    }
+
+    /// nothing heard, nothing clicked: no line.
+    @MainActor
+    func testNoOfferAndNoClickIsNoLine() {
+        XCTAssertNil(HandOffWorld().handOff.state(offering: nil))
+    }
+
+    private func makeFile(at url: URL, executable: Bool) throws {
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("#!/bin/sh\n".utf8).write(to: url)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: executable ? 0o755 : 0o644],
+            ofItemAtPath: url.path
+        )
     }
 
     /// a throwaway `Andrew Dictate.app`, with or without a readable plist.
@@ -584,5 +1095,70 @@ private final class CheckWorld {
                 return answer
             }
         )
+    }
+}
+
+/// the one-click hand-off with brew, the disk, the clipboard and the app's
+/// business in the test's hands: running 0.9.4, brew at /opt/homebrew,
+/// nothing newer on disk and a brew that exits clean until told otherwise.
+@MainActor
+private final class HandOffWorld {
+    let runner = FakeRunner()
+    let pasteboard = NSPasteboard.withUniqueName()
+    let environment = ["HOME": "/Users/someone", "PATH": "/usr/bin:/bin"]
+    var busy = false
+    var onDisk: String? = "0.9.4"
+    var brew: URL? = URL(fileURLWithPath: "/opt/homebrew/bin/brew")
+    private(set) var opened: [URL] = []
+    private(set) var relaunches = 0
+    private(set) var logged: [String] = []
+    private let pasteboardName: NSPasteboard.Name
+
+    private(set) lazy var handOff: UpdateHandOff = {
+        let handOff = UpdateHandOff(
+            runningVersion: "0.9.4",
+            onDiskVersion: { [unowned self] in onDisk },
+            relaunch: { [unowned self] in relaunches += 1 },
+            runner: runner,
+            locateBrew: { [unowned self] in brew },
+            environment: environment,
+            pasteboard: pasteboard,
+            open: { [unowned self] in opened.append($0) },
+            logFailure: { [unowned self] in logged.append($0) },
+            idlePoll: .milliseconds(5)
+        )
+        handOff.isBusy = { [unowned self] in busy }
+        return handOff
+    }()
+
+    init() {
+        pasteboardName = pasteboard.name
+    }
+
+    deinit {
+        NSPasteboard(name: pasteboardName).releaseGlobally()
+    }
+}
+
+/// a brew that answers whatever the test says, and remembers being asked.
+private final class FakeRunner: CommandRunner, @unchecked Sendable {
+    private let lock = NSLock()
+    private var ran: [Command] = []
+    private var answer = CommandResult(ending: .exited(0), stdout: "", stderr: "")
+
+    var commands: [Command] {
+        lock.withLock { ran }
+    }
+
+    var result: CommandResult {
+        get { lock.withLock { answer } }
+        set { lock.withLock { answer = newValue } }
+    }
+
+    func run(_ command: Command) async -> CommandResult {
+        lock.withLock {
+            ran.append(command)
+            return answer
+        }
     }
 }

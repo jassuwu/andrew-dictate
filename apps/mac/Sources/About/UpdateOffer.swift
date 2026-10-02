@@ -24,9 +24,9 @@ enum UpdateOffer {
         }
     }
 
-    /// what the click is for, not how it is done: `UpdateHandOff` decides
-    /// that. today a brew upgrade is copied for the user to paste; running
-    /// it in one click replaces the hand-off, not this.
+    /// what the click is for, not how it is done: `UpdateHandOff` does
+    /// that, running the brew upgrade itself and copying the command only
+    /// when it fails.
     enum Action: Equatable, Sendable {
         case brewUpgrade(String)
         case openReleasePage(URL)
@@ -149,5 +149,115 @@ enum UpdateOffer {
             .map(String.init)
             .joined(separator: ".")
         return Line(version: version, action: action(for: install))
+    }
+
+    /// the line from the click on. a brew line runs the upgrade itself, so
+    /// the line has to say how that went: the menu is where the click was,
+    /// so the menu is where the answer is.
+    enum LineState: Equatable, Sendable {
+        /// `update to <x>`: the daily check's line, not clicked yet.
+        case available(Line)
+        /// brew is running. a second click has nothing to add.
+        case updating
+        /// the new version is in /Applications; this process is the old one.
+        case restartToFinish
+        /// brew failed, ran out of time, or upgraded nothing. the command
+        /// is on the clipboard, so the terminal can say what brew would not.
+        case failedCopied
+
+        var title: String {
+            switch self {
+            case let .available(line):
+                line.title
+            case .updating:
+                "updating…"
+            case .restartToFinish:
+                "restart to finish"
+            case .failedCopied:
+                "couldn't update — command copied"
+            }
+        }
+
+        var isEnabled: Bool {
+            self != .updating
+        }
+    }
+
+    /// what a click asks of the world. the line decides; `UpdateHandOff`
+    /// does it.
+    enum Effect: Equatable, Sendable {
+        /// `brew upgrade` with the brew at this path.
+        case upgrade(brew: URL)
+        case open(URL)
+        /// quit and come back as whatever brew put in /Applications.
+        case relaunch
+        case copy(String)
+    }
+
+    struct Click: Equatable, Sendable {
+        let state: LineState
+        let effect: Effect?
+    }
+
+    /// a click on the line as it is shown. `busy` — a take, a model load or
+    /// a meeting — refuses every click quietly, the way the check waits: a
+    /// relaunch would end the take, and the clipboard is the inserter's
+    /// while it pastes. `brew` is where brew lives; nil, at neither prefix, makes a brew
+    /// install a dmg one, since there is nothing here to run.
+    static func click(
+        _ state: LineState,
+        busy: Bool,
+        brew: URL?
+    ) -> Click {
+        guard !busy else {
+            return Click(state: state, effect: nil)
+        }
+        switch state {
+        case let .available(line):
+            return click(line, brew: brew)
+        case .updating:
+            return Click(state: state, effect: nil)
+        case .restartToFinish:
+            return Click(state: state, effect: .relaunch)
+        case .failedCopied:
+            return Click(
+                state: state,
+                effect: .copy(UpdateCheck.upgradeCommand)
+            )
+        }
+    }
+
+    private static func click(_ line: Line, brew: URL?) -> Click {
+        let state = LineState.available(line)
+        switch line.action {
+        case .brewUpgrade:
+            guard let brew else {
+                return Click(state: state, effect: .open(releasesPage))
+            }
+            return Click(state: .updating, effect: .upgrade(brew: brew))
+        case let .openReleasePage(page):
+            return Click(state: state, effect: .open(page))
+        }
+    }
+
+    /// brew's run, judged. exit 0 is not proof: brew is happy to upgrade
+    /// nothing. the bundle in /Applications reading newer than this process
+    /// is the proof.
+    static func finished(
+        _ state: LineState,
+        ending: CommandResult.Ending,
+        onDisk: String?,
+        running: String
+    ) -> LineState {
+        guard state == .updating else {
+            return state
+        }
+        guard ending == .exited(0),
+              let onDisk,
+              UpdateCheck.isNewer(tag: onDisk, than: running)
+        else {
+            return .failedCopied
+        }
+        return .restartToFinish
     }
 }
