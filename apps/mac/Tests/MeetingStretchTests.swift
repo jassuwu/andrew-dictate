@@ -303,6 +303,61 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(lines, ["[00:00:10] you: right so anyway"])
     }
 
+    // MARK: - our own tones
+
+    /// The start sound comes back through the tap as far-side audio, here
+    /// from 0 to 0.43 s and louder than anyone, so it shows if it reaches
+    /// the engine. They were already talking when you pressed record, and
+    /// go on from 0.5 s. Only the start sound and a tenth of a second after
+    /// it reach the engine as silence: their words are theirs from 0.53 s,
+    /// not from the end of the second the start window runs for.
+    func testTheFarSideTalkingThroughTheStartWindowIsTranscribedAndTheStartSoundIsNot() async throws {
+        let c = coordinator(stretches())
+        c.start()
+        await source.awaitStart()
+
+        await play([
+            startSound(),
+            them("are we all here", from: 0.5, to: 1.7),
+        ], through: 3.0, on: c)
+        await waitFor { c.liveLines.count == 1 }
+
+        // heard from 0.52, so cut from 0.22 — the start sound in it silent —
+        // to 1.85.
+        XCTAssertEqual(handed(), ["are we all here 26080"])
+        XCTAssertEqual(live(c), ["them 0.2 are we all here"])
+    }
+
+    /// A far side quiet for long enough while something plays is asked with
+    /// the quiet probe, and they start talking just as it is asked; on the
+    /// mac's own speakers the mic has them too, a fifth as loud and a moment
+    /// late. The probe costs them its own third of a second and a little
+    /// more, not the two seconds the tap is given to answer it. And the
+    /// mic's copy is held against the far side the tap heard, every sample
+    /// of it — what the mic can hear coming back — so it is let go, and they
+    /// are said once, as them.
+    func testAQuietProbeCostsTheFarSideOnlyItsToneAndTheirWordsOnTheMicStayTheirs() async throws {
+        source.anythingIsPlaying = true
+        let transcriber = stretches(threshold: Self.keen)
+        let c = coordinator(transcriber, silenceTimeout: .seconds(3))
+        c.start()
+        await source.awaitStart()
+
+        // quiet from 0.1 s, so asked at 3.2.
+        let theirs = them("are we all here", from: 3.3, to: 6.3, voice: .theirs)
+        await play([theirs, theirs.asBleed()], through: 8.0, on: c)
+        await waitForStretches(transcriber, 2)
+        await waitFor { c.liveLines.count == 1 }
+
+        XCTAssertEqual(live(c), ["them 3.3 are we all here"])
+        let tally = await transcriber.tally
+        XCTAssertEqual(tally.bleed, 1, "the mic's copy is theirs: \(tally)")
+        XCTAssertEqual(tally.decodedYou, 0)
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, ["[00:00:03] them: are we all here"])
+    }
+
     // MARK: - a gap
 
     /// The lid closes at 3.0 s while they are mid-sentence, and the mac
@@ -1019,9 +1074,12 @@ final class MeetingStretchTests: XCTestCase {
     /// quiet: 0.002 at the loudest. It hears the hum on the first chunk too.
     private static let faint: Float = 0.001
 
+    /// Nobody here is testing the tap: by default the far side may be quiet
+    /// for as long as a test likes without it being asked about.
     private func coordinator(
         _ transcriber: StretchTranscriber,
-        clock: FakeClock = FakeClock()
+        clock: FakeClock = FakeClock(),
+        silenceTimeout: Duration = .seconds(600)
     ) -> MeetingCoordinator {
         let folder = dir.appendingPathComponent("docs")
         let c = MeetingCoordinator(
@@ -1030,10 +1088,8 @@ final class MeetingStretchTests: XCTestCase {
             diarizer: diarizer,
             spool: MeetingSpool(root: dir.appendingPathComponent("spool")),
             hookRunner: HookRunner(logURL: dir.appendingPathComponent("hooks.log")),
-            // nobody here is testing the tap: the far side may be quiet for
-            // as long as a test likes without it being called a dead tap.
             thresholds: .init(
-                probeTimeout: .seconds(1), silenceTimeout: .seconds(600),
+                probeTimeout: .seconds(1), silenceTimeout: silenceTimeout,
                 silenceFloor: 0.001, quietNudgeAfter: .seconds(3_600)),
             now: { clock.now },
             preferences: {
@@ -1122,6 +1178,16 @@ final class MeetingStretchTests: XCTestCase {
 
     private func them(_ phrase: String, from: Double, to: Double, voice: Voice? = nil) -> Said {
         Said(side: .them, phrase: phrase, from: from, to: to, voice: voice)
+    }
+
+    /// The start sound as the tap hears it, from the start of the meeting
+    /// for as long as the sound file runs: a phrase of its own, played at
+    /// three times the loudness the engine knows it by, so a stretch with
+    /// any of it in is heard as no phrase at all.
+    private func startSound() -> Said {
+        Said(
+            side: .them, phrase: "start sound", from: 0,
+            to: OurTones.startSound.totalSeconds, scale: 3)
     }
 
     /// The mic with nothing on it: a tone a thirtieth as loud as the first
@@ -1256,6 +1322,14 @@ private final class FakeClock: @unchecked Sendable {
 private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: AsyncStream<MeetingAudioChunk>.Continuation?
+    private var _anythingIsPlaying: Bool?
+
+    /// Something on the mac is playing: a far side quiet past the timeout
+    /// is asked with the quiet probe, which this never plays.
+    var anythingIsPlaying: Bool? {
+        get { lock.withLock { _anythingIsPlaying } }
+        set { lock.withLock { _anythingIsPlaying = newValue } }
+    }
 
     func start() async throws -> AsyncStream<MeetingAudioChunk> {
         let (stream, continuation) = AsyncStream<MeetingAudioChunk>.makeStream()

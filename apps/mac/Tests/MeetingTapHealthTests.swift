@@ -73,19 +73,19 @@ final class MeetingTapHealthTests: XCTestCase {
     // MARK: - our own tones are not the call
 
     /// The start sound comes back through the tap as far-side audio, and a
-    /// model given it writes it down as somebody speaking at 00:00. While
-    /// the start window is open the far side is handed over silent — the
-    /// spool keeps it as it was — and what you say meanwhile is still
-    /// heard, and so is the far side once the window has closed.
+    /// model given it writes it down as somebody speaking at 00:00. For as
+    /// long as it lasts, and a tenth of a second more, the far side is
+    /// handed over silent — the spool keeps it as it was — and what you say
+    /// meanwhile is still heard, and so is the far side after it.
     func testTheStartSoundIsNotTranscribedAndYourVoiceUnderItIs() async throws {
         transcriber.transcribesWhatItIsFed = true
         let c = coordinator()
         c.start()
         await source.awaitStart()
-        // the start window is the first second: the tone, with you talking
-        // over it, then a pause, then the far side speaking.
+        // the tone, with you talking over it and on after it, then a pause,
+        // then the far side speaking.
         await play(
-            both(at: .zero), both(at: .milliseconds(500)),
+            both(at: .zero), voiceAlone(at: .milliseconds(500)),
             silent(at: .seconds(1)), silent(at: .milliseconds(1_500)),
             them(at: .seconds(2)))
 
@@ -99,6 +99,67 @@ final class MeetingTapHealthTests: XCTestCase {
             transcriber.fed.map { $0.themRMS > 0.001 }, [false, false, false, false, true])
         let spooled = try XCTUnwrap(spooledThem())
         XCTAssertGreaterThan(rms(spooled.prefix(8_000)), 0.1, "the spool keeps the tone")
+    }
+
+    /// The quiet probe is a third of a second of our own. Asked, it takes
+    /// that from the far side and a tenth of a second more — not the two
+    /// seconds the tap is given to answer it. They began talking the moment
+    /// it was asked, and every word of theirs after 0.4 s reaches the
+    /// transcriber.
+    func testAQuietProbeCostsTheFarSideNoMoreThanItsOwnTone() async throws {
+        source.anythingIsPlaying = true
+        let c = coordinator()
+        c.start()
+        await source.awaitStart()
+        await play(loud(at: .zero))
+        for s in 2...6 {
+            await play(quiet(at: .seconds(s)))
+        }
+        await until { source.quietProbes == 1 }
+
+        // asked at 6.1; they talk from then for two seconds.
+        let said = (0..<4).map { them(at: .milliseconds(6_100 + 500 * $0)) }
+        for chunk in said {
+            await play(chunk)
+        }
+
+        let fed = transcriber.fed.filter { $0.at >= .milliseconds(6_100) }
+        XCTAssertEqual(fed.map(\.at), said.map(\.at))
+        let silenced = zip(fed.flatMap(\.them), said.flatMap(\.them))
+            .filter { fed, said in said != 0 && fed == 0 }
+            .count
+        XCTAssertLessThanOrEqual(silenced, 6_400, "at most 0.4 s of theirs")
+        XCTAssertGreaterThanOrEqual(silenced, 4_799, "the tone's own 0.3 s is still ours")
+    }
+
+    /// A rebuilt tap plays the start sound like a new one, and the far side
+    /// talking as it comes back is heard from just after the sound — not
+    /// from the end of the second the tap is given to hear it.
+    func testTheFarSideTalkingAsARebuiltTapComesBackIsHeardAfterItsStartSound() async throws {
+        transcriber.transcribesWhatItIsFed = true
+        let clock = FakeClock()
+        let c = coordinator(clock: clock)
+        c.start()
+        await source.awaitStart()
+        await play(both(at: .zero), silent(at: .milliseconds(500)))
+
+        clock.advance(by: .seconds(60))
+        source.skip(to: .seconds(62))
+        c.probeTapIsAlive()
+        await until { events.contains(.gapEnded) }
+        // the start sound is 62.0 to 62.3; they talk on from there.
+        await play(them(at: .milliseconds(62_300)))
+
+        c.stop()
+        await c.untilWrittenOut()
+        XCTAssertEqual(try savedLines(), [
+            "[00:00:00] you: you said something",
+            "[00:01:02] them: they said something",
+        ])
+        let after = try XCTUnwrap(transcriber.fed.first { $0.at == .milliseconds(62_300) })
+        XCTAssertEqual(
+            after.them.firstIndex { $0 != 0 }, 3_712,
+            "silent to 62.532: the start sound and a tenth of a second")
     }
 
     /// The quiet probe lands in the far side too, and is not a turn.
@@ -733,6 +794,12 @@ final class MeetingTapHealthTests: XCTestCase {
         let n = 16_000
         return .init(you: Array(repeating: 0.05, count: n),
                      them: (0..<n).map { sin(Float($0) * 0.05) * 0.3 }, at: at)
+    }
+
+    /// Half a second of you talking, and nothing from the far side.
+    private func voiceAlone(at: Duration) -> MeetingAudioChunk {
+        .init(you: Array(repeating: 0.05, count: 8_000),
+              them: Array(repeating: 0, count: 8_000), at: at)
     }
 
     /// You talking, and nothing from the far side.

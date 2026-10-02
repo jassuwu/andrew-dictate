@@ -197,6 +197,11 @@ extension MeetingAudioSource {
 protocol MeetingTranscriber: Sendable {
     func begin() async throws
     func feed(_ chunk: MeetingAudioChunk) async
+    /// A chunk whose far side opens with `tone` samples of a sound this app
+    /// played (`OurTones`). Those are not the call, and are not to be
+    /// decoded; they are still what the mic hears come back on the mac's
+    /// own speakers.
+    func feed(_ chunk: MeetingAudioChunk, tone: Int) async
     var lines: AsyncStream<LiveLine> { get }
     func finish() async -> [MeetingTurn]
     /// The whole meeting at once — for a spool the app found after a crash.
@@ -208,6 +213,13 @@ protocol MeetingTranscriber: Sendable {
 
 extension MeetingTranscriber {
     func decodeTally() async -> StretchTally? { nil }
+
+    /// One that hears the far side once, for everything, is handed it with
+    /// the tone as silence.
+    func feed(_ chunk: MeetingAudioChunk, tone: Int) async {
+        await feed(MeetingAudioChunk(
+            you: chunk.you, them: OurTones.silencing(chunk.them, first: tone), at: chunk.at))
+    }
 }
 
 /// Splits `them` into `them 1`, `them 2`…: who on the far side spoke when.

@@ -300,6 +300,10 @@ final class MeetingCoordinator: ObservableObject {
     /// counting our own chirp as the room speaking is what kept the quiet
     /// hour from ever coming round.
     private var probeUntil: Duration = .zero
+    /// The tone itself is shorter than the window that waits for it: until
+    /// this mark the far side the transcriber is handed is ours, and after
+    /// it, whatever the window, it is the call (`OurTones`).
+    private var toneUntil: Duration = .zero
     /// A rebuilt tap's start sound is on its way: the window runs from the
     /// first chunk the tap delivers, wherever the source stamps it.
     private var probeOpensAtNextChunk = false
@@ -433,6 +437,7 @@ final class MeetingCoordinator: ObservableObject {
         lastChunkArrived = now()
         nudgePending = false
         probeUntil = thresholds.probeTimeout
+        toneUntil = OurTones.silenced(for: OurTones.startSound)
         probeOpensAtNextChunk = false
         startWatchdog(for: meeting)
         publish()
@@ -760,6 +765,7 @@ final class MeetingCoordinator: ObservableObject {
         if probeOpensAtNextChunk, source.capturing != .yourSideAlone {
             probeOpensAtNextChunk = false
             probeUntil = max(probeUntil, chunk.at + thresholds.probeTimeout)
+            toneUntil = max(toneUntil, chunk.at + OurTones.silenced(for: OurTones.startSound))
         }
         #if DEBUG
         if let peak = sweepPeak {
@@ -853,8 +859,11 @@ final class MeetingCoordinator: ObservableObject {
         sayWhatArrivesWhileTheTapIsLost(chunk)
         #endif
 
+        // the far side as the tap heard it, and how much of it is a tone of
+        // ours: the transcriber decodes none of that, and still holds the
+        // mic against it. the spool has kept both sides as they were.
         if session.state == .recording || session.state == .rebuilding {
-            await meeting.transcriber?.feed(withoutOurTones(chunk))
+            await meeting.transcriber?.feed(chunk, tone: OurTones.samples(of: chunk, before: toneUntil))
         }
         guard current === meeting else { return }
 
@@ -987,21 +996,6 @@ final class MeetingCoordinator: ObservableObject {
         onEvent?(.problemCleared(problem))
     }
 
-    /// The chunk as the transcriber gets it: while a probe window is open
-    /// the far side is ours — the start sound, or the quiet probe — and a
-    /// model given it writes it down as somebody speaking. So the far side
-    /// up to the end of the window is handed over as silence, the same
-    /// length; your side is handed over as it is, and the spool has
-    /// already kept both as they were.
-    private func withoutOurTones(_ chunk: MeetingAudioChunk) -> MeetingAudioChunk {
-        guard chunk.at < probeUntil else { return chunk }
-        let ours = Int(((probeUntil - chunk.at).totalSeconds * MeetingAudioChunk.sampleRate).rounded())
-        let silenced = min(ours, chunk.them.count)
-        var them = chunk.them
-        them.replaceSubrange(0..<silenced, with: repeatElement(0, count: silenced))
-        return MeetingAudioChunk(you: chunk.you, them: them, at: chunk.at)
-    }
-
     /// The far side has been silent past the timeout while something
     /// plays. That is a question, not a verdict — you presenting to a muted
     /// room sounds the same — so the tap is asked it the way it was asked at
@@ -1013,6 +1007,7 @@ final class MeetingCoordinator: ObservableObject {
         // proof the tap works, not the room speaking, so it must not buy
         // the quiet hour back.
         probeUntil = max(probeUntil, elapsed + thresholds.quietProbeWindow)
+        toneUntil = max(toneUntil, elapsed + OurTones.silenced(for: OurTones.quietProbe))
         Task { [weak self, source] in
             do {
                 try await source.playQuietProbe()

@@ -141,10 +141,14 @@ actor StretchTranscriber: MeetingTranscriber {
     }
 
     func feed(_ chunk: MeetingAudioChunk) async {
+        await feed(chunk, tone: 0)
+    }
+
+    func feed(_ chunk: MeetingAudioChunk, tone: Int) async {
         let before = hearing
         let this = Task {
             await before?.value
-            await hear(chunk)
+            await hear(chunk, tone: tone)
         }
         hearing = this
         await this.value
@@ -231,16 +235,21 @@ actor StretchTranscriber: MeetingTranscriber {
 
     // MARK: - hearing
 
-    private func hear(_ chunk: MeetingAudioChunk) async {
+    /// The far side's trail hears it as the tap did, a tone of ours and
+    /// all: that is what the mic can hear coming back. Its detector and its
+    /// cutter hear the tone as silence, so no stretch begins on it and none
+    /// hands it to the engine.
+    private func hear(_ chunk: MeetingAudioChunk, tone: Int) async {
         guard !isFinished else { return }
         micLoudness.hear(chunk.you, at: chunk.at)
         farLoudness.hear(chunk.them, at: chunk.at)
+        let theirs = OurTones.silencing(chunk.them, first: tone)
         let youEdges = await youDetector.hear(chunk.you)
-        let themEdges = await themDetector.hear(chunk.them)
+        let themEdges = await themDetector.hear(theirs)
         queue(withoutBleed(
             you.take(chunk.you, at: chunk.at, edges: youEdges),
             mic: micLoudness, far: farLoudness)
-            + them.take(chunk.them, at: chunk.at, edges: themEdges))
+            + them.take(theirs, at: chunk.at, edges: themEdges))
     }
 
     /// A `you` stretch that is only the far side coming back through the mic
