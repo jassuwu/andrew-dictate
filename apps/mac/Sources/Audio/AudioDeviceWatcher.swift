@@ -17,11 +17,11 @@ enum AudioDeviceChange: String, Equatable, Sendable {
     case wake
     case screens
 
-    /// the mic a live take is hearing may be gone, or no longer the mic, so
-    /// the take ends and keeps what it had. the rest only make the capture
-    /// stale for the next press: a monitor arriving mid-sentence is no
-    /// reason to end the sentence.
-    var endsLiveTake: Bool {
+    /// the mic a live utterance is hearing may be gone, or no longer the
+    /// mic, so the utterance ends and keeps what it had. the rest only make
+    /// the capture stale for the next press: a monitor arriving
+    /// mid-sentence is no reason to end the sentence.
+    var endsLiveUtterance: Bool {
         switch self {
         case .engineReconfigured, .defaultInput:
             true

@@ -205,9 +205,9 @@ final class UtteranceMachine {
     /// how long the engine has left to answer the take in flight
     /// (`TranscriptionDeadline`).
     private var transcriptionDeadline: Task<Void, Never>?
-    /// takes in a row the engine never answered. one is worth a check; a
-    /// second, with nothing answered in between, is an engine that stopped.
-    private var unansweredTakes = 0
+    /// utterances in a row the engine never answered. one is worth a check;
+    /// a second, with nothing answered in between, is an engine that stopped.
+    private var unansweredUtterances = 0
     /// when the engine was last asked anything, a take or a wake.
     private var engineLastAsked: ContinuousClock.Instant?
     /// the start chime, held back 120 ms so a discarded capture can cancel it
@@ -665,12 +665,12 @@ final class UtteranceMachine {
     /// event: the time it spent reaching us is the user's wait, not ours to
     /// leave out of key-up → paste.
     func keyUp(eventAge: Duration = .zero) {
-        endTake(releasedAt: clock.now - max(.zero, eventAge))
+        endUtterance(releasedAt: clock.now - max(.zero, eventAge))
     }
 
-    /// the take is over — the key came up, the cap sealed it, or the mic
-    /// changed under it — and what was heard goes on to the page.
-    private func endTake(
+    /// the utterance is over — the key came up, the cap sealed it, or the
+    /// mic changed under it — and what was heard goes on to the page.
+    private func endUtterance(
         releasedAt released: ContinuousClock.Instant,
         micChanged: Bool = false
     ) {
@@ -892,7 +892,7 @@ final class UtteranceMachine {
             // it heard up to the change is the user's sentence, so the take
             // ends the way a release would — kept, written out, pasted —
             // and a pill after the paste says why it ended without them.
-            endTake(releasedAt: clock.now, micChanged: true)
+            endUtterance(releasedAt: clock.now, micChanged: true)
         case .systemPaused:
             systemPaused()
         }
@@ -910,7 +910,7 @@ final class UtteranceMachine {
             return
         }
         copiesInsteadOfPasting = true
-        endTake(releasedAt: clock.now)
+        endUtterance(releasedAt: clock.now)
     }
 
     /// the mac is back and someone is looking at it: unlocked, or woken
@@ -1187,7 +1187,7 @@ final class UtteranceMachine {
         }
         transcriptionDeadline?.cancel()
         transcriptionDeadline = nil
-        unansweredTakes = 0
+        unansweredUtterances = 0
     }
 
     /// the engine never answered. the press ends now, out loud, with its
@@ -1201,12 +1201,12 @@ final class UtteranceMachine {
 
         transcriptionDeadline = nil
         pipelineLogger.error("the speech model didn't answer in time; giving up on it")
-        unansweredTakes += 1
+        unansweredUtterances += 1
         // the engine after a restart starts with a clean slate.
-        let restart = unansweredTakes
+        let restart = unansweredUtterances
             >= TranscriptionDeadline.unansweredBeforeRestart
         if restart {
-            unansweredTakes = 0
+            unansweredUtterances = 0
         }
         activeTimeline = nil
         press?.timedOut = true

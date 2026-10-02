@@ -63,9 +63,9 @@ final class AudioRecorder: DisposableMicCapture {
     /// the main actor's view of whether a take is running, for the hops
     /// that land after it.
     private var isRecording = false
-    /// bumped by every ending, so a start that answers after its take was
-    /// cancelled does not count it as running.
-    private var takeSequence: UInt64 = 0
+    /// bumped by every ending, so a start that answers after its utterance
+    /// was cancelled does not count it as running.
+    private var utteranceSequence: UInt64 = 0
     private var isDiscarded = false
 
     /// the engine reconfigured itself underneath: it has stopped, and what
@@ -116,21 +116,21 @@ final class AudioRecorder: DisposableMicCapture {
             ContinuousClock.Instant
         ) -> Void
     ) async throws {
-        takeSequence &+= 1
-        let take = takeSequence
+        utteranceSequence &+= 1
+        let utterance = utteranceSequence
         try await ask { try $0.start(onFirstBuffer: onFirstBuffer) }
-        if take == takeSequence {
+        if utterance == utteranceSequence {
             isRecording = true
         }
     }
 
     func stop() async throws -> [Float] {
-        endTake()
+        endUtterance()
         return try await ask { try $0.stop() }
     }
 
     func cancel() {
-        endTake()
+        endUtterance()
         capture.enqueue { $0.cancel() }
     }
 
@@ -139,13 +139,13 @@ final class AudioRecorder: DisposableMicCapture {
     }
 
     func discard() {
-        endTake()
+        endUtterance()
         isDiscarded = true
         capture.discard()
     }
 
-    private func endTake() {
-        takeSequence &+= 1
+    private func endUtterance() {
+        utteranceSequence &+= 1
         isRecording = false
     }
 

@@ -250,9 +250,9 @@ final class DictationCoordinator: ObservableObject {
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
     /// between `com.apple.screenIsLocked` and its unlock.
     private var screenLockedByNotification = false
-    /// the mac went to sleep mid-take: the capture is suspended once that
-    /// take's mic has answered the stop (`suspendCaptureForSleep`).
-    private var suspendsCaptureAfterTheTake = false
+    /// the mac went to sleep mid-utterance: the capture is suspended once
+    /// that utterance's mic has answered the stop (`suspendCaptureForSleep`).
+    private var suspendsCaptureAfterTheUtterance = false
     private var distributedNotificationObservers: [NSObjectProtocol] = []
 
     init(settings: AppSettings = .shared) {
@@ -1428,7 +1428,7 @@ final class DictationCoordinator: ObservableObject {
         if change == .defaultOutput {
             feedbackSounds.outputChanged()
         }
-        if change.endsLiveTake, machine.state == .recording {
+        if change.endsLiveUtterance, machine.state == .recording {
             handleCaptureInterruption(reason: .deviceChanged)
         }
     }
@@ -1459,7 +1459,7 @@ final class DictationCoordinator: ObservableObject {
             captureSlot.suspend()
             return
         }
-        suspendsCaptureAfterTheTake = true
+        suspendsCaptureAfterTheUtterance = true
     }
 
     /// the login window is over the session. the lock notification can
@@ -1927,8 +1927,8 @@ extension DictationCoordinator {
         switch event {
         case let .state(state, fastDismiss):
             apply(state, fastHUDDismiss: fastDismiss)
-            if suspendsCaptureAfterTheTake, state != .recording {
-                suspendsCaptureAfterTheTake = false
+            if suspendsCaptureAfterTheUtterance, state != .recording {
+                suspendsCaptureAfterTheUtterance = false
                 captureSlot.suspend()
             }
         case .hearing:
