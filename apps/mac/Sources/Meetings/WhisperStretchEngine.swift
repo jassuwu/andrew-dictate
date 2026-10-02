@@ -88,6 +88,13 @@ actor WhisperStretchEngine: StretchEngine {
         options.skipSpecialTokens = true
         options.withoutTimestamps = false
         options.temperature = 0
+        // WhisperKit skips whatever is left in the last second of a window:
+        // its default `windowClipTime` is 1 s, so a stretch of a second or
+        // less is never decoded at all. Measured on large-v3: "yes." (0.6 s)
+        // and "okay." (0.5 s) came back empty, and came back whole with
+        // this at zero. A stretch is one window, cut at speech, so there is
+        // no tail of a longer recording to clip.
+        options.windowClipTime = 0
         let results = try await whisper.transcribe(audioArray: samples, decodeOptions: options)
         return results
             .flatMap(\.segments)
