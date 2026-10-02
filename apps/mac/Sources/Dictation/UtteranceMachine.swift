@@ -303,7 +303,8 @@ final class UtteranceMachine {
         Task.immediate { @MainActor [weak self] in
             do {
                 try await microphone.start { [weak self] instant in
-                    self?.recordFirstBuffer(
+                    self?.firstBufferLanded(
+                        id,
                         at: instant,
                         timelineID: timelineID
                     )
@@ -328,19 +329,39 @@ final class UtteranceMachine {
         capture.phase = .live
         self.capture = capture
         press?.mic = capture.microphone.deviceDescription
-        guard !capture.stopRequested else {
-            // let go before the mic answered: the take still counts, and a
-            // start chime after the release would be noise.
+        if capture.stopRequested {
+            // let go before the mic answered: the take still counts.
             stopMicrophone()
+        }
+    }
+
+    /// the mic's first audio: it is hearing you. the key only said you
+    /// pressed; this is the moment the chime can promise something.
+    private func firstBufferLanded(
+        _ id: UInt64,
+        at instant: ContinuousClock.Instant,
+        timelineID: UInt64
+    ) {
+        recordFirstBuffer(at: instant, timelineID: timelineID)
+        guard var capture,
+              capture.id == id,
+              !capture.isHearing else {
+            return
+        }
+        capture.isHearing = true
+        self.capture = capture
+        guard !capture.isEnding else {
+            // let go before it was heard: a start chime after the release
+            // would be noise.
             return
         }
         scheduleStartChime()
     }
 
-    /// the mic and the lamp start at key-down; only the chime waits, long
-    /// enough to know the key is being held rather than caught. a brush of
-    /// fn should make no sound at all. a mic slow to answer has already
-    /// spent some of that wait.
+    /// the mic and the lamp start at key-down; the chime waits for the
+    /// mic's first audio, and then long enough to know the key is being
+    /// held rather than caught. a brush of fn should make no sound at all.
+    /// a mic slow to be heard has already spent some of that wait.
     private func scheduleStartChime() {
         let held = press.map { $0.keyDown.duration(to: clock.now) } ?? .zero
         let wait = Duration.milliseconds(120) - held
@@ -1261,6 +1282,9 @@ extension UtteranceMachine {
         var phase = Phase.starting
         /// let go before the mic answered: stopped the moment it does.
         var stopRequested = false
+        /// its first audio has landed. the mic answering its start only
+        /// says the device opened; this says it is hearing you.
+        var isHearing = false
 
         /// the take is already over, whatever ended it.
         var isEnding: Bool {
