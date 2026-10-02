@@ -269,6 +269,36 @@ final class MeetingProblemsTests: XCTestCase {
             "the same problem in new words is noted once")
     }
 
+    /// The tap cannot be rebuilt and the source keeps the mic going alone,
+    /// the far side silence: the lamp says your side is still recorded,
+    /// and it is — what you say reaches the transcriber, and the far
+    /// side's silence is no reason to say the mic is not heard.
+    func testWithTheCallUnheardYourSideIsStillTranscribed() async throws {
+        source.rebuildsFail = true
+        source.capturing = .yourSideAlone
+        source.micName = "MacBook Pro Microphone"
+        let clock = FakeClock()
+        let c = coordinator(thresholds: retrying, clock: clock)
+        c.start()
+        await source.awaitStart()
+        await play(both(at: .zero), both(at: .seconds(1)))
+
+        clock.advance(by: .seconds(60))
+        c.probeTapIsAlive()
+        await until { c.problem != nil }
+        XCTAssertEqual(c.problems, [.cannotHearTheCall])
+        XCTAssertEqual(events.last?.hudText, "can't hear the call — still recording your side")
+
+        for s in 60...75 {
+            await play(you(at: .seconds(s)))
+        }
+        let fed = transcriber.fed.filter { $0.at >= .seconds(60) }
+        XCTAssertEqual(fed.count, 16)
+        XCTAssertTrue(fed.allSatisfy { $0.youRMS > 0.01 && $0.themRMS == 0 })
+        XCTAssertEqual(c.problems, [.cannotHearTheCall])
+        XCTAssertEqual(c.state, .rebuilding)
+    }
+
     /// A settle, then three tries in a row 100 ms and 200 ms apart, then
     /// one every 300 ms with the problem standing.
     private var retrying: MeetingThresholds {
@@ -399,6 +429,13 @@ final class MeetingProblemsTests: XCTestCase {
         let n = 16_000
         return .init(you: Array(repeating: 0, count: n),
                      them: (0..<n).map { sin(Float($0) * 0.05) * 0.3 }, at: at)
+    }
+
+    /// A second of you talking, and the far side as a rig with the mic
+    /// alone hands it over: silence.
+    private func you(at: Duration) -> MeetingAudioChunk {
+        .init(you: Array(repeating: 0.05, count: 16_000),
+              them: Array(repeating: 0, count: 16_000), at: at)
     }
 
     /// A second of nothing on either side.
