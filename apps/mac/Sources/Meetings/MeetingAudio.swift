@@ -24,6 +24,29 @@ struct MeetingAudioChunk: Sendable {
     }
 }
 
+/// Something the capture layer did by itself while a meeting ran, for the
+/// meeting's record: the mic it moved to, a move that failed, the built-in
+/// mic it fell back on. Stamped on the chunks' clock, so it lands in the
+/// record at the meeting time it happened.
+struct MeetingSourceEvent: Equatable, Sendable {
+    enum Kind: Equatable, Sendable {
+        /// The default input changed, or the mic went away, and the meeting
+        /// followed it.
+        case micChanged
+        /// A rig on another mic was brought up and never delivered, or
+        /// there was no mic to move to.
+        case micHandoffFailed
+        /// There was no default input a meeting could use, so it moved to
+        /// the built-in mic.
+        case micFellBack
+    }
+
+    let kind: Kind
+    /// The mic's name as the mac shows it; nil when there was none to move to.
+    let mic: String?
+    let at: Duration
+}
+
 /// The capture layer. Starting it plays the start sound — that is the probe
 /// (ADR 0021) — and the stream keeps flowing through silence because the mic
 /// is the clock (002). It ends only when `stop()` is called or the tap dies
