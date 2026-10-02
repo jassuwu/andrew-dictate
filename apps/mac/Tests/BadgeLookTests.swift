@@ -44,4 +44,21 @@ final class BadgeLookTests: XCTestCase {
             )
         }
     }
+
+    /// dictation is refused while a meeting records (ADR 0023), so the two
+    /// never meet in practice; if they ever did, the meeting is the one
+    /// that runs for an hour and needs the badge.
+    func testARecordingMeetingOutranksDictating() {
+        for isDictating in [false, true] {
+            XCTAssertEqual(
+                BadgeLook(
+                    needsSetup: false,
+                    isDictating: isDictating,
+                    meeting: .recording
+                ),
+                .recordingMeeting,
+                "dictating: \(isDictating)"
+            )
+        }
+    }
 }

@@ -40,10 +40,14 @@ enum BadgeLook: Equatable, Sendable, CaseIterable {
         // started around it.
         case .problem:
             self = .meetingProblem
+        // dictation is refused while a meeting records (ADR 0023), so a
+        // take never shares the badge with one; if it ever did, the hour
+        // long meeting is the one to show.
+        case .recording:
+            self = .recordingMeeting
         case .none,
              .callNotRecorded,
-             .gettingReady,
-             .recording:
+             .gettingReady:
             self = .idle
         }
     }
