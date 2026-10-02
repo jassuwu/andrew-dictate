@@ -162,6 +162,33 @@ final class CallWatcherTests: XCTestCase {
         XCTAssertEqual(watcher.observe([], isRecording: true, at: .seconds(3_600)), [])
     }
 
+    /// A pause in the audio, a dropped connection that comes back: either
+    /// half returning inside the window is the same call, and every silence
+    /// gets the whole window afresh.
+    func testEitherHalfComingBackInsideTheEndThresholdKeepsTheCall() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(0))
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(3))
+        _ = watcher.observe([zoom], isRecording: true, at: .seconds(5))
+
+        _ = watcher.observe([], isRecording: true, at: .seconds(100))
+        let micBack = app("zoom", audio: false)
+        XCTAssertEqual(watcher.observe([micBack], isRecording: true, at: .seconds(129)), [])
+
+        _ = watcher.observe([], isRecording: true, at: .seconds(130))
+        XCTAssertEqual(watcher.observe([], isRecording: true, at: .seconds(159)), [])
+        let audioBack = app("zoom", mic: false)
+        XCTAssertEqual(watcher.observe([audioBack], isRecording: true, at: .seconds(160)), [])
+
+        _ = watcher.observe([], isRecording: true, at: .seconds(161))
+        XCTAssertEqual(watcher.observe([], isRecording: true, at: .seconds(190)), [])
+        XCTAssertEqual(
+            watcher.observe([], isRecording: true, at: .seconds(191)),
+            [.stop("zoom")]
+        )
+    }
+
     /// Nothing was recording, so there is nothing to stop; the call just
     /// stops being the current one.
     func testACallThatEndsWithNothingRecordingSuggestsNothing() {

@@ -61,15 +61,17 @@ struct CallWatcher {
     ) -> [Suggestion] {
         recording = isRecording
         if var current = call {
-            if !apps.contains(where: { $0.name == current.app }) {
+            if apps.contains(where: { $0.name == current.app }) {
+                current.quietSince = nil
+            } else {
                 let since = current.quietSince ?? now
                 current.quietSince = since
                 if now - since >= endAfter {
                     call = nil
                     return isRecording ? [.stop(current.app)] : []
                 }
-                call = current
             }
+            call = current
             return []
         }
         guard let app = apps.first(where: \.looksLikeACall) else {
