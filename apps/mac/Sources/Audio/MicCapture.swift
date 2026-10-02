@@ -13,3 +13,20 @@ protocol MicCapture: AnyObject {
     func stop() throws -> [Float]
     func cancel()
 }
+
+/// the mic a press was heard through, as the press log names it: what the
+/// device calls itself, and how it is attached — the two facts that tell an
+/// airpods failure from a built-in one.
+struct MicDescription: Equatable, Sendable, Codable {
+    enum Transport: String, Equatable, Sendable, Codable {
+        case builtIn = "built-in"
+        case bluetooth
+        case usb
+        case continuity
+        case virtual
+        case unknown
+    }
+
+    let name: String
+    let transport: Transport
+}
