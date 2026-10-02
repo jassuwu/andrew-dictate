@@ -1053,6 +1053,19 @@ private struct DictionaryEditor: View {
                                 .font(.caption)
                                 .foregroundStyle(BrandUI.textSecondary)
                                 .help("andrew added this after you fixed the same word twice. remove it and it won’t come back.")
+                            // one click, and the same never-again as the
+                            // menu's undo: the store remembers the pair.
+                            Button {
+                                selection.remove(entry.id)
+                                store.remove(id: entry.id)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(BrandUI.textSecondary)
+                            .help("remove it. andrew won’t learn it again.")
+                            .accessibilityLabel("undo learned: \(entry.right)")
                         }
                     }
                 }
