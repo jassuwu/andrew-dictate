@@ -41,6 +41,10 @@ struct MeetingThresholds: Sendable {
     var diskNearlyFullUnder: Int64 = 1_000_000_000
     /// How often the disk is looked at again while a meeting records.
     var diskLookedAtEvery: Duration = .seconds(60)
+    /// A model still loading this long after `record`, with the tap not
+    /// heard yet either, is said on the pill: parakeet is in before it and
+    /// says nothing extra. Provisional.
+    var gettingReadySaidAfter: Duration = .seconds(3)
 
     /// Tries in a row before the meeting stops waiting on the tap.
     var rebuildAttempts: Int { rebuildSpacing.count + 1 }
@@ -61,6 +65,10 @@ struct MeetingPreferences: Sendable {
 /// The moments the rest of the app shows. The HUD says these in words; the
 /// notifier turns `.nudge` into a question with buttons.
 enum MeetingEvent: Equatable, Sendable {
+    /// The model is still loading a moment after `record`, and the tap has
+    /// not been heard either: said once, so a slow start is not silence.
+    /// Never after `started`, which is the start line once the tap is heard.
+    case gettingReady
     case started
     /// The start sound never came back: the meeting ends before it began.
     /// Only ever at the start — what goes wrong once recording has begun is
@@ -124,6 +132,7 @@ enum MeetingEvent: Equatable, Sendable {
     /// The words on the lamp. `nil` means the HUD stays quiet.
     var hudText: String? {
         switch self {
+        case .gettingReady: "getting ready…"
         case .started: "recording a meeting"
         // it names the fix and hands you to the one surface allowed to ask
         // for it, rather than naming a switch you then have to go and find.
@@ -469,6 +478,7 @@ final class MeetingCoordinator: ObservableObject {
         modelLoaded = false
         startWatchdog(for: meeting)
         publish()
+        sayGettingReadyIfSlow(meeting)
 
         let lastTapClosed = tapClosing
         meeting.capture = Task { [weak self] in
@@ -600,6 +610,22 @@ final class MeetingCoordinator: ObservableObject {
             throw error
         }
         meeting.handle = handle
+    }
+
+    /// A start the pill would otherwise leave silent: the model still
+    /// loading a moment after `record`, and the tap not heard yet either.
+    /// Said once. Once the tap is heard, `recording a meeting` is the start
+    /// line — the audio is being kept from then — so this is never said
+    /// after it, however long the model takes; the menu, the badge and the
+    /// lamp say getting ready until it is in.
+    private func sayGettingReadyIfSlow(_ meeting: Meeting) {
+        let wait = thresholds.gettingReadySaidAfter
+        Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            guard let self, current === meeting, !modelLoaded,
+                  session.state == .provingItCanHear else { return }
+            onEvent?(.gettingReady)
+        }
     }
 
     func stop() {

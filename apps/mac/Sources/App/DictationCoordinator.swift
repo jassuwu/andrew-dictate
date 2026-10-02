@@ -2636,9 +2636,10 @@ extension DictationCoordinator {
                 meetingsNeedAttention = true
                 runOnboardingAgain(scope: .meetingsOnly, openAt: .permissions)
             }
-        case .recovering, .gapBegan, .gapEnded, .problemBegan, .problemCleared,
-             .micMuted, .micUnmuted, .writingItOut, .readingAgain, .hookFailed,
-             .transcribingAgain, .transcribedAgain, .couldNotTranscribeAgain:
+        case .gettingReady, .recovering, .gapBegan, .gapEnded, .problemBegan,
+             .problemCleared, .micMuted, .micUnmuted, .writingItOut, .readingAgain,
+             .hookFailed, .transcribingAgain, .transcribedAgain,
+             .couldNotTranscribeAgain:
             break
         }
 

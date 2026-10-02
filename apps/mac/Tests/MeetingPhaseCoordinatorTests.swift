@@ -30,7 +30,9 @@ final class MeetingPhaseCoordinatorTests: XCTestCase {
 
     private var docs: URL { dir.appendingPathComponent("docs") }
 
-    private func coordinator() -> MeetingCoordinator {
+    private func coordinator(
+        gettingReadySaidAfter: Duration = .seconds(3)
+    ) -> MeetingCoordinator {
         let c = MeetingCoordinator(
             source: source,
             makeTranscriber: { [transcriber] _ in transcriber! },
@@ -40,7 +42,8 @@ final class MeetingPhaseCoordinatorTests: XCTestCase {
             thresholds: .init(
                 probeTimeout: .seconds(1), silenceTimeout: .seconds(600),
                 silenceFloor: 0.001, quietNudgeAfter: .seconds(3_600),
-                diskLookedAtEvery: .seconds(1)),
+                diskLookedAtEvery: .seconds(1),
+                gettingReadySaidAfter: gettingReadySaidAfter),
             freeSpace: { [disk] _ in disk!.bytes },
             preferences: { [unowned self] in
                 MeetingPreferences(folder: docs, hook: nil, model: .parakeetV3)
@@ -172,6 +175,68 @@ final class MeetingPhaseCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(seen, [.idle, .gettingReady, .idle])
         XCTAssertEqual(events, [.cannotHear])
+    }
+
+    // MARK: - the pill
+
+    /// A model still loading a while after `record`, with the tap not yet
+    /// heard either, is said once: a slow start is not silence.
+    func testASlowStartSaysGettingReadyOnce() async throws {
+        transcriber.loadsSlowly()
+        let c = coordinator(gettingReadySaidAfter: .milliseconds(200))
+
+        c.start()
+        await source.awaitStart()
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertEqual(events, [.gettingReady])
+        XCTAssertEqual(MeetingEvent.gettingReady.hudText, "getting ready…")
+
+        source.send(loud(at: .zero))
+        await waitFor { c.state == .recording }
+        XCTAssertEqual(events, [.gettingReady, .started])
+    }
+
+    /// Parakeet loads in under the wait: nothing is said but the start.
+    func testAFastModelSaysNothingExtra() async throws {
+        let c = coordinator(gettingReadySaidAfter: .milliseconds(200))
+
+        c.start()
+        await source.awaitStart()
+        try await Task.sleep(for: .milliseconds(400))
+        source.send(loud(at: .zero))
+        await waitFor { c.phase == .recording }
+
+        XCTAssertEqual(events, [.started])
+    }
+
+    /// Once the tap is heard, `recording a meeting` is the start line, and
+    /// getting ready is never said after it, however long the model takes.
+    func testGettingReadyIsNeverSaidAfterRecordingAMeeting() async throws {
+        transcriber.loadsSlowly()
+        let c = coordinator(gettingReadySaidAfter: .milliseconds(200))
+
+        c.start()
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await waitFor { c.state == .recording }
+        try await Task.sleep(for: .milliseconds(400))
+
+        XCTAssertEqual(events, [.started])
+        XCTAssertEqual(c.phase, .gettingReady)
+    }
+
+    /// Stopped before the wait is up, nothing more is said of a meeting
+    /// that is over.
+    func testAMeetingStoppedWhileGettingReadyIsNotSaidToBe() async throws {
+        transcriber.loadsSlowly()
+        let c = coordinator(gettingReadySaidAfter: .milliseconds(200))
+
+        c.start()
+        await source.awaitStart()
+        c.stop()
+        try await Task.sleep(for: .milliseconds(400))
+
+        XCTAssertFalse(events.contains(.gettingReady), "\(events)")
     }
 
     // MARK: - helpers
