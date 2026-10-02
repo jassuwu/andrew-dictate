@@ -62,6 +62,10 @@ actor StretchTranscriber: MeetingTranscriber {
     private var turns: [MeetingTurn] = []
     private(set) var tally = StretchTally()
 
+    /// The 100 ms the capture layer hands over, so a spool is heard in the
+    /// same steps the meeting was.
+    private static let spoolChunk = 1_600
+
     /// `ceiling` is the longest stretch the engine is handed — about 25 s
     /// for whisper, 15 s for parakeet. `detector` makes one detector per
     /// side; `now` is the wall the decoding is timed against.
@@ -85,9 +89,7 @@ actor StretchTranscriber: MeetingTranscriber {
     // MARK: - MeetingTranscriber
 
     func begin() async throws {
-        let loading = Task { [engine] in try await engine.load() }
-        self.loading = loading
-        try await loading.value
+        try await load()
         isReady = true
         startWorking()
     }
@@ -120,8 +122,29 @@ actor StretchTranscriber: MeetingTranscriber {
         return Self.inOrder(turns)
     }
 
+    /// A whole spool, heard the way the meeting was: in the chunks the
+    /// capture layer hands over, through a fresh detector per side, each
+    /// stretch decoded as soon as it is cut so only one is in memory beside
+    /// the recording. A spool has no gaps in it, so its clock is its sample
+    /// count.
     func transcribe(you: [Float], them: [Float]) async throws -> [MeetingTurn] {
-        []
+        try await load()
+        var turns: [MeetingTurn] = []
+        for (side, samples) in [(Stretch.Side.you, you), (.them, them)] {
+            let detector = makeDetector()
+            var cutter = StretchCutter(side: side, ceiling: ceiling)
+            var start = 0
+            while start < samples.count {
+                let end = min(start + Self.spoolChunk, samples.count)
+                let chunk = Array(samples[start..<end])
+                let edges = await detector.hear(chunk)
+                let at = StretchCutter.duration(of: start)
+                turns += await decodeAlone(cutter.take(chunk, at: at, edges: edges))
+                start = end
+            }
+            turns += await decodeAlone(cutter.flush())
+        }
+        return Self.inOrder(turns)
     }
 
     // MARK: - hearing
@@ -135,6 +158,14 @@ actor StretchTranscriber: MeetingTranscriber {
     }
 
     // MARK: - decoding
+
+    /// Loaded once, however many ask: `begin`, `finish` waiting on it, and a
+    /// spool all share the one load.
+    private func load() async throws {
+        let loading = loading ?? Task { [engine] in try await engine.load() }
+        self.loading = loading
+        try await loading.value
+    }
 
     private func queue(_ stretches: [Stretch]) {
         for stretch in stretches {
@@ -183,6 +214,17 @@ actor StretchTranscriber: MeetingTranscriber {
         }
         tally.failed += 1
         return nil
+    }
+
+    /// Off the queue and out of the panel: for a spool, which nobody is
+    /// watching and which has no meeting to fall behind.
+    private func decodeAlone(_ stretches: [Stretch]) async -> [MeetingTurn] {
+        var turns: [MeetingTurn] = []
+        for stretch in stretches {
+            guard let text = await decode(stretch), let words = Self.words(in: text) else { continue }
+            turns.append(Self.turn(words, from: stretch))
+        }
+        return turns
     }
 
     private func keep(_ text: String, from stretch: Stretch) {

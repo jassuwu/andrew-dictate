@@ -354,6 +354,38 @@ final class MeetingStretchTests: XCTestCase {
         ])
     }
 
+    // MARK: - a spool found at launch
+
+    /// The app died mid-meeting. At the next launch the spool is read back
+    /// whole and goes through the same detector and engine: the same
+    /// stretches, stamped from the start of the spool, each decoded once.
+    func testASpoolFoundAtLaunchIsCutAndDecodedTheSameWay() async throws {
+        let spool = MeetingSpool(root: dir.appendingPathComponent("spool"))
+        let handle = try spool.begin(.init(
+            app: "teams", started: Date(timeIntervalSince1970: 1_787_000_000),
+            engine: "whisper-large-v3-turbo", model: .whisperLargeV3Turbo))
+        let file = try SpoolAudioFile(url: handle.audioURL)
+        let said = [
+            you("are you recording this", from: 1.3, to: 2.5),
+            them("i am now", from: 2.3, to: 3.0),
+            you("good", from: 4.3, to: 4.8),
+        ]
+        for k in 0..<60 {
+            try await file.append(chunk(k, said))
+        }
+
+        let c = coordinator(stretches())
+        c.recoverOrphans()
+
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, [
+            "[00:00:01] you: are you recording this",
+            "[00:00:02] them: i am now",
+            "[00:00:04] you: good",
+        ])
+        XCTAssertEqual(handed().count, 3)
+    }
+
     // MARK: - the numbers
 
     /// What the meeting's record will be told: stretches decoded per side,
