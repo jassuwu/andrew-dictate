@@ -91,6 +91,39 @@ final class PasterPasteboardTests: XCTestCase {
         XCTAssertEqual(text(in: restored), ["copied since"])
     }
 
+    // MARK: - a copy you asked for
+
+    /// the menu's copy timings and copy diagnostics: a plain write you can
+    /// paste and your clipboard manager can keep — not the paste's relay.
+    func testACopyYouAskedForIsAPlainWrite() async {
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setString("what you had", forType: .string)
+
+        await Paster().copy("app 0.9.4 · mac 26.0", to: pasteboard)
+
+        let types = pasteboard.types ?? []
+        XCTAssertEqual(pasteboard.string(forType: .string), "app 0.9.4 · mac 26.0")
+        XCTAssertFalse(types.contains(Paster.transientType), "\(types)")
+        XCTAssertFalse(types.contains(Paster.concealedType), "\(types)")
+    }
+
+    /// two copies asked at once land one after the other, in order.
+    func testCopiesTakeTheirTurn() async {
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        let paster = Paster()
+
+        let first = Task { await paster.copy("timings", to: pasteboard) }
+        let second = Task { await paster.copy("diagnostics", to: pasteboard) }
+        await first.value
+        await second.value
+
+        XCTAssertEqual(pasteboard.string(forType: .string), "diagnostics")
+        XCTAssertEqual(pasteboard.pasteboardItems?.count, 1)
+    }
+
     private func text(in snapshot: Paster.Snapshot?) -> [String] {
         (snapshot?.items ?? []).flatMap { item in
             item.representations

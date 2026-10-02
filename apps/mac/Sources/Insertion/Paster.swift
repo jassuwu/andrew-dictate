@@ -209,6 +209,26 @@ final class Paster {
         return PasteOutcome(result: .pasted, insertedAt: insertedAt)
     }
 
+    /// a copy you asked for: the menu's timings and diagnostics. it takes
+    /// its turn behind any paste and the restore after it, so it never
+    /// lands between a dictation's snapshot of your clipboard and the put
+    /// back; and a read-ahead still out finishes first, so that off-main
+    /// read never meets this write half done. a plain write, as a ⌘C would
+    /// be: no relay marker, and the next paste reads it fresh by its change
+    /// count.
+    func copy(
+        _ text: String,
+        to pasteboard: NSPasteboard = .general
+    ) async {
+        await acquirePasteTransaction()
+        if let readingAhead {
+            _ = await readingAhead.read.value
+        }
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        releasePasteTransaction()
+    }
+
     private func acquirePasteTransaction() async {
         guard isPasting else {
             isPasting = true
