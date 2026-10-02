@@ -275,6 +275,25 @@ final class UtteranceMachineInterruptionTests: XCTestCase {
         XCTAssertEqual(outcomes, [.leftOnPasteboard(.locked), .delivered])
     }
 
+    /// the press log says the lock kept it, never that it was thrown away,
+    /// and the line reads back.
+    func testThePressLogSaysTheLockKeptIt() async throws {
+        let m = machine()
+        m.keyDown()
+        await pass(.seconds(1))
+        m.captureInterrupted(.systemPaused)
+        await settle { !self.outcomes.isEmpty }
+
+        let record = try XCTUnwrap(presses.first)
+        XCTAssertEqual(record.outcome.name, "left-on-pasteboard")
+        XCTAssertEqual(record.outcome.why, "locked")
+        let decoded = try JSONDecoder().decode(
+            PressRecord.self,
+            from: JSONEncoder().encode(record)
+        )
+        XCTAssertEqual(decoded.outcome, .leftOnPasteboard(.locked))
+    }
+
     // MARK: - a stop that spans the sleep
 
     /// the mac slept with the stop still out. the time asleep counted
