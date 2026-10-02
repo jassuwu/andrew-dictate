@@ -40,7 +40,7 @@ enum AudioRecorderError: LocalizedError {
 }
 
 @MainActor
-final class AudioRecorder {
+final class AudioRecorder: MicCapture {
     private static let targetSampleRate = 16_000.0
     private static let tapDuration = 0.1
     private static let preRollDuration = 0.3
