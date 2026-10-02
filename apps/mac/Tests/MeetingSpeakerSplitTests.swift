@@ -125,10 +125,12 @@ final class MeetingSpeakerSplitTests: XCTestCase {
         let c = coordinator()
         c.start()
         await source.awaitStart()
+        // a second at a time, each heard before the next: sixteen at once
+        // on a loaded runner are more than the split lets wait.
         for s in 0..<16 {
             source.send(loud(at: .seconds(s)))
+            await hearing.heard(s + 1)
         }
-        await hearing.heard(16)
 
         c.stop()
         await c.untilWrittenOut()
@@ -161,15 +163,12 @@ final class MeetingSpeakerSplitTests: XCTestCase {
         c.onEvent = { events.append($0) }
         c.start()
         await source.awaitStart()
-        source.send(loud(at: .zero))
-        source.send(loud(at: .seconds(1)))
-        // silence while something plays: asked at 8 s, unheard by 11 s, and
-        // the tap goes on calling back with nothing in it.
-        for s in 2..<20 {
-            source.send(silence(at: .seconds(s)))
-        }
-        for s in 20..<25 {
-            source.send(loud(at: .seconds(s)))
+        // silence while something plays from 2 s: asked at 8 s, unheard by
+        // 11 s, and the tap goes on calling back with nothing in it. Each
+        // second heard before the next, so none is let go for being behind.
+        for s in 0..<25 {
+            source.send((2..<20).contains(s) ? silence(at: .seconds(s)) : loud(at: .seconds(s)))
+            await hearing.heard(s + 1)
         }
         await until { c.elapsed >= .seconds(25) }
         XCTAssertEqual(events, [.started, .gapBegan, .gapEnded])

@@ -306,8 +306,9 @@ final class MeetingCoverageTests: XCTestCase {
 
         let c = coordinator()
         c.recoverOrphans()
-        await waitFor { !records.isEmpty }
-        await c.untilWrittenOut()
+        // the record is kept with the file, and the audio after it: a
+        // recovery is no meeting `untilWrittenOut` waits on.
+        await waitFor { !records.isEmpty && (try? keptAudio()) == 1 }
 
         let files = MeetingTranscriptFile.listAll(in: docs)
         XCTAssertEqual(files.count, 1)
