@@ -178,6 +178,13 @@ final class DictationCoordinator: ObservableObject {
     /// Rebuilt per transcript rather than reused: the window is *about* one
     /// dictation, so keeping a stale one around would show the wrong words.
     private let dictationArchive = DictationArchive()
+    /// the press log's file, written off the main thread: a record lands
+    /// after the paste, but the next press must not wait on a disk.
+    private let pressLog = PressLogStore()
+    private let pressLogQueue = DispatchQueue(
+        label: "\(AppIdentity.bundleID).press-log",
+        qos: .utility
+    )
     private var wordFixerWindowController: WordFixerWindowController?
 
     // MARK: meetings (ADR 0023, 0040)
@@ -1720,7 +1727,24 @@ extension DictationCoordinator {
             audioRecorder = nil
             hudViewModel.useRecorder(nil)
         case let .pressEnded(record):
-            pressLogger.notice("\(record.line(), privacy: .public)")
+            keep(record)
+        }
+    }
+
+    /// the line goes to the unified log now; the file follows on its own
+    /// queue, in press order.
+    private func keep(_ record: PressRecord) {
+        pressLogger.notice("\(record.line(), privacy: .public)")
+        let store = pressLog
+        let logger = pressLogger
+        pressLogQueue.async {
+            do {
+                try store.append(record)
+            } catch {
+                logger.error(
+                    "couldn't keep a press record: \(error.localizedDescription, privacy: .public)"
+                )
+            }
         }
     }
 }

@@ -15,6 +15,11 @@ import Foundation
 struct PressLogStore: Sendable {
     static let capacity = 200
 
+    /// one file, more than one hand on it: the coordinator appends from its
+    /// queue while settings may be wiping it. an append is a read and a
+    /// rewrite, and a wipe landing between the two must not be undone.
+    private static let lock = NSLock()
+
     let fileURL: URL
 
     init(fileURL: URL? = nil) {
@@ -31,6 +36,12 @@ struct PressLogStore: Sendable {
     /// rather than decoded and re-encoded, so a record from a newer build
     /// survives an older one's append.
     func append(_ record: PressRecord) throws {
+        try Self.lock.withLock {
+            try unlockedAppend(record)
+        }
+    }
+
+    private func unlockedAppend(_ record: PressRecord) throws {
         var lines = try rawLines()
         lines.append(try Self.encoder().encode(record))
         let kept = lines.suffix(Self.capacity)
@@ -55,7 +66,8 @@ struct PressLogStore: Sendable {
     /// oldest first. a line that will not decode is skipped, not thrown.
     func all() throws -> [PressRecord] {
         let decoder = Self.decoder()
-        return try rawLines().compactMap {
+        let lines = try Self.lock.withLock { try rawLines() }
+        return lines.compactMap {
             try? decoder.decode(PressRecord.self, from: $0)
         }
     }
@@ -67,10 +79,12 @@ struct PressLogStore: Sendable {
 
     /// unlinked, not emptied: wiping history leaves nothing to recover.
     func deleteAll() throws {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            return
+        try Self.lock.withLock {
+            guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                return
+            }
+            try FileManager.default.removeItem(at: fileURL)
         }
-        try FileManager.default.removeItem(at: fileURL)
     }
 
     private func rawLines() throws -> [Data] {
