@@ -28,7 +28,7 @@ enum UpdateOffer {
     /// that, running the brew upgrade itself and copying the command only
     /// when it fails.
     enum Action: Equatable, Sendable {
-        case brewUpgrade(String)
+        case brewUpgrade
         case openReleasePage(URL)
     }
 
@@ -51,7 +51,7 @@ enum UpdateOffer {
     static func action(for install: Install) -> Action {
         switch install {
         case .homebrew:
-            .brewUpgrade(UpdateCheck.upgradeCommand)
+            .brewUpgrade
         case .dmg:
             .openReleasePage(releasesPage)
         }

@@ -169,18 +169,15 @@ final class UpdateCheckTests: XCTestCase {
 
     // MARK: - the update line: what clicking it does
 
-    /// brew put it there, so brew replaces it — with the exact tap line.
-    func testABrewInstallIsOfferedTheUpgradeCommand() {
+    /// brew put it there, so brew replaces it.
+    func testABrewInstallIsOfferedTheUpgrade() {
         let line = UpdateOffer.line(
             latest: "0.9.5",
             running: "0.9.4",
             install: .homebrew
         )
 
-        XCTAssertEqual(
-            line?.action,
-            .brewUpgrade("brew upgrade --cask jassuwu/tap/andrew-dictate")
-        )
+        XCTAssertEqual(line?.action, .brewUpgrade)
     }
 
     /// a dmg user handed a brew line would paste an error into terminal.
@@ -473,7 +470,7 @@ final class UpdateCheckTests: XCTestCase {
 
     private let brewLine = UpdateOffer.Line(
         version: "0.9.5",
-        action: .brewUpgrade("brew upgrade --cask jassuwu/tap/andrew-dictate")
+        action: .brewUpgrade
     )
 
     private let optBrew = URL(fileURLWithPath: "/opt/homebrew/bin/brew")
