@@ -29,9 +29,9 @@ the domain model. one term, one meaning. if a word isn't here, it doesn't get us
 | **locked recording** | double-tap the dictation key to record hands-free; a single tap ends it and inserts as normal. |
 | **capture ceiling** | five minutes of one utterance. the capture stops accepting frames; the take is kept and still inserted. |
 | **dictation** | one delivered utterance, kept: raw + inserted text, time, engine, key-up→inserted. your own speech. deleted only by you. |
-| **meeting recording** | a local recording of one named app plus your mic, from `record a meeting` to `stop`. holds other people's words, so it is its own noun with its own rules (ADR 0022). what survives is the transcript. |
-| **tap** | the Core Audio process tap on the app you named. its channel is *them*. proved alive by hearing the start sound; never asked. |
-| **you / them** | the two channels of a meeting: your mic is *you*, the tapped app is *them*. after stop the diarizer splits *them* into `them 1`, `them 2`… |
+| **meeting recording** | a local recording of everything the mac plays plus your mic, from `record a meeting` to `stop`. no app is picked (ADR 0049); the file is called `meeting` unless the call app's name was known at the start. holds other people's words, so it is its own noun with its own rules (ADR 0022). what survives is the transcript. |
+| **tap** | the Core Audio tap on the whole mac — every process, this app's included. its channel is *them*. proved alive by hearing the start sound; never asked. |
+| **you / them** | the two channels of a meeting: your mic is *you*, everything the mac plays is *them* — the call, and a video or a notification sound if one plays. after stop the diarizer splits *them* into `them 1`, `them 2`… |
 | **spool** | the 0600 audio file a meeting writes to while it runs. deleted the moment the transcript is saved; a spool orphaned by a crash is transcribed at next launch and saved `recovered`. |
 | **live transcript** | the floating glass panel during a meeting: confirmed lines in ink, the tentative tail dimmed. the live pass *is* the transcript. |
 | **transcript file** | the markdown file a meeting produces: front matter (who spoke, how many words, whether it is whole and why not), then one paragraph per speaker turn, `[hh:mm:ss] you: …`, with a new one every minute of a long monologue. english when the model translates (whisper large, the default); as spoken when it cannot (turbo). a `README.md` beside the month folders tells an agent what they are. |
