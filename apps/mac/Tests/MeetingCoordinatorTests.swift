@@ -178,7 +178,9 @@ final class MeetingCoordinatorTests: XCTestCase {
     /// SPEC §11's hour of silence. It could never arrive: every rebuild
     /// replays the start sound into our own tap, and every silent chunk in
     /// between read as activity, so the quiet clock was reset every two
-    /// minutes for as long as the quiet lasted.
+    /// minutes for as long as the quiet lasted. Silence alone no longer
+    /// rebuilds anything, but a tap that keeps missing the quiet probe
+    /// still is, and its start sound must still not count as the room.
     func testASilentHourAsksOnce() async throws {
         let c = coordinator()
         // the real source chirps on every rebuild and the tap hears this
@@ -190,12 +192,14 @@ final class MeetingCoordinatorTests: XCTestCase {
         source.send(loud(at: .zero))
         await settle()
 
-        // nobody says another word. the tap goes silent, rebuilds, hears its
-        // own tone, and goes silent again — over and over.
+        // something plays and nobody says another word. the tap misses the
+        // quiet probe — this fake never plays it — is rebuilt, hears its
+        // own start sound, and misses the next one — over and over.
         await beQuiet(from: 5, through: 60)
 
         XCTAssertEqual(events.filter { $0 == .nudge }.count, 1, "\(events)")
         XCTAssertTrue(events.contains(.gapBegan))
+        XCTAssertGreaterThan(source.quietProbes, 1, "asked every time")
         XCTAssertGreaterThan(source.rebuilds, 1, "the tone really was replayed")
     }
 
