@@ -4,7 +4,7 @@ import Foundation
 enum HUDContent: Equatable, Sendable {
     case wave
     case prewarming
-    case text(String)
+    case text(String, button: String? = nil)
 }
 
 /// the size of the thing on the stage — the ribbon's canvas or the text
@@ -14,6 +14,7 @@ enum HUDContent: Equatable, Sendable {
 struct HUDLayout: Equatable, Sendable {
     let size: CGSize
     let lineCount: Int
+    var button: CGSize? = nil
 }
 
 enum HUDLayoutEngine {
@@ -28,9 +29,22 @@ enum HUDLayoutEngine {
     /// glass edge — nothing on the stage may touch the window's edge, which
     /// clips regardless of layer masks
     static let stageMargin: CGFloat = 24
+    static let pillCornerRadius: CGFloat = 22
+    /// the pill's one button (ADR 0047): a capsule inside the glass, as far
+    /// from its top, bottom and trailing edge as the pill's corner is round
+    /// minus its own, so the two curves share a centre.
+    static let buttonHeight: CGFloat = 24
+    static let buttonInset: CGFloat = (minimumSize.height - buttonHeight) / 2
+    static let buttonGap: CGFloat = 10
+    static let buttonHorizontalPadding: CGFloat = 11
 
     static var primaryFont: NSFont {
         .systemFont(ofSize: 12, weight: .medium)
+    }
+
+    /// the pill's type a step heavier: the one word you can press.
+    static var buttonFont: NSFont {
+        .systemFont(ofSize: 12, weight: .semibold)
     }
 
     static var primaryLineHeight: CGFloat {
@@ -68,7 +82,7 @@ enum HUDLayoutEngine {
                 size: waveSize,
                 lineCount: 1
             )
-        case let .text(text):
+        case let .text(text, button):
             let maximumWidth = max(
                 minimumSize.width,
                 screenWidth * maximumScreenWidthFraction
@@ -77,8 +91,13 @@ enum HUDLayoutEngine {
                 of: text,
                 font: primaryFont
             )
-            let fixedHorizontalSpace =
-                horizontalPadding * 2 + measurementSafety
+            let buttonSize = button.map(Self.buttonSize(for:))
+            // a button takes the trailing padding's place, and the gap
+            // before it, so the sentence keeps every point it had.
+            let fixedHorizontalSpace = horizontalPadding
+                + (buttonSize.map { buttonGap + $0.width + buttonInset }
+                    ?? horizontalPadding)
+                + measurementSafety
             let width = min(
                 max(primaryWidth + fixedHorizontalSpace, minimumSize.width),
                 maximumWidth
@@ -95,9 +114,18 @@ enum HUDLayoutEngine {
 
             return HUDLayout(
                 size: CGSize(width: width, height: height),
-                lineCount: lineCount
+                lineCount: lineCount,
+                button: buttonSize
             )
         }
+    }
+
+    static func buttonSize(for title: String) -> CGSize {
+        CGSize(
+            width: measuredWidth(of: title, font: buttonFont)
+                + buttonHorizontalPadding * 2,
+            height: buttonHeight
+        )
     }
 
     private static func measuredWidth(
