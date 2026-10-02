@@ -1087,7 +1087,7 @@ final class MeetingCoordinator: ObservableObject {
     ) async -> Saved? {
         let turns = covered.reading.turns
         let tally = covered.reading.tally
-        let (split, _) = await splitSpeakers(
+        let (split, speakersReport) = await splitSpeakers(
             in: turns, heardBy: speakers, spool: handle.audioURL, gaps: recording.gaps)
 
         let thin = covered.result == .thin
@@ -1114,7 +1114,7 @@ final class MeetingCoordinator: ObservableObject {
                 coverage: .init(
                     covered.result, reason: covered.reason, tally: tally,
                     farSideLoud: covered.farSideLoud),
-                audioKept: audioKept, audioKeptUntil: until)
+                audioKept: audioKept, audioKeptUntil: until, split: speakersReport)
         }
 
         let url: URL

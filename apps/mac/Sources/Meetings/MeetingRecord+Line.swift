@@ -26,6 +26,10 @@ extension MeetingRecord {
         if let toDiskS {
             fields.append("to_disk_s=\(Self.plain(toDiskS))")
         }
+        if let split {
+            fields.append("split_tail_s=\(Self.plain(split.tailS))")
+            fields.append("split_skipped=\(split.skipped)")
+        }
         if recovered {
             fields.append("recovered=1")
         }

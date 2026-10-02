@@ -107,6 +107,20 @@ struct MeetingRecord: Equatable, Sendable, Codable {
     /// your asking, and not of a meeting that has just ended. one per
     /// rerun; `toDiskS` is how long it took.
     var again = false
+    /// what the speaker split did at the stop, for a meeting that had one.
+    var split: Split?
+}
+
+// MARK: - the speaker split
+
+extension MeetingRecord {
+    /// the split's part of the seconds to the file — from the stop to its
+    /// last piece heard — and the pieces it let go, whose turns are plain
+    /// `them`.
+    struct Split: Equatable, Sendable, Codable {
+        var tailS: Double = 0
+        var skipped = 0
+    }
 }
 
 // MARK: - coverage
@@ -230,7 +244,18 @@ extension MeetingRecord {
             coverage: (try? container.decodeIfPresent(Coverage.self, forKey: .coverage)) ?? nil,
             audioKept: try container.decodeIfPresent(Bool.self, forKey: .audioKept) ?? false,
             audioKeptUntil: try container.decodeIfPresent(Date.self, forKey: .audioKeptUntil),
-            again: try container.decodeIfPresent(Bool.self, forKey: .again) ?? false
+            again: try container.decodeIfPresent(Bool.self, forKey: .again) ?? false,
+            split: try container.decodeIfPresent(Split.self, forKey: .split)
+        )
+    }
+}
+
+extension MeetingRecord.Split {
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            tailS: try container.decodeIfPresent(Double.self, forKey: .tailS) ?? 0,
+            skipped: try container.decodeIfPresent(Int.self, forKey: .skipped) ?? 0
         )
     }
 }
@@ -294,7 +319,8 @@ extension MeetingRecord {
         coverage: Coverage? = nil,
         audioKept: Bool = false,
         audioKeptUntil: Date? = nil,
-        again: Bool = false
+        again: Bool = false,
+        split: SpeakerSplit.Report? = nil
     ) {
         self.init(
             outcome: outcome,
@@ -320,7 +346,8 @@ extension MeetingRecord {
             coverage: coverage,
             audioKept: audioKept,
             audioKeptUntil: audioKeptUntil,
-            again: again
+            again: again,
+            split: split.map { Split(tailS: Self.seconds($0.tail), skipped: $0.skipped) }
         )
     }
 

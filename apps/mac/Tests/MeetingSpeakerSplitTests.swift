@@ -71,6 +71,8 @@ final class MeetingSpeakerSplitTests: XCTestCase {
         await c.untilWrittenOut()
 
         XCTAssertEqual(hearing.pieces.dropFirst(3), [.init(at: .seconds(3), samples: 8_000)])
+        XCTAssertEqual(records.first?.split?.skipped, 0)
+        XCTAssertNotNil(records.first?.split?.tailS)
     }
 
     /// The diarizer throws on the second second, both times. The meeting is
@@ -98,6 +100,7 @@ final class MeetingSpeakerSplitTests: XCTestCase {
         await c.untilWrittenOut()
 
         XCTAssertEqual(records.map(\.outcome), [.saved])
+        XCTAssertEqual(records.first?.split?.skipped, 1)
         XCTAssertEqual(try lines(), [
             "[00:00:00] them 1: hello",
             "[00:00:01] them: can you hear me",
