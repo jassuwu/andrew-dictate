@@ -135,6 +135,20 @@ struct AndrewDictateApp: App {
                     coordinator.toggleLiveTranscript()
                 }
             } else {
+                // a call is on and nothing is recording it (ADR 0047). the
+                // pill offered it once, for fifteen seconds; the menu leads
+                // with it for as long as the call lasts, the way it leads
+                // with a recording while one runs.
+                if let call = coordinator.unrecordedCall {
+                    Text("\(call) call · not recording")
+                        .foregroundStyle(.secondary)
+                        .disabled(true)
+
+                    Button("record a meeting") {
+                        coordinator.startMeeting()
+                    }
+                }
+
                 // a spool the app died on is being written out in the
                 // background. the pill says it once; this says it for as
                 // long as it runs.
@@ -183,11 +197,14 @@ struct AndrewDictateApp: App {
                     }
                 }
 
-                // nothing starts a recording but the user (ADR 0023), and
-                // there is no app to name: a meeting hears the whole mac
-                // (ADR 0049), so whatever the call is in is already heard.
-                Button("record a meeting") {
-                    coordinator.startMeeting()
+                // nothing starts a recording but the user (ADR 0023, 0047),
+                // and there is no app to pick: a meeting hears the whole mac
+                // (ADR 0049). it is named after the call that is on, if one
+                // is, and then it sits under that call's line above.
+                if coordinator.unrecordedCall == nil {
+                    Button("record a meeting") {
+                        coordinator.startMeeting()
+                    }
                 }
 
                 // one row, and only while it is needed: the tap would not
