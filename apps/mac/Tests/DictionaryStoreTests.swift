@@ -221,6 +221,43 @@ final class DictionaryStoreTests: XCTestCase {
         XCTAssertFalse(written.contains("learned"))
     }
 
+    /// taking a learned entry out — the menu's undo or the table's minus —
+    /// is saying "don't learn that", and it is still said after a relaunch.
+    func testRemovingALearnedEntryMeansNeverLearnItAgain() {
+        let store = DictionaryStore(fileURL: fileURL)
+        let learned = DictionaryEntry(wrong: "Jaz Dot Dev", right: "jass.dev", learned: true)
+        store.add(learned)
+
+        XCTAssertTrue(store.remove(id: learned.id))
+
+        let relaunched = DictionaryStore(fileURL: fileURL)
+        XCTAssertTrue(relaunched.neverLearn.contains(LearningKey(wrong: "jaz dot dev", right: "jass.dev")))
+        XCTAssertEqual(relaunched.entries, [])
+    }
+
+    func testRemovingARowYouTypedRemembersNothing() {
+        let store = DictionaryStore(fileURL: fileURL)
+        let typed = DictionaryEntry(wrong: "darsh", right: "Darsh")
+        store.add(typed)
+
+        store.remove(id: typed.id)
+
+        XCTAssertEqual(DictionaryStore(fileURL: fileURL).neverLearn, [])
+    }
+
+    /// an edit makes a learned row yours: the mark goes, and removing it
+    /// afterwards is removing your own row.
+    func testEditingALearnedEntryMakesItYours() {
+        let store = DictionaryStore(fileURL: fileURL)
+        let learned = DictionaryEntry(wrong: "jason", right: "JSON", learned: true)
+        store.add(learned)
+
+        store.updateRight(id: learned.id, right: "json")
+        store.remove(id: learned.id)
+
+        XCTAssertEqual(store.neverLearn, [])
+    }
+
     // MARK: - helpers
 
     private func writeDictionary(_ entries: [DictionaryEntry]) throws {
