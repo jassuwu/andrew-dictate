@@ -134,6 +134,9 @@ final class CallMonitor {
                 // a read that cannot be done is skipped, not taken for a
                 // quiet mac: that would end a call nobody left.
                 if let processes = await read(), isStarted {
+                    // debug, so only a `log stream` sees it: which bundle
+                    // ids a call app really listens and plays through.
+                    logger.debug("read: \(Self.describe(processes), privacy: .public)")
                     othersOnTheMic = processes.contains {
                         $0.pid != ownPID && $0.isRunningInput
                     }
@@ -184,6 +187,18 @@ final class CallMonitor {
         logger.notice(
             "call: \(current ?? "none", privacy: .public), unrecorded: \(unrecorded ?? "none", privacy: .public)")
         onCallsChanged?()
+    }
+
+    /// `812 us.zoom.xos (in, out)`, every process that is running audio.
+    private static func describe(_ processes: [AudioProcess]) -> String {
+        guard !processes.isEmpty else { return "nothing running" }
+        return processes.map { process in
+            let parts = [
+                process.isRunningInput ? "in" : nil,
+                process.isRunningOutput ? "out" : nil,
+            ].compactMap { $0 }
+            return "\(process.pid) \(process.bundleID ?? "-") (\(parts.joined(separator: ", ")))"
+        }.joined(separator: "; ")
     }
 
     /// `zoom (mic, audio)`: app names only, nothing about what is said.
