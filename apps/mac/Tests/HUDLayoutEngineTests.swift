@@ -94,7 +94,10 @@ extension HUDLayoutEngineTests {
         for message in [
             "heard nothing",
             "locked — tap to end",
-            "the microphone changed — say that again",
+            "the mic changed — pasted what i had.",
+            "microphone isn't responding",
+            "no sound from MacBook Pro Microphone",
+            "no sound from the microphone",
             "accessibility is off — the dictation key is dead",
             "still finishing the last one",
             "couldn't transcribe — tap to try again",
@@ -120,6 +123,7 @@ extension HUDLayoutEngineTests {
             "copied — secure field · ⌘V to paste",
             "copied — focus changed · ⌘V to paste",
             "copied — couldn't paste it · ⌘V to paste",
+            "copied — what you said before the lock · ⌘V to paste",
             "the clipboard is busy — nothing was copied",
         ] {
             let layout = HUDLayoutEngine.layout(

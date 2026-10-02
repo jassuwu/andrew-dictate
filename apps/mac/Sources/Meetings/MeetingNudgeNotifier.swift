@@ -29,9 +29,10 @@ final class MeetingNudgeNotifier: NSObject, UNUserNotificationCenterDelegate {
     private let center: UNUserNotificationCenter?
 
     override init() {
-        // A bare test binary has no bundle, and the notification centre
-        // refuses to exist without one. The app always has it.
-        center = Bundle.main.bundleIdentifier == nil ? nil : .current()
+        // The notification centre refuses to exist outside an app bundle,
+        // and throws rather than say so. The test runner has a bundle id
+        // but is not an app, so the id alone was not the check.
+        center = Bundle.main.bundleURL.pathExtension == "app" ? .current() : nil
         super.init()
         guard let center else { return }
         center.delegate = self

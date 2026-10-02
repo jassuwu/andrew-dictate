@@ -1,0 +1,332 @@
+import AppKit
+@preconcurrency import ApplicationServices
+
+/// a minute of watching one delivered dictation's words, and only those.
+///
+/// the adapter between AX and `SpanFollower`: it hears the field change, asks
+/// the follower to read, and hands over what our words read as once you have
+/// paused. it ends after a minute, when focus leaves the field, when our
+/// words are gone, or when the next dictation starts — whichever is first.
+@MainActor
+final class AXSpanWatcher {
+    /// "~60 s" in the rule: long enough to read back what landed and
+    /// correct a word, short enough that it's still about this dictation.
+    static let lifetime: Duration = .seconds(60)
+    /// typing pauses longer than this are a correction, not a word half-typed.
+    static let quiet: Duration = .milliseconds(1500)
+    /// the fallback for a field that never says it changed.
+    static let pollInterval: Duration = .milliseconds(1500)
+    /// the paste is a change: no notification by now means none are coming.
+    static let notificationGrace: Duration = .seconds(1)
+    /// a paste that hasn't shown up by now went somewhere we can't see.
+    static let landingDeadline: Duration = .seconds(3)
+
+    private let reader: AXSpanReader
+    private var follower: SpanFollower
+    private let onSettled: (String) -> Void
+    private let onEnded: () -> Void
+
+    private var observer: AXObserver?
+    private var application: AXUIElement?
+    private var retainedByObserver: Unmanaged<AXSpanWatcher>?
+    private var activation: NSObjectProtocol?
+    private var timers: [Task<Void, Never>] = []
+    private var quietTimer: Task<Void, Never>?
+    private var polling: Task<Void, Never>?
+
+    /// a focus question is out, off the main thread. one at a time: the
+    /// answer is the same for every ask while it is out.
+    private var askingFocus = false
+    private var hearsChanges = false
+    private var landed = false
+    private var lastRead: String?
+    private var lastSettled: String?
+    private var ended = false
+
+    init(
+        reader: AXSpanReader,
+        inserted: String,
+        onSettled: @escaping (String) -> Void,
+        onEnded: @escaping () -> Void
+    ) {
+        self.reader = reader
+        follower = SpanFollower(inserted: inserted)
+        self.onSettled = onSettled
+        self.onEnded = onEnded
+    }
+
+    func start() {
+        observe()
+        activation = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            // the app just activated, from the notification itself:
+            // frontmostApplication may not have caught up yet.
+            let activated = (
+                notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+                    as? NSRunningApplication
+            )?.processIdentifier
+            MainActor.assumeIsolated {
+                self?.focusMayHaveMoved(frontmost: activated)
+            }
+        }
+
+        // the paste can land before the observer is in, and then there is
+        // no change to hear: look once straight away.
+        after(.milliseconds(150)) { $0.readSpan() }
+        after(Self.notificationGrace) { watcher in
+            if !watcher.hearsChanges {
+                watcher.poll()
+            }
+        }
+        after(Self.landingDeadline) { watcher in
+            if !watcher.landed {
+                watcher.end(flushing: false)
+            }
+        }
+        after(Self.lifetime) { $0.end(flushing: true) }
+    }
+
+    /// the next dictation: whatever you were still typing isn't a finished
+    /// correction, and a pill about it would land on the take.
+    func stop() {
+        end(flushing: false)
+    }
+
+    // MARK: - hearing the field
+
+    private func observe() {
+        var created: AXObserver?
+        guard AXObserverCreate(
+            reader.processIdentifier,
+            axSpanWatcherCallback,
+            &created
+        ) == .success, let observer = created else {
+            poll()
+            return
+        }
+        // the observer holds the watcher until `end` lets go, so a callback
+        // can never reach a watcher that is gone.
+        let retained = Unmanaged.passRetained(self)
+        retainedByObserver = retained
+        let refcon = retained.toOpaque()
+        let application = AXSpanReader.application(reader.processIdentifier)
+        _ = AXObserverAddNotification(
+            observer,
+            reader.element,
+            kAXValueChangedNotification as CFString,
+            refcon
+        )
+        _ = AXObserverAddNotification(
+            observer,
+            reader.element,
+            kAXUIElementDestroyedNotification as CFString,
+            refcon
+        )
+        _ = AXObserverAddNotification(
+            observer,
+            application,
+            kAXFocusedUIElementChangedNotification as CFString,
+            refcon
+        )
+        CFRunLoopAddSource(
+            CFRunLoopGetMain(),
+            AXObserverGetRunLoopSource(observer),
+            .defaultMode
+        )
+        self.observer = observer
+        self.application = application
+    }
+
+    fileprivate func notified(_ notification: String) {
+        switch notification {
+        case kAXValueChangedNotification:
+            // the field does say when it changes: no need to keep asking.
+            hearsChanges = true
+            polling?.cancel()
+            polling = nil
+            readSpan()
+        case kAXUIElementDestroyedNotification:
+            end(flushing: true)
+        default:
+            focusMayHaveMoved()
+        }
+    }
+
+    /// a slow look every second and a half, for a field that never says it
+    /// changed — and the same look at where focus is.
+    private func poll() {
+        guard polling == nil, !ended else {
+            return
+        }
+        polling = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.pollInterval)
+                guard let self, !Task.isCancelled, !self.ended else {
+                    return
+                }
+                self.focusMayHaveMoved()
+                self.readSpan()
+            }
+        }
+    }
+
+    /// another app in front ends the watch here. our field still focused
+    /// inside its app is a round trip to that app, asked off the main
+    /// thread: every second and a half while polling, and on every switch.
+    private func focusMayHaveMoved(
+        frontmost: pid_t? = NSWorkspace.shared.frontmostApplication?
+            .processIdentifier
+    ) {
+        guard !ended else {
+            return
+        }
+        guard frontmost == reader.processIdentifier else {
+            end(flushing: true)
+            return
+        }
+        guard !askingFocus else {
+            return
+        }
+        askingFocus = true
+        let reader = reader
+        Task { @MainActor [weak self] in
+            let stillFocused = await Task.detached(priority: .utility) {
+                reader.isStillFocused()
+            }.value
+            guard let self else {
+                return
+            }
+            self.askingFocus = false
+            if !stillFocused {
+                self.end(flushing: true)
+            }
+        }
+    }
+
+    // MARK: - reading
+
+    private func readSpan() {
+        guard !ended else {
+            return
+        }
+        switch follower.read(reader) {
+        case .notLanded:
+            return
+        case let .reads(text):
+            guard landed else {
+                landed = true
+                lastRead = text
+                lastSettled = text
+                return
+            }
+            guard text != lastRead else {
+                return
+            }
+            lastRead = text
+            quietTimer?.cancel()
+            quietTimer = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: Self.quiet)
+                guard !Task.isCancelled else {
+                    return
+                }
+                self?.settle()
+            }
+        case .gone:
+            // sent, cleared or deleted: what you left our words as before
+            // they went is still what you made of them.
+            end(flushing: landed)
+        }
+    }
+
+    private func settle() {
+        guard let lastRead, lastRead != lastSettled else {
+            return
+        }
+        lastSettled = lastRead
+        onSettled(lastRead)
+    }
+
+    private func end(flushing: Bool) {
+        guard !ended else {
+            return
+        }
+        ended = true
+        timers.forEach { $0.cancel() }
+        timers = []
+        quietTimer?.cancel()
+        polling?.cancel()
+        if let activation {
+            NSWorkspace.shared.notificationCenter.removeObserver(activation)
+        }
+        if let observer {
+            AXObserverRemoveNotification(
+                observer,
+                reader.element,
+                kAXValueChangedNotification as CFString
+            )
+            AXObserverRemoveNotification(
+                observer,
+                reader.element,
+                kAXUIElementDestroyedNotification as CFString
+            )
+            if let application {
+                AXObserverRemoveNotification(
+                    observer,
+                    application,
+                    kAXFocusedUIElementChangedNotification as CFString
+                )
+            }
+            CFRunLoopRemoveSource(
+                CFRunLoopGetMain(),
+                AXObserverGetRunLoopSource(observer),
+                .defaultMode
+            )
+        }
+        observer = nil
+        if flushing {
+            settle()
+        }
+        // nothing is kept: what our words read as goes with the watch.
+        lastRead = nil
+        lastSettled = nil
+        onEnded()
+        // last, and nothing after it: this may be the final reference.
+        let retained = retainedByObserver
+        retainedByObserver = nil
+        retained?.release()
+    }
+
+    private func after(
+        _ delay: Duration,
+        _ action: @escaping @MainActor (AXSpanWatcher) -> Void
+    ) {
+        timers.append(Task { @MainActor [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, let self, !self.ended else {
+                return
+            }
+            action(self)
+        })
+    }
+}
+
+/// AX calls back on the run loop the source was added to — the main one.
+private func axSpanWatcherCallback(
+    _ observer: AXObserver,
+    _ element: AXUIElement,
+    _ notification: CFString,
+    _ refcon: UnsafeMutableRawPointer?
+) {
+    guard let refcon else {
+        return
+    }
+    let watcher = Unmanaged<AXSpanWatcher>.fromOpaque(refcon)
+        .takeUnretainedValue()
+    let name = notification as String
+    MainActor.assumeIsolated {
+        watcher.notified(name)
+    }
+}

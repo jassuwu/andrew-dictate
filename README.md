@@ -42,18 +42,23 @@ brew upgrade --cask jassuwu/tap/andrew-dictate
 
 that's it — you don't run the `xattr` line again. every release is signed with the same key, so homebrew carries your approval to the new version and your microphone and accessibility grants survive.
 
-brew swaps the app on disk, it can't restart it for you: quit andrew from the menu bar and open it again to be running the new one. the about window notices, and offers you the restart.
+you don't have to remember to look. when there's a new version, the menu says `update to 0.9.5`. click it and the app runs that brew line for you. the line reads `updating…` while brew works, then `restart to finish`, and clicking that brings andrew back as the new version. if brew can't do it, the line says `couldn't update — command copied`. paste it into a terminal and brew will tell you what went wrong. if you installed from the dmg, clicking opens the releases page instead.
+
+if you run the brew line yourself, brew swaps the app on disk but can't restart it for you. quit andrew from the menu bar and open it again to be running the new one. the about window notices, and offers you the restart.
 
 ## where your words go
 
-nowhere. the app has two things that touch the network, and you trigger both.
+nowhere. the speech models run on your mac, so nothing you say leaves it. the app does go online in three places, and this is all of them.
 
-- downloading a speech model, the first time you set up a job.
-- `check for updates` in the about window, which asks github for the latest tag.
+- downloading a speech model, the first time you set up a job. you click for it.
+- `check for updates` in the about window, which asks github for the latest tag. you click for that too.
+- once a day, the app asks dictate.jass.gg for the newest version. the request is `dictate.jass.gg/api/latest?version=0.9.4` with your version in it, and that's all. no id, no account, nothing about your mac. if there's something newer, a line in the menu says so. it never asks while you're dictating or recording a meeting, and a switch in settings › general stops it.
 
-there's no account, no analytics, and no crash reporting. audio is never written to disk, except during a meeting, where a temp file holds it until the transcript is saved and then it's deleted. dictations are kept in a local history you can switch off or wipe.
+that last one is new. i used to say the app only went online when you clicked something, but fixes weren't reaching people, so now it asks once a day. i count those asks: one tally per version per day, like `2026-10-02: 0.9.4 → 12`, so i can see how many people use this and which versions are still out there. the tally is all i keep. no ip address, no id, nothing that tells one mac from another. vercel hosts the site, so it sees your ip like any web host does, but my code never reads it. switch the check off and you're not in the count.
 
-it's about 17k lines of swift. read it.
+there's no account and no crash reporting, and nothing about what you dictate or click leaves your mac. audio is never written to disk, except during a meeting, where a temp file holds it until the transcript is saved and then it's deleted. dictations are kept in a local history you can switch off or wipe. the app also keeps a small log on your mac of how each press ended, with none of your words in it, so you can send me `copy diagnostics` when something breaks. wiping your history wipes it too.
+
+it's about 28k lines of swift. read it.
 
 ## limits
 
@@ -61,13 +66,13 @@ it's about 17k lines of swift. read it.
 - dictation is english by default. a multilingual model is one click away in settings.
 - meetings only write english. if you read hindi and want hindi, that's not here yet.
 - one dictation stops at five minutes. it keeps what it heard and pastes it — it just stops listening.
-- unsigned builds mean no auto-update. `check for updates` in the about window tells you when there's one; `brew upgrade` installs it, no `xattr` line needed.
+- unsigned builds mean no auto-update. the menu tells you when there's a new version; `brew upgrade` installs it, no `xattr` line needed.
 
 ## next
 
 signed builds with auto-update. whisper as a dictation option, for languages parakeet doesn't do.
 
-not coming: accounts, cloud, sync, a paid tier, telemetry, windows, linux, ios.
+not coming: accounts, cloud, sync, a paid tier, windows, linux, ios, or any tracking beyond the daily version count.
 
 ## credits
 

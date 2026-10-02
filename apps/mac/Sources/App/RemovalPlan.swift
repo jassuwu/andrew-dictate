@@ -117,7 +117,7 @@ struct Remover {
         case .dictations:
             supportDirectory.appendingPathComponent("dictations.jsonl")
         case .dictionary:
-            supportDirectory.appendingPathComponent("dictionary.json")
+            supportDirectory.appendingPathComponent(DictionaryStore.fileName)
         case .meetingLeftovers:
             // two things, one item: the spool folder and hooks.log. the
             // folder is the url; the log goes with it in `remove`.
@@ -126,6 +126,24 @@ struct Remover {
             modelDirectory
         case .settings, .permissions:
             nil
+        }
+    }
+
+    /// files that go with an item without being its url: the meeting
+    /// hook's log; the press log, which is evidence about your dictations
+    /// and has no reason to outlive them; and the never-learn list, the
+    /// learned rows you turned down, which belongs to the dictionary they
+    /// were turned down from.
+    private func companions(of item: RemovalPlan.Item) -> [URL] {
+        switch item {
+        case .dictations:
+            [supportDirectory.appendingPathComponent(PressLogStore.fileName)]
+        case .dictionary:
+            [supportDirectory.appendingPathComponent(DictionaryStore.neverLearnFileName)]
+        case .meetingLeftovers:
+            [supportDirectory.appendingPathComponent("hooks.log")]
+        case .settings, .speechModels, .permissions:
+            []
         }
     }
 
@@ -150,12 +168,10 @@ struct Remover {
                 }
                 var size = allocatedSize(of: url)
                 var exists = fileManager.fileExists(atPath: url.path)
-                if item == .meetingLeftovers {
-                    let log = supportDirectory.appendingPathComponent("hooks.log")
-                    if fileManager.fileExists(atPath: log.path) {
-                        size += allocatedSize(of: log)
-                        exists = true
-                    }
+                for companion in companions(of: item)
+                where fileManager.fileExists(atPath: companion.path) {
+                    size += allocatedSize(of: companion)
+                    exists = true
                 }
                 return RemovalPlan.Entry(item: item, bytes: size, exists: exists)
             }
@@ -197,11 +213,9 @@ struct Remover {
                 }
                 continue
             }
-            if item == .meetingLeftovers {
-                let log = supportDirectory.appendingPathComponent("hooks.log")
-                if fileManager.fileExists(atPath: log.path) {
-                    try? fileManager.removeItem(at: log)
-                }
+            for companion in companions(of: item)
+            where fileManager.fileExists(atPath: companion.path) {
+                try? fileManager.removeItem(at: companion)
             }
             guard fileManager.fileExists(atPath: url.path) else {
                 continue

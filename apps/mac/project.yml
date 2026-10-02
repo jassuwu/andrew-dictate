@@ -85,7 +85,7 @@ targets:
       path: Sources/Info.plist
       properties:
         CFBundleDisplayName: $(PRODUCT_NAME)
-        CFBundleShortVersionString: "0.9.4"
+        CFBundleShortVersionString: "0.10.0"
         CFBundleVersion: "6"
         LSUIElement: true
         # deliberately no LSMultipleInstancesProhibited: this block is
@@ -108,7 +108,11 @@ targets:
         excludes:
           - PipelinePlaygroundView.swift
           - WordFixerView.swift
+      - Sources/Audio/AudioSoundFlag.swift
       - Sources/Audio/CaptureCapWarning.swift
+      - Sources/Audio/CaptureSlot.swift
+      - Sources/Audio/CaptureStaleness.swift
+      - Sources/Audio/MicCapture.swift
       - Sources/Audio/RingSplicer.swift
       - Sources/Audio/TapHealthMonitor.swift
       - Sources/Archive/Dictation.swift
@@ -117,6 +121,11 @@ targets:
       - Sources/Archive/ArchiveBrowserViewModel.swift
       - Sources/Archive/ArchiveSettingsModel.swift
       - Sources/About/UpdateCheck.swift
+      - Sources/About/UpdateOffer.swift
+      - Sources/About/DailyUpdateCheck.swift
+      - Sources/About/UpdateHandOff.swift
+      - Sources/About/CommandRunner.swift
+      - Sources/About/BrewUpgrade.swift
       - path: Sources/Meetings
         excludes:
           - LiveTranscriptView.swift
@@ -129,6 +138,7 @@ targets:
       - Sources/Settings/MeetingsListModel.swift
       - Sources/Onboarding/OnboardingMeetingSetup.swift
       - Sources/App/AppIdentity.swift
+      - Sources/App/AppRelaunch.swift
       - Sources/App/Capabilities.swift
       - Sources/App/CaptureInterruptionNotice.swift
       - Sources/App/EnginePreparationState.swift
@@ -151,14 +161,25 @@ targets:
       - Sources/Hotkey/HotkeyBinding.swift
       - Sources/Hotkey/TapLockDetector.swift
       - Sources/Hotkey/TranscribingRepress.swift
+      - Sources/Dictation
+      # the learner, the locator and the follower are pure; the AX reader
+      # and watcher compile here and are never driven.
+      - Sources/Learning
       - Sources/Insertion/FocusAnchor.swift
       # the pasteboard write is asserted on a private pasteboard; no test
       # here posts a keystroke. the key-code resolver comes along because
       # Paster holds one.
       - Sources/Insertion/Paster.swift
       - Sources/Insertion/PasteKeyCodeResolver.swift
+      - Sources/Insertion/Inserter.swift
       - Sources/Instrumentation/UtteranceTimeline.swift
       - Sources/Instrumentation/TimelineSummary.swift
+      - Sources/Instrumentation/PressLogStore.swift
+      - Sources/Instrumentation/PressDiagnostics.swift
+      - Sources/Instrumentation/MainThreadWatchdog.swift
+      # the protocol only; ParakeetEngine is the FluidAudio half.
+      - Sources/Transcription/TranscriptionEngine.swift
+      - Sources/Transcription/SerialGate.swift
     settings:
       base:
         GENERATE_INFOPLIST_FILE: true

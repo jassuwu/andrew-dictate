@@ -1,9 +1,10 @@
 import Accelerate
 import AVFoundation
 import os
+import Synchronization
 
-/// file scope because the tap and its storage run off the main actor, where
-/// there is no `self` to log through.
+/// file scope because the tap, the storage and the engine all run off the
+/// main actor, where there is no `self` to log through.
 private let recorderLogger = Logger(
     subsystem: AppIdentity.loggingSubsystem,
     category: "audio"
@@ -16,6 +17,8 @@ enum AudioRecorderError: LocalizedError {
     case notRecording
     case oversizedCaptureBuffer
     case unavailableBuffer
+    /// thrown away: whatever was asked of it after that is not done.
+    case discarded
 
     var errorDescription: String? {
         switch self {
@@ -35,12 +38,164 @@ enum AudioRecorderError: LocalizedError {
             "an audio buffer arrived larger than the capture pool"
         case .unavailableBuffer:
             "an audio buffer could not be allocated"
+        case .discarded:
+            "audio capture was thrown away"
         }
     }
 }
 
+/// one capture, from the press that first needs it to the moment it is
+/// thrown away: one `AVAudioEngine`, and one serial queue every call into
+/// that engine runs on.
+///
+/// the main actor never touches the engine. it asks, and awaits the
+/// answer, and the utterance machine stops waiting after a moment of its
+/// own. a device change used to be answered by rebuilding the engine in
+/// place on the main thread while Core Audio was still tearing down its
+/// default-device aggregate — the way an `AVAudioEngine` spins the main
+/// thread for good, and the hourglass after a monitor or the lid. now a
+/// stale or wedged capture is thrown away whole: its teardown is queued
+/// behind whatever it is stuck in, and the next press builds a new capture
+/// with a new queue, so a wedged queue can never wedge the next engine.
 @MainActor
-final class AudioRecorder {
+final class AudioRecorder: DisposableMicCapture {
+    private let capture: CaptureEngine
+    /// the main actor's view of whether a take is running, for the hops
+    /// that land after it.
+    private var isRecording = false
+    /// bumped by every ending, so a start that answers after its utterance
+    /// was cancelled does not count it as running.
+    private var utteranceSequence: UInt64 = 0
+    private var isDiscarded = false
+
+    /// the engine reconfigured itself underneath: it has stopped, and what
+    /// it is bound to is anyone's guess.
+    var onConfigurationChange: (() -> Void)?
+    var onCapReached: (() -> Void)?
+    var onCapApproaching: (() -> Void)?
+
+    var currentLevel: Float {
+        capture.levelStorage.currentLevel
+    }
+
+    /// the device the engine's input is actually bound to, which is not
+    /// necessarily the system default — the gap the press log exists to
+    /// show. read on the capture's queue when it starts; this is the copy.
+    var deviceDescription: MicDescription? {
+        capture.boundDevice
+    }
+
+    /// one atomic, set from the audio thread (`AudioSoundFlag`).
+    var hasHeardSound: Bool {
+        capture.soundFlag.hasHeardSound
+    }
+
+    /// cheap: nothing is opened until the capture is started or prepared.
+    init(preRollEnabled: Bool) {
+        capture = CaptureEngine(preRollEnabled: preRollEnabled)
+
+        // armed once and left armed: the storage guarantees one trip per
+        // utterance.
+        capture.capNotifier.setCallback { [weak self] in
+            self?.handleCapReached()
+        }
+        capture.capApproachingNotifier.setCallback { [weak self] in
+            self?.handleCapApproaching()
+        }
+        capture.configurationChangeNotifier.setCallback { [weak self] in
+            // a capture already thrown away has nothing left to say: its
+            // engine moving must not end a take on the one that replaced it.
+            guard let self, !self.isDiscarded else {
+                return
+            }
+            self.onConfigurationChange?()
+        }
+    }
+
+    deinit {
+        capture.discard()
+    }
+
+    func start(
+        onFirstBuffer: @escaping @MainActor @Sendable (
+            ContinuousClock.Instant
+        ) -> Void
+    ) async throws {
+        utteranceSequence &+= 1
+        let utterance = utteranceSequence
+        try await ask { try $0.start(onFirstBuffer: onFirstBuffer) }
+        if utterance == utteranceSequence {
+            isRecording = true
+        }
+    }
+
+    func stop() async throws -> [Float] {
+        endUtterance()
+        return try await ask { try $0.stop() }
+    }
+
+    func cancel() {
+        endUtterance()
+        capture.enqueue { $0.cancel() }
+    }
+
+    func prepare() {
+        capture.enqueue { $0.prepare() }
+    }
+
+    func discard() {
+        endUtterance()
+        isDiscarded = true
+        capture.discard()
+    }
+
+    private func endUtterance() {
+        utteranceSequence &+= 1
+        isRecording = false
+    }
+
+    /// `work` on the capture's queue, and its answer. the continuation is
+    /// made here, on the main actor, so the work is queued before this
+    /// first suspends: a cancel asked after a start always lands after it.
+    /// (a nonisolated async helper would hop off the main actor first, and
+    /// an esc in that gap left the mic open.)
+    private func ask<Answer: Sendable>(
+        _ work: @escaping @Sendable (CaptureEngine) throws -> Answer
+    ) async throws -> Answer {
+        try await withCheckedThrowingContinuation { continuation in
+            capture.submit(work) { continuation.resume(with: $0) }
+        }
+    }
+
+    private func handleCapApproaching() {
+        // a hop that lands after the take is over is about a finger that
+        // has already lifted; the countdown is news only while recording.
+        guard isRecording else {
+            return
+        }
+
+        onCapApproaching?()
+    }
+
+    private func handleCapReached() {
+        // a hop that lands after stop or cancel is about a take the user has
+        // already let go of, so say nothing.
+        guard isRecording else {
+            return
+        }
+
+        // capture is sealed; a live meter would claim otherwise. `isRecording`
+        // stays true so the eventual `stop` still returns the five minutes.
+        capture.levelStorage.reset()
+        onCapReached?()
+    }
+}
+
+/// the off-main half of one capture. the engine, its format, its storage
+/// and whether a take is running are touched only on `queue`; the level,
+/// the bound device and the notifiers are lock-guarded and read from
+/// anywhere.
+private final class CaptureEngine: @unchecked Sendable {
     private static let targetSampleRate = 16_000.0
     private static let tapDuration = 0.1
     private static let preRollDuration = 0.3
@@ -56,179 +211,148 @@ final class AudioRecorder {
     private static let capWarningLead = 30.0
     private static let conversionBufferCapacity: AVAudioFrameCount = 16_384
 
-    private let engine: AVAudioEngine
-    private let levelStorage: AudioLevelStorage
-    private let firstBufferNotifier: AudioFirstBufferNotifier
-    private let capNotifier: AudioCapNotifier
-    private let capApproachingNotifier: AudioCapNotifier
-    private var inputFormat: AVAudioFormat
-    private var captureStorage: AudioCaptureStorage
-    private var hasInstalledTap = false
+    let levelStorage = AudioLevelStorage()
+    let soundFlag = AudioSoundFlag()
+    let capNotifier = AudioEventNotifier()
+    let capApproachingNotifier = AudioEventNotifier()
+    let configurationChangeNotifier = AudioEventNotifier()
+
+    private let queue: DispatchQueue
+    private let preRollEnabled: Bool
+    private let firstBufferNotifier = AudioFirstBufferNotifier()
+    private let bound = OSAllocatedUnfairLock<MicDescription?>(initialState: nil)
+    private let discarded = OSAllocatedUnfairLock(initialState: false)
+
+    // on `queue` only.
+    /// the system default input when the engine was built, which is the
+    /// device it was told to open.
+    private var requestedDevice: AudioObjectID?
+    private var engine: AVAudioEngine?
+    /// says when the mic first delivers, an I/O cycle (~10 ms) after it
+    /// starts. the tap hands audio over a tenth of a second at a time, so
+    /// its first buffer is that late; the take itself is still the tap's.
+    private var firstAudioSink: AVAudioSinkNode?
+    private var inputFormat: AVAudioFormat?
+    private var captureStorage: AudioCaptureStorage?
     private var isRecording = false
-    private var configurationChangeObserver: NSObjectProtocol?
+    /// started and not paused since: pre-roll listening, or a take.
+    private var isListening = false
+    /// the engine reconfigured itself for real, so it is not asked to
+    /// pause again: only what it already heard is taken from it.
+    private var reconfigured = false
+    private var configurationObserver: NSObjectProtocol?
 
-    private(set) var isPreRollEnabled: Bool
-    var onInterruption: ((CaptureInterruption) -> Void)?
-    var onCapReached: (() -> Void)?
-    var onCapApproaching: (() -> Void)?
-
-    var currentLevel: Float {
-        levelStorage.currentLevel
-    }
-
-    init(preRollEnabled: Bool = false) throws {
-        let engine = AVAudioEngine()
-        let inputNode = engine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-
-        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
-            throw AudioRecorderError.invalidInputFormat
-        }
-
-        let levelStorage = AudioLevelStorage()
-        let firstBufferNotifier = AudioFirstBufferNotifier()
-        let capNotifier = AudioCapNotifier()
-        let capApproachingNotifier = AudioCapNotifier()
-        let captureStorage = try Self.makeCaptureStorage(
-            format: inputFormat,
-            preRollEnabled: preRollEnabled,
-            capNotifier: capNotifier,
-            capApproachingNotifier: capApproachingNotifier
+    init(preRollEnabled: Bool) {
+        self.preRollEnabled = preRollEnabled
+        queue = DispatchQueue(
+            label: "\(AppIdentity.bundleID).capture",
+            qos: .userInteractive
         )
+    }
 
-        self.engine = engine
-        self.inputFormat = inputFormat
-        self.captureStorage = captureStorage
-        self.levelStorage = levelStorage
-        self.firstBufferNotifier = firstBufferNotifier
-        self.capNotifier = capNotifier
-        self.capApproachingNotifier = capApproachingNotifier
-        isPreRollEnabled = preRollEnabled
+    var boundDevice: MicDescription? {
+        bound.withLock { $0 }
+    }
 
-        // armed once and left armed: the notifier outlives every storage
-        // rebuild, so the hook keeps working after a device change.
-        capNotifier.setCallback { [weak self] in
-            self?.handleCapReached()
-        }
-        capApproachingNotifier.setCallback { [weak self] in
-            self?.handleCapApproaching()
-        }
+    private var isDiscarded: Bool {
+        discarded.withLock { $0 }
+    }
 
-        installCaptureTap(
-            storage: captureStorage,
-            format: inputFormat,
-            firstBufferNotifier: firstBufferNotifier
-        )
-        engine.prepare()
+    // MARK: - asked from the main actor
 
-        if preRollEnabled,
-           AVCaptureDevice.authorizationStatus(for: .audio) == .authorized {
-            try engine.start()
-        }
-
-        configurationChangeObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange,
-            object: engine,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.handleConfigurationChange()
+    /// runs `work` on the queue and hands its answer back. queued before
+    /// this returns. a capture that has been thrown away does nothing more
+    /// and says so.
+    func submit<Answer: Sendable>(
+        _ work: @escaping @Sendable (CaptureEngine) throws -> Answer,
+        answer: @escaping @Sendable (Result<Answer, any Error>) -> Void
+    ) {
+        queue.async { [self] in
+            guard !isDiscarded else {
+                answer(.failure(AudioRecorderError.discarded))
+                return
             }
+            answer(Result { try work(self) })
         }
     }
 
-    func requestMicrophoneAccess() async -> Bool {
-        let granted = await AVCaptureDevice.requestAccess(for: .audio)
-
-        if granted {
-            recorderLogger.notice("microphone permission granted")
-            do {
-                try startContinuousCaptureIfNeeded()
-            } catch {
-                recorderLogger.error(
-                    """
-                    pre-roll audio capture failed to start: \
-                    \(error.localizedDescription, privacy: .public)
-                    """
-                )
+    /// fire-and-forget, in order behind whatever was asked before it.
+    func enqueue(_ work: @escaping @Sendable (CaptureEngine) -> Void) {
+        queue.async { [self] in
+            guard !isDiscarded else {
+                return
             }
-        } else {
-            recorderLogger.notice("microphone permission denied")
+            work(self)
         }
-
-        return granted
     }
 
-    func prepareGraph() {
-        engine.prepare()
-    }
-
-    func applyPreRoll(_ enabled: Bool) throws {
-        guard enabled != isPreRollEnabled else {
-            try startContinuousCaptureIfNeeded()
+    /// never asked anything again. the teardown waits behind whatever the
+    /// queue is stuck in, and runs if that ever lets go.
+    func discard() {
+        let first = discarded.withLock { wasDiscarded in
+            defer { wasDiscarded = true }
+            return !wasDiscarded
+        }
+        guard first else {
             return
         }
-
-        if isRecording {
-            captureStorage.discard()
-            isRecording = false
-            levelStorage.reset()
-        }
-
-        let previousMode = isPreRollEnabled
-
-        do {
-            try rebuildCapturePath(preRollEnabled: enabled)
-        } catch {
-            do {
-                try rebuildCapturePath(preRollEnabled: previousMode)
-            } catch {
-                recorderLogger.error(
-                    """
-                    audio capture rollback failed: \
-                    \(error.localizedDescription, privacy: .public)
-                    """
-                )
-            }
-            throw error
+        queue.async { [self] in
+            tearDown()
         }
     }
 
+    // MARK: - on the queue
+
     func start(
-        onFirstBuffer: @escaping @MainActor @Sendable (
-            ContinuousClock.Instant
-        ) -> Void
+        onFirstBuffer: @escaping AudioFirstBufferNotifier.Callback
     ) throws {
         guard !isRecording else {
             throw AudioRecorderError.alreadyRecording
         }
 
-        firstBufferNotifier.arm(onFirstBuffer)
-        captureStorage.begin()
+        let (engine, storage) = try built()
+        // armed once the storage is taking the take: with pre-roll on the
+        // engine is already running, and the first audio it reports must
+        // be audio the take keeps.
+        storage.begin()
         levelStorage.reset()
+        soundFlag.listen(
+            judgingSamples: inputFormat?.commonFormat == .pcmFormatFloat32
+        )
+        firstBufferNotifier.arm(onFirstBuffer)
 
         do {
             if !engine.isRunning {
-                try engine.start()
+                try start(engine)
             }
             isRecording = true
+            isListening = true
         } catch {
             firstBufferNotifier.disarm()
-            captureStorage.discard()
+            soundFlag.stopListening()
+            storage.discard()
             levelStorage.reset()
             throw error
         }
+        noteBoundDevice()
     }
 
     func stop() throws -> [Float] {
-        guard isRecording else {
+        guard isRecording,
+              let engine,
+              let captureStorage,
+              let inputFormat else {
             throw AudioRecorderError.notRecording
         }
 
-        if !isPreRollEnabled {
-            engine.pause()
+        if !preRollEnabled {
+            if !reconfigured {
+                engine.pause()
+            }
+            isListening = false
         }
         firstBufferNotifier.disarm()
+        soundFlag.stopListening()
         isRecording = false
         levelStorage.reset()
 
@@ -244,20 +368,287 @@ final class AudioRecorder {
             return
         }
 
-        if !isPreRollEnabled {
-            engine.pause()
+        if !preRollEnabled {
+            if !reconfigured {
+                engine?.pause()
+            }
+            isListening = false
         }
         firstBufferNotifier.disarm()
+        soundFlag.stopListening()
         isRecording = false
-        captureStorage.discard()
+        captureStorage?.discard()
         levelStorage.reset()
+    }
+
+    /// built ahead of a press, and with pre-roll on, listening. built
+    /// means the engine made, the default mic bound and the graph prepared
+    /// — the audio unit initialized, no I/O started — so with pre-roll off
+    /// the mic is not live and its indicator stays dark. a mic not yet
+    /// granted is left alone entirely: onboarding is the only place that
+    /// asks, and the grant prepares it.
+    func prepare() {
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
+            return
+        }
+        do {
+            let (engine, _) = try built()
+            guard preRollEnabled,
+                  !engine.isRunning else {
+                return
+            }
+            try start(engine)
+            isListening = true
+            noteBoundDevice()
+        } catch {
+            recorderLogger.error(
+                """
+                audio capture failed to get ready: \
+                \(error.localizedDescription, privacy: .public)
+                """
+            )
+        }
+    }
+
+    /// the engine, its tap and its storage, built the first time they are
+    /// needed and kept until the capture is thrown away.
+    private func built() throws -> (AVAudioEngine, AudioCaptureStorage) {
+        if let engine, let captureStorage {
+            return (engine, captureStorage)
+        }
+
+        guard let device = MicDescription.defaultInputDevice() else {
+            throw MicCaptureError.noInputDevice
+        }
+        let engine = AVAudioEngine()
+        let inputNode = engine.inputNode
+        Self.bind(inputNode, to: device)
+        // read after the binding: the format is the bound device's.
+        let format = inputNode.outputFormat(forBus: 0)
+
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            throw AudioRecorderError.invalidInputFormat
+        }
+
+        let storage = try Self.makeCaptureStorage(
+            format: format,
+            preRollEnabled: preRollEnabled,
+            capNotifier: capNotifier,
+            capApproachingNotifier: capApproachingNotifier
+        )
+        installCaptureTap(on: inputNode, storage: storage, format: format)
+        attachFirstAudioSink(to: engine, format: format)
+        engine.prepare()
+
+        configurationObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: nil
+        ) { [weak self] _ in
+            self?.engineReconfigured()
+        }
+
+        self.engine = engine
+        requestedDevice = device
+        inputFormat = format
+        captureStorage = storage
+        return (engine, storage)
+    }
+
+    /// the press records through the mic the mac says is the mic right
+    /// now, told to the engine's input unit before anything reads its
+    /// format. left to itself the unit can race Core Audio through a device
+    /// change and settle on another input — the iphone's continuity mic
+    /// after a call took the airpods — and stay there.
+    private static func bind(
+        _ inputNode: AVAudioInputNode,
+        to device: AudioObjectID
+    ) {
+        guard let unit = inputNode.audioUnit else {
+            recorderLogger.error("the input has no audio unit to bind the default mic to")
+            return
+        }
+        var device = device
+        let status = AudioUnitSetProperty(
+            unit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &device,
+            UInt32(MemoryLayout<AudioObjectID>.size)
+        )
+        if status != noErr {
+            recorderLogger.error(
+                "couldn't bind the input to the default mic: \(status, privacy: .public)"
+            )
+        }
+    }
+
+    private func installCaptureTap(
+        on inputNode: AVAudioInputNode,
+        storage: AudioCaptureStorage,
+        format: AVAudioFormat
+    ) {
+        let tapFrameCapacity = AVAudioFrameCount(
+            max(1_024, ceil(format.sampleRate * Self.tapDuration))
+        )
+
+        inputNode.installTap(
+            onBus: 0,
+            bufferSize: tapFrameCapacity,
+            format: format
+        ) { [storage, levelStorage, soundFlag, firstBufferNotifier] buffer, _ in
+            if storage.appendCopy(of: buffer) {
+                levelStorage.update(from: buffer)
+                // frames, not loudness: a device that delivers is alive,
+                // even if its first frames are zeros. an empty buffer
+                // delivered nothing, and the chime must not promise it did.
+                // whether the frames were sound is the deadline's question.
+                if buffer.frameLength > 0 {
+                    soundFlag.hear(buffer.audioBufferList)
+                    firstBufferNotifier.notify(at: ContinuousClock.now)
+                }
+            }
+        }
+    }
+
+    /// called on the audio thread every I/O cycle while the engine runs,
+    /// so it reads atomics until an utterance is waiting to be heard. the
+    /// cycle that hears it wins a compare-exchange and pokes a dispatch
+    /// source built ahead (`AudioFirstBufferNotifier`), and until one
+    /// sample of the utterance is not exactly zero each cycle's samples
+    /// get one vDSP pass (`AudioSoundFlag`): no lock, no allocation,
+    /// nothing that can make the audio thread wait.
+    private func attachFirstAudioSink(
+        to engine: AVAudioEngine,
+        format: AVAudioFormat
+    ) {
+        let sink = AVAudioSinkNode {
+            [soundFlag, firstBufferNotifier] _, frameCount, buffers in
+            if frameCount > 0 {
+                soundFlag.hear(buffers)
+                firstBufferNotifier.notify(at: ContinuousClock.now)
+            }
+            return noErr
+        }
+        engine.attach(sink)
+        engine.connect(engine.inputNode, to: sink, format: format)
+        firstAudioSink = sink
+    }
+
+    /// a device that won't start with the sink in the graph still starts
+    /// without it: its first audio is then the tap's, a tenth of a second
+    /// later, as it always was.
+    private func start(_ engine: AVAudioEngine) throws {
+        do {
+            try engine.start()
+        } catch {
+            guard let sink = firstAudioSink else {
+                throw error
+            }
+            recorderLogger.error(
+                """
+                the input wouldn't start with the first-audio sink, starting \
+                without it: \(error.localizedDescription, privacy: .public)
+                """
+            )
+            engine.detach(sink)
+            firstAudioSink = nil
+            engine.prepare()
+            try engine.start()
+        }
+    }
+
+    /// posted on whatever thread the engine likes, and looked at on the
+    /// queue. binding the input to a device by name makes the engine let go
+    /// of its own default-device aggregate, and it says so once, just after
+    /// it first starts, still running on the mic it was given: that is the
+    /// binding's echo, not news. an engine that stopped under a take, or
+    /// moved to another device, is — and the main actor decides what that
+    /// means for a take.
+    private func engineReconfigured() {
+        queue.async { [self] in
+            guard !isDiscarded, let engine else {
+                return
+            }
+            if engine.isRunning == isListening,
+               let requestedDevice,
+               boundDeviceID() == requestedDevice {
+                recorderLogger.info("audio capture's engine settled on the bound mic")
+                return
+            }
+            reconfigured = true
+            recorderLogger.notice("audio capture's engine reconfigured itself")
+            configurationChangeNotifier.notify()
+        }
+    }
+
+    private func boundDeviceID() -> AudioObjectID? {
+        guard let unit = engine?.inputNode.audioUnit else {
+            return nil
+        }
+        var device = AudioObjectID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        guard AudioUnitGetProperty(
+            unit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &device,
+            &size
+        ) == noErr else {
+            return nil
+        }
+        return device
+    }
+
+    /// the device the engine's input unit actually opened, read back once
+    /// it is running. one that is not the device it was told to open is
+    /// the evidence of a race the binding lost.
+    private func noteBoundDevice() {
+        guard let device = boundDeviceID() else {
+            return
+        }
+        let description = MicDescription(device: device)
+        bound.withLock { $0 = description }
+
+        if let requestedDevice, device != requestedDevice {
+            let wanted = MicDescription(device: requestedDevice)
+            recorderLogger.notice(
+                """
+                the input opened \(description?.name ?? "an unnamed device", privacy: .public) \
+                but the default mic was \(wanted?.name ?? "an unnamed device", privacy: .public)
+                """
+            )
+        }
+    }
+
+    private func tearDown() {
+        firstBufferNotifier.disarm()
+        soundFlag.stopListening()
+        levelStorage.reset()
+        isRecording = false
+        isListening = false
+        if let configurationObserver {
+            NotificationCenter.default.removeObserver(configurationObserver)
+            self.configurationObserver = nil
+        }
+        guard let engine else {
+            return
+        }
+        engine.stop()
+        engine.inputNode.removeTap(onBus: 0)
+        firstAudioSink = nil
+        self.engine = nil
+        captureStorage = nil
+        inputFormat = nil
     }
 
     private static func makeCaptureStorage(
         format: AVAudioFormat,
         preRollEnabled: Bool,
-        capNotifier: AudioCapNotifier,
-        capApproachingNotifier: AudioCapNotifier
+        capNotifier: AudioEventNotifier,
+        capApproachingNotifier: AudioEventNotifier
     ) throws -> AudioCaptureStorage {
         let tapFrameCapacity = AVAudioFrameCount(
             max(1_024, ceil(format.sampleRate * tapDuration))
@@ -284,119 +675,6 @@ final class AudioRecorder {
             capNotifier: capNotifier,
             capApproachingNotifier: capApproachingNotifier
         )
-    }
-
-    private func installCaptureTap(
-        storage: AudioCaptureStorage,
-        format: AVAudioFormat,
-        firstBufferNotifier: AudioFirstBufferNotifier
-    ) {
-        let tapFrameCapacity = AVAudioFrameCount(
-            max(1_024, ceil(format.sampleRate * Self.tapDuration))
-        )
-
-        engine.inputNode.installTap(
-            onBus: 0,
-            bufferSize: tapFrameCapacity,
-            format: format
-        ) { [storage, levelStorage, firstBufferNotifier] buffer, _ in
-            if storage.appendCopy(of: buffer) {
-                levelStorage.update(from: buffer)
-                firstBufferNotifier.notify(at: ContinuousClock.now)
-            }
-        }
-        hasInstalledTap = true
-    }
-
-    private func rebuildCapturePath(
-        preRollEnabled: Bool
-    ) throws {
-        let inputNode = engine.inputNode
-        let newInputFormat = inputNode.outputFormat(forBus: 0)
-
-        guard newInputFormat.sampleRate > 0,
-              newInputFormat.channelCount > 0 else {
-            throw AudioRecorderError.invalidInputFormat
-        }
-
-        let newStorage = try Self.makeCaptureStorage(
-            format: newInputFormat,
-            preRollEnabled: preRollEnabled,
-            capNotifier: capNotifier,
-            capApproachingNotifier: capApproachingNotifier
-        )
-
-        engine.stop()
-        if hasInstalledTap {
-            inputNode.removeTap(onBus: 0)
-            hasInstalledTap = false
-        }
-
-        inputFormat = newInputFormat
-        captureStorage = newStorage
-        isPreRollEnabled = preRollEnabled
-        levelStorage.reset()
-
-        installCaptureTap(
-            storage: newStorage,
-            format: newInputFormat,
-            firstBufferNotifier: firstBufferNotifier
-        )
-        engine.prepare()
-        try startContinuousCaptureIfNeeded()
-    }
-
-    private func handleConfigurationChange() {
-        firstBufferNotifier.disarm()
-        isRecording = false
-        captureStorage.discardAndClearPreRoll()
-        levelStorage.reset()
-
-        do {
-            try rebuildCapturePath(preRollEnabled: isPreRollEnabled)
-        } catch {
-            recorderLogger.error(
-                """
-                audio capture rebuild failed after configuration change: \
-                \(error.localizedDescription, privacy: .public)
-                """
-            )
-        }
-
-        onInterruption?(.deviceChanged)
-    }
-
-    private func handleCapApproaching() {
-        // a hop that lands after the take is over is about a finger that
-        // has already lifted; the countdown is news only while recording.
-        guard isRecording else {
-            return
-        }
-
-        onCapApproaching?()
-    }
-
-    private func handleCapReached() {
-        // a hop that lands after stop or cancel is about a take the user has
-        // already let go of, so say nothing.
-        guard isRecording else {
-            return
-        }
-
-        // capture is sealed; a live meter would claim otherwise. `isRecording`
-        // stays true so the eventual `stop` still returns the five minutes.
-        levelStorage.reset()
-        onCapReached?()
-    }
-
-    private func startContinuousCaptureIfNeeded() throws {
-        guard isPreRollEnabled,
-              !engine.isRunning,
-              AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
-            return
-        }
-
-        try engine.start()
     }
 
     private static func convertToTranscriptionFormat(
@@ -483,45 +761,119 @@ final class AudioRecorder {
     }
 }
 
+/// one answer per utterance: the sink's or the tap's, whichever lands
+/// first. `notify` is called from the audio thread every I/O cycle, so it
+/// takes no lock and allocates nothing. until an utterance is armed it
+/// reads one atomic and returns; the one call that wins a compare-exchange
+/// on the utterance's token stores the instant and pokes a dispatch source
+/// built ahead of time — once per utterance — and the main queue does the
+/// rest. the instant is handed over only if its token is still the armed
+/// one: a disarm and a re-arm between the audio thread and the main queue
+/// drop a stale instant instead of giving it to the next utterance.
 private final class AudioFirstBufferNotifier: @unchecked Sendable {
     typealias Callback = @MainActor @Sendable (
         ContinuousClock.Instant
     ) -> Void
 
+    /// instants cross the threads as nanoseconds past this one: a word an
+    /// atomic can hold, where an `Instant` is not.
+    private let origin = ContinuousClock.now
+    /// the token of the utterance waiting to be heard; zero when none is.
+    private let waiting = Atomic<UInt64>(0)
+    /// the token the audio thread heard, and when. written by the winner
+    /// only, the instant before the token, so a token read is never ahead
+    /// of its instant.
+    private let heardToken = Atomic<UInt64>(0)
+    private let heardAt = Atomic<Int64>(0)
+    private let delivery: any DispatchSourceUserDataAdd
+
+    // under `lock`: the capture's queue arms and disarms, the main queue
+    // delivers. the audio thread never touches either.
     private let lock = NSLock()
-    private var callback: Callback?
+    private var armed: (token: UInt64, callback: Callback)?
+    private var lastToken: UInt64 = 0
+
+    init() {
+        delivery = DispatchSource.makeUserDataAddSource(queue: .main)
+        delivery.setEventHandler { [weak self] in
+            self?.deliver()
+        }
+        delivery.activate()
+    }
+
+    deinit {
+        delivery.cancel()
+    }
 
     func arm(_ callback: @escaping Callback) {
-        lock.lock()
-        self.callback = callback
-        lock.unlock()
+        let token = lock.withLock {
+            lastToken &+= 1
+            if lastToken == 0 {
+                lastToken = 1
+            }
+            armed = (lastToken, callback)
+            return lastToken
+        }
+        waiting.store(token, ordering: .releasing)
     }
 
     func disarm() {
-        lock.lock()
-        callback = nil
-        lock.unlock()
+        waiting.store(0, ordering: .releasing)
+        lock.withLock {
+            armed = nil
+        }
     }
 
+    /// the audio thread's half: atomics and a poke, nothing that waits.
     func notify(at instant: ContinuousClock.Instant) {
-        lock.lock()
-        let callback = callback
-        self.callback = nil
-        lock.unlock()
+        let token = waiting.load(ordering: .relaxed)
+        guard token != 0,
+              waiting.compareExchange(
+                  expected: token,
+                  desired: 0,
+                  ordering: .acquiringAndReleasing
+              ).exchanged else {
+            return
+        }
+        heardAt.store(
+            Self.nanoseconds(origin.duration(to: instant)),
+            ordering: .relaxed
+        )
+        heardToken.store(token, ordering: .releasing)
+        delivery.add(data: 1)
+    }
 
+    /// the main queue's half. pokes that land together are one call, and
+    /// the newest token is the only one that can still be armed.
+    private func deliver() {
+        let token = heardToken.load(ordering: .acquiring)
+        let nanoseconds = heardAt.load(ordering: .relaxed)
+        let callback: Callback? = lock.withLock {
+            guard let armed, armed.token == token else {
+                return nil
+            }
+            self.armed = nil
+            return armed.callback
+        }
         guard let callback else {
             return
         }
-
-        Task { @MainActor in
+        let instant = origin + .nanoseconds(nanoseconds)
+        MainActor.assumeIsolated {
             callback(instant)
         }
     }
+
+    private static func nanoseconds(_ duration: Duration) -> Int64 {
+        let (seconds, attoseconds) = duration.components
+        return seconds &* 1_000_000_000 &+ attoseconds / 1_000_000_000
+    }
 }
 
-/// stays armed across storage rebuilds, unlike the one-shot first-buffer
-/// notifier: the storage itself guarantees one trip per utterance.
-private final class AudioCapNotifier: @unchecked Sendable {
+/// something the capture says on the main actor: the cap, the warning
+/// before it, the engine reconfiguring. set once and left set for the
+/// capture's whole life, unlike the one-shot first-buffer notifier.
+private final class AudioEventNotifier: @unchecked Sendable {
     typealias Callback = @MainActor @Sendable () -> Void
 
     private let lock = NSLock()
@@ -603,8 +955,8 @@ private final class AudioCaptureStorage: @unchecked Sendable {
     private let bytesPerFrame: Int
     private let preRollBuffer: AVAudioPCMBuffer?
     private let preRollPrefixBuffer: AVAudioPCMBuffer?
-    private let capNotifier: AudioCapNotifier
-    private let capApproachingNotifier: AudioCapNotifier
+    private let capNotifier: AudioEventNotifier
+    private let capApproachingNotifier: AudioEventNotifier
 
     private var captured: [AVAudioPCMBuffer] = []
     private var nextPoolIndex = 0
@@ -623,8 +975,8 @@ private final class AudioCaptureStorage: @unchecked Sendable {
         maximumFrameCount: Int,
         capWarningLeadFrameCount: Int,
         preRollFrameCapacity: Int,
-        capNotifier: AudioCapNotifier,
-        capApproachingNotifier: AudioCapNotifier
+        capNotifier: AudioEventNotifier,
+        capApproachingNotifier: AudioEventNotifier
     ) throws {
         var pool: [AVAudioPCMBuffer] = []
         pool.reserveCapacity(poolCount)
@@ -830,16 +1182,6 @@ private final class AudioCaptureStorage: @unchecked Sendable {
         isAcceptingAudio = false
         resetUtterance()
         preRollPrefixBuffer?.frameLength = 0
-    }
-
-    func discardAndClearPreRoll() {
-        lock.lock()
-        defer { lock.unlock() }
-
-        isAcceptingAudio = false
-        resetUtterance()
-        preRollPrefixBuffer?.frameLength = 0
-        ringSplicer?.reset()
     }
 
     /// the cap is a ceiling, not a failure: stop taking frames but keep what

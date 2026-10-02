@@ -15,6 +15,7 @@ docs/adr/
 # secrets & local config
 *.local
 .env
+.env.*
 AndrewDictate-*.dmg
 
 # wayfinder map & tickets (local working docs, same as ADRs)
@@ -26,3 +27,6 @@ apps/mac/.build-dev/
 
 # per-session workflow worktrees
 .claude/worktrees/
+
+# the fidelity tool is its own package (apps/mac/Tools/fidelity)
+apps/mac/Tools/fidelity/.build/

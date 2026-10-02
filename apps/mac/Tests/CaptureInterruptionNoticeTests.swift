@@ -1,18 +1,22 @@
 import XCTest
 
 final class CaptureInterruptionNoticeTests: XCTestCase {
-    func testALostMicrophoneSaysSo() {
+    /// the take is kept and pasted; the pill after the paste says why it
+    /// ended without you, in the cap's voice.
+    func testAMicChangeSaysWhatItPasted() {
         XCTAssertEqual(
             CaptureInterruptionNotice.message(for: .deviceChanged),
-            "the microphone changed — say that again"
+            "the mic changed — pasted what i had."
         )
     }
 
-    /// sleeping and locking were always silent, and stay that way: nobody is
-    /// looking at the screen to read the pill.
-    func testSleepAndLockStaySilent() {
-        XCTAssertNil(
-            CaptureInterruptionNotice.message(for: .systemPaused)
+    /// sleep and the lock keep the take too, on the clipboard: the pill
+    /// waits for you to come back and says where the words went, in the
+    /// other copies' voice.
+    func testSleepAndTheLockSayWhereTheWordsWent() {
+        XCTAssertEqual(
+            CaptureInterruptionNotice.message(for: .systemPaused),
+            "copied — what you said before the lock · ⌘V to paste"
         )
     }
 }

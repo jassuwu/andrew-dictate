@@ -14,7 +14,10 @@ final class HotkeyLogicTests: XCTestCase {
         )
     }
 
-    func testChordCancelsHeldCaptureAndReleaseDoesNothing() {
+    /// another key during a hold is a chord: the machine decides whether
+    /// that was a shortcut or the end of a sentence, and the release after
+    /// it does nothing either way.
+    func testAChordDuringAHoldIsSaidAndReleaseDoesNothing() {
         var detector = TapLockDetector()
 
         XCTAssertEqual(
@@ -23,7 +26,7 @@ final class HotkeyLogicTests: XCTestCase {
         )
         XCTAssertEqual(
             detector.keyDown(isEscape: false),
-            [.cancel]
+            [.chord]
         )
         XCTAssertEqual(
             detector.modifierReleased(at: 1.2),

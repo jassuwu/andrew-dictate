@@ -14,14 +14,18 @@ enum HUDWaveMotion {
 /// what sits under the lamp line so it survives a light background. a bare
 /// gold line is a lamp on black and an underline on a white page.
 ///
-/// the HUD ships `.ribbonClear` (2026-09-21). the others remain for the
-/// lamp lab, where they are the comparison it was chosen against.
-enum LampGround: String, CaseIterable, Identifiable {
+/// the HUD ships `.painted` (2026-09-22), standing on `.smoke`. the others
+/// remain for the lamp lab, where they are the comparison it was chosen
+/// against — so only the debug build, which has the lab, carries them.
+enum LampGround: String, CaseIterable {
+    #if DEBUG
     /// today: the line and its bloom on nothing
     case bare
+    #endif
     /// a blurred dark stroke under the line — invisible on black, a faint
     /// smoke on white. the subtitle trick.
     case smoke
+    #if DEBUG
     /// a sliver of Liquid Glass behind the line: the same capsule the text
     /// pill uses, so one can morph into the other
     case glass
@@ -34,12 +38,51 @@ enum LampGround: String, CaseIterable, Identifiable {
     /// the same lit ribbon under clear glass, which lets more of the light
     /// through than regular
     case ribbonClear
+    #endif
     /// the tube drawn by hand: translucent tan body, pale rim on top, shade
     /// below, halo and smoke. no Liquid Glass, so it looks the same in the
     /// panel as in the lab — Liquid Glass draws dimmed in a window that is
     /// not key, and the panel never is (ADR 0042).
     case painted
 
+    /// the one that ships: the drawn tube (2026-09-22). the tinted Liquid
+    /// Glass ribbon is the look it copies; it only has it in a key window.
+    static let shipped: LampGround = .painted
+
+    var isRibbon: Bool {
+        switch self {
+        case .painted:
+            return true
+        case .smoke:
+            return false
+        #if DEBUG
+        case .ribbon, .ribbonLit, .ribbonClear:
+            return true
+        case .bare, .glass:
+            return false
+        #endif
+        }
+    }
+
+    /// a light in the ribbon's outline under the glass
+    var litInside: Bool {
+        #if DEBUG
+        return self == .ribbonLit || self == .ribbonClear
+        #else
+        return false
+        #endif
+    }
+
+    /// no glass effect at all: the canvas draws the tube
+    var drawsGlass: Bool {
+        self == .painted
+    }
+}
+
+#if DEBUG
+/// what only the lab asks of a ground: its name, which ones to audition,
+/// and how the Liquid Glass ones are glassed.
+extension LampGround: Identifiable {
     var id: String { rawValue }
 
     var label: String {
@@ -58,41 +101,16 @@ enum LampGround: String, CaseIterable, Identifiable {
     /// line, smoke and sliver were the audition the ribbon won.
     static let candidates: [LampGround] = [.ribbon, .ribbonClear, .painted]
 
-    /// the one that ships: the drawn tube (2026-09-22). the tinted Liquid
-    /// Glass ribbon is the look it copies; it only has it in a key window.
-    static let shipped: LampGround = .painted
-
-    var isRibbon: Bool {
-        switch self {
-        case .ribbon, .ribbonLit, .ribbonClear, .painted:
-            true
-        case .bare, .smoke, .glass:
-            false
-        }
-    }
-
     /// carries a glass ID, so it can morph into the pill
     var isGlass: Bool {
         self == .glass || isRibbon
-    }
-
-    /// a light in the ribbon's outline under the glass
-    var litInside: Bool {
-        switch self {
-        case .ribbonLit, .ribbonClear: true
-        default: false
-        }
-    }
-
-    /// no glass effect at all: the canvas draws the tube
-    var drawsGlass: Bool {
-        self == .painted
     }
 
     var glass: Glass {
         self == .ribbonLit || self == .ribbon ? .regular : .clear
     }
 }
+#endif
 
 @MainActor
 final class HUDViewModel: ObservableObject {
@@ -107,12 +125,18 @@ final class HUDViewModel: ObservableObject {
     /// hands-free capture looks exactly like a held key unless the lamp
     /// says otherwise. the coordinator owns the fact; the line wears it.
     @Published private(set) var isRecordingLocked = false
+    /// whether this take's mic has sent its first audio. until it has, the
+    /// recording lamp wears the ember: the key is down, the mic is not
+    /// hearing you yet.
+    @Published private(set) var isHearing = false
 
     private var audioRecorder: AudioRecorder?
     private var levelSamplingTask: Task<Void, Never>?
+    #if DEBUG
     /// development only: a voice for the rehearsal. when set, the sampler
     /// reads this instead of the recorder.
     var rehearsalLevel: Float?
+    #endif
 
     init(
         state: DictationCoordinator.State,
@@ -152,6 +176,8 @@ final class HUDViewModel: ObservableObject {
 
         if state != previousState {
             waveTransitionStartedAt = Date()
+            // every take starts deaf.
+            isHearing = false
         }
 
         configureLevelSampling(
@@ -163,6 +189,16 @@ final class HUDViewModel: ObservableObject {
             feedbackMessage = nil
             presentationGeneration += 1
         }
+    }
+
+    /// the mic's first audio landed: the ember lights. the ignite starts
+    /// here, not at the key, so it plays whole however long the mic took.
+    func micHeard() {
+        guard state == .recording, !isHearing else {
+            return
+        }
+        waveTransitionStartedAt = Date()
+        isHearing = true
     }
 
     /// not folded into `update(state:)`: the lock is set a beat after the
@@ -249,10 +285,18 @@ final class HUDViewModel: ObservableObject {
         }
     }
 
+    /// the mic, unless a debug build is rehearsing the lamp.
+    private var currentLevel: Float {
+        #if DEBUG
+        if let rehearsalLevel {
+            return rehearsalLevel
+        }
+        #endif
+        return audioRecorder?.currentLevel ?? 0
+    }
+
     private func sampleCurrentLevel(interval: Double) {
-        let shaped = WaveLevelShaper.shape(
-            rehearsalLevel ?? audioRecorder?.currentLevel ?? 0
-        )
+        let shaped = WaveLevelShaper.shape(currentLevel)
         let attack = 1 - exp(-interval / 0.040)
         let release = 1 - exp(-interval / 0.200)
         let gain = shaped > loudness ? attack : release
@@ -288,6 +332,13 @@ struct HUDView: View {
                         lampLine(phase: .ember)
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel("Warming up")
+                    case .recording where !viewModel.isHearing:
+                        // pressed, not yet heard: the ember until the
+                        // mic's first audio, so a lit lamp means it is
+                        // hearing you.
+                        lampLine(phase: .ember)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Waiting for the microphone")
                     case .recording:
                         lampLine(phase: .burn)
                             .accessibilityElement(children: .ignore)
@@ -382,16 +433,11 @@ struct LampLine: View {
     let loudness: Float
     let startedAt: Date
     var isLocked = false
-    var ground: LampGround = .bare
+    var ground: LampGround = .shipped
     /// set both to let the sliver morph into another glass shape in the
     /// same `GlassEffectContainer`
     var glassID: String?
     var glassNamespace: Namespace.ID?
-
-    static let glassSize = CGSize(
-        width: HUDWaveMotion.lineWidth + 36,
-        height: 26
-    )
 
     /// thinner than the glass wants, longer to make up for it: the ribbon
     /// has to stay a line, not a worm
@@ -412,6 +458,9 @@ struct LampLine: View {
                 ? Self.ribbonLength
                 : HUDWaveMotion.lineWidth
         )
+        // the drawn tube is all canvas; only the lab's grounds put glass
+        // behind or over it.
+        #if DEBUG
         .background {
             if ground == .glass {
                 sliver
@@ -422,7 +471,14 @@ struct LampLine: View {
                 ribbon
             }
         }
+        #endif
     }
+
+    #if DEBUG
+    static let glassSize = CGSize(
+        width: HUDWaveMotion.lineWidth + 36,
+        height: 26
+    )
 
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
@@ -524,6 +580,7 @@ struct LampLine: View {
             glass
         }
     }
+    #endif
 }
 
 /// where the lamp is in its life, as numbers: the same pose drives the gold
@@ -578,8 +635,9 @@ struct LampPose {
     }
 }
 
+#if DEBUG
 /// the wave as a shape, so Liquid Glass can take its outline: the stroked
-/// path of the same line the canvas draws.
+/// path of the same line the canvas draws. the lab's glass ribbons only.
 struct WaveRibbonShape: Shape {
     let half: CGFloat
     let amplitude: CGFloat
@@ -603,6 +661,7 @@ struct WaveRibbonShape: Shape {
         )
     }
 }
+#endif
 
 /// the lamp: a bare gold line, bolted in place. flat ember when silent,
 /// waving when voice hits it, tungsten color shift riding the loudness.
@@ -623,7 +682,8 @@ struct GoldRippleLine: View {
     let startedAt: Date
     /// double-tap lock: the key is no longer held, so the ends get pinned.
     var isLocked = false
-    var ground: LampGround = .bare
+    /// only `.smoke` is drawn here: the rest of a ground is `LampLine`'s.
+    var ground: LampGround
     /// false when a glass ribbon is the lamp: no line and no hot core, only
     /// the smoke, a halo that spills light by loudness, the lock dots and
     /// the off-dot. the glass over it carries the colour.
@@ -1092,6 +1152,7 @@ struct GoldRippleLine: View {
         }
     }
 
+    #if DEBUG
     /// the lamp's colour at a brightness, for anything outside the canvas
     /// that wants to glow the same gold — the glass ribbon's tint.
     static func tint(brightness b: Double) -> Color {
@@ -1110,6 +1171,7 @@ struct GoldRippleLine: View {
     ) -> Double {
         a + (b - a) * t
     }
+    #endif
 
     private func goldMix(_ b: Double) -> [Double] {
         let t = min(max(b, 0), 1)

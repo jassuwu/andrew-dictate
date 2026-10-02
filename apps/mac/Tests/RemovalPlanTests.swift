@@ -136,6 +136,64 @@ final class RemovalPlanTests: XCTestCase {
         )
     }
 
+    /// the press log rides with the dictations: no words in it, but left
+    /// behind it would be the one file keeping the folder alive.
+    func testRemovingDictationsTakesThePressLogAndTheFolder() throws {
+        try write("dictations.jsonl")
+        try write("presses.jsonl", bytes: 256)
+
+        let entry = remover().plan().entries.first { $0.item == .dictations }
+        XCTAssertGreaterThanOrEqual(entry?.bytes ?? 0, 256)
+
+        XCTAssertTrue(remover().remove([.dictations]).isEmpty)
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: support.appendingPathComponent("presses.jsonl").path
+            )
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: support.path))
+    }
+
+    /// a press log with no dictations beside it is still something to remove.
+    func testAPressLogAloneStillCountsAsDictations() throws {
+        try write("presses.jsonl")
+
+        XCTAssertEqual(
+            remover().plan().entries.first { $0.item == .dictations }?.exists,
+            true
+        )
+    }
+
+    /// the pairs you turned down ride with the dictionary they were
+    /// turned down from: left behind, they would keep the folder alive and
+    /// a reinstall would still refuse to learn them.
+    func testRemovingTheDictionaryTakesTheNeverLearnListAndTheFolder() throws {
+        try write("dictionary.json")
+        try write("never-learn.json", bytes: 256)
+
+        let entry = remover().plan().entries.first { $0.item == .dictionary }
+        XCTAssertGreaterThanOrEqual(entry?.bytes ?? 0, 256)
+
+        XCTAssertTrue(remover().remove([.dictionary]).isEmpty)
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: support.appendingPathComponent("never-learn.json").path
+            )
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: support.path))
+    }
+
+    /// every learned row taken out leaves an empty dictionary and a
+    /// never-learn list: still something to remove.
+    func testANeverLearnListAloneStillCountsAsTheDictionary() throws {
+        try write("never-learn.json")
+
+        XCTAssertEqual(
+            remover().plan().entries.first { $0.item == .dictionary }?.exists,
+            true
+        )
+    }
+
     /// Something the plan did not know about is not something it may delete.
     func testAnUnknownFileKeepsTheFolderAlive() throws {
         try write("dictations.jsonl")

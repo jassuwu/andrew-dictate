@@ -73,6 +73,10 @@ final class AppLifecycleDelegate: NSObject, NSApplicationDelegate {
 @MainActor
 struct AndrewDictateApp: App {
     @StateObject private var coordinator = DictationCoordinator()
+    @StateObject private var updates = DailyUpdateCheck.live()
+    /// what clicking the update line does: a brew install runs the upgrade
+    /// and the line follows it; a dmg install opens the releases page.
+    @StateObject private var updateHandOff = UpdateHandOff.live()
     @NSApplicationDelegateAdaptor(AppLifecycleDelegate.self)
     private var lifecycleDelegate
 
@@ -173,6 +177,15 @@ struct AndrewDictateApp: App {
                     }
                 }
 
+                // the third, and it goes on its own too: a word the app
+                // just learned from your fixes, taken back in one click for
+                // two minutes. after that it is a row in the dictionary tab.
+                if let learned = coordinator.undoableLearning {
+                    Button("undo learned: \(learned.right)") {
+                        coordinator.undoLearning()
+                    }
+                }
+
                 // nothing starts a recording but the user, and the user
                 // names the app (ADR 0023, 0040). meeting apps first.
                 Menu("record a meeting") {
@@ -228,6 +241,7 @@ struct AndrewDictateApp: App {
                 }
             }
 
+            #if DEBUG
             if Capabilities.current.hasLampLab {
                 Button("lamp lab (dev)") {
                     coordinator.openLampLab()
@@ -236,13 +250,33 @@ struct AndrewDictateApp: App {
                     coordinator.rehearseHUDForDevelopment()
                 }
             }
+            #endif
 
             Divider()
+
+            // a newer version is a line here and nothing else (ADR 0043):
+            // no dot on the badge, because a dot means the app needs you
+            // and an old version still works. a meeting owns the menu while
+            // it runs, so the line waits for it. once clicked, the line is
+            // the upgrade's progress: the menu is where the click was.
+            if let line = updateHandOff.state(offering: updates.line),
+               !coordinator.meetings.isRecording {
+                Button(line.title) {
+                    updateHandOff.click(offering: updates.line)
+                }
+                .disabled(!line.isEnabled)
+            }
 
             // back from settings (reversing part of ADR 0030, recorded in
             // 0034): the mac-standard home for a menu bar app's identity.
             Button("about Andrew Dictate") {
                 coordinator.openAbout()
+            }
+
+            // what a friend sends instead of a story: the last fifty
+            // presses and how each ended, never a word of what was said.
+            Button("copy diagnostics") {
+                coordinator.copyDiagnostics()
             }
 
             Button("quit Andrew Dictate") {
@@ -265,6 +299,18 @@ struct AndrewDictateApp: App {
                 lifecycleDelegate.onTerminate = { [weak coordinator] in
                     coordinator?.prepareToQuit() ?? .terminateNow
                 }
+                // busy is anything but idle: loading the model, a take, a
+                // meeting. the check waits for the next tick; a click on
+                // the line is refused.
+                let isBusy = { [weak coordinator] in
+                    guard let coordinator else {
+                        return true
+                    }
+                    return coordinator.state != .idle
+                        || coordinator.meetings.isRecording
+                }
+                updates.start(isBusy: isBusy)
+                updateHandOff.isBusy = isBusy
             }
         }
 

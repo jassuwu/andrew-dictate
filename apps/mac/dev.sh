@@ -38,10 +38,13 @@ echo "▸ generating project"
 xcodegen generate --quiet
 
 echo "▸ building Debug   (signing as: ${IDENTITY})"
+# the packages optimized, the app not: a dev build dictates at the speed the
+# shipped one does, and the app's own code still debugs (dev-packages.xcconfig).
 xcodebuild build \
   -project AndrewDictate.xcodeproj \
   -scheme AndrewDictate \
   -configuration Debug \
+  -xcconfig dev-packages.xcconfig \
   -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath "$DERIVED" \
   CODE_SIGN_IDENTITY="$IDENTITY" \

@@ -554,7 +554,12 @@ struct SettingsView: View {
                     pendingArchiveWipe = true
                 }
                 // an archive the app could not read is not one it may erase.
-                .disabled(browser.items.isEmpty || browser.failure != nil)
+                // with history off the list is empty but the press log is
+                // not, and this is the only button that wipes it.
+                .disabled(
+                    (browser.items.isEmpty && !archive.hasAnythingToDelete)
+                        || browser.failure != nil
+                )
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 12)
@@ -847,6 +852,18 @@ struct SettingsView: View {
                     .foregroundStyle(BrandUI.textSecondary)
             }
 
+            // the one request the app makes on its own (ADR 0043), so the
+            // row says exactly what goes out.
+            SettingsToggleRow(
+                "check for updates",
+                explanation: """
+                    once a day, sends the version you're running to \
+                    dictate.jass.gg and nothing else. a newer one shows up \
+                    as a line in the menu.
+                    """,
+                isOn: $settings.checksForUpdates
+            )
+
             rowDivider
 
             numbersDashboard
@@ -1021,11 +1038,35 @@ private struct DictionaryEditor: View {
                 }
 
                 TableColumn("right") { entry in
-                    DictionaryCellEditor(
-                        value: entry.right,
-                        prompt: "right"
-                    ) {
-                        store.updateRight(id: entry.id, right: $0)
+                    HStack(spacing: 6) {
+                        DictionaryCellEditor(
+                            value: entry.right,
+                            prompt: "right"
+                        ) {
+                            store.updateRight(id: entry.id, right: $0)
+                        }
+                        // a row the app added is still yours: the mark only
+                        // says where it came from. an edit makes it plainly
+                        // yours and the mark goes.
+                        if entry.learned {
+                            Text("learned")
+                                .font(.caption)
+                                .foregroundStyle(BrandUI.textSecondary)
+                                .help("andrew added this after you fixed the same word twice. remove it and it won’t come back.")
+                            // one click, and the same never-again as the
+                            // menu's undo: the store remembers the pair.
+                            Button {
+                                selection.remove(entry.id)
+                                store.remove(id: entry.id)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(BrandUI.textSecondary)
+                            .help("remove it. andrew won’t learn it again.")
+                            .accessibilityLabel("undo learned: \(entry.right)")
+                        }
                     }
                 }
             }

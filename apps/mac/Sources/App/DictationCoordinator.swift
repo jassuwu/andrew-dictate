@@ -8,8 +8,8 @@ struct HotkeyDetection: Equatable, Sendable {
     let sequence: Int
 }
 
-/// file scope because the recorder is built during init, before there is a
-/// `self` to log through.
+/// the audio category: the recorder's and the machine's mic lines log
+/// under it too, so a device move or a grant reads beside them.
 private let audioLogger = Logger(
     subsystem: AppIdentity.loggingSubsystem,
     category: "audio"
@@ -25,52 +25,21 @@ final class DictationCoordinator: ObservableObject {
         subsystem: AppIdentity.loggingSubsystem,
         category: "cleanup"
     )
-    private let pipelineLogger = Logger(
-        subsystem: AppIdentity.loggingSubsystem,
-        category: "pipeline"
-    )
     private let permissionLogger = Logger(
         subsystem: AppIdentity.loggingSubsystem,
         category: "permissions"
     )
-    enum State: Equatable, Sendable {
-        case idle
-        case prewarming
-        case recording
-        case transcribing
+    /// one line per press, at notice so the unified log keeps it past the
+    /// moment. every field is public: there are no words in a record.
+    private let pressLogger = Logger(
+        subsystem: AppIdentity.loggingSubsystem,
+        category: "press"
+    )
+    /// the machine owns the state; the menu, the HUD and the menu-bar icon
+    /// still say `DictationCoordinator.State`.
+    typealias State = UtteranceMachine.State
 
-        var displayName: String {
-            switch self {
-            // Said the way a person would say it. "prewarming" and "idle" are
-            // words for whoever wrote the state machine — the menu is read by
-            // someone who wants to know whether they can talk yet.
-            case .idle:
-                "ready"
-            case .prewarming:
-                "loading the speech model…"
-            case .recording:
-                "listening"
-            case .transcribing:
-                "writing it out…"
-            }
-        }
-
-        /// the panel's view of it: to the layout engine idle and recording
-        /// are both a wave, and the panel has to tell them apart.
-        var lamp: HUDLampState {
-            switch self {
-            case .idle:
-                .idle
-            case .prewarming:
-                .prewarming
-            case .recording:
-                .recording
-            case .transcribing:
-                .transcribing
-            }
-        }
-    }
-
+    /// the machine's state, mirrored for the menu. only `apply` writes it.
     @Published private(set) var state: State = .prewarming
     @Published private(set) var enginePreparationState:
         EnginePreparationState = .notStarted
@@ -85,6 +54,10 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var lastTranscript: String?
     /// drives the menu's one time-sensitive row after a failed transcription
     @Published private(set) var canRetryLastFailure = false
+    /// the entry the app just learned from your fixes, for the menu's
+    /// one-click undo. two minutes, then it is a row in your dictionary like
+    /// any other — still removable there.
+    @Published private(set) var undoableLearning: DictionaryEntry?
     /// the engine's own words, before any transform ran. this is what "fix a
     /// word" opens on: an entry's `wrong` side has to be what parakeet
     /// produced, or it never fires.
@@ -148,10 +121,51 @@ final class DictationCoordinator: ObservableObject {
 
     private let hotkeyMonitor: HotkeyMonitor
     private let transcriptionEngine: ParakeetEngine
-    private let paster: Paster
-    /// var, not let: the input node can be missing at launch (headset off,
-    /// dock unplugged) and arrive later. one failed build must not be final.
-    private var audioRecorder: AudioRecorder?
+    /// the machine's, and the menu's copies go through it too, so they
+    /// take their turn with a paste.
+    private let inserter: PasteInserter
+    /// key-down to outcome. this object wires it and wears what it says.
+    private let machine: UtteranceMachine
+    /// a minute of watching each delivered dictation for a word you
+    /// correct (ADR 0046). built on the first delivery.
+    private lazy var learningFromCorrections: LearningFromCorrections = {
+        let learning = LearningFromCorrections(
+            store: dictionaryStore,
+            fullCleanup: { [settings] in settings.cleanupEnabled }
+        )
+        learning.onLearned = { [weak self] entry in
+            self?.announceLearned(entry)
+        }
+        return learning
+    }()
+    private var undoableLearningExpiry: Task<Void, Never>?
+    /// `learned: <word>` not yet said: the pill had a take, a meeting or
+    /// another sentence when the entry was learned.
+    private var learnedAnnouncements = LearnedAnnouncements()
+    /// the capture each press records with. a device change, a mic that
+    /// wedged or the mac going to sleep is answered with a fresh one, never
+    /// by rebuilding this one in place.
+    private lazy var captureSlot = CaptureSlot(
+        clock: ContinuousUtteranceClock(),
+        isInUse: { [weak self] in
+            self?.machine.state == .recording
+        },
+        keepsListening: { [weak self] in
+            self?.settings.preRollEnabled ?? false
+        },
+        make: { [weak self] in
+            let recorder = AudioRecorder(
+                preRollEnabled: self?.settings.preRollEnabled ?? false
+            )
+            self?.wire(recorder)
+            // the wave follows whichever capture is current.
+            self?.hudViewModel.useRecorder(recorder)
+            return recorder
+        }
+    )
+    /// what moves underneath the capture: the default devices, the device
+    /// list, a wake, the displays.
+    private var deviceWatcher: AudioDeviceWatcher?
     private let feedbackSounds: FeedbackSounds
     private let hudViewModel: HUDViewModel
     private var hudPanelStorage: HUDPanel?
@@ -178,16 +192,6 @@ final class DictationCoordinator: ObservableObject {
     /// whether the ember is an answer to something the user did. a
     /// launch-time warm-up is not, and shows nothing (HUDPresentation).
     private var prewarmPresentsHUD = true
-    /// a double-tapped key leaves nothing to hold, so nothing to feel. the
-    /// HUD has to carry the difference for as long as the capture runs.
-    private var isRecordingLocked = false
-    private var activeFocusAnchor: FocusAnchor?
-    private var pipelineTask: Task<Void, Never>?
-    /// the start chime, held back 120 ms so a discarded capture can cancel it
-    private var startCueTask: Task<Void, Never>?
-    private var retryBuffer = RetryBuffer()
-    private var retryExpiryTask: Task<Void, Never>?
-    private var pipelineGeneration = 0
     private var enginePrewarmTask: Task<Void, Never>?
     private var engineSwapTask: Task<Void, Never>?
     private var engineHealthTask: Task<Void, Never>?
@@ -197,23 +201,13 @@ final class DictationCoordinator: ObservableObject {
     private var engineSwitchState: EngineSwitchState
     private var enginePreparationRequested: Bool
     private var settingsCancellables: Set<AnyCancellable> = []
-    /// One cleaner, kept. Its nineteen regexes — plus one per taught word —
-    /// compile on construction, and that used to happen on the main actor
-    /// between transcript and paste, growing with the dictionary. Rebuilt
-    /// only when the dictionary or the cleanup toggle changes.
-    private var cleaner = DeterministicCleaner(entries: [], fullCleanup: true)
-    private var isApplyingPreRollSetting = false
     private var isApplyingEngineVersionSetting = false
     private var onboardingWindowController: OnboardingWindowController?
     private var isOnboardingPresented: Bool
     private var hotkeyDetectionSequence = 0
     private var stateGeneration: UInt64 = 0
-    private var transcribingBeganAt: Date?
     private var feedbackGeneration: UInt64 = 0
     private var activeFeedbackGeneration: UInt64?
-    /// the cap ended this take, not the user's finger. the pill that says
-    /// so has to ride the paste, so the fact outlives the stop.
-    private var capForcedEnd = false
     /// an exceptional message the setup window took the screen from. it is
     /// owed, not spent: held until that window closes (HUDFeedbackGate).
     private var heldFeedback: (
@@ -221,26 +215,37 @@ final class DictationCoordinator: ObservableObject {
         duration: TimeInterval,
         at: Date
     )?
-    private let timelineClock = ContinuousClock()
     private let timelineStore = UtteranceTimelineStore()
-    private var timelineSequence: UInt64 = 0
-    private var activeTimeline: UtteranceTimelineBuilder?
+    /// held while the mic is live (`keepDisplayAwake`).
+    private var displayAwakeActivity: (any NSObjectProtocol)?
     private var aboutWindowController: AboutWindowController?
+    #if DEBUG
     private var lampLabWindowController: LampLabWindowController?
+    #endif
     /// Rebuilt per transcript rather than reused: the window is *about* one
     /// dictation, so keeping a stale one around would show the wrong words.
     private let dictationArchive = DictationArchive()
-    /// Held between delivery and the timeline completing, because that is the
-    /// one place that knows whether anything actually reached the page.
-    private var pendingArchiveText: (heard: String, inserted: String)?
+    /// the press log's file, written off the main thread: a record lands
+    /// after the paste, but the next press must not wait on a disk.
+    private let pressLog = PressLogStore()
+    private let pressLogQueue = DispatchQueue(
+        label: "\(AppIdentity.bundleID).press-log",
+        qos: .utility
+    )
+    /// watches the main thread while a press is in flight. lazy, because
+    /// its stalls are noted on the machine's press.
+    private lazy var watchdog = MainThreadWatchdog { [weak self] milliseconds in
+        self?.machine.mainStalled(for: .milliseconds(milliseconds))
+    }
     private var wordFixerWindowController: WordFixerWindowController?
 
     // MARK: meetings (ADR 0023, 0040)
-    let meetings: MeetingCoordinator
-    let liveTranscript = LiveTranscriptModel(app: "", elapsed: .zero)
+    /// built on first use: a mac that only dictates never pays for meetings.
+    let meetings: LazyMeetings
+    /// made by the first meeting, like the panel that shows it.
+    private lazy var liveTranscript = LiveTranscriptModel(app: "", elapsed: .zero)
     @Published private(set) var meetingModelDownloads: [MeetingModel: Double] = [:]
     @Published private(set) var isLiveTranscriptShown = false
-    private let meetingNotifier = MeetingNudgeNotifier()
     /// the app `record a meeting ▸ zoom` named, held while setup runs. the
     /// click already happened; setup is the detour, not a new question.
     private var pendingMeetingApp: RunningApp?
@@ -249,6 +254,11 @@ final class DictationCoordinator: ObservableObject {
     /// A quit is waiting on a meeting's transcript to be written.
     private var quitWaitingOnMeeting = false
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
+    /// between `com.apple.screenIsLocked` and its unlock.
+    private var screenLockedByNotification = false
+    /// the mac went to sleep mid-utterance: the capture is suspended once
+    /// that utterance's mic has answered the stop (`suspendCaptureForSleep`).
+    private var suspendsCaptureAfterTheUtterance = false
     private var distributedNotificationObservers: [NSObjectProtocol] = []
 
     init(settings: AppSettings = .shared) {
@@ -262,45 +272,42 @@ final class DictationCoordinator: ObservableObject {
             onboardingDismissed: settings.onboardingDismissed,
             dictationWanted: settings.dictationWanted
         )
-        dictionaryStore = DictionaryStore()
-        transcriptionEngine = ParakeetEngine(
+        let dictionaryStore = DictionaryStore()
+        self.dictionaryStore = dictionaryStore
+        let transcriptionEngine = ParakeetEngine(
             version: settings.engineVersion
         )
-        let paster = Paster()
-        self.paster = paster
-
-        let recorder: AudioRecorder?
-        do {
-            recorder = try AudioRecorder(
-                preRollEnabled: settings.preRollEnabled
-            )
-        } catch {
-            recorder = nil
-            audioLogger.error(
-                """
-                audio recorder init failed: \
-                \(error.localizedDescription, privacy: .public)
-                """
-            )
-        }
-        audioRecorder = recorder
-        feedbackSounds = FeedbackSounds(settings: settings)
-        meetings = MeetingCoordinator(
-            source: CoreAudioMeetingSource(),
-            makeTranscriber: { try await MeetingEngines.makeTranscriber(for: $0) },
-            diarizer: MeetingEngines.makeDiarizer(),
-            preferences: {
-                MeetingPreferences(
-                    folder: settings.meetingsFolder,
-                    hook: settings.meetingHook,
-                    model: settings.meetingModel
-                )
-            }
+        self.transcriptionEngine = transcriptionEngine
+        let inserter = PasteInserter()
+        self.inserter = inserter
+        machine = UtteranceMachine(
+            engine: transcriptionEngine,
+            inserter: inserter,
+            dictionary: { dictionaryStore.entries },
+            coolDuration: HUDWaveMotion.coolDuration
         )
+
+        feedbackSounds = FeedbackSounds(settings: settings)
+        meetings = LazyMeetings(coordinator: {
+            MeetingCoordinator(
+                source: CoreAudioMeetingSource(),
+                makeTranscriber: { try await MeetingEngines.makeTranscriber(for: $0) },
+                diarizer: MeetingEngines.makeDiarizer(),
+                preferences: {
+                    MeetingPreferences(
+                        folder: settings.meetingsFolder,
+                        hook: settings.meetingHook,
+                        model: settings.meetingModel
+                    )
+                }
+            )
+        }, notifier: {
+            MeetingNudgeNotifier()
+        })
 
         let viewModel = HUDViewModel(
             state: .prewarming,
-            audioRecorder: recorder
+            audioRecorder: nil
         )
         hudViewModel = viewModel
 
@@ -308,22 +315,25 @@ final class DictationCoordinator: ObservableObject {
         hotkeyMonitor = monitor
 
         monitor.onBegin = { [weak self] in
-            self?.beginRecording()
+            self?.beginRecording(locked: false)
         }
-        monitor.onEnd = { [weak self] in
-            self?.endRecording()
+        monitor.onEnd = { [weak self] timestamp in
+            self?.keyReleased(at: timestamp)
         }
         monitor.onCancel = { [weak self] in
-            self?.cancelRecording()
+            self?.keyCancelledOrLost()
+        }
+        monitor.onChord = { [weak self] timestamp in
+            self?.machine.chordPressed(eventAge: Self.age(of: timestamp))
         }
         monitor.onLockBegin = { [weak self] in
-            self?.beginLockedRecording()
+            self?.beginRecording(locked: true)
         }
-        monitor.onLockEnd = { [weak self] in
-            self?.endRecording()
+        monitor.onLockEnd = { [weak self] timestamp in
+            self?.keyReleased(at: timestamp)
         }
         monitor.onLockCancel = { [weak self] in
-            self?.cancelRecording()
+            self?.keyCancelledOrLost()
         }
         monitor.onKeyDetected = { [weak self] in
             guard let self else {
@@ -335,23 +345,23 @@ final class DictationCoordinator: ObservableObject {
             )
         }
         monitor.onEscape = { [weak self] in
-            self?.handleEscape() ?? false
+            self?.machine.escape() ?? false
         }
-        recorder?.onInterruption = { [weak self] reason in
-            self?.handleCaptureInterruption(reason: reason)
-        }
-        recorder?.onCapReached = { [weak self] in
-            self?.handleCaptureCapReached()
-        }
-        recorder?.onCapApproaching = { [weak self] in
-            self?.handleCaptureCapApproaching()
+        // built ahead of the first press, off the main thread, and with
+        // pre-roll on, listening.
+        captureSlot.prepare()
+        deviceWatcher = AudioDeviceWatcher { [weak self] change in
+            self?.audioDevicesChanged(change)
         }
 
+        // a turn later: `@Published` says so in willSet, and the capture
+        // built for the new mode reads the setting itself.
         settings.$preRollEnabled
             .dropFirst()
             .removeDuplicates()
-            .sink { [weak self] enabled in
-                self?.applyPreRoll(enabled)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.applyPreRoll()
             }
             .store(in: &settingsCancellables)
 
@@ -389,13 +399,20 @@ final class DictationCoordinator: ObservableObject {
             settings.$cleanupEnabled
         )
         .sink { [weak self] entries, fullCleanup in
-            self?.cleaner = DeterministicCleaner(
+            self?.machine.cleaner = DeterministicCleaner(
                 entries: entries,
                 fullCleanup: fullCleanup
             )
+            // a learned row removed from the dictionary tab has nothing
+            // left for the menu to undo.
+            if let learned = self?.undoableLearning,
+               !entries.contains(where: { $0.id == learned.id }) {
+                self?.undoableLearning = nil
+            }
         }
         .store(in: &settingsCancellables)
 
+        wireMachine()
         installSystemLifecycleObservers()
         wireMeetings()
 
@@ -407,7 +424,7 @@ final class DictationCoordinator: ObservableObject {
         }
 
         if isOnboardingPresented {
-            hotkeyMonitor.setDetectionOnly(true)
+            resettingHotkey { hotkeyMonitor.setDetectionOnly(true) }
         }
 
         if enginePreparationRequested {
@@ -440,6 +457,7 @@ final class DictationCoordinator: ObservableObject {
             }
         }
 
+        #if DEBUG
         if Capabilities.current.hasLampLab,
            UserDefaults.standard.bool(
                forKey: LampLabWindowController.atLaunchKey
@@ -462,6 +480,7 @@ final class DictationCoordinator: ObservableObject {
                 }
             }
         }
+        #endif
         // "fix a word…" is the menu's only time-sensitive action, and it used
         // to be grey until this session's first dictation — while the words
         // it wants sat in the archive the whole time. detached, because the
@@ -484,7 +503,7 @@ final class DictationCoordinator: ObservableObject {
 
     @discardableResult
     func rebindHotkey(to binding: HotkeyBinding) -> Bool {
-        hotkeyMonitor.rebind(to: binding)
+        resettingHotkey { hotkeyMonitor.rebind(to: binding) }
     }
 
 
@@ -499,6 +518,7 @@ final class DictationCoordinator: ObservableObject {
         controller.present()
     }
 
+    #if DEBUG
     /// Development only (`Capabilities.hasLampLab`): walk the real HUD
     /// through a dictation without a mic or a key — warm, record, cool,
     /// one line of feedback — so the lamp can be seen over a real desktop.
@@ -533,6 +553,13 @@ final class DictationCoordinator: ObservableObject {
             for (next, feedback, hold) in steps {
                 if let next {
                     self.hudViewModel.update(state: next)
+                }
+                if next == .recording {
+                    // the mic's first audio, a beat after the press.
+                    Task { @MainActor [weak self] in
+                        try? await Task.sleep(for: .milliseconds(120))
+                        self?.hudViewModel.micHeard()
+                    }
                 }
                 if let feedback {
                     self.hudViewModel.showFeedback(feedback)
@@ -570,6 +597,7 @@ final class DictationCoordinator: ObservableObject {
         }
         controller.present()
     }
+    #endif
 
     /// The door ticket 011 chose. It opens on `lastHeard` — the engine's
     /// untouched words — because a dictionary entry's `wrong` side has to be
@@ -595,6 +623,52 @@ final class DictationCoordinator: ObservableObject {
         )
         wordFixerWindowController = controller
         controller.present()
+    }
+
+    /// the menu's `undo learned:` row. the entry goes, and so does the
+    /// chance of learning that pair again.
+    func undoLearning() {
+        guard let entry = undoableLearning else {
+            return
+        }
+        dictionaryStore.remove(id: entry.id)
+        undoableLearning = nil
+        undoableLearningExpiry?.cancel()
+    }
+
+    /// said once, in the pill, as you wrote it — and undoable from the menu
+    /// for two minutes.
+    private func announceLearned(_ entry: DictionaryEntry) {
+        learnedAnnouncements.learned(entry)
+        sayLearnedIfQuiet()
+        undoableLearning = entry
+        undoableLearningExpiry?.cancel()
+        undoableLearningExpiry = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(120))
+            guard !Task.isCancelled,
+                  self?.undoableLearning?.id == entry.id else {
+                return
+            }
+            self?.undoableLearning = nil
+        }
+    }
+
+    /// the pill says what was learned once it is free: idle, no meeting,
+    /// no other sentence up. asked again whenever one of those ends, so a
+    /// word learned mid-meeting is said after it — however long it ran.
+    private func sayLearnedIfQuiet() {
+        let entries = dictionaryStore.entries
+        guard let message = learnedAnnouncements.due(
+            canSay: state == .idle
+                && !meetings.isRecording
+                && activeFeedbackGeneration == nil,
+            stillThere: { learned in
+                entries.contains { $0.id == learned.id }
+            }
+        ) else {
+            return
+        }
+        flashNotice(message, duration: 2)
     }
 
     /// The dashboard's numbers, straight from the same store the copied
@@ -624,16 +698,47 @@ final class DictationCoordinator: ObservableObject {
     /// is not a claim about the app anyone runs — and a number a reader can
     /// reproduce on their own mac is worth more than one in a README.
     func copyTimings() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(
-            timelineStore.formattedReport(
-                conditions: .current(
-                    engine: activeEngineVersion.displayName
-                )
-            ),
-            forType: .string
+        let report = timelineStore.formattedReport(
+            conditions: .current(
+                engine: activeEngineVersion.displayName
+            )
         )
+        Task { [inserter] in
+            await inserter.copy(report)
+        }
+    }
+
+    /// "copy diagnostics": who is running what, then the last fifty
+    /// presses. read through the press log's own queue, so a press that
+    /// ended a moment ago is already in it — and so is the default mic,
+    /// since asking the audio server is never done on the main thread.
+    func copyDiagnostics() {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let system = ProcessInfo.processInfo.operatingSystemVersion
+        let appVersion = info["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info["CFBundleVersion"] as? String ?? "?"
+        let engine = activeEngineVersion.rawValue
+        let store = pressLog
+        pressLogQueue.async {
+            let setup = PressDiagnostics.Setup(
+                appVersion: appVersion,
+                build: build,
+                macOS: "\(system.majorVersion).\(system.minorVersion)."
+                    + "\(system.patchVersion)",
+                engine: engine,
+                defaultMic: MicDescription.systemDefaultInput()
+            )
+            let text = PressDiagnostics.text(
+                setup: setup,
+                presses: try? store.recent(PressDiagnostics.pressCount)
+            )
+            // silent, like any copy: the pill is for what needs saying.
+            // through the paster, so it can't land inside a dictation's
+            // snapshot and restore.
+            Task { @MainActor [weak self] in
+                await self?.inserter.copy(text)
+            }
+        }
     }
 
     func presentOnboardingIfNeeded() {
@@ -699,7 +804,7 @@ final class DictationCoordinator: ObservableObject {
     /// does any more is claim the setup succeeded — that claim belongs to the
     /// permissions, and they are asked again every time it matters.
     private func dismissOnboarding() {
-        hotkeyMonitor.setDetectionOnly(false)
+        resettingHotkey { hotkeyMonitor.setDetectionOnly(false) }
         settings.onboardingDismissed = true
         onboardingWindowController?.close()
     }
@@ -734,7 +839,7 @@ final class DictationCoordinator: ObservableObject {
         }
         onboardingWindowController = nil
         isOnboardingPresented = false
-        hotkeyMonitor.setDetectionOnly(false)
+        resettingHotkey { hotkeyMonitor.setDetectionOnly(false) }
         // anything granted in there was granted to onboarding's own
         // checklist, not to us, so this is the moment to ask the system
         // again — and it is what rebuilds the key monitors under a grant
@@ -772,11 +877,17 @@ final class DictationCoordinator: ObservableObject {
     }
 
     func requestMicrophoneAccess() async -> Bool {
-        if let audioRecorder {
-            return await audioRecorder.requestMicrophoneAccess()
+        let granted = await AVCaptureDevice.requestAccess(for: .audio)
+
+        if granted {
+            audioLogger.notice("microphone permission granted")
+            // with pre-roll on, the mic could not listen until now.
+            captureSlot.prepare()
+        } else {
+            audioLogger.notice("microphone permission denied")
         }
 
-        return await AVCaptureDevice.requestAccess(for: .audio)
+        return granted
     }
 
     func retryEnginePrewarm() {
@@ -796,13 +907,10 @@ final class DictationCoordinator: ObservableObject {
             return
         }
 
-        invalidatePipeline()
-        if state == .recording {
-            audioRecorder?.cancel()
-            setRecordingLocked(false)
-            activeFocusAnchor = nil
-            activeTimeline = nil
-        }
+        // whatever was in flight goes with the model, and so does a pill
+        // the setup window was holding back about it.
+        heldFeedback = nil
+        machine.abandon()
 
         enginePrewarmTask?.cancel()
         enginePrewarmTask = nil
@@ -816,7 +924,6 @@ final class DictationCoordinator: ObservableObject {
         engineSwitchMessage = nil
         _ = engineSwitchState.cancelPreparation()
         applyEngineVersionSetting(activeEngineVersion)
-        setState(.idle)
 
         await transcriptionEngine.unloadModels()
     }
@@ -838,7 +945,7 @@ final class DictationCoordinator: ObservableObject {
             )
         }
         isOnboardingPresented = true
-        hotkeyMonitor.setDetectionOnly(true)
+        resettingHotkey { hotkeyMonitor.setDetectionOnly(true) }
         withHUDPanel { $0.dismiss() }
 
         // a cached window keeps the scope it was built with, and the screen
@@ -867,45 +974,15 @@ final class DictationCoordinator: ObservableObject {
         controller.present()
     }
 
-    private func applyPreRoll(_ enabled: Bool) {
-        guard !isApplyingPreRollSetting,
-              let audioRecorder else {
-            return
-        }
-
-        isApplyingPreRollSetting = true
-        defer { isApplyingPreRollSetting = false }
-
-        if state == .recording {
-            audioRecorder.cancel()
-            setRecordingLocked(false)
-            activeFocusAnchor = nil
-            activeTimeline = nil
-            setState(.idle)
-        }
-
-        do {
-            try audioRecorder.applyPreRoll(enabled)
-        } catch {
-            audioLogger.error(
-                """
-                pre-roll setting failed to apply: \
-                \(error.localizedDescription, privacy: .public)
-                """
-            )
-            let appliedMode = audioRecorder.isPreRollEnabled
-            Task { [weak self] in
-                guard let self,
-                      self.settings.preRollEnabled != appliedMode else {
-                    return
-                }
-                self.settings.preRollEnabled = appliedMode
-            }
-        }
+    /// a capture is built for one mode or the other, so switching throws it
+    /// away — never under a live take, which keeps its capture until it
+    /// lets go — and with pre-roll on, a fresh one starts listening.
+    private func applyPreRoll() {
+        captureSlot.listeningChanged()
     }
 
     private func prepareProductiveWaitWork() {
-        audioRecorder?.prepareGraph()
+        captureSlot.prepare()
     }
 
     private func replaceEngine(with version: EngineVersion) {
@@ -968,7 +1045,7 @@ final class DictationCoordinator: ObservableObject {
         // the progress callbacks happen to land.
         engineModelWasOnDisk = ModelStore.isOnDisk(version)
         enginePreparationState = .downloading(progress: 0)
-        setState(.prewarming)
+        machine.enginePreparing()
 
         enginePrewarmTask = Task { [weak self] in
             guard let self else {
@@ -1000,7 +1077,7 @@ final class DictationCoordinator: ObservableObject {
                 self.enginePreparationState = .ready
                 self.enginePrewarmTask = nil
                 self.retryWasUserInitiated = false
-                self.setState(.idle)
+                self.machine.engineSettled()
             } catch is CancellationError {
                 return
             } catch {
@@ -1017,7 +1094,7 @@ final class DictationCoordinator: ObservableObject {
                     \(error.localizedDescription, privacy: .public)
                     """
                 )
-                self.setState(.idle)
+                self.machine.engineSettled()
                 // the retry announced itself ("speech model failed —
                 // retrying"); its failure must not be quieter than its
                 // beginning, or the key just stops answering.
@@ -1191,8 +1268,14 @@ final class DictationCoordinator: ObservableObject {
                         self?.handleCaptureInterruption(
                             reason: .systemPaused
                         )
+                        self?.suspendCaptureForSleep()
                     } else {
                         self?.handleSystemResume()
+                        // woken onto the lock screen, the unlock is what
+                        // brings you back, not the wake.
+                        if self?.isScreenLocked == false {
+                            self?.machine.systemResumed()
+                        }
                     }
                 }
             }
@@ -1210,12 +1293,14 @@ final class DictationCoordinator: ObservableObject {
             ) { [weak self] notification in
                 let isLock = notification.name == lockedName
                 Task { @MainActor [weak self] in
+                    self?.screenLockedByNotification = isLock
                     if isLock {
                         self?.handleCaptureInterruption(
                             reason: .systemPaused
                         )
                     } else {
                         self?.handleSystemResume()
+                        self?.machine.systemResumed()
                     }
                 }
             }
@@ -1278,7 +1363,7 @@ final class DictationCoordinator: ObservableObject {
             was: hadAccessibility,
             now: snapshot.accessibilityGranted
         ) {
-            hotkeyMonitor.reinstall()
+            resettingHotkey { hotkeyMonitor.reinstall() }
             permissionLogger.notice(
                 "hotkey monitors reinstalled after trust change"
             )
@@ -1337,93 +1422,100 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
-    /// the recorder can fail to build at launch — no input device yet — and
-    /// that answer was kept forever. ask again when the user asks to record:
-    /// by then the headset may well be back on.
-    private func ensureAudioRecorder() -> AudioRecorder? {
-        if let audioRecorder {
-            return audioRecorder
+    /// every capture the slot builds answers to the same three things from
+    /// underneath.
+    private func wire(_ recorder: AudioRecorder) {
+        recorder.onConfigurationChange = { [weak self] in
+            self?.audioDevicesChanged(.engineReconfigured)
         }
-
-        do {
-            let recorder = try AudioRecorder(
-                preRollEnabled: settings.preRollEnabled
-            )
-            recorder.onInterruption = { [weak self] reason in
-                self?.handleCaptureInterruption(reason: reason)
-            }
-            recorder.onCapReached = { [weak self] in
-                self?.handleCaptureCapReached()
-            }
-            recorder.onCapApproaching = { [weak self] in
-                self?.handleCaptureCapApproaching()
-            }
-            audioRecorder = recorder
-            hudViewModel.useRecorder(recorder)
-            audioLogger.notice("audio recorder rebuilt on demand")
-            return recorder
-        } catch {
-            audioLogger.error(
-                """
-                audio recorder still unavailable: \
-                \(error.localizedDescription, privacy: .public)
-                """
-            )
-            return nil
+        recorder.onCapReached = { [weak self] in
+            self?.handleCaptureCapReached()
+        }
+        recorder.onCapApproaching = { [weak self] in
+            self?.machine.capApproaching()
         }
     }
 
-    /// thirty seconds of runway. the wave comes back on its own when the
-    /// pill clears, so the lamp needs nothing here.
-    private func handleCaptureCapApproaching() {
-        guard state == .recording else {
-            return
+    /// anything that decides which mic a press opens may have moved. the
+    /// capture is stale either way, and the next press gets a fresh one; a
+    /// change that may have taken the mic from under a live take ends that
+    /// take, keeping what it heard.
+    private func audioDevicesChanged(_ change: AudioDeviceChange) {
+        audioLogger.notice(
+            "audio devices moved: \(change.rawValue, privacy: .public)"
+        )
+        // the hourglass after a monitor or the lid came before any press.
+        watchdog.watchAfterHardwareChange()
+        captureSlot.deviceChanged()
+        if change == .defaultOutput {
+            feedbackSounds.outputChanged()
         }
-
-        flashNotice("thirty seconds left", duration: 2)
+        if change.endsLiveUtterance, machine.state == .recording {
+            handleCaptureInterruption(reason: .deviceChanged)
+        }
     }
 
-    /// the recorder sealed the mic at the ceiling, so the take is over
-    /// whether the finger knows it or not — end it and deliver the five
-    /// minutes. a lamp still saying "listening" over a sealed mic is
-    /// spec §4's forbidden shape: a failure wearing the success signal.
+    /// the detector says "cancel" for two different things: a key you let
+    /// go of too soon, and the app resetting it underneath you. the second
+    /// is not yours to lose a recording over (`keyLost`).
+    private var isResettingHotkey = false
+
+    private func resettingHotkey<T>(_ reset: () -> T) -> T {
+        isResettingHotkey = true
+        defer { isResettingHotkey = false }
+        return reset()
+    }
+
+    private func keyCancelledOrLost() {
+        if isResettingHotkey {
+            machine.keyLost()
+        } else {
+            machine.keyCancelled()
+        }
+    }
+
     private func handleCaptureCapReached() {
-        guard state == .recording else {
+        guard machine.capReached() else {
             return
         }
-
-        capForcedEnd = true
-        endRecording()
         // the key was never released. without this a hands-free lock reads
         // the next press as the end of a take that is already finished.
-        hotkeyMonitor.reset()
+        resettingHotkey { hotkeyMonitor.reset() }
     }
 
     private func handleCaptureInterruption(
         reason: CaptureInterruption
     ) {
-        switch state {
-        case .recording:
-            audioRecorder?.cancel()
-            setRecordingLocked(false)
-            activeFocusAnchor = nil
-            activeTimeline = nil
-            setState(.idle, fastHUDDismiss: true)
-            // they are still holding the key and still talking, and the
-            // whole sentence is gone. the one loss path that used to say
-            // nothing at all.
-            if let notice = CaptureInterruptionNotice.message(for: reason) {
-                flashNotice(notice, duration: 2)
-            }
-        case .idle, .prewarming, .transcribing:
-            break
-        }
+        machine.captureInterrupted(reason)
+        resettingHotkey { hotkeyMonitor.reset() }
+    }
 
-        hotkeyMonitor.reset()
+    /// nothing listens through a sleep, pre-roll included: the capture
+    /// goes, and waking (the device watcher's) builds the next one once
+    /// the hardware has settled. a take the sleep just ended is still
+    /// handing over what it heard, and throwing its capture away under the
+    /// stop would lose it: that capture goes once the take has let go.
+    private func suspendCaptureForSleep() {
+        guard machine.state == .recording else {
+            captureSlot.suspend()
+            return
+        }
+        suspendsCaptureAfterTheUtterance = true
+    }
+
+    /// the login window is over the session. the lock notification can
+    /// land after the wake it came with, so the window server is asked as
+    /// well: `CGSSessionScreenIsLocked` is only there while it is up.
+    private var isScreenLocked: Bool {
+        guard !screenLockedByNotification else {
+            return true
+        }
+        let session = CGSessionCopyCurrentDictionary() as? [String: Any]
+        return session?["CGSSessionScreenIsLocked"] as? Bool ?? false
     }
 
     private func handleSystemResume() {
-        hotkeyMonitor.reset()
+        resettingHotkey { hotkeyMonitor.reset() }
         verifyEngineHealth()
         // a meeting is meant to survive the sleep, not be cancelled by it —
         // but the tap rarely does, and a frozen clock reads as a meeting
@@ -1470,45 +1562,145 @@ final class DictationCoordinator: ObservableObject {
                     """
                 )
                 if self.state == .prewarming {
-                    self.setState(.idle)
+                    self.machine.engineSettled()
                 }
             }
         }
     }
 
-    private func beginRecording() {
-        capForcedEnd = false
+    /// a take went unanswered. the engine is asked a second of silence
+    /// with a deadline of its own, and one that doesn't answer is
+    /// restarted. the probe is awaited, never waited on: the main thread
+    /// and the next press go on meanwhile.
+    private func checkEngineAnswers() {
+        // a restart, a switch or a first load is already building a fresh
+        // engine; a check already out is the same question.
+        guard isPrewarmed, engineHealthTask == nil else {
+            return
+        }
+
+        let engine = transcriptionEngine
+        let generation = engineGeneration
+        engineHealthTask = Task { @MainActor [weak self] in
+            let answered = await EngineProbe.answers(engine)
+            guard let self, !Task.isCancelled else {
+                return
+            }
+            // not cancelled, so still the check on record. it is over
+            // either way, or a switch made mid-check would leave every
+            // later check thinking one is still out.
+            self.engineHealthTask = nil
+            guard generation == self.engineGeneration else {
+                return
+            }
+            guard !answered else {
+                self.engineLogger.notice("the speech model answered its check")
+                return
+            }
+            self.engineLogger.error("the speech model didn't answer its check")
+            self.restartEngine()
+        }
+    }
+
+    /// a wedged engine can't be cancelled, only replaced: the loaded model
+    /// goes and the same one loads fresh, in the background. a press
+    /// meanwhile hears "loading the speech model…"; a restart that fails
+    /// leaves `.failed`, which the next press retries out loud. the lamp is
+    /// left alone: a pill may be saying why, and a take may be in flight.
+    private func restartEngine() {
+        guard isPrewarmed,
+              enginePrewarmTask == nil,
+              engineSwapTask == nil else {
+            return
+        }
+
+        engineLogger.error("restarting the speech model")
+        engineHealthTask?.cancel()
+        engineHealthTask = nil
+        engineGeneration += 1
+        let generation = engineGeneration
+        isPrewarmed = false
+        enginePreparationState = .warmingUp
+        let engine = transcriptionEngine
+        enginePrewarmTask = Task { @MainActor [weak self] in
+            await engine.unloadModels()
+            // removing the model cancels this mid-unload: loading it again
+            // would race the removal for the files.
+            guard !Task.isCancelled,
+                  generation == self?.engineGeneration else {
+                return
+            }
+            // the model is on disk, so this is seconds. a load still going
+            // after a minute has wedged: `.failed`, and the next press
+            // retries out loud rather than hearing "loading…" for good.
+            let outcome = await EngineRestart.run {
+                try await engine.prewarm(progressHandler: nil)
+            }
+            guard !Task.isCancelled,
+                  let self,
+                  generation == self.engineGeneration else {
+                return
+            }
+            self.enginePrewarmTask = nil
+            self.isPrewarmed = outcome == .restarted
+            self.enginePreparationState = outcome.preparationState
+            switch outcome {
+            case .restarted:
+                self.engineLogger.notice("the speech model restarted")
+            case let .failed(why):
+                self.engineLogger.error(
+                    "the speech model didn't restart: \(why, privacy: .public)"
+                )
+            case .timedOut:
+                self.engineLogger.error(
+                    "the speech model didn't restart within a minute; the next press tries again"
+                )
+            }
+            // a press during the restart lit the ember; it settles now.
+            if self.state == .prewarming {
+                self.machine.engineSettled()
+            }
+        }
+    }
+
+    private func beginRecording(locked: Bool) {
+        // the last dictation's watch ends with this press, whatever the
+        // press does next: only that dictation's span, only until the next.
+        learningFromCorrections.stopWatching()
         // ADR 0023: refused during a meeting, and it says why. you started
         // the recording, so a dead hotkey is not a mystery — but a silent
         // one would still be spec §4's forbidden shape.
         if meetings.dictationResponse == .refuseAndSayWhy {
             flashNotice("recording a meeting — stop it to dictate", duration: 2)
+            machine.refusePress(.meetingRunning)
             return
         }
-        // the pill still says the last one failed and the samples are still
-        // here: this press means "that one", not "a new one". endRecording's
-        // state guard makes the eventual key release a no-op.
-        if activeFeedbackGeneration != nil, canRetryLastFailure {
-            retryLastFailure()
-            return
+        if locked {
+            machine.doubleTapped()
+        } else {
+            machine.keyDown()
         }
-        if state == .transcribing {
-            let elapsed = Date().timeIntervalSince(
-                transcribingBeganAt ?? .distantPast
-            )
-            switch TranscribingRepress.response(transcribingFor: elapsed) {
-            case .refuseAndSayWhy:
-                // the sentence is still on its way to the page. discarding
-                // it silently left no text, no pill and no history row —
-                // spec §4's forbidden shape, wearing nothing at all.
-                flashNotice("still finishing the last one", duration: 1.4)
-                return
-            case .dropAndRestart:
-                invalidatePipeline()
-                setState(.idle)
-            }
-        }
+    }
 
+    /// the release, aged by its own event.
+    private func keyReleased(at eventTimestamp: TimeInterval?) {
+        machine.keyUp(eventAge: Self.age(of: eventTimestamp))
+    }
+
+    /// `NSEvent.timestamp` and `systemUptime` count the same seconds since
+    /// boot, so the gap is how long the key event waited for the main
+    /// thread. none means it is now.
+    private static func age(of eventTimestamp: TimeInterval?) -> Duration {
+        .seconds(eventTimestamp.map {
+            max(0, ProcessInfo.processInfo.systemUptime - $0)
+        } ?? 0)
+    }
+
+    /// the app's half of a press, asked by the machine once its own answers
+    /// (a retry on offer, a sentence still being written out) are spent: a
+    /// speech model, a mic grant, an input device. a refusal has already
+    /// been said here; the machine only writes it down.
+    private func microphoneForPress() -> UtteranceMachine.MicrophoneAnswer {
         guard isPrewarmed else {
             // the key is a statement of intent: from here the ember is an
             // answer, so it may show even if the warm-up began at login.
@@ -1520,8 +1712,8 @@ final class DictationCoordinator: ObservableObject {
             let notice = enginePreparationState.pressedEarlyNotice(
                 downloadSize: "about \(size)"
             )
-            switch enginePreparationState {
-            case .notStarted:
+            switch enginePreparationState.earlyPress {
+            case .startPreparing:
                 // a mac set up for meetings only has no model and no menu
                 // row offering one, so this keypress is both the consent the
                 // launch stopped assuming and the only way back in. say what
@@ -1538,18 +1730,18 @@ final class DictationCoordinator: ObservableObject {
                     )
                 }
                 requestEnginePreparation(asking: true)
-            case .failed:
+            case .retryPreparing:
                 // pressing the key is a statement of intent, and a failed
                 // model download is usually a blip. try again, out loud —
                 // the alternative is a lamp that breathes forever.
                 retryEnginePrewarm()
                 flashNotice("speech model failed — retrying")
-                return
-            case .downloading, .warmingUp, .ready:
+                return .refused(.modelNotReady)
+            case .wait:
                 break
             }
             if state != .prewarming {
-                setState(.prewarming)
+                machine.enginePreparing()
             } else {
                 // already warming from launch, with nothing on screen —
                 // light it now rather than at the next state change.
@@ -1561,480 +1753,34 @@ final class DictationCoordinator: ObservableObject {
             if let notice {
                 flashNotice(notice)
             }
-            return
-        }
-        guard state == .idle else {
-            return
+            return .refused(.modelNotReady)
         }
         // the one grant we can verify at the point of use: if the hotkey
         // reached us at all, accessibility is alive. the mic may not be.
         guard SystemPermissions.snapshot().microphoneGranted else {
             refreshPermissions(moment: .midSession)
             announcePermissionGap("microphone access is off")
-            return
+            return .refused(.microphonePermissionOff)
         }
-        guard let audioRecorder = ensureAudioRecorder() else {
-            flashNotice("no microphone available")
-            return
-        }
-
-        // a new take is the sentence you care about now; the lost one stops
-        // being offered.
-        clearRetry()
-        timelineSequence &+= 1
-        let timelineID = timelineSequence
-        activeTimeline = UtteranceTimelineBuilder(
-            id: timelineID,
-            keyDown: timelineClock.now
-        )
-        // the standby anchor. the one that decides the paste is taken at
-        // key-up; this is what stands in if AX hands back nothing then, or
-        // if by then the frontmost window is one of ours.
-        let focusAnchor = FocusAnchor.capture()
-
-        do {
-            try audioRecorder.start { [weak self] instant in
-                self?.recordFirstBuffer(
-                    at: instant,
-                    timelineID: timelineID
-                )
-            }
-            activeFocusAnchor = focusAnchor
-            // the mic and the lamp start at key-down; only the chime waits,
-            // long enough to know the key is being held rather than caught.
-            // a brush of fn should make no sound at all.
-            startCueTask?.cancel()
-            startCueTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .milliseconds(120))
-                guard !Task.isCancelled,
-                      let self,
-                      !self.isOnboardingPresented else {
-                    return
-                }
-                self.feedbackSounds.play(.start)
-            }
-            setState(.recording)
-        } catch {
-            audioLogger.error(
-                """
-                audio recording failed to start: \
-                \(error.localizedDescription, privacy: .public)
-                """
-            )
-            activeFocusAnchor = nil
-            activeTimeline = nil
-            // the device may have been yanked between the check and the tap.
-            // drop it so the next press rebuilds instead of retrying a corpse.
-            audioRecorder.cancel()
-            self.audioRecorder = nil
-            hudViewModel.useRecorder(nil)
-            setState(.idle)
-            flashNotice("couldn't start recording")
-        }
+        // no audio here: the capture is opened on its own queue when the
+        // machine starts it, and a missing mic answers from there.
+        return .ready(captureSlot.captureForPress())
     }
 
-    private func beginLockedRecording() {
-        if state == .recording {
-            return
-        }
-
-        // no discard of its own: a lock that starts mid-transcription is the
-        // same repress as any other, and beginRecording owns that decision.
-        beginRecording()
-
-        // only claim the lock if the capture took — a missing mic or a
-        // failed engine leaves us idle, and a lamp that says "locked"
-        // over nothing is a lie.
-        guard state == .recording else {
-            return
-        }
-        setRecordingLocked(true)
-        flashNotice("locked — tap to end")
-    }
-
-    /// the HUD is the only place this fact can live: there is no held
-    /// key to look at, and the lamp burns identically either way.
-    private func setRecordingLocked(_ locked: Bool) {
-        guard locked != isRecordingLocked else {
-            return
-        }
-        isRecordingLocked = locked
-        hudViewModel.setRecordingLocked(locked)
-    }
-
-    private func endRecording() {
-        guard state == .recording,
-              let audioRecorder else {
-            return
-        }
-
-        setRecordingLocked(false)
-
-        do {
-            activeTimeline?.keyUp = timelineClock.now
-            let samples = try audioRecorder.stop()
-            // taken now rather than at key-down: the window worth protecting
-            // is key-up → paste, the ~600 ms when nobody is moving anything.
-            // key-down → paste spans the whole utterance, which is exactly
-            // when aiming at the field you actually want is normal.
-            let focusAnchor = FocusAnchor.captureUnlessOurs()
-                ?? activeFocusAnchor
-            activeFocusAnchor = nil
-            if !isOnboardingPresented {
-                feedbackSounds.play(.end)
-            }
-            setState(.transcribing)
-            startPipeline(
-                samples,
-                focusAnchor: focusAnchor
-            )
-        } catch {
-            audioLogger.error(
-                """
-                audio recording failed to stop: \
-                \(error.localizedDescription, privacy: .public)
-                """
-            )
-            activeFocusAnchor = nil
-            activeTimeline = nil
-            setState(.idle, fastHUDDismiss: true)
-            // they spoke and there is nothing to show for it. say so.
-            flashNotice("recording was lost")
-        }
-    }
-
-    private func cancelRecording() {
-        // a discarded capture must not leave a chime in flight behind it
-        startCueTask?.cancel()
-        guard state == .recording,
-              let audioRecorder else {
-            return
-        }
-
-        audioRecorder.cancel()
-        setRecordingLocked(false)
-        activeFocusAnchor = nil
-        activeTimeline = nil
-        // a brush of the key should read as a flicker, not a cut
-        setState(.idle, fastHUDDismiss: true)
-    }
-
-    private func recordFirstBuffer(
-        at instant: ContinuousClock.Instant,
-        timelineID: UInt64
-    ) {
-        guard activeTimeline?.id == timelineID,
-              activeTimeline?.micFirstBuffer == nil else {
-            return
-        }
-        activeTimeline?.micFirstBuffer = instant
-    }
-
-    private func startPipeline(
-        _ samples: [Float],
-        focusAnchor: FocusAnchor?
-    ) {
-        pipelineGeneration += 1
-        let generation = pipelineGeneration
-
-        pipelineTask = Task { [weak self] in
-            await self?.transcribeAndInsert(
-                samples,
-                focusAnchor: focusAnchor,
-                generation: generation
-            )
-        }
-    }
-
-    private func transcribeAndInsert(
-        _ samples: [Float],
-        focusAnchor: FocusAnchor?,
-        generation: Int
-    ) async {
-        defer {
-            finishPipeline(generation: generation)
-        }
-
-        do {
-            let transcript = try await transcriptionEngine.transcribe(samples)
-            try Task.checkCancellation()
-            guard generation == pipelineGeneration else {
-                return
-            }
-            let transcriptReady = timelineClock.now
-            activeTimeline?.transcriptReady = transcriptReady
-
-            // one read of the text at the caret, two decisions: is the
-            // sentence there still running (so no capital), and do the words
-            // need a space to stand apart from it. read off the held element,
-            // the same one the paste decision revalidates.
-            let textAtCaret = focusAnchor?.textBeforeCursor()
-            let continuingASentence = continuesSentence(after: textAtCaret)
-
-            // a dictation aimed at our own window is a correction, not a
-            // sentence: dictate "cache" into the fixer's "what you meant"
-            // field and full cleanup would save it as "Cache." forever. the
-            // dictionary still runs — that is the ADR 0038 "cleanup off"
-            // path, not a new one. scoped per bundle, not per field, the
-            // same way CoreAudioMeetingSource treats our own bundle id: the
-            // fixer's field is the only dictation target we own. every
-            // other dictation goes through the cleaner built once for the
-            // current dictionary and settings.
-            let cleanedTranscript = pastesIntoOurOwnUI(
-                target: focusAnchor?.targetBundleIdentifier,
-                own: Bundle.main.bundleIdentifier
-            )
-                ? DeterministicCleaner(
-                    entries: dictionaryStore.entries,
-                    fullCleanup: false
-                ).clean(transcript, continuingASentence: continuingASentence)
-                : cleaner.clean(transcript, continuingASentence: continuingASentence)
-            activeTimeline?.cleaned = timelineClock.now
-            guard !cleanedTranscript.trimmingCharacters(
-                in: .whitespacesAndNewlines
-            ).isEmpty else {
-                let held = activeTimeline?.heldDuration
-                activeTimeline = nil
-                // an accident is neither a success nor a failure. "heard
-                // nothing" is an answer, and a key nobody meant to press
-                // asked no question. a retry holds no key at all (held is
-                // exactly zero), and it did ask.
-                if let held,
-                   held > .zero,
-                   held < Duration.milliseconds(300) {
-                    guard generation == pipelineGeneration,
-                          state == .transcribing else {
-                        return
-                    }
-                    setState(.idle, fastHUDDismiss: true)
-                    return
-                }
-                // silence must not wear the success afterglow.
-                await reportPipelineFailure(
-                    "heard nothing",
-                    generation: generation
-                )
-                return
-            }
-            // a second dictation into the same field must not weld itself
-            // to the first. the space is a delivery detail — the cleaner
-            // still renders a flush string and the archive still keeps it.
-            let joinsWhatIsThere = needsJoinSpace(after: textAtCaret?.last)
-            let pasteTranscript = joinsWhatIsThere
-                ? " " + cleanedTranscript
-                : cleanedTranscript
-
-            lastTranscript = cleanedTranscript
-            lastHeard = transcript
-            pendingArchiveText = (
-                heard: transcript,
-                inserted: cleanedTranscript
-            )
-            // hands-free means our own settings window may be in front of the
-            // app you dictated into. give the frontmost spot back before the
-            // ⌘V goes out, or the paste lands here and reads as focus theft.
-            _ = await focusAnchor?.yieldFocusBackToAnchor()
-            let outcome = await paster.paste(
-                pasteTranscript,
-                reasonForLeavingOnPasteboard: {
-                    switch focusAnchor?.revalidationDecision()
-                        ?? .copyFocusChanged {
-                    case .paste:
-                        nil
-                    case .copySecure:
-                        .secureField
-                    case .copyFocusChanged:
-                        .focusChanged
-                    }
-                }
-            )
-            if outcome.result != .leftOnPasteboard(
-                .pasteboardUnavailable
-            ) {
-                settings.recordDictatedTranscript(cleanedTranscript)
-            }
-            guard generation == pipelineGeneration else {
-                return
-            }
-
-            switch outcome.result {
-            case .pasted:
-                // the paste's own instant, not this one: paste() returns as
-                // soon as ⌘V is posted, and that is what "inserted" means.
-                completeTimeline(
-                    at: outcome.insertedAt,
-                    stage: .delivered
-                )
-                // success is silent, but a take the user did not end is
-                // not quite success: say what landed, after it lands. a
-                // pill flashed at 5:00 would be wiped by the paste's own
-                // return to idle.
-                if capForcedEnd {
-                    setState(.idle)
-                    await flashFeedback(
-                        "five minutes — that's the cap. pasted what i had.",
-                        duration: 2.4
-                    )
-                }
-            case let .leftOnPasteboard(reason):
-                completeTimeline(
-                    at: timelineClock.now,
-                    stage: reason == .secureField
-                        ? .leftOnPasteboardSecure
-                        : .leftOnPasteboard
-                )
-                setState(.idle)
-                // 4 s, not the shared default: this pill is the only thing
-                // telling them their words are on the clipboard, and it is
-                // asking them to do something about it.
-                await flashFeedback(
-                    feedbackMessage(for: reason),
-                    duration: 4
-                )
-            }
-        } catch is CancellationError {
-            return
-        } catch {
-            pipelineLogger.error(
-                "transcription failed: \(error.localizedDescription, privacy: .public)"
-            )
-            activeTimeline = nil
-            guard generation == pipelineGeneration,
-                  state == .transcribing else {
-                return
-            }
-            // the samples are still in this frame. "say the whole thing
-            // again" is not a recourse for a paragraph, so keep them.
-            armRetry(samples)
-            await reportPipelineFailure(
-                "couldn't transcribe — tap to try again",
-                generation: generation,
-                duration: 4
-            )
-        }
-    }
-
-    /// a dictation that produced nothing must not end in the lamp's
-    /// afterglow — that glow is the success signal. cut it short and say
-    /// what went wrong in the same pill that carries "copied — …".
-    private func reportPipelineFailure(
-        _ message: String,
-        generation: Int,
-        duration: TimeInterval = 2.4
-    ) async {
-        guard generation == pipelineGeneration,
-              state == .transcribing else {
-            return
-        }
-
-        setState(.idle, fastHUDDismiss: true)
-        await flashFeedback(message, duration: duration)
-    }
-
-    /// the failed dictation is still recoverable until the next one, and the
-    /// menu row plus the pill are the only two places that can say so.
-    private func armRetry(_ samples: [Float]) {
-        retryBuffer.arm(samples: samples, at: Date())
-        canRetryLastFailure = true
-        retryExpiryTask?.cancel()
-        retryExpiryTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(RetryBuffer.lifetime))
-            guard !Task.isCancelled else {
-                return
-            }
-            self?.clearRetry()
-        }
-    }
-
-    private func clearRetry() {
-        retryExpiryTask?.cancel()
-        retryExpiryTask = nil
-        retryBuffer.clear()
-        canRetryLastFailure = false
-    }
-
-    /// re-runs the samples that were thrown on, delivered wherever the
-    /// cursor is *now* — the failure may have sent them to another window.
+    /// the menu's door to the samples the engine threw on; a press while the
+    /// pill still says so is the other.
     func retryLastFailure() {
-        guard let samples = retryBuffer.take(at: Date()) else {
-            clearRetry()
-            return
-        }
-        clearRetry()
-
-        let now = timelineClock.now
-        timelineSequence &+= 1
-        var timeline = UtteranceTimelineBuilder(
-            id: timelineSequence,
-            keyDown: now
-        )
-        // held ≈ 0 rather than a fabricated hold: this row measures the
-        // retry, and nobody held a key for it.
-        timeline.micFirstBuffer = now
-        timeline.keyUp = now
-        activeTimeline = timeline
-        setState(.transcribing)
-        startPipeline(samples, focusAnchor: FocusAnchor.capture())
+        machine.retryLastFailure()
     }
 
-    private func invalidatePipeline() {
-        heldFeedback = nil
-        setRecordingLocked(false)
-        pipelineGeneration += 1
-        pipelineTask?.cancel()
-        pipelineTask = nil
-        activeTimeline = nil
-    }
-
-    /// "copied" is a fact; the user needs the verb. the pill cannot be
-    /// clicked (it ignores mouse events), so the recovery has to be
-    /// something their hands can already do.
-    private func feedbackMessage(
-        for reason: LeftOnPasteboardReason
-    ) -> String {
-        switch reason {
-        case .secureField:
-            "copied — secure field · ⌘V to paste"
-        case .focusChanged:
-            "copied — focus changed · ⌘V to paste"
-        case .accessibilityUnavailable,
-             .shortcutUnavailable,
-             .cancelled:
-            "copied — couldn't paste it · ⌘V to paste"
-        case .pasteboardUnavailable:
-            // the only one with no recovery to offer: the clipboard write
-            // itself failed, so there is nothing sitting there to paste.
-            "the clipboard is busy — nothing was copied"
-        }
-    }
-
-    private func completeTimeline(
-        at instant: ContinuousClock.Instant,
-        stage: UtteranceTimeline.CompletionStage
-    ) {
-        defer {
-            activeTimeline = nil
-            pendingArchiveText = nil
-        }
-        guard let timeline = activeTimeline?.complete(stage, at: instant) else {
-            return
-        }
-        timelineStore.append(timeline)
-        archive(timeline, stage: stage)
-    }
-
-    /// A dictation becomes a kept thing only once it has actually been
-    /// delivered. A cancelled one produced no text, so there is nothing to
-    /// keep; one left on the pasteboard reached you by another route and
-    /// still counts — except the one refused for a secure field, which
-    /// reached nowhere and is a password.
+    /// the machine decides what is worth keeping; whether dictations are
+    /// kept at all is a setting, and the file is the archive's.
     private func archive(
         _ timeline: UtteranceTimeline,
-        stage: UtteranceTimeline.CompletionStage
+        heard: String,
+        inserted: String
     ) {
-        guard settings.keepDictations,
-              stage.isKeepable,
-              let text = pendingArchiveText else {
+        guard settings.keepDictations else {
             return
         }
 
@@ -2048,8 +1794,8 @@ final class DictationCoordinator: ObservableObject {
                         timeIntervalSinceNow:
                             -timeline.durations.total.inMilliseconds / 1_000
                     ),
-                    heard: text.heard,
-                    inserted: text.inserted,
+                    heard: heard,
+                    inserted: inserted,
                     engine: activeEngineVersion.rawValue,
                     keyUpToInsertedMilliseconds:
                         timeline.durations.keyUpToCompletion.inMilliseconds
@@ -2062,82 +1808,33 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
-    private func finishPipeline(generation: Int) {
-        guard generation == pipelineGeneration else {
-            return
-        }
-
-        pipelineTask = nil
-        guard state == .transcribing else {
-            return
-        }
-
-        // success is silent: the lamp's afterglow is the whole goodbye.
-        // hold the panel just long enough for the cool-out to finish.
-        let elapsed = Date().timeIntervalSince(
-            transcribingBeganAt ?? .distantPast
-        )
-        let remaining = max(
-            0,
-            HUDWaveMotion.coolDuration + 0.05 - elapsed
-        )
-        let stateToken = stateGeneration
-        Task { @MainActor [weak self] in
-            if remaining > 0 {
-                try? await Task.sleep(for: .seconds(remaining))
-            }
-            guard let self,
-                  stateToken == self.stateGeneration,
-                  self.state == .transcribing else {
-                return
-            }
-            self.setState(.idle, fastHUDDismiss: true)
-        }
+    /// what a shown pill carries to its own expiry: a newer pill, or any
+    /// state change in between, means the clear is no longer this pill's.
+    private struct ShownFeedback {
+        let feedbackToken: UInt64
+        let stateToken: UInt64
+        let lasts: TimeInterval
     }
 
-    private func handleEscape() -> Bool {
-        guard state != .idle, state != .prewarming else {
-            return false
-        }
-
-        cancelCurrentInteraction()
-        return true
-    }
-
-    private func cancelCurrentInteraction() {
-        let cancelRequested = timelineClock.now
-
-        if state == .recording {
-            audioRecorder?.cancel()
-            setRecordingLocked(false)
-            activeFocusAnchor = nil
-        }
-
-        pipelineGeneration += 1
-        pipelineTask?.cancel()
-        pipelineTask = nil
-        setState(.idle, fastHUDDismiss: true)
-        let idle = timelineClock.now
-
-        if let timeline = activeTimeline?.cancelled(
-            requestedAt: cancelRequested,
-            idleAt: idle
-        ) {
-            timelineStore.append(timeline)
-        }
-        activeTimeline = nil
-    }
-
-    /// 2.4 s, where it used to be 1.2: the pill springs in over 0.32 s and
-    /// then sits at bottom-centre while the reader's eyes are on their
-    /// cursor. the two call sites that ride this default are both failures,
-    /// and one of them ("copied — …") is an instruction.
     private func flashFeedback(
         _ message: String,
-        duration: TimeInterval = 2.4
+        duration: TimeInterval
     ) async {
+        guard let shown = showFeedback(message, duration: duration) else {
+            return
+        }
+        await expireFeedback(shown)
+    }
+
+    /// the half of a pill that happens now. apart from its expiry so a pill
+    /// the machine owes lands in the same turn as the state change it
+    /// follows. nil when the setup window is holding it instead.
+    private func showFeedback(
+        _ message: String,
+        duration: TimeInterval
+    ) -> ShownFeedback? {
         // the setup window force-dismissed the panel, so the sleep-then-
-        // clear below would run against something nobody can see and the
+        // clear would run against something nobody can see and the
         // sentence would be lost for good. hold it; closing setup says it.
         if HUDFeedbackGate.decide(
             isOnboardingPresented: isOnboardingPresented,
@@ -2148,7 +1845,7 @@ final class DictationCoordinator: ObservableObject {
                 duration: duration,
                 at: Date()
             )
-            return
+            return nil
         }
 
         feedbackGeneration += 1
@@ -2179,23 +1876,31 @@ final class DictationCoordinator: ObservableObject {
             for: .text(message),
             screenWidth: screenWidth
         ).lineCount
-        try? await Task.sleep(
-            for: .seconds(duration + (lineCount == 2 ? 0.6 : 0))
+        return ShownFeedback(
+            feedbackToken: feedbackToken,
+            stateToken: stateToken,
+            lasts: duration + (lineCount == 2 ? 0.6 : 0)
         )
-        guard stateToken == stateGeneration,
-              feedbackToken == feedbackGeneration,
-              activeFeedbackGeneration == feedbackToken else {
+    }
+
+    private func expireFeedback(_ shown: ShownFeedback) async {
+        try? await Task.sleep(for: .seconds(shown.lasts))
+        guard shown.stateToken == stateGeneration,
+              shown.feedbackToken == feedbackGeneration,
+              activeFeedbackGeneration == shown.feedbackToken else {
             return
         }
 
         activeFeedbackGeneration = nil
         hudViewModel.clearFeedback()
         synchronizeHUD()
+        sayLearnedIfQuiet()
     }
 
-    private func setState(
+    /// the machine's state, worn by the panel and mirrored for the menu.
+    private func apply(
         _ newState: State,
-        fastHUDDismiss: Bool = false
+        fastHUDDismiss: Bool
     ) {
         if newState == .recording {
             // they have moved on and are talking again; a held sentence
@@ -2205,13 +1910,29 @@ final class DictationCoordinator: ObservableObject {
         stateGeneration += 1
         feedbackGeneration += 1
         activeFeedbackGeneration = nil
-        if newState == .transcribing {
-            transcribingBeganAt = Date()
-        }
         state = newState
         hudViewModel.update(state: newState)
+        // nothing ticks at idle: the watchdog follows a press and lingers
+        // a few seconds after it, then stops.
+        switch newState {
+        case .idle:
+            watchdog.windDown()
+        case .prewarming:
+            watchdog.watch(.prewarming)
+        case .recording:
+            watchdog.watch(.recording)
+        case .transcribing:
+            watchdog.watch(.transcribing)
+        }
 
         synchronizeHUD(fastDismiss: fastHUDDismiss)
+        if newState == .idle {
+            // a turn later: a pill the take owes lands with this change,
+            // and goes first.
+            Task { @MainActor [weak self] in
+                self?.sayLearnedIfQuiet()
+            }
+        }
     }
 
     private func synchronizeHUD(fastDismiss: Bool = false) {
@@ -2239,6 +1960,112 @@ final class DictationCoordinator: ObservableObject {
                 )
             )
             panel.present()
+        }
+    }
+}
+
+// MARK: - the utterance machine
+
+extension DictationCoordinator {
+    /// the machine asks two questions only this side can answer, and says
+    /// everything else through one callback.
+    private func wireMachine() {
+        machine.onEvent = { [weak self] event in
+            self?.handle(event)
+        }
+        machine.microphoneForPress = { [weak self] in
+            self?.microphoneForPress() ?? .refused(.modelNotReady)
+        }
+        machine.isPillShowing = { [weak self] in
+            self?.activeFeedbackGeneration != nil
+        }
+    }
+
+    private func handle(_ event: UtteranceEvent) {
+        switch event {
+        case let .state(state, fastDismiss):
+            apply(state, fastHUDDismiss: fastDismiss)
+            if suspendsCaptureAfterTheUtterance, state != .recording {
+                suspendsCaptureAfterTheUtterance = false
+                captureSlot.suspend()
+            }
+        case .hearing:
+            hudViewModel.micHeard()
+        case let .chime(chime):
+            guard !isOnboardingPresented else {
+                return
+            }
+            feedbackSounds.play(chime == .start ? .start : .end)
+        case let .pill(message, duration):
+            guard let shown = showFeedback(message, duration: duration) else {
+                return
+            }
+            Task { @MainActor [weak self] in
+                await self?.expireFeedback(shown)
+            }
+        case let .locked(locked):
+            hudViewModel.setRecordingLocked(locked)
+        case let .keepAwake(awake):
+            keepDisplayAwake(awake)
+        case let .timelineCompleted(timeline):
+            timelineStore.append(timeline)
+        case let .archiveRecord(timeline, heard, inserted):
+            archive(timeline, heard: heard, inserted: inserted)
+        case let .dictated(text):
+            settings.recordDictatedTranscript(text)
+        case let .transcribed(heard, inserted):
+            lastTranscript = inserted
+            lastHeard = heard
+        case let .delivered(heard, inserted):
+            learningFromCorrections.delivered(heard: heard, inserted: inserted)
+        case let .retryOffered(offered):
+            canRetryLastFailure = offered
+        case .microphoneDropped:
+            captureSlot.drop()
+        case .engineSuspect:
+            checkEngineAnswers()
+        case .engineUnresponsive:
+            restartEngine()
+        case let .pressEnded(record):
+            keep(record)
+        }
+    }
+
+    /// an idle-display-sleep assertion, the one `pmset -g assertions` lists
+    /// as "dictating". ProcessInfo's activity rather than IOKit's call: the
+    /// same assertion underneath, with a token instead of an id and a
+    /// return code to check, and the system drops it if the app dies.
+    /// display only — keeping the system awake too is the display's doing,
+    /// and nothing here should outlive the mic.
+    private func keepDisplayAwake(_ awake: Bool) {
+        if awake {
+            guard displayAwakeActivity == nil else {
+                return
+            }
+            displayAwakeActivity = ProcessInfo.processInfo.beginActivity(
+                options: .idleDisplaySleepDisabled,
+                reason: "dictating"
+            )
+        } else if let activity = displayAwakeActivity {
+            ProcessInfo.processInfo.endActivity(activity)
+            displayAwakeActivity = nil
+        }
+    }
+
+    /// the line goes to the unified log now; the file follows on its own
+    /// queue, in press order.
+    private func keep(_ record: PressRecord) {
+        pressLogger.notice("\(record.line(), privacy: .public)")
+        let store = pressLog
+        let logger = pressLogger
+        pressLogQueue.async {
+            do {
+                try store.append(record)
+            } catch {
+                logger.error(
+                    "couldn't keep a press record: \(error.localizedDescription, privacy: .public)"
+                )
+            }
         }
     }
 }
@@ -2276,14 +2103,14 @@ extension DictationCoordinator {
         liveTranscript.clear()
         liveTranscript.app = MeetingApps.displayName(app)
         liveTranscript.elapsed = .zero
-        Task { [meetingNotifier] in
-            await meetingNotifier.requestPermissionIfNeeded()
+        Task { [notifier = meetings.notifier] in
+            await notifier.requestPermissionIfNeeded()
         }
-        meetings.start(tapping: app)
+        meetings.coordinator.start(tapping: app)
     }
 
     func stopMeeting() {
-        meetingNotifier.withdraw()
+        meetings.withdrawNudge()
         meetings.stop()
     }
 
@@ -2331,17 +2158,59 @@ extension DictationCoordinator {
     }
 
     private func wireMeetings() {
-        meetings.onEvent = { [weak self] event in
+        meetings.onCoordinatorBuilt = { [weak self] built in
+            self?.wire(built)
+        }
+        meetings.onNotifierBuilt = { [weak self] notifier in
+            self?.wire(notifier)
+        }
+        // recovery loads the meeting model and can run for a quarter of an
+        // hour. five seconds of head start keeps it off the dictation
+        // model's prewarm, so the first fn press is not slower for it. the
+        // number is a guess, like the rest of MeetingThresholds.
+        meetings.launch(
+            setUp: hasMeetingsSetUp,
+            transcripts: settings.meetingsFolder,
+            spool: MeetingSpool(),
+            recoveryDelay: .seconds(5)
+        )
+    }
+
+    /// a meeting model on disk, or a folder somebody chose. both are a
+    /// stat, so a mac that only dictates learns it has nothing to repair
+    /// without walking the transcripts folder.
+    private var hasMeetingsSetUp: Bool {
+        !installedMeetingModels.isEmpty || settings.meetingsFolderWasChosen
+    }
+
+    /// the notifier's buttons. a nudge or a stop from a banner the last run
+    /// left behind finds no meeting, and does nothing.
+    private func wire(_ notifier: MeetingNudgeNotifier) {
+        notifier.onKeepGoing = { [weak self] in
+            self?.meetings.keepGoing()
+        }
+        notifier.onStop = { [weak self] in
+            self?.stopMeeting()
+        }
+        notifier.onShowFile = { url in
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+    }
+
+    /// the coordinator's half of the wiring, run once, the moment it is
+    /// built — before anything it does can need answering.
+    private func wire(_ built: MeetingCoordinator) {
+        built.onEvent = { [weak self] event in
             self?.handle(event)
         }
-        meetings.onLine = { [weak self] line in
+        built.onLine = { [weak self] line in
             self?.liveTranscript.upsert(line)
         }
-        meetings.recordHookRun = { [weak self] run in
+        built.recordHookRun = { [weak self] run in
             self?.settings.meetingHookLastRunAt = run.finishedAt
             self?.settings.meetingHookLastRunLabel = run.outcome.label
         }
-        meetings.$elapsed
+        built.$elapsed
             .sink { [weak self] elapsed in
                 self?.liveTranscript.elapsed = elapsed
             }
@@ -2349,45 +2218,32 @@ extension DictationCoordinator {
         // The menu observes *this* object, not the one nested inside it: a
         // meeting that starts without this line leaves the menu drawing the
         // idle version, with no way to stop what it cannot see.
-        meetings.$state
+        built.$state
             .removeDuplicates()
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &meetingCancellables)
-        meetings.$elapsed
+        // a word learned during the meeting is said once it is over. a
+        // turn later: @Published sinks run before the new state is stored.
+        built.$state
+            .removeDuplicates()
+            .filter { $0 == .idle }
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.sayLearnedIfQuiet()
+                }
+            }
+            .store(in: &meetingCancellables)
+        built.$elapsed
             .map { $0.components.seconds }
             .removeDuplicates()
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &meetingCancellables)
         // same reason as the two above: the menu watches this object, and
         // the recovery line lives on the one nested inside it.
-        meetings.$recovering
+        built.$recovering
             .removeDuplicates()
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &meetingCancellables)
-        meetingNotifier.onKeepGoing = { [weak self] in
-            self?.meetings.keepGoing()
-        }
-        meetingNotifier.onStop = { [weak self] in
-            self?.stopMeeting()
-        }
-        meetingNotifier.onShowFile = { url in
-            NSWorkspace.shared.activateFileViewerSelecting([url])
-        }
-        // transcripts written before the app started locking them down are
-        // still 0644 — other people's words, readable by every account on
-        // the machine. repaired once, off the main thread.
-        let folder = settings.meetingsFolder
-        Task.detached(priority: .utility) {
-            MeetingTranscriptFile.lockDown(in: folder)
-        }
-        // recovery loads the meeting model and can run for a quarter of an
-        // hour. five seconds of head start keeps it off the dictation
-        // model's prewarm, so the first fn press is not slower for it. the
-        // number is a guess, like the rest of MeetingThresholds.
-        Task { [weak self] in
-            try? await Task.sleep(for: .seconds(5))
-            self?.meetings.recoverOrphans()
-        }
     }
 
     private func handle(_ event: MeetingEvent) {
@@ -2398,21 +2254,25 @@ extension DictationCoordinator {
                 toggleLiveTranscript()
             }
         case .nudge:
-            meetingNotifier.ask(app: meetingAppName, quietFor: meetings.thresholds.quietNudgeAfter)
+            // only a built coordinator says anything, so this builds nothing
+            meetings.notifier.ask(
+                app: meetingAppName,
+                quietFor: meetings.coordinator.thresholds.quietNudgeAfter
+            )
         case .saved(let summary):
             liveTranscriptPanel?.dismissKeepingPreference()
             // the file *is* the feature, and the pill that names it is gone
             // in two seconds — often before you are back at the mac.
             lastMeeting = summary
             lastMeetingSavedAt = Date()
-            meetingNotifier.saved(summary)
+            meetings.notifier.saved(summary)
             // the transcript has landed, so a quit that was waiting on it
             // can go through. the hook runs after this and may not finish;
             // the file it was told about is already written.
             finishQuitting()
         case .saveFailed:
             liveTranscriptPanel?.dismissKeepingPreference()
-            meetingNotifier.saveFailed()
+            meetings.notifier.saveFailed()
             // nothing more will be written, so a quit waiting on the file
             // goes through here too.
             finishQuitting()
@@ -2457,8 +2317,10 @@ extension DictationCoordinator {
 }
 
 
+#if DEBUG
 /// development only: dump a window's layer tree with the properties that
 /// could carry an active/inactive look, to diff the panel against the lab.
+/// the lab is its only caller, so release carries neither.
 enum HUDHierarchyDump {
     static let keys = [
         "effect", "filters", "compositingFilter", "backgroundFilters",
@@ -2532,3 +2394,4 @@ enum HUDHierarchyDump {
         )
     }
 }
+#endif

@@ -3,10 +3,15 @@ import AppKit
 @MainActor
 final class HotkeyMonitor {
     var onBegin: (() -> Void)?
-    var onEnd: (() -> Void)?
+    /// the ends carry the key event's own timestamp (seconds since boot,
+    /// `NSEvent.timestamp`), so key-up can be when the finger lifted rather
+    /// than when the main thread got round to hearing it.
+    var onEnd: ((TimeInterval?) -> Void)?
     var onCancel: (() -> Void)?
+    /// another key during a hold, with that key's own timestamp.
+    var onChord: ((TimeInterval?) -> Void)?
     var onLockBegin: (() -> Void)?
-    var onLockEnd: (() -> Void)?
+    var onLockEnd: ((TimeInterval?) -> Void)?
     var onLockCancel: (() -> Void)?
     var onKeyDetected: (() -> Void)?
     var onEscape: (() -> Bool)?
@@ -122,7 +127,10 @@ final class HotkeyMonitor {
             guard keyCode == binding.keyCode else {
                 return
             }
-            perform(detector.modifierReleased(at: event.timestamp))
+            perform(
+                detector.modifierReleased(at: event.timestamp),
+                at: event.timestamp
+            )
             return
         }
 
@@ -139,7 +147,10 @@ final class HotkeyMonitor {
             return
         }
 
-        perform(detector.modifierPressed(at: event.timestamp))
+        perform(
+            detector.modifierPressed(at: event.timestamp),
+            at: event.timestamp
+        )
     }
 
     private func handleKeyDown(_ event: NSEvent) {
@@ -157,7 +168,10 @@ final class HotkeyMonitor {
             _ = detector.reset()
             return
         }
-        perform(detector.keyDown(isEscape: isEscape))
+        perform(
+            detector.keyDown(isEscape: isEscape),
+            at: event.timestamp
+        )
     }
 
     private func modifierFlag(
@@ -180,7 +194,12 @@ final class HotkeyMonitor {
         }
     }
 
-    private func perform(_ actions: [TapLockDetector.Action]) {
+    /// `timestamp` is the key event behind these actions, when there is one:
+    /// a provisional end that timed out, a reset or a rebind has none.
+    private func perform(
+        _ actions: [TapLockDetector.Action],
+        at timestamp: TimeInterval? = nil
+    ) {
         for action in actions {
             switch action {
             case .begin:
@@ -190,17 +209,21 @@ final class HotkeyMonitor {
             case .end:
                 provisionalEndTask?.cancel()
                 provisionalEndTask = nil
-                onEnd?()
+                onEnd?(timestamp)
             case .cancel:
                 provisionalEndTask?.cancel()
                 provisionalEndTask = nil
                 onCancel?()
+            case .chord:
+                provisionalEndTask?.cancel()
+                provisionalEndTask = nil
+                onChord?(timestamp)
             case .lockBegin:
                 provisionalEndTask?.cancel()
                 provisionalEndTask = nil
                 onLockBegin?()
             case .lockEnd:
-                onLockEnd?()
+                onLockEnd?(timestamp)
             case .lockCancel:
                 onLockCancel?()
             }

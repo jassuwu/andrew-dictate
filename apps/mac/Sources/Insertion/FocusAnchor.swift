@@ -125,8 +125,12 @@ func needsJoinSpace(after previous: Character?) -> Bool {
     return !openingOrWhitespace.contains(previous)
 }
 
-@MainActor
-struct FocusAnchor {
+/// which app is in front is AppKit's, read on the main actor; the focused
+/// element and the text at its caret are AX calls — IPC to that app, safe
+/// from any thread — so key-up can read them beside the engine instead of
+/// on the main thread. the element is a CF reference that is never
+/// mutated, which is what makes the anchor safe to hand across.
+struct FocusAnchor: @unchecked Sendable {
     private let application: FocusApplicationIdentity
     private let focusedElement: AXUIElement?
     private let focusedElementWasSecure: Bool
@@ -136,6 +140,7 @@ struct FocusAnchor {
         application.bundleIdentifier
     }
 
+    @MainActor
     static func capture(
         workspace: NSWorkspace = .shared
     ) -> FocusAnchor? {
@@ -143,6 +148,11 @@ struct FocusAnchor {
             return nil
         }
 
+        return capture(in: application)
+    }
+
+    /// the anchor in an app already read: only its AX half, from any thread.
+    static func capture(in application: FocusApplicationIdentity) -> FocusAnchor {
         let focusedElement = focusedElement()
         return FocusAnchor(
             application: application,
@@ -151,12 +161,60 @@ struct FocusAnchor {
         )
     }
 
+    /// how long the app in front gets to name its focused element for
+    /// key-down's standby: a healthy one answers in a few milliseconds.
+    static let standbyPatience: Float = 0.2
+
+    /// the same, with every AX message bounded by `timeout`. asked of the
+    /// app's own element rather than the system-wide one: a timeout set on
+    /// the system-wide element is set for every AX call this process makes.
+    static func capture(
+        in application: FocusApplicationIdentity,
+        answeringWithin timeout: Float
+    ) -> FocusAnchor {
+        let applicationElement = AXUIElementCreateApplication(
+            application.processIdentifier
+        )
+        _ = AXUIElementSetMessagingTimeout(applicationElement, timeout)
+        let focusedElement = focusedElement(of: applicationElement)
+        if let focusedElement {
+            _ = AXUIElementSetMessagingTimeout(focusedElement, timeout)
+        }
+        return FocusAnchor(
+            application: application,
+            focusedElement: focusedElement,
+            focusedElementWasSecure: isSecureTextField(focusedElement)
+        )
+    }
+
+    /// the frontmost app, ours included: the AppKit half of `capture`.
+    @MainActor
+    static func frontmost(
+        workspace: NSWorkspace = .shared
+    ) -> FocusApplicationIdentity? {
+        applicationIdentity(workspace: workspace)
+    }
+
+    /// the frontmost app, unless it is one of ours: `captureUnlessOurs`
+    /// without the AX half.
+    @MainActor
+    static func frontmostUnlessOurs(
+        workspace: NSWorkspace = .shared
+    ) -> FocusApplicationIdentity? {
+        guard let application = applicationIdentity(workspace: workspace),
+              application.bundleIdentifier != AppIdentity.bundleID else {
+            return nil
+        }
+        return application
+    }
+
     /// The anchor a dictation is judged against, taken at key-up.
     ///
     /// Our own window being frontmost is not an answer: a locked recording
     /// that ended while settings, about or fix-a-word was open still means
     /// the app you were talking into, so that case declines and the key-down
     /// anchor stands.
+    @MainActor
     static func captureUnlessOurs(
         workspace: NSWorkspace = .shared
     ) -> FocusAnchor? {
@@ -177,6 +235,7 @@ struct FocusAnchor {
     /// and a refusal returns false rather than hanging: revalidation then
     /// reports a changed focus and the transcript stays on the clipboard,
     /// which is today's behaviour.
+    @MainActor
     func yieldFocusBackToAnchor(
         workspace: NSWorkspace = .shared,
         activate: (Int32) -> Bool = { processIdentifier in
@@ -207,6 +266,7 @@ struct FocusAnchor {
         return false
     }
 
+    @MainActor
     func revalidationDecision(
         workspace: NSWorkspace = .shared
     ) -> FocusRevalidationDecision {
@@ -306,6 +366,7 @@ struct FocusAnchor {
         return range
     }
 
+    @MainActor
     private static func applicationIdentity(
         workspace: NSWorkspace
     ) -> FocusApplicationIdentity? {
@@ -319,11 +380,12 @@ struct FocusAnchor {
         )
     }
 
-    private static func focusedElement() -> AXUIElement? {
-        let systemWideElement = AXUIElementCreateSystemWide()
+    private static func focusedElement(
+        of element: AXUIElement = AXUIElementCreateSystemWide()
+    ) -> AXUIElement? {
         var value: CFTypeRef?
         let error = AXUIElementCopyAttributeValue(
-            systemWideElement,
+            element,
             kAXFocusedUIElementAttribute as CFString,
             &value
         )

@@ -13,6 +13,9 @@ enum LeftOnPasteboardReason: Equatable, Sendable {
     case shortcutUnavailable
     case cancelled
     case pasteboardUnavailable
+    /// the mac locked or slept under the take: the field it was going to
+    /// is behind the lock screen, so it is copied and never pasted.
+    case locked
 }
 
 /// What the paste did, and the instant it reached the target app.
@@ -35,7 +38,7 @@ struct PasteOutcome: Sendable {
 
 @MainActor
 final class Paster {
-    private struct Snapshot: Sendable {
+    struct Snapshot: Sendable {
         struct Item: Sendable {
             struct Representation: Sendable {
                 let type: String
@@ -59,6 +62,54 @@ final class Paster {
     private var isPasting = false
     private var pasteWaiters: [CheckedContinuation<Void, Never>] = []
     private let keyCodeResolver = PasteKeyCodeResolver()
+    /// the clipboard as key-up found it, read off the main thread while
+    /// the engine works: a clipboard holding an image can take tens of
+    /// milliseconds to read, and none of them need be after the words.
+    private var readingAhead: (id: UInt64, read: Task<Snapshot?, Never>)?
+    private var readAheadSequence: UInt64 = 0
+    /// it holds whatever you had copied, a password included, so it does
+    /// not outlive the take it was read for. a take that runs past this
+    /// reads the clipboard at the paste, as every take used to.
+    private static let readAheadLifetime = Duration.seconds(30)
+
+    /// reads the clipboard now, for the paste to come. not while a paste
+    /// or its restore is still out: that one writes the clipboard on the
+    /// main thread, and the read would race it. the paste reads it itself
+    /// then, as it always has.
+    func readAhead() {
+        guard !isPasting else {
+            readingAhead = nil
+            return
+        }
+        readAheadSequence &+= 1
+        let id = readAheadSequence
+        readingAhead = (
+            id,
+            Task.detached(priority: .userInitiated) {
+                Self.snapshot(of: .general)
+            }
+        )
+        Task { [weak self] in
+            try? await Task.sleep(for: Self.readAheadLifetime)
+            if self?.readingAhead?.id == id {
+                self?.readingAhead = nil
+            }
+        }
+    }
+
+    /// the clipboard to put back after the paste: the one read while the
+    /// engine worked if nothing was copied since, or read again now if
+    /// something was. a ⌘C during the wait is what you have, so it is what
+    /// comes back.
+    nonisolated static func snapshotToRestore(
+        early: Snapshot?,
+        on pasteboard: NSPasteboard
+    ) -> Snapshot? {
+        if let early, early.changeCount == pasteboard.changeCount {
+            return early
+        }
+        return snapshot(of: pasteboard)
+    }
 
     func paste(
         _ text: String,
@@ -70,8 +121,9 @@ final class Paster {
         // dictation queues behind the real restore instead of behind the
         // caller. miss one of the early returns and the next paste hangs.
 
+        let early = await takeReadAhead()
         let pasteboard = NSPasteboard.general
-        var snapshot = Self.snapshot(of: pasteboard)
+        var snapshot = Self.snapshotToRestore(early: early, on: pasteboard)
 
         if let capturedSnapshot = snapshot,
            pasteboard.changeCount != capturedSnapshot.changeCount {
@@ -157,6 +209,26 @@ final class Paster {
         return PasteOutcome(result: .pasted, insertedAt: insertedAt)
     }
 
+    /// a copy you asked for: the menu's timings and diagnostics. it takes
+    /// its turn behind any paste and the restore after it, so it never
+    /// lands between a dictation's snapshot of your clipboard and the put
+    /// back; and a read-ahead still out finishes first, so that off-main
+    /// read never meets this write half done. a plain write, as a ⌘C would
+    /// be: no relay marker, and the next paste reads it fresh by its change
+    /// count.
+    func copy(
+        _ text: String,
+        to pasteboard: NSPasteboard = .general
+    ) async {
+        await acquirePasteTransaction()
+        if let readingAhead {
+            _ = await readingAhead.read.value
+        }
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        releasePasteTransaction()
+    }
+
     private func acquirePasteTransaction() async {
         guard isPasting else {
             isPasting = true
@@ -177,7 +249,16 @@ final class Paster {
         pasteWaiters.removeFirst().resume()
     }
 
-    private static func snapshot(of pasteboard: NSPasteboard) -> Snapshot? {
+    /// done with by the paste that takes it, whatever the paste does next.
+    private func takeReadAhead() async -> Snapshot? {
+        guard let readingAhead else {
+            return nil
+        }
+        self.readingAhead = nil
+        return await readingAhead.read.value
+    }
+
+    nonisolated static func snapshot(of pasteboard: NSPasteboard) -> Snapshot? {
         let changeCount = pasteboard.changeCount
 
         guard let pasteboardItems = pasteboard.pasteboardItems else {
