@@ -137,6 +137,11 @@ struct KeptAudio: Sendable {
         do {
             try? fm.removeItem(at: compressed)
             try compress(handle.audioURL, compressed)
+            // a copy that does not hold the whole meeting is no copy: the
+            // only original is not let go for it.
+            guard Self.holdsAll(of: handle.audioURL, in: compressed) else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
             audio = (compressed, root.appendingPathComponent("\(id).m4a"))
         } catch {
             Self.logger.error("could not compress a meeting's audio, keeping it as it was: \(error.localizedDescription, privacy: .public)")

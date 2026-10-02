@@ -352,7 +352,44 @@ final class KeptAudioTests: XCTestCase {
         XCTAssertEqual(try keptFiles().map(\.pathExtension), ["json", "m4a"])
     }
 
+    /// The compressed copy came out short of the meeting. It is not taken
+    /// on trust in place of the only original: the spool's own file is kept
+    /// instead, as when compressing fails outright.
+    func testACompressedCopyThatComesOutShortIsNotKeptInPlaceOfTheSpool() async throws {
+        transcribers.lineUp(healthy())
+        let short = KeptAudio(
+            root: audioFolder, now: { [wall] in wall!.now },
+            compress: { caf, m4a in try Self.aac(caf, m4a, frames: 8_000) })
+
+        try await meeting(seconds: 2, on: coordinator(kept: short))
+
+        XCTAssertEqual(try keptFiles().map(\.pathExtension), ["caf", "json"])
+        let audio = try XCTUnwrap(try keptFiles().first { $0.pathExtension == "caf" })
+        XCTAssertEqual(try AVAudioFile(forReading: audio).length, 32_000)
+        XCTAssertEqual(try spoolFolders(), 0)
+    }
+
     // MARK: - helpers
+
+    /// The first `frames` of a spool as AAC, and no more: an encoder that
+    /// stopped short.
+    private nonisolated static func aac(_ caf: URL, _ m4a: URL, frames: AVAudioFrameCount) throws {
+        let input = try AVAudioFile(forReading: caf, commonFormat: .pcmFormatFloat32, interleaved: false)
+        let output = try AVAudioFile(
+            forWriting: m4a,
+            settings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: input.processingFormat.sampleRate,
+                AVNumberOfChannelsKey: input.processingFormat.channelCount,
+                AVEncoderBitRateKey: KeptAudio.bitRate,
+            ],
+            commonFormat: .pcmFormatFloat32,
+            interleaved: false)
+        let buffer = try XCTUnwrap(
+            AVAudioPCMBuffer(pcmFormat: input.processingFormat, frameCapacity: frames))
+        try input.read(into: buffer, frameCount: frames)
+        try output.write(from: buffer)
+    }
 
     /// A spool whose meeting was written out into `transcript`, marked to be
     /// kept, with two seconds of audio still in it.
