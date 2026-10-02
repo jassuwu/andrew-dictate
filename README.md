@@ -52,11 +52,11 @@ nowhere. the speech models run on your mac, so nothing you say leaves it. the ap
 
 - downloading a speech model, the first time you set up a job. you click for it.
 - `check for updates` in the about window, which asks github for the latest tag. you click for that too.
-- once a day, the app asks dictate.jass.gg for the newest version. the request is `dictate.jass.gg/api/latest?version=0.9.4` with your version in it, and that's all. no id, no account, nothing about your mac. vercel hosts the site, so it sees your ip address like any web host would. if there's something newer, a line in the menu says so. it never asks while you're dictating or recording a meeting, and a switch in settings › general stops it.
+- once a day, the app asks dictate.jass.gg for the newest version. the request is `dictate.jass.gg/api/latest?version=0.9.4` with your version in it, and that's all. no id, no account, nothing about your mac. if there's something newer, a line in the menu says so. it never asks while you're dictating or recording a meeting, and a switch in settings › general stops it.
 
-that last one is new. i used to say the app only went online when you clicked something. but fixes weren't reaching people, so now it asks once a day, and you can turn it off.
+that last one is new. i used to say the app only went online when you clicked something. but fixes weren't reaching people, so now it asks once a day, and you can turn it off. i also count the asks. each one adds 1 to a tally for its version and that day, like `2026-10-02: 0.9.4 → 12`, so i can see how many people use this and which versions are still out there. the tally is the only thing i store. i don't keep your ip address, your user agent, an id, or anything else that could tell one mac from another. vercel hosts the site, so it sees your ip address like any web host would, but my code never reads it. switch the check off and nothing is sent, so you're not in the count.
 
-there's no account, no analytics, and no crash reporting. audio is never written to disk, except during a meeting, where a temp file holds it until the transcript is saved and then it's deleted. dictations are kept in a local history you can switch off or wipe.
+there's no account and no crash reporting. the app records no usage: nothing about what you dictate, what you click, or when, and no text or audio ever leaves your mac. the daily version count is the only counting there is. audio is never written to disk, except during a meeting, where a temp file holds it until the transcript is saved and then it's deleted. dictations are kept in a local history you can switch off or wipe.
 
 it's about 22k lines of swift. read it.
 
@@ -72,7 +72,7 @@ it's about 22k lines of swift. read it.
 
 signed builds with auto-update. whisper as a dictation option, for languages parakeet doesn't do.
 
-not coming: accounts, cloud, sync, a paid tier, telemetry, windows, linux, ios.
+not coming: accounts, cloud, sync, a paid tier, windows, linux, ios, or any tracking beyond the daily version count.
 
 ## credits
 
