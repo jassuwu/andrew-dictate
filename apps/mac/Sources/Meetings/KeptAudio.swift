@@ -63,6 +63,17 @@ struct KeptAudio: Sendable {
         let model: MeetingModel
         /// When the sweep deletes it. nil keeps it until you do.
         let until: Date?
+        /// The meeting's gaps on both clocks, as the spool noted them: the
+        /// audio has a hole only where nothing was spooled, and a reading of
+        /// it again needs to know where. nil for a meeting with none, and
+        /// for audio kept before they were noted, whose gaps are then taken
+        /// from the file as holes.
+        var gaps: [MeetingSpool.Gap]? = nil
+
+        /// The two clocks of its audio, when the label knows them.
+        var clock: SpoolClock? {
+            gaps.map { SpoolClock($0.compactMap(\.closed)) }
+        }
     }
 
     /// Audio on disk, and its label.
@@ -212,7 +223,7 @@ struct KeptAudio: Sendable {
         let id = handle.folder.lastPathComponent
         let label = label(id) ?? Label(
             transcript: transcript, started: manifest.started, model: manifest.model,
-            until: nil)
+            until: nil, gaps: manifest.gaps.flatMap { $0.isEmpty ? nil : $0 })
         return keep(handle, label: label)
     }
 
@@ -250,7 +261,7 @@ struct KeptAudio: Sendable {
             try write(
                 Label(
                     transcript: entry.label.transcript, started: entry.label.started,
-                    model: model, until: until),
+                    model: model, until: until, gaps: entry.label.gaps),
                 to: labelURL(entry.id))
             return true
         } catch {
@@ -307,7 +318,7 @@ struct KeptAudio: Sendable {
     private func dateAudioWithNoTranscript(_ id: String, _ label: Label, now: Date) {
         let dated = Label(
             transcript: label.transcript, started: label.started, model: label.model,
-            until: now.addingTimeInterval(Self.keptWithoutItsTranscriptFor))
+            until: now.addingTimeInterval(Self.keptWithoutItsTranscriptFor), gaps: label.gaps)
         do {
             try write(dated, to: labelURL(id))
         } catch {
@@ -432,6 +443,7 @@ extension KeptAudio.Label: Codable {
         case model
         case until
         case untilDeleted
+        case gaps
     }
 
     init(from decoder: any Decoder) throws {
@@ -440,7 +452,10 @@ extension KeptAudio.Label: Codable {
             transcript: URL(fileURLWithPath: try container.decode(String.self, forKey: .transcript)),
             started: try container.decode(Date.self, forKey: .started),
             model: try container.decode(MeetingModel.self, forKey: .model),
-            until: try container.decodeIfPresent(Date.self, forKey: .until))
+            until: try container.decodeIfPresent(Date.self, forKey: .until),
+            // gaps this build cannot make out are gaps it does not know, not
+            // a label lost: the file's are used, as for an older label.
+            gaps: (try? container.decodeIfPresent([MeetingSpool.Gap].self, forKey: .gaps)) ?? nil)
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -450,5 +465,6 @@ extension KeptAudio.Label: Codable {
         try container.encode(model, forKey: .model)
         try container.encode(until, forKey: .until)
         try container.encode(until == nil, forKey: .untilDeleted)
+        try container.encodeIfPresent(gaps, forKey: .gaps)
     }
 }

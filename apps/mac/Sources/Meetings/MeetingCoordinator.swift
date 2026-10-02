@@ -1496,7 +1496,8 @@ final class MeetingCoordinator: ObservableObject {
         if thin || keepAudio.keptFor != nil {
             keep = KeptAudio.Label(
                 transcript: url, started: started, model: model,
-                until: thin ? nil : keepAudio.keptFor.map { keptAudio.now().addingTimeInterval($0) })
+                until: thin ? nil : keepAudio.keptFor.map { keptAudio.now().addingTimeInterval($0) },
+                gaps: clock.gaps.isEmpty ? nil : clock.gaps.map(MeetingSpool.Gap.init))
             // marked before anything is awaited: from here no launch writes
             // this spool out a second time, whatever happens to the app
             // while its audio is being kept.
@@ -2081,9 +2082,9 @@ extension MeetingCoordinator {
         }
         let transcriber = try await makeTranscriber(model)
         let turns = try await transcriber.transcribe(you: audio.you, them: audio.them)
-        // the file says where its gaps were on the meeting's clock and no
-        // more, so each is taken for a hole in the audio.
-        let clock = SpoolClock(nothingSpooledDuring: header.gaps)
+        // the label knows where the audio has holes; audio kept before it
+        // did has only the file's gaps, and each is taken for one.
+        let clock = entry.label.clock ?? SpoolClock(nothingSpooledDuring: header.gaps)
         let reading = Reading(
             turns: clock.onTheMeetingsClock(turns),
             tally: await transcriber.decodeTally())

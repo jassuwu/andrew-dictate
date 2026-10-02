@@ -54,6 +54,23 @@ struct MeetingSpool: Sendable {
         var ended: Duration?
         var spooledAtEnded: Duration?
 
+        init(
+            began: Duration, spooledAtBegan: Duration,
+            ended: Duration? = nil, spooledAtEnded: Duration? = nil
+        ) {
+            self.began = began
+            self.spooledAtBegan = spooledAtBegan
+            self.ended = ended
+            self.spooledAtEnded = spooledAtEnded
+        }
+
+        /// One that has closed, as it is noted.
+        init(_ gap: SpoolClock.Gap) {
+            self.init(
+                began: gap.began, spooledAtBegan: gap.spooledAtBegan,
+                ended: gap.ended, spooledAtEnded: gap.spooledAtEnded)
+        }
+
         /// On both clocks, once it has closed.
         var closed: SpoolClock.Gap? {
             guard let ended, let spooledAtEnded else { return nil }

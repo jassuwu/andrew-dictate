@@ -485,6 +485,35 @@ final class MeetingAgainTests: XCTestCase {
         ])
     }
 
+    /// The tap kept calling back with silence through the gap, and all of
+    /// it was spooled: the audio has no hole there, and its label says so.
+    /// A turn read from it is where the meeting had it, not three seconds
+    /// later.
+    func testTurnsPastAGapTheAudioKeptRecordingThroughAreNotMoved() async throws {
+        let gap = MeetingSession.Gap(began: .seconds(5), ended: .seconds(8))
+        let file = try await existingMeeting(
+            gaps: [gap],
+            spooled: [.init(
+                began: .seconds(5), spooledAtBegan: .seconds(5),
+                ended: .seconds(8), spooledAtEnded: .seconds(8))],
+            audioSeconds: 12)
+        let again = FakeTranscriber()
+        again.batchTurns = [
+            .init(speaker: .you, at: .seconds(4), text: "before"),
+            .init(speaker: .them(nil), at: .seconds(10), text: "after"),
+        ]
+        again.tally = passing
+        transcribers.lineUp(again)
+
+        await coordinator().transcribeAgain(file, with: .whisperLargeV3)
+
+        XCTAssertEqual(try lines(of: file), [
+            "[00:00:04] you: before",
+            "[00:00:10] them 1: after",
+        ])
+        XCTAssertEqual(kept.entry(for: file)?.label.gaps?.count, 1, "and the label keeps them")
+    }
+
     // MARK: - when it fails
 
     /// The model threw. The file is exactly the bytes it was, the lamp says
@@ -626,6 +655,7 @@ final class MeetingAgainTests: XCTestCase {
     @discardableResult
     private func existingMeeting(
         gaps: [MeetingSession.Gap] = [],
+        spooled: [MeetingSpool.Gap]? = nil,
         recovered: Bool = false,
         thin: Bool = false,
         audioUntil: Date? = nil,
@@ -648,7 +678,8 @@ final class MeetingAgainTests: XCTestCase {
             try await file.append(loud(at: .seconds(s)))
         }
         XCTAssertTrue(kept.keep(handle, label: .init(
-            transcript: url, started: started, model: .parakeetV3, until: audioUntil)))
+            transcript: url, started: started, model: .parakeetV3, until: audioUntil,
+            gaps: spooled)))
         return url
     }
 
