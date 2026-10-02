@@ -11,7 +11,8 @@ struct MeetingSummary: Identifiable, Equatable, Sendable {
     let app: String
     let started: Date
     let duration: Duration
-    /// False when a rebuild left holes — never handed back looking whole.
+    /// False when a rebuild left holes, or the coverage check found the
+    /// transcript thin — never handed back looking whole.
     let complete: Bool
     let gapCount: Int
     /// The spool outlived the app and was transcribed at the next launch.
