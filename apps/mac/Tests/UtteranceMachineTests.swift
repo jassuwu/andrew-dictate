@@ -780,6 +780,23 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(presses.first?.stages.keyUp, 0)
     }
 
+    /// a stall of the main thread mid-press is noted on that press: the
+    /// longest one, since that is the one that made it feel dead.
+    func testTheLongestMainThreadStallIsNotedOnThePressInFlight() async {
+        let m = machine()
+        engine.reply = .success("still here")
+
+        m.mainStalled(for: .milliseconds(900))
+        m.keyDown()
+        m.mainStalled(for: .milliseconds(812))
+        m.mainStalled(for: .milliseconds(600))
+        await pass(.seconds(1))
+        m.keyUp()
+        await settle { !self.presses.isEmpty }
+
+        XCTAssertEqual(presses.map(\.mainStallMs), [812])
+    }
+
     /// the record is what gets sent to jass, so no field of it may carry a
     /// word of what was said — not the engine's words, not the pasted ones.
     func testNoRecordCarriesAWordOfWhatWasSaid() async throws {

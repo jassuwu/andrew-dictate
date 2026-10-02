@@ -449,6 +449,19 @@ final class UtteranceMachine {
         return true
     }
 
+    // MARK: - the main thread, from outside
+
+    /// the watchdog saw the main thread go unanswered this long. kept on
+    /// the press in flight, longest wins; between presses it is only a
+    /// line in the log.
+    func mainStalled(for duration: Duration) {
+        guard var press else {
+            return
+        }
+        press.mainStall = max(press.mainStall ?? .zero, duration)
+        self.press = press
+    }
+
     // MARK: - the app pulling the rug
 
     /// a setting that rebuilds the capture path (pre-roll) cannot do it
