@@ -39,8 +39,15 @@ enum CoverageCheck {
     /// engine failed twice, or that were still waiting when it was never
     /// there to read them — before the transcript does not cover it.
     static let mostUnread = 0.2
+    /// A side read for less than this is a few short answers, and a few
+    /// short answers can be "yeah", "mm", "right".
+    static let enoughReadToCount = Duration.seconds(30)
+    /// Talk runs at two or three words a second. Read speech that came to
+    /// under half a word a second was heard and mostly not written down.
+    static let fewestWordsPerSecond = 0.5
 
     static let couldNotBeRead = "some of what was said could not be read"
+    static let fewerWords = "far fewer words than the talk that was heard"
 
     static func verdict(you: Side, them: Side, farSideLoud: Duration) -> Verdict {
         for side in [you, them] {
@@ -49,6 +56,12 @@ enum CoverageCheck {
             else { continue }
             if (speech - read) / speech > mostUnread {
                 return .thin(reason: couldNotBeRead)
+            }
+        }
+        for side in [you, them] {
+            guard let read = side.read, read >= enoughReadToCount else { continue }
+            if Double(side.words) / read.totalSeconds < fewestWordsPerSecond {
+                return .thin(reason: fewerWords)
             }
         }
         return .pass
