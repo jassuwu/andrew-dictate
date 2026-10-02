@@ -79,7 +79,9 @@ final class SpeakerSplit {
         hear(chunk.them.prefix(min(chunk.you.count, chunk.them.count)))
     }
 
-    private func hear(_ them: ArraySlice<Float>) {
+    /// A meeting being recorded sends its pieces in the background, where
+    /// they never compete with the transcriber that has to keep up.
+    private func hear(_ them: ArraySlice<Float>, priority: TaskPriority = .background) {
         guard hearing != nil, !pieces.isClosed else { return }
         var rest = them
         while !rest.isEmpty {
@@ -96,7 +98,7 @@ final class SpeakerSplit {
                     // its memory or the stop a backlog.
                     logger.error("a piece of the far side was let go: the speaker split is behind")
                 } else {
-                    send(piece, filling, priority: .background)
+                    send(piece, filling, priority: priority)
                 }
                 filling = []
                 filling.reserveCapacity(pieces.length)
@@ -104,17 +106,20 @@ final class SpeakerSplit {
         }
     }
 
-    /// A whole spool nothing heard as it was recorded — one a crash left —
-    /// read a piece at a time, each heard before the next is read: the disk
-    /// is far quicker than the diarizer, and reading ahead would have the
-    /// whole far side waiting in memory.
+    /// A whole spool nothing heard as it was recorded — one a crash left,
+    /// or kept audio transcribed again — read a piece at a time, each heard
+    /// before the next is read: the disk is far quicker than the diarizer,
+    /// and reading ahead would have the whole far side waiting in memory.
+    /// Nothing is being recorded beside it, so its pieces go at utility, not
+    /// in the background, where ticket 23's bench heard a minute in 0.6 s
+    /// against 0.2 s for the same minute in a one-pass split.
     func hear(spool url: URL) async {
         guard hearing != nil, !pieces.isClosed else { return }
         let length = pieces.length
         let reading = Task.detached(priority: .utility) { [self] in
             guard let farSide = try? SpoolAudioFile.FarSide(url) else { return }
             while let them = try? farSide.next(length), !them.isEmpty {
-                await hear(them[...])
+                await hear(them[...], priority: .utility)
                 await caughtUp()
             }
         }
