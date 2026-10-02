@@ -25,6 +25,8 @@ struct Fidelity {
                 try await Bench.run(arguments)
             case "presses":
                 try Presses.run(arguments)
+            case "mic":
+                try await MicStart.run(arguments)
             case "help", "--help", "-h":
                 print(usage)
             default:
@@ -47,6 +49,8 @@ struct Fidelity {
           batch against streaming on each recording. exits 1 if any differ.
       bench [--make] [--idle S] [--gap S] [--repeats N] [--warm-only] [--decay]
           ASR time by word count: cold, warm, and woken at key-down.
+      mic [--trials N]
+          key-down → first audio on the real mic: cold vs prepared, sink vs tap.
       presses < lines
           key-up → ⌘V and key-down → first audio, p50/p90, from press-log lines.
 
