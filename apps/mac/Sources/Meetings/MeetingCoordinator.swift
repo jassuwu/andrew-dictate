@@ -102,6 +102,10 @@ enum MeetingEvent: Equatable, Sendable {
     /// The model would not load. The recording stops; the spool stays for
     /// recovery, so the audio is not lost with it.
     case engineFailed(String)
+    /// The spool could not be made — a full disk, a folder that will not
+    /// take a file — so the meeting has nowhere to keep its audio and does
+    /// not start. Nothing in setup fixes a disk, so no window opens.
+    case spoolFailed(String)
     /// The transcript could not be written where it was asked to go. The
     /// spool stays; the next launch tries again.
     case saveFailed(String)
@@ -143,6 +147,7 @@ enum MeetingEvent: Equatable, Sendable {
         case .nothingToKeep: "nothing was heard, nothing kept"
         case .hookFailed(let label): "hook failed (\(label))"
         case .engineFailed(let reason): "meeting model failed — \(reason)"
+        case .spoolFailed(let reason): "can't write the meeting's audio to disk — \(reason)"
         case .saveFailed(let reason): "couldn't save the transcript — \(reason). kept for next launch"
         case .transcribingAgain(let model): "transcribing again with \(model.shortName)…"
         case .transcribedAgain(let summary, let model): Self.againText(summary, model)
@@ -468,15 +473,22 @@ final class MeetingCoordinator: ObservableObject {
             guard current === meeting else { return }
 
             // Ours to get right: the spool and the engine. A failure here is
-            // the app's, not the permission's, and is told as such.
-            let transcriber: any MeetingTranscriber
+            // the app's, not the permission's, and each is told as what it
+            // is. The spool first: a disk with no room for it is the disk's
+            // to say, not the model's, and nothing is loaded for a meeting
+            // with nowhere to keep its audio.
             let model = meeting.preferences.model
             do {
-                let handle = try spool.begin(.init(
-                    app: meeting.app, started: meeting.started,
-                    engine: model.rawValue, model: model))
-                meeting.handle = handle
-                meeting.audioFile = try openAudioFile(handle.audioURL)
+                try openTheSpool(of: meeting)
+            } catch {
+                logger.error("the meeting's spool could not be made: \(error.localizedDescription, privacy: .public)")
+                guard current === meeting else { return }
+                onEvent?(.spoolFailed(error.localizedDescription))
+                stop(nothingKept: .spoolFailed)
+                return
+            }
+            let transcriber: any MeetingTranscriber
+            do {
                 transcriber = try await makeTranscriber(model)
             } catch {
                 logger.error("meeting could not start: \(error.localizedDescription, privacy: .public)")
@@ -555,6 +567,24 @@ final class MeetingCoordinator: ObservableObject {
                 await ingest(chunk, into: meeting)
             }
         }
+    }
+
+    /// The meeting's spool: its folder and manifest, then its audio file.
+    /// A folder whose audio file could not be made goes with the failure —
+    /// left, it would be a manifest with no audio that no launch ever
+    /// clears, and every launch would build the meetings to look at it.
+    private func openTheSpool(of meeting: Meeting) throws {
+        let model = meeting.preferences.model
+        let handle = try spool.begin(.init(
+            app: meeting.app, started: meeting.started,
+            engine: model.rawValue, model: model))
+        do {
+            meeting.audioFile = try openAudioFile(handle.audioURL)
+        } catch {
+            spool.discard(handle)
+            throw error
+        }
+        meeting.handle = handle
     }
 
     func stop() {

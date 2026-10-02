@@ -27,6 +27,10 @@ final class MeetingProblemsTests: XCTestCase {
         try? FileManager.default.removeItem(at: dir)
     }
 
+    private var spool: MeetingSpool {
+        MeetingSpool(root: dir.appendingPathComponent("spool"))
+    }
+
     /// The test's own numbers: a one-second start window, and the mic
     /// given ten seconds of silence, in meeting time.
     private func coordinator(
@@ -44,7 +48,7 @@ final class MeetingProblemsTests: XCTestCase {
             source: source,
             makeTranscriber: { [transcriber] _ in transcriber! },
             diarizer: FakeDiarizer(),
-            spool: MeetingSpool(root: dir.appendingPathComponent("spool")),
+            spool: spool,
             hookRunner: HookRunner(logURL: dir.appendingPathComponent("hooks.log")),
             keptAudio: KeptAudio(
                 root: dir.appendingPathComponent("meeting-audio"),
@@ -424,6 +428,46 @@ final class MeetingProblemsTests: XCTestCase {
         XCTAssertEqual(events, [.cannotHear, .cannotHear])
     }
 
+    /// The disk is full: the spool's folder was made and its audio file
+    /// could not be. The meeting has nowhere to keep its audio, and that is
+    /// what the lamp says — not that the model failed — with no window over
+    /// it. Nothing is left in the spool for every launch after to build the
+    /// meetings for, and the record says why nothing was kept.
+    func testASpoolThatCannotBeMadeIsTheDisksFailureAndLeavesNothingBehind() async throws {
+        let writer = FallibleWriter()
+        writer.opensFail = true
+        let c = coordinator(writer: writer)
+        c.start()
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(c.state, .idle)
+        XCTAssertEqual(events.count, 1, "\(events)")
+        guard case .spoolFailed(let reason) = events.first else {
+            return XCTFail("expected spoolFailed, got \(events)")
+        }
+        XCTAssertEqual(
+            events.first?.hudText, "can't write the meeting's audio to disk — \(reason)")
+        XCTAssertEqual(events.first?.opensSetup, false)
+        XCTAssertEqual(source.starts, 0, "no tap was opened for it")
+        XCTAssertEqual(records.map(\.outcome), [.nothingKept(.spoolFailed)])
+        XCTAssertEqual(records.first?.outcome.why, "spool-failed")
+        XCTAssertFalse(spool.mayHoldOrphans(), "nothing is left in the spool")
+    }
+
+    /// The spool's folder itself could not be made: said the same way.
+    func testASpoolFolderThatCannotBeMadeIsSaidTheSameWay() async throws {
+        try Data("not a folder".utf8).write(to: spool.root)
+        let c = coordinator()
+        c.start()
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(c.state, .idle)
+        guard case .spoolFailed = events.first, events.count == 1 else {
+            return XCTFail("expected spoolFailed, got \(events)")
+        }
+        XCTAssertEqual(records.map(\.outcome), [.nothingKept(.spoolFailed)])
+    }
+
     // MARK: - several at once
 
     /// The disk nearly full from the start, and the mic gone silent while
@@ -700,14 +744,22 @@ private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
 private final class FallibleWriter: @unchecked Sendable {
     private let lock = NSLock()
     private var _fails = false
+    private var _opensFail = false
 
     var fails: Bool {
         get { lock.withLock { _fails } }
         set { lock.withLock { _fails = newValue } }
     }
 
+    /// While set, the audio file cannot be made at all: a full disk.
+    var opensFail: Bool {
+        get { lock.withLock { _opensFail } }
+        set { lock.withLock { _opensFail = newValue } }
+    }
+
     func open(_ url: URL) throws -> any MeetingAudioWriter {
-        Writer(file: try SpoolAudioFile(url: url), owner: self)
+        if opensFail { throw CocoaError(.fileWriteOutOfSpace) }
+        return Writer(file: try SpoolAudioFile(url: url), owner: self)
     }
 
     private struct Writer: MeetingAudioWriter {

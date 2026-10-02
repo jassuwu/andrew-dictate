@@ -64,6 +64,9 @@ struct MeetingRecord: Equatable, Sendable, Codable {
         case micNotAllowed
         /// there was no mic, or the one there would not start.
         case micFailed
+        /// the spool could not be made — a full disk, a folder that would
+        /// not take a file — so there was nowhere to keep the audio.
+        case spoolFailed
     }
 
     /// what one side of the call said, as counts.
@@ -476,6 +479,7 @@ extension MeetingRecord.Outcome {
         case .nothingKept(.spoolEmpty): "spool-empty"
         case .nothingKept(.micNotAllowed): "mic-not-allowed"
         case .nothingKept(.micFailed): "mic-failed"
+        case .nothingKept(.spoolFailed): "spool-failed"
         case .saved, .savedThin, .modelFailed, .couldNotWrite, .couldNotRecover, .setAside,
              .spoolUnreadable, .setAsideUnreadable, .waitingForModel, .unchanged:
             nil
@@ -499,6 +503,7 @@ extension MeetingRecord.Outcome {
         case ("nothing-kept", "spool-empty"): self = .nothingKept(.spoolEmpty)
         case ("nothing-kept", "mic-not-allowed"): self = .nothingKept(.micNotAllowed)
         case ("nothing-kept", "mic-failed"): self = .nothingKept(.micFailed)
+        case ("nothing-kept", "spool-failed"): self = .nothingKept(.spoolFailed)
         default: return nil
         }
     }

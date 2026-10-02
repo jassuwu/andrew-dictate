@@ -2623,7 +2623,7 @@ extension DictationCoordinator {
         case .saveFailed:
             dismissLiveTranscriptUnlessRecording()
             meetings.notifier.saveFailed()
-        case .nothingToKeep, .engineFailed:
+        case .nothingToKeep, .engineFailed, .spoolFailed:
             dismissLiveTranscriptUnlessRecording()
         case .cannotHear, .micNotAllowed, .micFailed:
             // the pill cannot be clicked, so naming the switch was a dead
@@ -2645,7 +2645,7 @@ extension DictationCoordinator {
         if let text = event.hudText {
             let duration: TimeInterval
             switch event {
-            case .hookFailed, .engineFailed, .saveFailed, .couldNotTranscribeAgain,
+            case .hookFailed, .engineFailed, .spoolFailed, .saveFailed, .couldNotTranscribeAgain,
                  .transcribedAgain, .micFailed: duration = 4
             // a recovered meeting arrives unprompted and is about yesterday:
             // two seconds is not long enough to read it.
