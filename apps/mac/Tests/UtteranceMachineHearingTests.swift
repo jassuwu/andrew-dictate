@@ -145,6 +145,54 @@ final class UtteranceMachineHearingTests: XCTestCase {
         XCTAssertFalse(chimes.contains(.start))
     }
 
+    // MARK: - a mic that sends nothing
+
+    /// a mic can open and still send nothing. a second after it answers,
+    /// the press ends naming it, and it is dropped: the next press opens a
+    /// fresh one and records.
+    func testAMicSilentForASecondIsNamedAndDropped() async {
+        let m = machine()
+
+        m.keyDown()
+        await pass(.milliseconds(900))
+        XCTAssertEqual(m.state, .recording)
+        XCTAssertEqual(pills, [])
+
+        await pass(.milliseconds(100))
+        XCTAssertEqual(pills, [Pill("no sound from AirPods Pro", 2.4)])
+        XCTAssertTrue(events.contains(.microphoneDropped))
+        XCTAssertEqual(mic.cancels, 1)
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(states.last, .init(.idle, fast: true))
+        XCTAssertFalse(lamp.contains(.hearing))
+        XCTAssertEqual(chimes, [])
+        XCTAssertEqual(retryOffers, [])
+        XCTAssertEqual(outcomes, [.noAudio])
+        XCTAssertEqual(
+            presses.first?.mic,
+            MicDescription(name: "AirPods Pro", transport: .bluetooth)
+        )
+
+        let fresh = CuedMic(clock: clock)
+        micForPress = fresh
+        m.keyDown()
+        XCTAssertEqual(fresh.starts, 1)
+        XCTAssertEqual(mic.starts, 1)
+        XCTAssertEqual(m.state, .recording)
+    }
+
+    /// a mic that will not say what it is still gets a sentence.
+    func testAnUnnamedMicIsTheMicrophone() async {
+        let m = machine()
+        mic.deviceDescription = nil
+
+        m.keyDown()
+        await pass(.seconds(1))
+
+        XCTAssertEqual(pills, [Pill("no sound from the microphone", 2.4)])
+        XCTAssertEqual(outcomes, [.noAudio])
+    }
+
     // MARK: - helpers
 
     private var presses: [PressRecord] {

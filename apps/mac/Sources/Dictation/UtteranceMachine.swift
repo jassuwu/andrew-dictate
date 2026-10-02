@@ -132,6 +132,9 @@ final class UtteranceMachine {
     /// how long the mic gets to start, or to stop, before the press stops
     /// waiting on it. a healthy one answers in tens of milliseconds.
     static let microphoneDeadline = Duration.milliseconds(1_500)
+    /// how long a mic that answered gets to send its first audio. a
+    /// healthy one is heard within a tap buffer, about a tenth of that.
+    static let firstAudioDeadline = Duration.seconds(1)
     private let dictionary: @MainActor () -> [DictionaryEntry]
     private let ownBundleIdentifier: String?
     /// how long the lamp's afterglow runs (`HUDWaveMotion.coolDuration`).
@@ -146,6 +149,8 @@ final class UtteranceMachine {
     private var pendingStart: UInt64?
     private var startDeadline: Task<Void, Never>?
     private var stopDeadline: Task<Void, Never>?
+    /// the live mic of the press in flight, not heard yet.
+    private var firstAudioWait: Task<Void, Never>?
     /// a double-tapped key leaves nothing to hold, so nothing to feel. the
     /// HUD has to carry the difference for as long as the capture runs.
     private var isRecordingLocked = false
@@ -332,10 +337,66 @@ final class UtteranceMachine {
         capture.phase = .live
         self.capture = capture
         press?.mic = capture.microphone.deviceDescription
-        if capture.stopRequested {
+        guard !capture.stopRequested else {
             // let go before the mic answered: the take still counts.
             stopMicrophone()
+            return
         }
+        if !capture.isHearing {
+            awaitFirstAudio(id)
+        }
+    }
+
+    /// a mic can open and still send nothing — one the phone took for a
+    /// call, a driver that wedged — so it gets a second to be heard.
+    private func awaitFirstAudio(_ id: UInt64) {
+        firstAudioWait?.cancel()
+        firstAudioWait = Task { @MainActor [weak self, clock] in
+            try? await clock.sleep(for: Self.firstAudioDeadline)
+            guard !Task.isCancelled else {
+                return
+            }
+            self?.microphoneStayedSilent(id)
+        }
+    }
+
+    /// a second since it answered, and not a sound.
+    private func microphoneStayedSilent(_ id: UInt64) {
+        firstAudioWait = nil
+        guard let capture,
+              capture.id == id,
+              capture.phase == .live,
+              !capture.isHearing else {
+            return
+        }
+
+        audioLogger.error("the microphone sent nothing for a second; dropping it")
+        cancelCapture()
+        endWithNoSound(from: capture.microphone)
+    }
+
+    /// the mic answered and sent no sound. the pill names it, so you know
+    /// which one to look at, and it is dropped, so the next press opens a
+    /// fresh one. nothing is kept for a retry: there was nothing to hear,
+    /// and pressing again records again.
+    private func endWithNoSound(from microphone: any MicCapture) {
+        setRecordingLocked(false)
+        activeFocusAnchor = nil
+        activeTimeline = nil
+        emit(.microphoneDropped)
+        setState(.idle, fastHUDDismiss: true)
+        flashFeedback(Self.noSound(from: microphone.deviceDescription))
+        endPress(.noAudio)
+    }
+
+    /// the mic as it names itself, which is what you would look for in
+    /// the menu bar or system settings.
+    private static func noSound(from mic: MicDescription?) -> String {
+        guard let name = mic?.name.trimmingCharacters(in: .whitespaces),
+              !name.isEmpty else {
+            return "no sound from the microphone"
+        }
+        return "no sound from \(name)"
     }
 
     /// the mic's first audio: it is hearing you. the key only said you
@@ -353,6 +414,8 @@ final class UtteranceMachine {
         }
         capture.isHearing = true
         self.capture = capture
+        firstAudioWait?.cancel()
+        firstAudioWait = nil
         guard !capture.isEnding else {
             // let go before it was heard: lighting the lamp, or a start
             // chime, after the release would be noise.
@@ -543,6 +606,10 @@ final class UtteranceMachine {
 
         capture.phase = .stopping
         self.capture = capture
+        // the take is over: whether it was heard is judged on what the
+        // stop hands back.
+        firstAudioWait?.cancel()
+        firstAudioWait = nil
         let id = capture.id
         let microphone = capture.microphone
         stopDeadline?.cancel()
@@ -1184,6 +1251,8 @@ final class UtteranceMachine {
         capture = nil
         stopDeadline?.cancel()
         stopDeadline = nil
+        firstAudioWait?.cancel()
+        firstAudioWait = nil
     }
 
     // MARK: - effects
