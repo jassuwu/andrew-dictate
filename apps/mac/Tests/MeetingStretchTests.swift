@@ -164,6 +164,42 @@ final class MeetingStretchTests: XCTestCase {
         ])
     }
 
+    // MARK: - a gap
+
+    /// The lid closes at 3.0 s while they are mid-sentence, and the mac
+    /// wakes a minute in; the tap comes back stamped 60.0 s and they are
+    /// talking again. What was being said is closed at the gap, and what
+    /// comes after is stamped on the meeting's clock — 57 s of audio never
+    /// reached the spool, so by a count of samples it would read 3.0.
+    ///
+    /// The diarizer hears the spool, so it is asked about spool time: the
+    /// coordinator takes the lost 57 s back off a turn stamped on the
+    /// meeting's clock, and lands on 3.0 — where that audio really is.
+    func testAfterAGapTheTurnsAreOnTheMeetingsClockAndTheSplitHearsTheSpool() async throws {
+        let clock = FakeClock()
+        let c = coordinator(stretches(), clock: clock)
+        c.start(tapping: zoom)
+        await source.awaitStart()
+
+        await play([them("can you hear me", from: 1.3, to: 3.0)], through: 3.0, on: c)
+        clock.advance(by: .seconds(60))
+        c.probeTapIsAlive()
+        await waitFor { c.state == .rebuilding }
+        XCTAssertEqual(c.state, .rebuilding)
+
+        await play([them("you dropped off", from: 60.0, to: 61.0)], from: 60.0, through: 63.0, on: c)
+        await waitFor { c.liveLines.count == 2 }
+
+        XCTAssertEqual(live(c), ["them 1.0 can you hear me", "them 60.0 you dropped off"])
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, [
+            "[00:00:01] them: can you hear me",
+            "[00:01:00] them: you dropped off",
+        ])
+        XCTAssertEqual(diarizer.askedAbout.map(seconds), ["1.0", "3.0"])
+    }
+
     // MARK: - a model that takes its time
 
     /// Whisper takes ten-odd seconds to load and the tap opens at once.

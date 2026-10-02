@@ -44,6 +44,10 @@ struct StretchCutter {
     /// Quiet kept while nobody is speaking: the pre-roll, and room for a
     /// detector that says speech began a little after it did.
     static let keptWhileQuiet = samples(in: .seconds(2))
+    /// Stamps are sample counts, so a chunk that follows on is off by
+    /// rounding at most; the capture layer only moves the clock on for an
+    /// outage of a second or more.
+    static let gapTolerance = Duration.milliseconds(10)
 
     init(side: Stretch.Side, ceiling: Duration) {
         precondition(ceiling > .zero, "a stretch must be allowed some length")
@@ -60,12 +64,25 @@ struct StretchCutter {
     /// edges its detector found once it had heard it. Returns the stretches
     /// that ended.
     mutating func take(_ samples: [Float], at: Duration, edges: [SpeechEdge]) -> [Stretch] {
+        var done: [Stretch] = []
+        // A stamp ahead of where the last chunk ended is a gap: the tap was
+        // gone and the capture layer moved the clock on over it. What was
+        // being said is closed where the audio stopped, nothing from before
+        // is pre-roll for what comes after, and the clock starts again here.
+        // Speech the detector still hears goes on in a new stretch.
+        if origin != nil, at - time(of: heard) > Self.gapTolerance {
+            if let from = openFrom {
+                if heard > from { done.append(cut(from, heard)) }
+                openFrom = heard
+            }
+            drop(before: heard)
+            origin = nil
+        }
         if origin == nil {
             origin = (heard, at)
         }
         held.append(contentsOf: samples)
 
-        var done: [Stretch] = []
         for edge in edges {
             switch edge {
             case .began(let start):
