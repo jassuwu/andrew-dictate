@@ -16,6 +16,8 @@ enum BadgeMarks {
         case liveDot
         /// a setup gap: the red dot, top right.
         case setupDot
+        /// getting ready: the rim part of the way round.
+        case partRim
         /// recording a meeting: the whole rim.
         case rim
     }
@@ -26,7 +28,7 @@ enum BadgeMarks {
         case .idle: nil
         case .dictating: .liveDot
         case .callNotRecorded: nil
-        case .gettingReady: nil
+        case .gettingReady: .partRim
         case .recordingMeeting: .rim
         case .meetingProblem: nil
         case .needsSetup: .setupDot
@@ -74,6 +76,10 @@ enum BadgeMarks {
     /// 1 pt wide on a 1x screen, 1.5 pt on a 2x one, never a smeared 1.3.
     enum Rim {
         static let width: CGFloat = 1.3
+        /// how far round getting ready goes, clockwise from the top middle.
+        static let readyShare: CGFloat = 0.36
+        /// the rest of the way round, so the part reads as a part.
+        static let trackOpacity: CGFloat = 0.2
     }
 
     // MARK: - drawing
@@ -104,6 +110,8 @@ enum BadgeMarks {
                 ),
                 color: red
             )
+        case .partRim:
+            drawPartRim(in: rect)
         case .rim:
             gold.setStroke()
             rimPath(in: rect).stroke()
@@ -119,15 +127,37 @@ enum BadgeMarks {
         ring.stroke()
     }
 
-    /// the rim's centre line, starting at the top middle and running
-    /// clockwise. both of its edges land on whole device pixels, and its
-    /// corners curve round the same points the tile's do.
+    private static func drawPartRim(in rect: NSRect) {
+        gold.withAlphaComponent(Rim.trackOpacity).setStroke()
+        rimPath(in: rect).stroke()
+
+        let (part, length) = rimPathAndLength(in: rect)
+        part.setLineDash(
+            [length * Rim.readyShare, length],
+            count: 2,
+            phase: 0
+        )
+        gold.setStroke()
+        part.stroke()
+    }
+
     private static func rimPath(in rect: NSRect) -> NSBezierPath {
+        rimPathAndLength(in: rect).path
+    }
+
+    /// the rim's centre line, starting at the top middle and running
+    /// clockwise, so a dash from phase 0 fills it the way a clock does,
+    /// and how long it is. both of its edges land on whole device pixels,
+    /// and its corners curve round the same points the tile's do.
+    private static func rimPathAndLength(
+        in rect: NSRect
+    ) -> (path: NSBezierPath, length: CGFloat) {
         let scale = deviceScale()
         let outer = snapped(Tile.inset, scale: scale)
         let width = max(1 / scale, snapped(Rim.width, scale: scale))
         let band = rect.insetBy(dx: outer + width / 2, dy: outer + width / 2)
         let radius = Tile.cornerCentre - (outer + width / 2)
+        let length = 4 * (band.width - 2 * radius) + 2 * .pi * radius
 
         let path = NSBezierPath()
         path.move(to: NSPoint(x: band.midX, y: band.maxY))
@@ -165,7 +195,7 @@ enum BadgeMarks {
         )
         path.close()
         path.lineWidth = width
-        return path
+        return (path, length)
     }
 
     /// pixels per point where this is being drawn: 1 on an external

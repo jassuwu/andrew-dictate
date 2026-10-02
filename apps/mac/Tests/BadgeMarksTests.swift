@@ -43,6 +43,18 @@ final class BadgeMarksTests: XCTestCase {
         }
     }
 
+    func testGettingReadyIsGoldOnlyPartOfTheWayRound() {
+        for scale in scales {
+            let rendered = render(.gettingReady, scale: scale)
+            let goldEdges = Edge.allCases.filter {
+                rendered.has(gold, in: $0.middle)
+            }
+
+            XCTAssertFalse(goldEdges.isEmpty, "\(scale)x")
+            XCTAssertLessThan(goldEdges.count, 4, "\(scale)x")
+        }
+    }
+
     // MARK: - what is looked for, and where
 
     private let gold = BrandUI.goldRGB
