@@ -92,6 +92,25 @@ final class MeetingProblemsTests: XCTestCase {
         ])
     }
 
+    /// Half a minute with nothing from either side: a quiet room, or no
+    /// call at all. A mic is not missed when there is nobody to answer.
+    func testBothSidesSilentIsNothingToSay() async throws {
+        source.micName = "MacBook Pro Microphone"
+        let c = coordinator()
+        c.start()
+        await source.awaitStart()
+        await play(both(at: .zero))
+        for s in 1...30 {
+            await play(silent(at: .seconds(s)))
+        }
+
+        XCTAssertEqual(c.problems, [])
+        XCTAssertEqual(events, [.started])
+        c.stop()
+        await c.untilWrittenOut()
+        XCTAssertEqual(records.first?.events, [])
+    }
+
     // MARK: - helpers
 
     /// A second of both sides talking.
@@ -108,6 +127,12 @@ final class MeetingProblemsTests: XCTestCase {
         let n = 16_000
         return .init(you: Array(repeating: 0, count: n),
                      them: (0..<n).map { sin(Float($0) * 0.05) * 0.3 }, at: at)
+    }
+
+    /// A second of nothing on either side.
+    private func silent(at: Duration) -> MeetingAudioChunk {
+        .init(you: Array(repeating: 0, count: 16_000),
+              them: Array(repeating: 0, count: 16_000), at: at)
     }
 
     /// Each chunk, once the coordinator has taken in the one before.
