@@ -94,7 +94,8 @@ extension HUDLayoutEngineTests {
         for message in [
             "heard nothing",
             "locked — tap to end",
-            "the microphone changed — say that again",
+            "the mic changed — pasted what i had.",
+            "microphone isn't responding",
             "accessibility is off — the dictation key is dead",
             "still finishing the last one",
             "couldn't transcribe — tap to try again",
