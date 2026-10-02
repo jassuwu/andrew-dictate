@@ -193,6 +193,82 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(states.last, .init(.idle, fast: true))
     }
 
+    // MARK: - couldn't transcribe
+
+    /// the samples are kept, and a press while the pill still says so means
+    /// "that one": it replays them rather than opening the mic.
+    func testAFailedTranscriptionArmsARetryTheNextPressReplays() async {
+        let m = machine()
+        engine.reply = .failure(EngineFailure())
+
+        await hold(m, for: .seconds(1))
+        await settle { !self.pills.isEmpty }
+
+        XCTAssertEqual(pills, [Pill("couldn't transcribe — tap to try again", 4)])
+        XCTAssertEqual(states.last, .init(.idle, fast: true))
+        XCTAssertEqual(retryOffers, [true])
+        XCTAssertEqual(completions, [])
+
+        engine.reply = .success("the build failed")
+        m.keyDown()
+        XCTAssertEqual(m.state, .transcribing)
+        XCTAssertEqual(mic.starts, 1)
+        await settle { self.inserter.inserted.count == 1 }
+
+        XCTAssertEqual(engine.heard, [mic.samples, mic.samples])
+        XCTAssertEqual(inserter.inserted, ["The build failed."])
+        XCTAssertEqual(completions, [.delivered])
+        XCTAssertEqual(retryOffers, [true, false])
+        // the key's eventual release ends nothing: there is no recording.
+        m.keyUp()
+        XCTAssertEqual(mic.stops, 1)
+    }
+
+    /// once the pill has gone, a press is a new sentence, and the lost one
+    /// stops being offered.
+    func testAPressAfterThePillHasGoneRecordsAgain() async {
+        let m = machine()
+        engine.reply = .failure(EngineFailure())
+        await hold(m, for: .seconds(1))
+        await settle { !self.pills.isEmpty }
+
+        pillShowing = false
+        m.keyDown()
+
+        XCTAssertEqual(m.state, .recording)
+        XCTAssertEqual(mic.starts, 2)
+        XCTAssertEqual(engine.heard.count, 1)
+        XCTAssertEqual(retryOffers, [true, false])
+    }
+
+    /// two minutes and the lost sentence is somebody else's sentence.
+    func testTheRetryLapsesAfterTwoMinutes() async {
+        let m = machine()
+        engine.reply = .failure(EngineFailure())
+        await hold(m, for: .seconds(1))
+        await settle { !self.pills.isEmpty }
+
+        await pass(.seconds(119))
+        XCTAssertEqual(retryOffers, [true])
+        await pass(.seconds(1))
+        XCTAssertEqual(retryOffers, [true, false])
+    }
+
+    /// the menu's door to the same samples.
+    func testTheMenuRetriesTheLostSentence() async {
+        let m = machine()
+        engine.reply = .failure(EngineFailure())
+        await hold(m, for: .seconds(1))
+        await settle { !self.pills.isEmpty }
+
+        engine.reply = .success("the build failed")
+        m.retryLastFailure()
+        await settle { self.inserter.inserted.count == 1 }
+
+        XCTAssertEqual(engine.heard, [mic.samples, mic.samples])
+        XCTAssertEqual(retryOffers, [true, false])
+    }
+
     // MARK: - helpers
 
     private var pills: [Pill] {
@@ -217,6 +293,15 @@ final class UtteranceMachineTests: XCTestCase {
         events.compactMap {
             if case let .chime(chime) = $0 {
                 return chime
+            }
+            return nil
+        }
+    }
+
+    private var retryOffers: [Bool] {
+        events.compactMap {
+            if case let .retryOffered(offered) = $0 {
+                return offered
             }
             return nil
         }
