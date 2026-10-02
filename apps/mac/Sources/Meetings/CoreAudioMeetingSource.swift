@@ -423,7 +423,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
                 bringUpStandby(on: mic, slot: slot)
             case .dropStandby:
                 guard let dropped else { continue }
-                logger.error("mic: \(dropped.mic.name, privacy: .public) came up and never delivered; tearing it down")
+                logger.error("mic: \(dropped.mic.name, privacy: .public) came up and never delivered the mic; tearing it down")
                 hal.async { self.teardown(dropped) }
             case .tell(let kind, let mic):
                 tell(kind, mic: mic, at: stamp)
@@ -744,7 +744,12 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             if let live, live.id == id {
                 return (live, self.continuation, nil)
             }
-            guard let standby, standby.id == id else { return (nil, nil, nil) }
+            // A standby whose mic brought none of its channels is not the
+            // mic the meeting moved to. It is left to run out its time,
+            // and the move is told as failed.
+            guard let standby, standby.id == id,
+                  MicMix.micChannels(said: standby.micChannels, carried: layout) > 0
+            else { return (nil, nil, nil) }
             let old = live
             live = standby
             self.standby = nil
@@ -762,9 +767,17 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             following.async { self.tookOver(takeover) }
         }
         guard let rig, let continuation else { return }
+        let micChannels = MicMix.micChannels(said: rig.micChannels, carried: layout)
+        if rig.layout == nil {
+            rig.layout = layout
+            if micChannels < rig.micChannels {
+                logger.error("\(rig.mic.name, privacy: .public) brought \(micChannels, privacy: .public) of its \(rig.micChannels, privacy: .public) channels through \(rig.uid, privacy: .public); the rest of `you` is silence")
+            } else {
+                logger.info("first buffer through \(rig.uid, privacy: .public): \(layout, privacy: .public) channels, \(micChannels, privacy: .public) of them the mic's")
+            }
+        }
         // A rig whose mic went from under it can keep calling back with the
         // tap's channels where the mic's were. That is not `you`.
-        if rig.layout == nil { rig.layout = layout }
         guard rig.layout == layout else { return }
 
         // Sub-device channels come first, taps after (002 §4, confirmed by
@@ -780,7 +793,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             let channels = Int(buffer.mNumberChannels)
             let available = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size / max(channels, 1)
             for channel in 0..<channels {
-                let isMic = flatIndex < rig.micChannels
+                let isMic = flatIndex < micChannels
                 flatIndex += 1
                 let n = min(frames, available)
                 if isMic {

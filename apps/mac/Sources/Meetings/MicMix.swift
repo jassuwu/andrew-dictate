@@ -27,6 +27,18 @@ enum MicMix {
         return mixed
     }
 
+    /// The tap is stereo (`stereoGlobalTapButExcludeProcesses`), and its
+    /// channels come after the mic's in every buffer (002 §4).
+    static let tapChannels = 2
+
+    /// How many of a buffer's channels, from the first, are the mic's: what
+    /// the mic said it has, unless the buffer carried fewer. The tap's come
+    /// last, so a short buffer is short of the mic's: what is missing is
+    /// missing from `you`, and the far side is never read as it.
+    static func micChannels(said: Int, carried: Int) -> Int {
+        min(said, max(0, carried - tapChannels))
+    }
+
     private static func rms(_ samples: [Float]) -> Float {
         guard !samples.isEmpty else { return 0 }
         let sum = samples.reduce(Float(0)) { $0 + $1 * $1 }
