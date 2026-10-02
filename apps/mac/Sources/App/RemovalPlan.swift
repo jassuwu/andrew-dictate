@@ -117,7 +117,7 @@ struct Remover {
         case .dictations:
             supportDirectory.appendingPathComponent("dictations.jsonl")
         case .dictionary:
-            supportDirectory.appendingPathComponent("dictionary.json")
+            supportDirectory.appendingPathComponent(DictionaryStore.fileName)
         case .meetingLeftovers:
             // two things, one item: the spool folder and hooks.log. the
             // folder is the url; the log goes with it in `remove`.
@@ -135,7 +135,7 @@ struct Remover {
     private func companions(of item: RemovalPlan.Item) -> [URL] {
         switch item {
         case .dictations:
-            [supportDirectory.appendingPathComponent("presses.jsonl")]
+            [supportDirectory.appendingPathComponent(PressLogStore.fileName)]
         case .meetingLeftovers:
             [supportDirectory.appendingPathComponent("hooks.log")]
         case .dictionary, .settings, .speechModels, .permissions:
