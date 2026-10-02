@@ -31,6 +31,13 @@ protocol Inserter: AnyObject {
         _ text: String,
         at anchor: (any InsertionAnchor)?
     ) async -> PasteOutcome
+    /// leaves the words on the pasteboard for you to paste, and never
+    /// pastes: the place they were going is gone. a normal write, not the
+    /// paste's transient relay, so it is still there when you come back.
+    func copy(
+        _ text: String,
+        because reason: LeftOnPasteboardReason
+    ) async -> PasteOutcome
 }
 
 /// the real one: `FocusAnchor` for where the words are going, `Paster` for
@@ -69,6 +76,15 @@ final class PasteInserter: Inserter {
                 }
             }
         )
+    }
+
+    func copy(
+        _ text: String,
+        because reason: LeftOnPasteboardReason
+    ) async -> PasteOutcome {
+        // the paste's own path with a reason to stop short: written, the
+        // reason handed back, no ⌘V and no restore.
+        await paster.paste(text, reasonForLeavingOnPasteboard: { reason })
     }
 }
 

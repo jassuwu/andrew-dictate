@@ -269,6 +269,7 @@ extension PressRecord.Outcome {
         .shortcutUnavailable,
         .cancelled,
         .pasteboardUnavailable,
+        .locked,
     ]
 
     private static func name(of reason: LeftOnPasteboardReason) -> String {
@@ -279,6 +280,7 @@ extension PressRecord.Outcome {
         case .shortcutUnavailable: "no-paste-shortcut"
         case .cancelled: "paste-cancelled"
         case .pasteboardUnavailable: "clipboard-busy"
+        case .locked: "locked"
         }
     }
 }

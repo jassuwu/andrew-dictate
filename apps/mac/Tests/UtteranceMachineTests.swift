@@ -1465,4 +1465,18 @@ final class FakeInserter: Inserter {
         inserted.append(text)
         return PasteOutcome(result: result, insertedAt: clock.now)
     }
+
+    /// what was left on the clipboard without a paste being tried.
+    private(set) var copied: [String] = []
+
+    func copy(
+        _ text: String,
+        because reason: LeftOnPasteboardReason
+    ) async -> PasteOutcome {
+        copied.append(text)
+        return PasteOutcome(
+            result: .leftOnPasteboard(reason),
+            insertedAt: clock.now
+        )
+    }
 }

@@ -1075,6 +1075,8 @@ final class UtteranceMachine {
             // the only one with no recovery to offer: the clipboard write
             // itself failed, so there is nothing sitting there to paste.
             "the clipboard is busy — nothing was copied"
+        case .locked:
+            "copied — what you said before the lock · ⌘V to paste"
         }
     }
 

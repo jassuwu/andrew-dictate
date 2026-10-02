@@ -13,6 +13,9 @@ enum LeftOnPasteboardReason: Equatable, Sendable {
     case shortcutUnavailable
     case cancelled
     case pasteboardUnavailable
+    /// the mac locked or slept under the take: the field it was going to
+    /// is behind the lock screen, so it is copied and never pasted.
+    case locked
 }
 
 /// What the paste did, and the instant it reached the target app.
