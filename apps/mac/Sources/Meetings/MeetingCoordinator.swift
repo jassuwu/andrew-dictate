@@ -39,7 +39,7 @@ struct MeetingThresholds: Sendable {
 struct MeetingPreferences: Sendable {
     let folder: URL
     let hook: URL?
-    let model: MeetingModel
+    var model: MeetingModel
     /// How long its audio waits once its file is written.
     var keepAudio: KeepMeetingAudio = .default
 }
@@ -288,11 +288,16 @@ final class MeetingCoordinator: ObservableObject {
     /// `name` is the call app's, once something can tell which one held the
     /// mic at the start (ADR 0047); without one the meeting is `unnamed`.
     /// It is a name and nothing more: the tap hears the whole mac either way.
-    func start(name: String? = nil) {
+    func start(name: String? = nil, model: MeetingModel? = nil) {
         guard session.state == .idle else { return }
+        // `model` is `record with`: this one meeting's model, in its own
+        // snapshot, so the spool, the file and a recovery all say the model
+        // that heard it. nil is whatever settings say.
+        var snapshot = preferences()
+        if let model { snapshot.model = model }
         let meeting = Meeting(
             app: name ?? Self.unnamed, started: date(),
-            preferences: preferences())
+            preferences: snapshot)
         current = meeting
         meeting.awake = keepAwake.hold()
 
