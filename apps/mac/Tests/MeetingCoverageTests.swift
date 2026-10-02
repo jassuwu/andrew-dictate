@@ -116,6 +116,18 @@ final class MeetingCoverageTests: XCTestCase {
         XCTAssertEqual(told["complete"] as? Bool, false)
     }
 
+    /// The lamp does not say `saved` as if all were well: it says the file
+    /// is not whole and that the audio is still there.
+    func testTheLampSaysAMeetingThatStayedThinIsIncompleteAndItsAudioKept() async throws {
+        let (live, again) = stillThin()
+        transcribers.lineUp(live, again)
+
+        try await meeting(seconds: 2)
+
+        let saved = events.compactMap { if case .saved = $0 { $0 } else { nil } }
+        XCTAssertEqual(saved.map(\.hudText), ["saved · incomplete, audio kept"])
+    }
+
     /// The audio of a meeting that stayed thin is all there is to check the
     /// file against, or to read it again from: it is kept. It is not a
     /// spool a crash left, either — the next launch does not write the

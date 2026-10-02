@@ -81,6 +81,11 @@ enum MeetingEvent: Equatable, Sendable {
         if summary.recovered {
             return "recovered \(summary.app) — saved · \(summary.duration.spoken)"
         }
+        // not whole with no gap in it is a transcript the coverage check
+        // found thin, and that one keeps its audio.
+        if summary.gapCount == 0, !summary.complete {
+            return "saved · incomplete, audio kept"
+        }
         if summary.gapCount == 0 {
             return "saved · \(summary.duration.spoken)"
         }
