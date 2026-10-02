@@ -5,6 +5,7 @@ final class MeetingCoordinatorTests: XCTestCase {
     private var dir: URL!
     private var source: FakeSource!
     private var transcriber: FakeTranscriber!
+    private var transcribers: FakeTranscribers!
     private var events: [MeetingEvent] = []
     private var hookRuns: [HookRun] = []
     private var hook: URL?
@@ -17,6 +18,7 @@ final class MeetingCoordinatorTests: XCTestCase {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         source = FakeSource()
         transcriber = FakeTranscriber()
+        transcribers = FakeTranscribers(otherwise: transcriber)
         events = []
         hookRuns = []
         hook = nil
@@ -26,21 +28,26 @@ final class MeetingCoordinatorTests: XCTestCase {
         try? FileManager.default.removeItem(at: dir)
     }
 
+    /// `starting` is the date each meeting starts on, in order; a meeting
+    /// past the end of it starts now.
     private func coordinator(
         thresholds: MeetingThresholds = .init(
             probeTimeout: .seconds(1), silenceTimeout: .seconds(5),
             silenceFloor: 0.001, quietNudgeAfter: .seconds(30)),
-        clock: FakeClock = FakeClock()
+        clock: FakeClock = FakeClock(),
+        starting dates: [Date] = []
     ) -> MeetingCoordinator {
         let folder = dir.appendingPathComponent("docs")
+        let dates = StartDates(dates)
         let c = MeetingCoordinator(
             source: source,
-            makeTranscriber: { [transcriber] _ in transcriber! },
+            makeTranscriber: { [transcribers] _ in transcribers!.next() },
             diarizer: FakeDiarizer(),
             spool: MeetingSpool(root: dir.appendingPathComponent("spool")),
             hookRunner: HookRunner(logURL: dir.appendingPathComponent("hooks.log")),
             thresholds: thresholds,
             now: { clock.now },
+            date: { dates.next() },
             preferences: { [hook] in
                 MeetingPreferences(folder: folder, hook: hook, model: .whisperLargeV3Turbo)
             }
@@ -422,6 +429,14 @@ final class MeetingCoordinatorTests: XCTestCase {
         try? await Task.sleep(for: .seconds(seconds))
     }
 
+    /// Until the transcriber is parked in its hold, or two seconds, so a
+    /// test against code that never gets there fails instead of hanging.
+    private func held(_ transcriber: FakeTranscriber) async {
+        for _ in 0..<200 where !transcriber.isWaiting {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     /// Silence, delivered the way a live tap delivers it: one chunk at a
     /// time, with room for a rebuild and its tone to land in between.
     private func beQuiet(from first: Int, through last: Int) async {
@@ -456,9 +471,27 @@ private final class FakeClock: @unchecked Sendable {
     }
 }
 
+/// The dates meetings start on, one each, in order.
+private final class StartDates: @unchecked Sendable {
+    private let lock = NSLock()
+    private var dates: [Date]
+
+    init(_ dates: [Date]) {
+        self.dates = dates
+    }
+
+    func next() -> Date {
+        lock.withLock { dates.isEmpty ? Date() : dates.removeFirst() }
+    }
+}
+
+/// The tap. Opened again after a stop, it starts a new stream, the way the
+/// real one does for the next meeting.
 private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
-    private var continuation: AsyncStream<MeetingAudioChunk>.Continuation?
-    private var started = false
+    private let lock = NSLock()
+    private var _continuation: AsyncStream<MeetingAudioChunk>.Continuation?
+    private var starts = 0
+    private var startsSeen = 0
     private var nextAt: Duration = .zero
     var rebuilds = 0
     /// The real source plays the start sound again on every rebuild, and the
@@ -467,10 +500,16 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     /// does to the quiet clock.
     var toneOnRebuild: MeetingAudioChunk?
 
+    private var continuation: AsyncStream<MeetingAudioChunk>.Continuation? {
+        lock.withLock { _continuation }
+    }
+
     func start(tapping app: RunningApp) async throws -> AsyncStream<MeetingAudioChunk> {
         let (stream, continuation) = AsyncStream<MeetingAudioChunk>.makeStream()
-        self.continuation = continuation
-        started = true
+        lock.withLock {
+            _continuation = continuation
+            starts += 1
+        }
         return stream
     }
 
@@ -486,41 +525,136 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
 
     func tappedAppIsPlaying() -> Bool? { playing }
 
-    func stop() async { continuation?.finish() }
+    func stop() async {
+        let continuation = lock.withLock { () -> AsyncStream<MeetingAudioChunk>.Continuation? in
+            defer { _continuation = nil }
+            return _continuation
+        }
+        continuation?.finish()
+    }
 
     func send(_ chunk: MeetingAudioChunk) {
         nextAt = chunk.at + chunk.duration
         continuation?.yield(chunk)
     }
 
+    /// Until the tap has been opened once more than the last call saw, or
+    /// two seconds — a meeting that never opens it fails the test instead
+    /// of hanging it.
     func awaitStart() async {
-        while !started { try? await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<200 {
+            let opened = lock.withLock {
+                guard starts > startsSeen else { return false }
+                startsSeen += 1
+                return true
+            }
+            if opened { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
     }
 }
 
 private struct Unreadable: Error {}
 
+/// One per meeting, the way the app builds them. The test lines up the ones
+/// it wants to hold or read; a meeting past those gets the shared one.
+private final class FakeTranscribers: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lined: [FakeTranscriber] = []
+    private let otherwise: FakeTranscriber
+
+    init(otherwise: FakeTranscriber) {
+        self.otherwise = otherwise
+    }
+
+    func lineUp(_ transcribers: FakeTranscriber...) {
+        lock.withLock { lined.append(contentsOf: transcribers) }
+    }
+
+    func next() -> FakeTranscriber {
+        lock.withLock { lined.isEmpty ? otherwise : lined.removeFirst() }
+    }
+}
+
+/// While `holds` is set, `finish` and `transcribe` wait for the test to
+/// `release()` them — the last decode of a meeting, or the whole of a
+/// recovery's, still running.
 private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
     var finalTurns: [MeetingTurn] = []
     var batchTurns: [MeetingTurn] = []
     /// what a spool the engine cannot read does at every launch.
     var batchFailure: (any Error)?
-    private(set) var fed = 0
     let lines: AsyncStream<LiveLine>
     private let emitter: AsyncStream<LiveLine>.Continuation
+    private let lock = NSLock()
+    private var _fed = 0
+    private var _holds = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
 
-    init() {
+    init(finalTurns: [MeetingTurn] = [], batchTurns: [MeetingTurn] = []) {
+        self.finalTurns = finalTurns
+        self.batchTurns = batchTurns
         (lines, emitter) = AsyncStream<LiveLine>.makeStream()
     }
 
+    var fed: Int {
+        lock.withLock { _fed }
+    }
+
+    var holds: Bool {
+        get { lock.withLock { _holds } }
+        set { lock.withLock { _holds = newValue } }
+    }
+
+    var isWaiting: Bool {
+        lock.withLock { !waiting.isEmpty }
+    }
+
     func begin() async throws {}
-    func feed(_ chunk: MeetingAudioChunk) async { fed += 1 }
-    func finish() async -> [MeetingTurn] { finalTurns }
+    func feed(_ chunk: MeetingAudioChunk) async {
+        lock.withLock { _fed += 1 }
+    }
+    func finish() async -> [MeetingTurn] {
+        await heldUntilReleased()
+        return finalTurns
+    }
     func transcribe(you: [Float], them: [Float]) async throws -> [MeetingTurn] {
+        await heldUntilReleased()
         if let batchFailure { throw batchFailure }
         return batchTurns
     }
     func emit(_ line: LiveLine) { emitter.yield(line) }
+
+    func release() {
+        let released = lock.withLock {
+            _holds = false
+            let released = waiting
+            waiting = []
+            return released
+        }
+        for continuation in released {
+            continuation.resume()
+        }
+    }
+
+    private func heldUntilReleased() async {
+        guard holds else { return }
+        // the hold is checked again in the same lock that registers the
+        // wait: a release landing between the two would otherwise leave
+        // this waiting on a release that already happened.
+        await withCheckedContinuation { continuation in
+            let goNow = lock.withLock {
+                guard _holds else {
+                    return true
+                }
+                waiting.append(continuation)
+                return false
+            }
+            if goNow {
+                continuation.resume()
+            }
+        }
+    }
 }
 
 private struct FakeDiarizer: MeetingDiarizer {
