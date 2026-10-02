@@ -16,6 +16,9 @@ struct StretchTally: Equatable, Sendable {
     var decodedThem = 0
     /// Stretches the engine threw on twice. Their words are not in the file.
     var failed = 0
+    /// `you` stretches let go before they were decoded, because they were only
+    /// the far side coming back through the mic. Not decoded, not failed.
+    var bleed = 0
     /// How far behind the meeting the decoding ran: from a stretch joining
     /// the queue to its decode finishing, the worst of the meeting and the
     /// latest.
@@ -58,6 +61,11 @@ actor StretchTranscriber: MeetingTranscriber {
     private let themDetector: any SpeechDetector
     private var you: StretchCutter
     private var them: StretchCutter
+    /// How loud each side has been, for the last minute. A `you` stretch is
+    /// held against them when it ends, to tell it from the far side coming
+    /// back through the mic.
+    private var micLoudness = LoudnessTrail()
+    private var farLoudness = LoudnessTrail()
 
     /// Each chunk is heard after the one before it has been, whoever calls.
     /// The detector is awaited, so without this a chunk could overtake its
@@ -119,7 +127,7 @@ actor StretchTranscriber: MeetingTranscriber {
     func finish() async -> [MeetingTurn] {
         await hearing?.value
         isFinished = true
-        queue(you.flush() + them.flush())
+        queue(withoutBleed(you.flush()) + them.flush())
         // A model still loading is waited for: a meeting stopped in its
         // first seconds must not be written out with none of its words. One
         // that failed, or was never asked to load, has nothing to wait for.
@@ -182,10 +190,30 @@ actor StretchTranscriber: MeetingTranscriber {
 
     private func hear(_ chunk: MeetingAudioChunk) async {
         guard !isFinished else { return }
+        micLoudness.hear(chunk.you, at: chunk.at)
+        farLoudness.hear(chunk.them, at: chunk.at)
         let youEdges = await youDetector.hear(chunk.you)
         let themEdges = await themDetector.hear(chunk.them)
-        queue(you.take(chunk.you, at: chunk.at, edges: youEdges)
+        queue(withoutBleed(you.take(chunk.you, at: chunk.at, edges: youEdges))
             + them.take(chunk.them, at: chunk.at, edges: themEdges))
+    }
+
+    /// A `you` stretch that is only the far side coming back through the mic
+    /// goes no further: it is counted, and the engine never hears it.
+    /// `them` is never in doubt.
+    private func withoutBleed(_ stretches: [Stretch]) -> [Stretch] {
+        var kept: [Stretch] = []
+        for stretch in stretches {
+            if stretch.side == .you,
+               BleedJudge.verdict(
+                   mic: micLoudness, far: farLoudness, from: stretch.at, to: stretch.end) == .drop
+            {
+                tally.bleed += 1
+            } else {
+                kept.append(stretch)
+            }
+        }
+        return kept
     }
 
     // MARK: - decoding

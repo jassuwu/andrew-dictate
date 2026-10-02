@@ -12,6 +12,11 @@ import XCTest
 /// The numbers in here follow from three settings: chunks of 100 ms, a
 /// loudness detector with a 0.5 s hangover, and the cutter's 0.3 s of
 /// pre-roll. A phrase said from 1.3 s is stamped 1.0 s.
+///
+/// A tone that never changes has no pattern to follow, so where one side has
+/// to be told from a copy of the other, speech is a tone in bursts — a few
+/// hundred milliseconds of syllable, a breath, the next, each at its own
+/// loudness — and each voice has bursts of its own.
 @MainActor
 final class MeetingStretchTests: XCTestCase {
     private var dir: URL!
@@ -505,19 +510,54 @@ final class MeetingStretchTests: XCTestCase {
             mostBehind: .seconds(13), lastBehind: .seconds(1)))
     }
 
+    // MARK: - the far side coming back through the mic
+
+    /// On the mac's own speakers the far side leaves them and comes back in
+    /// through the mic, a little late and a fifth as loud. Heard apart, that
+    /// is a second speaker saying everything they said, and it is you. The
+    /// copy is let go before it is decoded; they keep their one line.
+    ///
+    /// The far side says it from 1.3 to 4.3 s, the mic has it from 1.38 to
+    /// 4.38: a stretch 1.08 to 4.38 that is only theirs.
+    func testTheFarSideComingBackThroughTheMicIsNotYou() async throws {
+        let transcriber = stretches(threshold: Self.keen)
+        let c = coordinator(transcriber)
+        c.start(tapping: zoom)
+        await source.awaitStart()
+
+        let theirs = them("are we all here", from: 1.3, to: 4.3, voice: .theirs)
+        await play([theirs, theirs.asBleed()], through: 6.0, on: c)
+        await waitForStretches(transcriber, 2)
+        await waitFor { c.liveLines.count == 1 }
+
+        XCTAssertEqual(live(c), ["them 1.0 are we all here"])
+        XCTAssertEqual(handed(), ["are we all here 52800"])
+        let tally = await transcriber.tally
+        XCTAssertEqual(tally, StretchTally(decodedThem: 1, bleed: 1))
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, ["[00:00:01] them: are we all here"])
+    }
+
     // MARK: - building a meeting
 
     private func stretches(
         ceiling: Duration = .seconds(25),
         hangover: Duration = .milliseconds(500),
+        threshold: Float = 0.02,
         clock: FakeClock = FakeClock()
     ) -> StretchTranscriber {
         StretchTranscriber(
             engine: engine,
             ceiling: ceiling,
-            detector: { LoudnessDetector(threshold: 0.02, hangover: hangover) },
+            detector: { LoudnessDetector(threshold: threshold, hangover: hangover) },
             now: { clock.now })
     }
+
+    /// A detector keen enough to hear the far side coming back through the
+    /// mic, which is a fifth as loud as it left: the voice model on a real
+    /// mac is. Still above the hum on the far side's first chunk.
+    private static let keen: Float = 0.006
 
     private func coordinator(
         _ transcriber: StretchTranscriber,
@@ -564,14 +604,58 @@ final class MeetingStretchTests: XCTestCase {
         let phrase: String
         let from: Double
         let to: Double
+        /// How loud it is from one moment to the next. A flat tone when nil.
+        var voice: Voice?
+        var scale: Float = 1
+
+        /// What the mic makes of this when it is the far side's, played out
+        /// of the mac's speakers: a little late and a fifth as loud.
+        func asBleed(after delay: Double = 0.08, scale: Float = 0.2) -> Said {
+            Said(
+                side: .you, phrase: phrase, from: from + delay, to: to + delay,
+                voice: voice, scale: scale)
+        }
     }
 
-    private func you(_ phrase: String, from: Double, to: Double) -> Said {
-        Said(side: .you, phrase: phrase, from: from, to: to)
+    /// Syllables: each is a tone at its own loudness for `on` seconds and
+    /// then quiet for `gap`, and the voice goes round them again from the
+    /// first when it runs out. Its loudest syllable is 1, so a phrase is
+    /// still as loud as the engine knows it by.
+    private struct Voice {
+        let syllables: [(on: Double, gap: Double, level: Float)]
+
+        func level(at t: Double) -> Float {
+            var left = t.truncatingRemainder(dividingBy: syllables.reduce(0) { $0 + $1.on + $1.gap })
+            for syllable in syllables {
+                if left < syllable.on { return syllable.level }
+                left -= syllable.on
+                if left < syllable.gap { return 0 }
+                left -= syllable.gap
+            }
+            return 0
+        }
+
+        /// The far side's: 2.14 s to go round.
+        static let theirs = Voice(syllables: [
+            (0.16, 0.04, 1.0), (0.12, 0.08, 0.6), (0.20, 0.04, 0.8), (0.14, 0.06, 0.4),
+            (0.18, 0.10, 0.9), (0.10, 0.04, 0.5), (0.16, 0.06, 0.7), (0.22, 0.04, 1.0),
+            (0.12, 0.08, 0.3), (0.14, 0.06, 0.8),
+        ])
+
+        /// Yours: its own rhythm, and a length that does not go into theirs.
+        static let yours = Voice(syllables: [
+            (0.13, 0.05, 0.7), (0.19, 0.07, 1.0), (0.11, 0.09, 0.4), (0.17, 0.05, 0.9),
+            (0.15, 0.11, 0.6), (0.21, 0.05, 0.5), (0.12, 0.07, 1.0), (0.18, 0.06, 0.3),
+            (0.14, 0.04, 0.8),
+        ])
     }
 
-    private func them(_ phrase: String, from: Double, to: Double) -> Said {
-        Said(side: .them, phrase: phrase, from: from, to: to)
+    private func you(_ phrase: String, from: Double, to: Double, voice: Voice? = nil) -> Said {
+        Said(side: .you, phrase: phrase, from: from, to: to, voice: voice)
+    }
+
+    private func them(_ phrase: String, from: Double, to: Double, voice: Voice? = nil) -> Said {
+        Said(side: .them, phrase: phrase, from: from, to: to, voice: voice)
     }
 
     /// The meeting from `start` to `end` seconds, a 100 ms chunk at a time,
@@ -603,12 +687,15 @@ final class MeetingStretchTests: XCTestCase {
             let from = max(first, Int((line.from * 16_000).rounded()))
             let to = min(first + n, Int((line.to * 16_000).rounded()))
             guard from < to else { continue }
-            let loudness = engine.loudness(of: line.phrase)
+            let loudness = engine.loudness(of: line.phrase) * line.scale
+            let began = Int((line.from * 16_000).rounded())
             for i in from..<to {
-                let sample = sin(Float(i) * 0.05) * loudness
+                let level = line.voice?.level(at: Double(i - began) / 16_000) ?? 1
+                let sample = sin(Float(i) * 0.05) * loudness * level
+                // two lines on one side are heard together.
                 switch line.side {
-                case .you: you[i - first] = sample
-                case .them: them[i - first] = sample
+                case .you: you[i - first] += sample
+                case .them: them[i - first] += sample
                 }
             }
         }
@@ -653,6 +740,17 @@ final class MeetingStretchTests: XCTestCase {
         Task { finished.turns = await transcriber.finish() }
         await waitFor { finished.turns != nil }
         return finished.turns
+    }
+
+    /// Polls until the transcriber has dealt with `count` stretches, one way
+    /// or another: decoded, failed, or let go as bleed.
+    private func waitForStretches(_ transcriber: StretchTranscriber, _ count: Int) async {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while ContinuousClock.now < deadline {
+            let tally = await transcriber.tally
+            if tally.decodedYou + tally.decodedThem + tally.failed + tally.bleed >= count { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     /// Polls until `condition` holds or the time is up; the assertion after
@@ -724,6 +822,11 @@ private final class Finished: @unchecked Sendable {
 /// Knows a phrase by its loudness: the test plays phrase n at 0.1 × n, and a
 /// stretch is heard as the phrase whose loudness its peak is nearest to.
 /// Silence is heard as nothing at all.
+///
+/// Words are words however quiet: a stretch a fifth as loud as phrase n —
+/// the phrase coming back through the mic — is heard as phrase n. Only for
+/// the first two phrases: a fifth of any later one is as loud as an earlier
+/// phrase, and is heard as that.
 private final class PhraseEngine: StretchEngine, @unchecked Sendable {
     private let lock = NSLock()
     private var phrases: [String] = []
@@ -784,7 +887,10 @@ private final class PhraseEngine: StretchEngine, @unchecked Sendable {
         let peak = samples.reduce(Float(0)) { max($0, abs($1)) }
         return try lock.withLock {
             let index = Int((peak * 10).rounded()) - 1
-            let phrase = peak < 0.05 ? "" : phrases.indices.contains(index) ? phrases[index] : "?"
+            let quiet = Int((peak * 50).rounded()) - 1
+            let phrase = peak >= 0.05
+                ? (phrases.indices.contains(index) ? phrases[index] : "?")
+                : (peak >= 0.015 && phrases.indices.contains(quiet) ? phrases[quiet] : "")
             decoded.append((phrase, samples.count))
             wall?.advance(by: eachDecode)
             if let left = failures[phrase], left > 0 {
