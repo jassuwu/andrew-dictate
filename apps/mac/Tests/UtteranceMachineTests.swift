@@ -445,6 +445,7 @@ final class UtteranceMachineTests: XCTestCase {
         await settle { self.inserter.inserted.count == 1 }
         XCTAssertEqual(inserter.inserted, ["Hands free."])
         XCTAssertEqual(completions, [.delivered])
+        XCTAssertEqual(outcomes, [.delivered])
     }
 
     /// a lamp that says "locked" over nothing is a lie.
@@ -506,6 +507,9 @@ final class UtteranceMachineTests: XCTestCase {
         )
         XCTAssertEqual(m.state, .idle)
         XCTAssertEqual(states.last, .init(.idle, fast: false))
+        // delivered, and the record says the ceiling ended it, not you.
+        XCTAssertEqual(outcomes, [.delivered])
+        XCTAssertEqual(presses.map(\.capped), [true])
     }
 
     /// the next take is not capped because the last one was.
@@ -520,6 +524,7 @@ final class UtteranceMachineTests: XCTestCase {
         await settle { self.inserter.inserted.count == 2 }
 
         XCTAssertEqual(pills.count, pillsAfterTheCap)
+        XCTAssertEqual(presses.map(\.capped), [true, false])
     }
 
     /// a hop that lands after the take is over is about a finger that has
