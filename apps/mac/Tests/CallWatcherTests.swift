@@ -189,6 +189,37 @@ final class CallWatcherTests: XCTestCase {
         )
     }
 
+    /// A participant who mutes still hears everyone else. Losing the mic
+    /// alone is the most common thing that happens in a call.
+    func testMutingDoesNotEndTheCall() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(0))
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(3))
+        _ = watcher.observe([zoom], isRecording: true, at: .seconds(5))
+
+        let muted = app("zoom", mic: false, audio: true)
+        XCTAssertEqual(watcher.observe([muted], isRecording: true, at: .seconds(100)), [])
+        XCTAssertEqual(watcher.observe([muted], isRecording: true, at: .seconds(1_000)), [])
+        XCTAssertEqual(watcher.observe([muted], isRecording: true, at: .seconds(5_000)), [])
+        XCTAssertEqual(watcher.currentCall, "zoom")
+    }
+
+    /// Everyone else going quiet while you hold the mic open is a pause in a
+    /// conversation, not the end of one.
+    func testTheOtherSideGoingQuietDoesNotEndTheCall() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(0))
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(3))
+        _ = watcher.observe([zoom], isRecording: true, at: .seconds(5))
+
+        let listening = app("zoom", mic: true, audio: false)
+        XCTAssertEqual(watcher.observe([listening], isRecording: true, at: .seconds(100)), [])
+        XCTAssertEqual(watcher.observe([listening], isRecording: true, at: .seconds(1_000)), [])
+        XCTAssertEqual(watcher.currentCall, "zoom")
+    }
+
     /// The list is meant to leave out an app that is doing neither, but an
     /// entry that says so anyway is not a reason to hold the call open.
     func testAnAppListedWhileDoingNothingCountsAsAbsent() {
