@@ -501,9 +501,8 @@ final class MeetingCoordinator: ObservableObject {
                     recovering = nil
                     await until { self.current == nil }
                 }
-                recovering = orphan.manifest.app
-                onEvent?(.recovering(app: orphan.manifest.app))
                 await recover(orphan.handle, manifest: orphan.manifest)
+                recovering = nil
             }
         }
     }
@@ -964,9 +963,22 @@ final class MeetingCoordinator: ObservableObject {
         // name: not always the one the manifest does.
         var model = manifest.model
         do {
-            let ready = try await transcriberForRecovery(preferring: manifest.model)
+            guard let ready = try await transcriberForRecovery(preferring: manifest.model) else {
+                // nothing to read it with, which is nothing wrong with the
+                // spool: no attempt is counted and it is not set aside. a
+                // launch with a model on this mac writes it out.
+                logger.error("no meeting model is installed, so a spool waits")
+                keepMeetingRecord?(MeetingRecord(
+                    .waitingForModel, app: manifest.app, model: manifest.model,
+                    startedAt: manifest.started, duration: duration, recovered: true))
+                return
+            }
             let transcriber = ready.transcriber
             model = ready.model
+            // said once it is known to be happening: a spool that waits, or
+            // will not read, is not being written out, whatever the lamp says.
+            recovering = manifest.app
+            onEvent?(.recovering(app: manifest.app))
             let turns = try await transcriber.transcribe(you: audio.you, them: audio.them)
             let reading = Reading(turns: turns, tally: await transcriber.decodeTally())
             // checked like any meeting, and not read again: this was the
@@ -1019,11 +1031,11 @@ final class MeetingCoordinator: ObservableObject {
     ]
 
     /// A transcriber for the model a spool was recorded with, or for another
-    /// meeting model that is on this mac when that one is not. Anything but
-    /// a model missing is the model's failure and is thrown.
+    /// meeting model that is on this mac when that one is not; nil when none
+    /// is. Anything but a model missing is the model's failure and is thrown.
     private func transcriberForRecovery(
         preferring model: MeetingModel
-    ) async throws -> (transcriber: any MeetingTranscriber, model: MeetingModel) {
+    ) async throws -> (transcriber: any MeetingTranscriber, model: MeetingModel)? {
         for candidate in [model] + Self.modelsToRecoverWith.filter({ $0 != model }) {
             do {
                 return (try await makeTranscriber(candidate), candidate)
@@ -1031,7 +1043,7 @@ final class MeetingCoordinator: ObservableObject {
                 continue
             }
         }
-        throw MeetingModel.NotInstalled(model: model)
+        return nil
     }
 
     // MARK: -

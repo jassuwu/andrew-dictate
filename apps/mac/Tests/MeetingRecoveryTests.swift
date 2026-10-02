@@ -150,6 +150,43 @@ final class MeetingRecoveryTests: XCTestCase {
         XCTAssertEqual(records.map(\.outcome), [.saved, .saved, .saved])
     }
 
+    /// No meeting model on this mac, so nothing can read the spool and
+    /// nothing is wrong with it: no attempt is counted, it is not set aside,
+    /// and the lamp does not claim to be writing it out. A later launch,
+    /// with a model, does.
+    func testRecoveryWithNoModelInstalledLeavesTheSpoolAloneUntilALaterLaunch() async throws {
+        let handle = try await orphan("teams", started: started)
+        transcribers.installed = []
+        transcribers.transcriber.batchTurns = [
+            .init(speaker: .them(nil), at: .zero, text: "recovered words here")]
+        let c = coordinator()
+
+        c.recoverOrphans()
+        await awaitRecords(1)
+
+        XCTAssertEqual(records.map(\.outcome), [.waitingForModel])
+        let record = try XCTUnwrap(records.first)
+        XCTAssertTrue(record.recovered)
+        XCTAssertEqual(record.app, "teams")
+        XCTAssertEqual(record.startedAt, started)
+        XCTAssertEqual(record.durationS, 1)
+        let waiting = spool.orphans()
+        XCTAssertEqual(waiting.map(\.handle), [handle])
+        XCTAssertNil(waiting.first?.manifest.attempts)
+        XCTAssertEqual(spool.unreadableCount(), 0)
+        XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).count, 0)
+        XCTAssertFalse(events.contains(.recovering(app: "teams")), "\(events)")
+        XCTAssertNil(c.recovering)
+
+        transcribers.installed = [.parakeetV3]
+        c.recoverOrphans()
+        await awaitRecords(2)
+
+        XCTAssertEqual(records.map(\.outcome), [.waitingForModel, .saved])
+        XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).map(\.recovered), [true])
+        XCTAssertEqual(spool.orphans().count, 0)
+    }
+
     // MARK: - helpers
 
     /// A spool a crash left behind, with a second of audio on it.
