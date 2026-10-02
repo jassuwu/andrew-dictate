@@ -288,6 +288,69 @@ enum MeetingTranscriptFile {
     /// Reads only the front matter. The body can be megabytes; the history
     /// pane needs six fields.
     static func summary(of url: URL) throws -> MeetingSummary {
+        let front = try frontMatter(of: url)
+        return MeetingSummary(
+            fileURL: url,
+            app: front.app,
+            started: front.started,
+            duration: front.duration,
+            complete: front.complete,
+            gapCount: front.gapLines.count,
+            recovered: front.recovered
+        )
+    }
+
+    /// What a file says about the meeting itself, for the one rewrite a file
+    /// ever gets: the facts that stay when the meeting is transcribed again.
+    struct Header: Equatable, Sendable {
+        let app: String
+        let started: Date
+        /// The offset `started` was written in, so a rewrite writes the same
+        /// line however far the mac has travelled since.
+        let timeZone: TimeZone
+        /// The whole seconds the file says, which is all it says.
+        let duration: Duration
+        let gaps: [MeetingSession.Gap]
+        let recovered: Bool
+        let complete: Bool
+    }
+
+    static func header(of url: URL) throws -> Header {
+        let front = try frontMatter(of: url)
+        // a gap line is `- [41.2, 63.0]`. one that is not is a file whose
+        // holes this build cannot say, and a rewrite would be guessing.
+        let gaps = try front.gapLines.map { line -> MeetingSession.Gap in
+            let numbers = line.dropFirst("- [".count).dropLast("]".count)
+                .split(separator: ",")
+                .compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+            guard line.hasSuffix("]"), numbers.count == 2 else {
+                throw Failure.malformed(url.lastPathComponent)
+            }
+            return MeetingSession.Gap(began: .seconds(numbers[0]), ended: .seconds(numbers[1]))
+        }
+        return Header(
+            app: front.app,
+            started: front.started,
+            timeZone: front.timeZone,
+            duration: front.duration,
+            gaps: gaps,
+            recovered: front.recovered,
+            complete: front.complete)
+    }
+
+    /// The top of a file, read once for both of the ways it is read: the
+    /// body can be megabytes and neither wants it.
+    private struct FrontMatter {
+        let app: String
+        let started: Date
+        let timeZone: TimeZone
+        let duration: Duration
+        let complete: Bool
+        let recovered: Bool
+        let gapLines: [String]
+    }
+
+    private static func frontMatter(of url: URL) throws -> FrontMatter {
         let text = try String(contentsOf: url, encoding: .utf8)
         var lines = text.components(separatedBy: "\n")[...]
         guard lines.first == "---" else {
@@ -296,11 +359,11 @@ enum MeetingTranscriptFile {
         lines = lines.dropFirst()
 
         var fields: [String: String] = [:]
-        var gapCount = 0
+        var gapLines: [String] = []
         var closed = false
         for line in lines {
             if line == "---" { closed = true; break }
-            if line.hasPrefix("- [") { gapCount += 1; continue }
+            if line.hasPrefix("- [") { gapLines.append(line); continue }
             guard let colon = line.firstIndex(of: ":") else { continue }
             let key = String(line[..<colon])
             let value = line[line.index(after: colon)...]
@@ -319,15 +382,25 @@ enum MeetingTranscriptFile {
         else {
             throw Failure.malformed(url.lastPathComponent)
         }
-        return MeetingSummary(
-            fileURL: url,
+        return FrontMatter(
             app: app,
             started: started,
+            timeZone: offset(written: startedText) ?? .current,
             duration: .seconds(durationSeconds),
             complete: fields["complete"] == "true",
-            gapCount: gapCount,
-            recovered: fields["recovered"] == "true"
-        )
+            recovered: fields["recovered"] == "true",
+            gapLines: gapLines)
+    }
+
+    /// The offset at the end of an ISO 8601 time, `+05:30` or `Z`.
+    private static func offset(written text: String) -> TimeZone? {
+        if text.hasSuffix("Z") { return TimeZone(secondsFromGMT: 0) }
+        let tail = text.suffix(6)
+        guard tail.count == 6, let sign = tail.first, sign == "+" || sign == "-",
+              let hours = Int(tail.dropFirst().prefix(2)),
+              let minutes = Int(tail.suffix(2))
+        else { return nil }
+        return TimeZone(secondsFromGMT: (sign == "-" ? -1 : 1) * (hours * 3_600 + minutes * 60))
     }
 
     static func listAll(
