@@ -445,10 +445,13 @@ final class AppSettings: ObservableObject {
         meetingModel = userDefaults
             .string(forKey: Self.meetingModelKey)
             .flatMap(MeetingModel.init(rawValue:)) ?? .default
-        // a value this build cannot read is no shortcut, never a crash.
+        // a value this build cannot read is no shortcut, never a crash; nor
+        // is one it would refuse, kept from a build that took it (⌘W).
+        let dictationKey = userDefaults.hotkeyBinding()
         meetingShortcut = userDefaults
             .data(forKey: Self.meetingShortcutKey)
             .flatMap { try? JSONDecoder().decode(MeetingShortcut.self, from: $0) }
+            .flatMap { $0.refusal(againstDictationKey: dictationKey) == nil ? $0 : nil }
         let pickedMeetingsFolder = userDefaults
             .string(forKey: Self.meetingsFolderKey)
             .map { URL(fileURLWithPath: $0, isDirectory: true) }

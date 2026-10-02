@@ -279,6 +279,18 @@ final class AppSettingsTests: XCTestCase {
             MeetingShortcut(keyCode: 46, modifiers: [.control, .option], keyName: "M"))
     }
 
+    /// ⌘W kept from a build that took it would go on closing nothing and
+    /// starting meetings: a shortcut this build would refuse does not load.
+    func testAStoredMeetingShortcutThisBuildWouldRefuseDoesNotLoad() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        userDefaults.set(
+            Data(#"{"keyCode":13,"keyName":"W","modifiers":8}"#.utf8),
+            forKey: "AndrewDictate.meetingShortcut")
+
+        XCTAssertNil(AppSettings(userDefaults: userDefaults).meetingShortcut)
+    }
+
     func testThereIsNoMeetingShortcutUntilOneIsSet() {
         let (userDefaults, suiteName) = makeUserDefaults()
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
