@@ -39,9 +39,10 @@ struct PressRecord: Equatable, Sendable, Codable {
         /// still transcribing so long after key-up that the next press
         /// dropped it and recorded instead.
         case droppedAsHung
-        /// the mic answered but sent no sound: nothing within a second of
-        /// starting, or by key-up only zeros or a sliver. a mic failure,
-        /// not "heard nothing", so no retry is offered.
+        /// the mic answered but sent no sound: nothing, or frames of only
+        /// exact zeros, within a second of starting (three for a headset),
+        /// or by key-up only zeros or a sliver. a mic failure, not "heard
+        /// nothing", so no retry is offered.
         case noAudio
     }
 

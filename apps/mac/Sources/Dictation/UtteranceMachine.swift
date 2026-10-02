@@ -428,14 +428,16 @@ final class UtteranceMachine {
             stopMicrophone()
             return
         }
-        if !micTurn.isHearing {
+        if !micTurn.isHearing || !micTurn.microphone.hasHeardSound {
             awaitFirstAudio(id)
         }
     }
 
     /// a mic can open and still send nothing — one the phone took for a
-    /// call, a driver that wedged — so it gets a second to be heard, or
-    /// three if it is a headset still switching profile.
+    /// call, a driver that wedged — or send frames of nothing but exact
+    /// zeros, the way a muted, dead or virtual device does. it gets a
+    /// second to be heard making a sound, or three if it is a headset
+    /// still switching profile.
     private func awaitFirstAudio(_ id: UInt64) {
         firstAudioWait?.cancel()
         let deadline = Self.firstAudioDeadline(
@@ -446,17 +448,24 @@ final class UtteranceMachine {
         }
     }
 
-    /// its deadline since it answered, and not a sound.
+    /// its deadline since it answered, and not a sound: no frames, or
+    /// frames of exact zeros. a real room is never exact zero, so zeros
+    /// this long are the device, not you being quiet.
     private func microphoneStayedSilent(_ id: UInt64) {
         firstAudioWait = nil
         guard let micTurn,
               micTurn.id == id,
-              micTurn.phase == .live,
-              !micTurn.isHearing else {
+              micTurn.phase == .live else {
             return
         }
-
-        audioLogger.error("the microphone sent nothing for a second; dropping it")
+        if micTurn.isHearing {
+            guard !micTurn.microphone.hasHeardSound else {
+                return
+            }
+            audioLogger.error("the microphone sent only zeros since it started; dropping it")
+        } else {
+            audioLogger.error("the microphone sent nothing since it started; dropping it")
+        }
         cancelMicTurn()
         endWithNoSound(from: press?.mic)
     }
@@ -504,8 +513,12 @@ final class UtteranceMachine {
         }
         micTurn.isHearing = true
         self.micTurn = micTurn
-        firstAudioWait?.cancel()
-        firstAudioWait = nil
+        // frames say the device is alive; whether they were sound is
+        // still the deadline's to judge, unless it already knows.
+        if micTurn.microphone.hasHeardSound {
+            firstAudioWait?.cancel()
+            firstAudioWait = nil
+        }
         guard !micTurn.isEnding else {
             // let go before it was heard: lighting the lamp, or a start
             // chime, after the release would be noise.

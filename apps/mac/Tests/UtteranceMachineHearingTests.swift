@@ -241,6 +241,66 @@ final class UtteranceMachineHearingTests: XCTestCase {
         XCTAssertEqual(presses.count, 1)
     }
 
+    /// frames of nothing but exact zeros are a device that is alive and
+    /// deaf — muted, dead or virtual. its frames light the lamp and play
+    /// the chime, and within its second it is named like one that sent
+    /// nothing: dropped, and nothing kept to try again.
+    func testAMicSendingOnlyZerosIsNamedWithinItsSecond() async {
+        let m = machine()
+        mic.sendsOnlyZeros = true
+
+        m.keyDown()
+        mic.hear()
+        await pass(.milliseconds(900))
+        XCTAssertTrue(lamp.contains(.hearing))
+        XCTAssertEqual(chimes, [.start])
+        XCTAssertEqual(outcomes, [])
+
+        await pass(.milliseconds(100))
+        XCTAssertEqual(pills, [Pill("no sound from MacBook Pro Microphone", 2.4)])
+        XCTAssertTrue(events.contains(.microphoneDropped))
+        XCTAssertEqual(mic.cancels, 1)
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(states.last, .init(.idle, fast: true))
+        XCTAssertEqual(retryOffers, [])
+        XCTAssertEqual(outcomes, [.noAudio])
+    }
+
+    /// a headset still switching profile gets its three seconds for this
+    /// too: zeros while it switches are the switch.
+    func testABluetoothMicSendingOnlyZerosGetsItsThreeSeconds() async {
+        mic.deviceDescription = MicDescription(
+            name: "AirPods Pro",
+            transport: .bluetooth
+        )
+        let m = machine()
+        mic.sendsOnlyZeros = true
+
+        m.keyDown()
+        mic.hear()
+        await pass(.milliseconds(2_900))
+        XCTAssertEqual(outcomes, [])
+
+        await pass(.milliseconds(100))
+        XCTAssertEqual(pills, [Pill("no sound from AirPods Pro", 2.4)])
+        XCTAssertEqual(outcomes, [.noAudio])
+    }
+
+    /// a mic that sent any sound at all is a mic: it records for as long
+    /// as the key is held.
+    func testAMicThatSentSoundRecordsPastItsSecond() async {
+        let m = machine()
+
+        m.keyDown()
+        mic.hear()
+        await pass(.seconds(5))
+
+        XCTAssertEqual(pills, [])
+        XCTAssertEqual(outcomes, [])
+        XCTAssertEqual(m.state, .recording)
+        XCTAssertFalse(events.contains(.microphoneDropped))
+    }
+
     /// its second to be heard doesn't run out while the mac is away:
     /// nobody was there to talk, and a wake is slow for everything. once
     /// back, it gets a whole second of its own.
@@ -529,6 +589,11 @@ final class CuedMic: MicCapture {
         name: "MacBook Pro Microphone",
         transport: .builtIn
     )
+    /// its frames are all exact zeros: alive, and deaf.
+    var sendsOnlyZeros = false
+    var hasHeardSound: Bool {
+        !sendsOnlyZeros
+    }
     private(set) var starts = 0
     private(set) var stops = 0
     private(set) var cancels = 0

@@ -24,6 +24,18 @@ protocol MicCapture: AnyObject {
     /// the device this capture is bound to, if it will say. read for the
     /// press log, never to decide anything.
     var deviceDescription: MicDescription? { get }
+    /// whether any sample this utterance has heard is not exactly zero. a
+    /// real room never is; a muted, dead or virtual device can deliver
+    /// frames of nothing but zeros. read once its first-audio deadline
+    /// comes due: frames light the lamp, and this says they were sound.
+    var hasHeardSound: Bool { get }
+}
+
+extension MicCapture {
+    /// a capture that cannot see its samples never calls a mic deaf.
+    var hasHeardSound: Bool {
+        true
+    }
 }
 
 /// why a mic would not start, where the reason changes what the press says.
