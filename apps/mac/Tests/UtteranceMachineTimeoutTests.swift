@@ -12,6 +12,12 @@ final class UtteranceMachineTimeoutTests: XCTestCase {
     private var events: [UtteranceEvent] = []
     private var pillShowing = false
     private var micForPress: FakeMic?
+    /// when set, presses are handed captures the way the app hands them
+    /// out — through the slot, which the machine's drop empties.
+    private var slot: CaptureSlot?
+    private var made: [SlotMic] = []
+    /// what the next capture the slot builds will do wrong.
+    private var nextCaptureFails: SlotMic.Failure?
 
     override func setUp() async throws {
         clock = FakeUtteranceClock()
@@ -21,6 +27,9 @@ final class UtteranceMachineTimeoutTests: XCTestCase {
         inserter = FakeInserter(clock: clock)
         events = []
         pillShowing = false
+        slot = nil
+        made = []
+        nextCaptureFails = nil
     }
 
     override func tearDown() async throws {
@@ -46,11 +55,16 @@ final class UtteranceMachineTimeoutTests: XCTestCase {
                 self.pillShowing = true
             case .state:
                 self.pillShowing = false
+            case .microphoneDropped:
+                self.slot?.drop()
             default:
                 break
             }
         }
         machine.microphoneForPress = { [weak self] in
+            if let slot = self?.slot {
+                return .ready(slot.captureForPress())
+            }
             guard let self, let mic = self.micForPress else {
                 return .refused(.modelNotReady)
             }
@@ -289,7 +303,93 @@ final class UtteranceMachineTimeoutTests: XCTestCase {
         XCTAssertEqual(outcomes, [.cancelled])
     }
 
+    // MARK: - a mic that fails on the way out
+
+    /// a stop that throws — a format the capture can't convert, a device
+    /// gone mid-take — loses that take out loud, once. the capture goes with
+    /// it, so the next press records through a fresh one rather than
+    /// failing the same way for the same cause.
+    func testAStopThatFailsCostsOneTakeAndTheNextPressIsFresh() async {
+        let m = machine(handingOutCapturesThroughTheSlot: true)
+        nextCaptureFails = .stop
+        engine.reply = .success("second try")
+
+        await hold(m, for: .seconds(1))
+        await settle { !self.pills.isEmpty }
+        pillShowing = false
+        await hold(m, for: .seconds(1))
+        await settle { self.inserter.inserted.count == 1 }
+
+        XCTAssertEqual(made.count, 2)
+        XCTAssertTrue(made[0].discarded)
+        XCTAssertEqual(made.map(\.starts), [1, 1])
+        XCTAssertEqual(pills, [Pill("recording was lost", 1.6)])
+        XCTAssertEqual(inserter.inserted, ["Second try."])
+        XCTAssertEqual(outcomes, [.recordingLost, .delivered])
+    }
+
+    /// a stop that never comes back is the same: one take lost, and a
+    /// fresh capture for the next.
+    func testAStopThatNeverAnswersCostsOneTakeAndTheNextPressIsFresh() async {
+        let m = machine(handingOutCapturesThroughTheSlot: true)
+        nextCaptureFails = .stopNeverAnswers
+        engine.reply = .success("second try")
+
+        await hold(m, for: .seconds(1))
+        await pass(.milliseconds(1_500))
+        await settle { !self.pills.isEmpty }
+        pillShowing = false
+        await hold(m, for: .seconds(1))
+        await settle { self.inserter.inserted.count == 1 }
+
+        XCTAssertEqual(made.count, 2)
+        XCTAssertTrue(made[0].discarded)
+        XCTAssertEqual(pills, [Pill("recording was lost", 1.6)])
+        XCTAssertEqual(outcomes, [.recordingLost, .delivered])
+    }
+
+    /// a fresh capture that won't start is thrown away too, and the next
+    /// press builds another rather than retrying a corpse.
+    func testACaptureThatWontStartIsRebuiltByTheNextPress() async {
+        let m = machine(handingOutCapturesThroughTheSlot: true)
+        nextCaptureFails = .start
+        engine.reply = .success("second try")
+
+        m.keyDown()
+        await settle { !self.pills.isEmpty }
+        m.keyUp()
+        pillShowing = false
+        await hold(m, for: .seconds(1))
+        await settle { self.inserter.inserted.count == 1 }
+
+        XCTAssertEqual(made.count, 2)
+        XCTAssertTrue(made[0].discarded)
+        XCTAssertEqual(pills, [Pill("couldn't start recording", 1.6)])
+        XCTAssertEqual(outcomes, [.couldNotStartRecording, .delivered])
+    }
+
     // MARK: - helpers
+
+    private func machine(
+        handingOutCapturesThroughTheSlot: Bool
+    ) -> UtteranceMachine {
+        let machine = machine()
+        slot = CaptureSlot(
+            clock: clock,
+            isInUse: { [weak machine] in machine?.state == .recording },
+            keepsListening: { false },
+            make: { [weak self] in
+                let capture = SlotMic(
+                    clock: self?.clock ?? FakeUtteranceClock(),
+                    fails: self?.nextCaptureFails
+                )
+                self?.nextCaptureFails = nil
+                self?.made.append(capture)
+                return capture
+            }
+        )
+        return machine
+    }
 
     private var presses: [PressRecord] {
         events.compactMap {
@@ -391,3 +491,59 @@ final class UtteranceMachineTimeoutTests: XCTestCase {
 }
 
 private struct EngineThrew: Error {}
+
+/// a capture the slot hands out and throws away, wrong in one chosen way.
+@MainActor
+private final class SlotMic: DisposableMicCapture {
+    enum Failure {
+        case start
+        case stop
+        case stopNeverAnswers
+    }
+
+    struct Broken: Error {}
+
+    let deviceDescription: MicDescription? = nil
+    private let clock: FakeUtteranceClock
+    private let fails: Failure?
+    private(set) var starts = 0
+    private(set) var discarded = false
+
+    init(clock: FakeUtteranceClock, fails: Failure?) {
+        self.clock = clock
+        self.fails = fails
+    }
+
+    func start(
+        onFirstBuffer: @escaping @MainActor @Sendable (
+            ContinuousClock.Instant
+        ) -> Void
+    ) async throws {
+        starts += 1
+        if fails == .start {
+            throw Broken()
+        }
+        onFirstBuffer(clock.now)
+    }
+
+    func stop() async throws -> [Float] {
+        switch fails {
+        case .stop:
+            throw Broken()
+        case .stopNeverAnswers:
+            // never comes back; the machine stops waiting on it.
+            try await clock.sleep(for: .seconds(3_600))
+            throw Broken()
+        case .start, nil:
+            return (0..<1_600).map { Float($0 % 7) * 0.01 }
+        }
+    }
+
+    func cancel() {}
+
+    func prepare() {}
+
+    func discard() {
+        discarded = true
+    }
+}
