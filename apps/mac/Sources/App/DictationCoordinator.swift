@@ -109,6 +109,29 @@ final class DictationCoordinator: ObservableObject {
     /// is being recorded, and on a mac that has no meeting model.
     @Published private(set) var unrecordedCall: String?
 
+    /// what the menu bar badge wears. a recording is the gold rim whether or
+    /// not a call is in it; a call with nothing recording is the "call on,
+    /// not recorded" look. getting ready and a meeting's problem are other
+    /// tickets' to feed, so they are never asked for here.
+    ///
+    /// transcribing is not dictating on purpose. the lamp's cool phase owns
+    /// the wait and the menu already says "writing it out…" (ADR 0017).
+    var badgeLook: BadgeLook {
+        let meeting: BadgeLook.Meeting
+        if meetings.isRecording {
+            meeting = .recording
+        } else if unrecordedCall != nil {
+            meeting = .callNotRecorded
+        } else {
+            meeting = .none
+        }
+        return BadgeLook(
+            needsSetup: needsAttention,
+            isDictating: state == .recording,
+            meeting: meeting
+        )
+    }
+
     /// the meeting that just ended, for as long as it is the thing you came
     /// back to the menu for.
     @Published private(set) var lastMeeting: MeetingSummary?
