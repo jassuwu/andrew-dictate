@@ -189,6 +189,24 @@ final class CallWatcherTests: XCTestCase {
         )
     }
 
+    /// The list is meant to leave out an app that is doing neither, but an
+    /// entry that says so anyway is not a reason to hold the call open.
+    func testAnAppListedWhileDoingNothingCountsAsAbsent() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(0))
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(3))
+        _ = watcher.observe([zoom], isRecording: true, at: .seconds(5))
+
+        let idle = app("zoom", mic: false, audio: false)
+        XCTAssertEqual(watcher.observe([idle], isRecording: true, at: .seconds(100)), [])
+        XCTAssertEqual(watcher.observe([idle], isRecording: true, at: .seconds(129)), [])
+        XCTAssertEqual(
+            watcher.observe([idle], isRecording: true, at: .seconds(130)),
+            [.stop("zoom")]
+        )
+    }
+
     /// Nothing was recording, so there is nothing to stop; the call just
     /// stops being the current one.
     func testACallThatEndsWithNothingRecordingSuggestsNothing() {

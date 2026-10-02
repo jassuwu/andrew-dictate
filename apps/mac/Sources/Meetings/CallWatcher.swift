@@ -21,6 +21,11 @@ struct CallWatcher {
         /// Only both together look like a call. The mic alone is dictation, a
         /// screen recorder, a voice memo; audio alone is a video or music.
         var looksLikeACall: Bool { holdsMic && playsAudio }
+
+        /// Either is enough to keep a call going. A participant who mutes
+        /// still hears everyone else, so losing the mic alone is not the end
+        /// of anything.
+        var keepsACallGoing: Bool { holdsMic || playsAudio }
     }
 
     enum Suggestion: Equatable, Sendable {
@@ -61,7 +66,7 @@ struct CallWatcher {
     ) -> [Suggestion] {
         recording = isRecording
         if var current = call {
-            if apps.contains(where: { $0.name == current.app }) {
+            if apps.contains(where: { $0.name == current.app && $0.keepsACallGoing }) {
                 current.quietSince = nil
             } else {
                 let since = current.quietSince ?? now
