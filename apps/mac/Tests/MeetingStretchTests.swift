@@ -193,6 +193,24 @@ final class MeetingStretchTests: XCTestCase {
         ])
     }
 
+    /// A one-line call, stopped before the model was ready and while the
+    /// line was still being said: stopping waits for the model, and the
+    /// words are in the file.
+    func testStoppingBeforeTheModelHasLoadedStillSavesTheWords() async throws {
+        engine.holdLoading()
+        let c = coordinator(stretches())
+        c.start(tapping: zoom)
+        await source.awaitStart()
+
+        await play([you("hello", from: 0.3, to: 1.0)], through: 1.0, on: c)
+        c.stop()
+        try await Task.sleep(for: .milliseconds(300))
+        engine.letLoad()
+
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, ["[00:00:00] you: hello"])
+    }
+
     // MARK: - an engine that fails
 
     func testAStretchTheEngineFailsOnOnceIsTriedAgain() async throws {

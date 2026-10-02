@@ -90,6 +90,13 @@ actor StretchTranscriber: MeetingTranscriber {
         await hearing?.value
         isFinished = true
         queue(you.flush() + them.flush())
+        // A model still loading is waited for: a meeting stopped in its
+        // first seconds must not be written out with none of its words. One
+        // that failed, or was never asked to load, has nothing to wait for.
+        if let loading, (try? await loading.value) != nil {
+            isReady = true
+            startWorking()
+        }
         while let worker {
             await worker.value
         }
