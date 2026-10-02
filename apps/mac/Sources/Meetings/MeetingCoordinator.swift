@@ -711,33 +711,50 @@ final class MeetingCoordinator: ObservableObject {
         var wait = thresholds.settleBeforeRebuild
         var failures = 0
         while await pause(wait), isRebuilding(meeting) {
+            let failed: MeetingRecord.Label
+            // Set before the rebuild, not after: the tone can be heard the
+            // instant the tap is back.
+            probeUntil = elapsed + thresholds.probeTimeout
             do {
-                // Set before the rebuild, not after: the tone can be heard
-                // the instant the tap is back.
-                probeUntil = elapsed + thresholds.probeTimeout
                 try await source.rebuild()
-                // A rebuilt tap must hear something before it is trusted
-                // again; a rebuild that produces silence is just a new gap.
-                return
+                // A rebuilt tap must hear its start sound before it is
+                // trusted again, and `ingest` closes the gap the moment it
+                // does. One that hears nothing came back as dead as the tap
+                // it replaced: every call `noErr`, every buffer zero.
+                guard await !heardAgain(meeting) else { return }
+                failed = .probeUnheard
             } catch {
                 logger.error("tap rebuild failed: \(error.localizedDescription, privacy: .public)")
-                guard isRebuilding(meeting) else { return }
-                failures += 1
-                // with the problem standing, the problem is the record: a
-                // try every half minute for an hour is not kept one by one.
+                failed = .rebuildFailed
+            }
+            guard isRebuilding(meeting) else { return }
+            failures += 1
+            // with the problem standing, the problem is the record: a try
+            // every half minute for an hour is not kept one by one.
+            if session.problem == nil {
+                meeting.notes.note(failed, at: elapsed)
+            }
+            if failures < thresholds.rebuildAttempts {
+                wait = thresholds.rebuildSpacing[failures - 1]
+            } else {
                 if session.problem == nil {
-                    meeting.notes.note(.rebuildFailed, at: elapsed)
+                    cannotHearTheCall(meeting)
                 }
-                if failures < thresholds.rebuildAttempts {
-                    wait = thresholds.rebuildSpacing[failures - 1]
-                } else {
-                    if session.problem == nil {
-                        cannotHearTheCall(meeting)
-                    }
-                    wait = thresholds.retryWhileTheProblemStands
-                }
+                wait = thresholds.retryWhileTheProblemStands
             }
         }
+    }
+
+    /// Until the rebuilt tap has been heard, or the probe window has passed
+    /// on the real clock. True once the meeting no longer waits on it.
+    private func heardAgain(_ meeting: Meeting) async -> Bool {
+        let step = Duration.milliseconds(50)
+        var waited = Duration.zero
+        while isRebuilding(meeting), waited < thresholds.probeTimeout {
+            guard await pause(step) else { break }
+            waited += step
+        }
+        return !isRebuilding(meeting)
     }
 
     private func cannotHearTheCall(_ meeting: Meeting) {

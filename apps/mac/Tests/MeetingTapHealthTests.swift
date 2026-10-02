@@ -390,6 +390,43 @@ final class MeetingTapHealthTests: XCTestCase {
         ])
     }
 
+    /// A rebuild can come back without complaint and still hear nothing —
+    /// 002 §6's dead tap is all `noErr`. A rebuilt tap that does not hear
+    /// its own start sound is a try that failed like any other: tried
+    /// again, and never taken for a recovery.
+    func testARebuiltTapThatDoesNotHearItsStartSoundIsATryThatFailed() async throws {
+        source.rebuiltTapsThatHearNothing = 1
+        let clock = FakeClock()
+        var thresholds = retrying
+        thresholds.probeTimeout = .milliseconds(300)
+        let c = coordinator(thresholds: thresholds, clock: clock)
+        c.start()
+        await source.awaitStart()
+        await play(loud(at: .zero), loud(at: .seconds(1)))
+
+        clock.advance(by: .seconds(60))
+        source.skip(to: .seconds(60))
+        c.probeTapIsAlive()
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(source.rebuilds, 1)
+        XCTAssertEqual(c.state, .rebuilding, "nothing heard yet")
+
+        await until { events.contains(.gapEnded) }
+        XCTAssertEqual(source.rebuilds, 2)
+        let at = source.rebuiltAt
+        guard at.count == 2 else { return }
+        XCTAssertGreaterThanOrEqual(at[1] - at[0], .milliseconds(400))
+        XCTAssertEqual(events, [.started, .gapBegan, .gapEnded])
+
+        c.stop()
+        await c.untilWrittenOut()
+        XCTAssertEqual(records.first?.events, [
+            .init(.gapBegan, atS: 2),
+            .init(.probeUnheard, atS: 60),
+            .init(.gapEnded, atS: 60.3),
+        ])
+    }
+
     /// A settle, then three tries in a row 100 ms and 200 ms apart, then
     /// one every 300 ms with the problem standing.
     private var retrying: MeetingThresholds {
@@ -513,6 +550,14 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
         lock.withLock { nextAt = max(nextAt, at) }
     }
 
+    /// How many rebuilds from now come back without a word of complaint
+    /// and a tap that hears nothing: every call `noErr`, every buffer zero.
+    var rebuiltTapsThatHearNothing: Int {
+        get { lock.withLock { _rebuiltTapsThatHearNothing } }
+        set { lock.withLock { _rebuiltTapsThatHearNothing = newValue } }
+    }
+    private var _rebuiltTapsThatHearNothing = 0
+
     /// How many rebuilds from now throw, the device not there yet.
     var rebuildsThatFail: Int {
         get { lock.withLock { _rebuildsThatFail } }
@@ -523,15 +568,20 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     /// A rebuilt tap plays the start sound, and hears it come back a moment
     /// later as far-side audio, the way the real one does.
     func rebuild() async throws {
-        let at = try lock.withLock { () throws -> Duration in
+        let at = try lock.withLock { () throws -> Duration? in
             _rebuilds += 1
             _rebuiltAt.append(ContinuousClock.now)
             if _rebuildsThatFail > 0 {
                 _rebuildsThatFail -= 1
                 throw DeviceGone()
             }
+            if _rebuiltTapsThatHearNothing > 0 {
+                _rebuiltTapsThatHearNothing -= 1
+                return nil
+            }
             return nextAt
         }
+        guard let at else { return }
         let n = 4_800
         send(.init(you: Array(repeating: 0, count: n),
                    them: (0..<n).map { sin(Float($0) * 0.05) * 0.3 }, at: at))
