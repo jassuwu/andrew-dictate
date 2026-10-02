@@ -73,8 +73,17 @@ final class AppLifecycleDelegate: NSObject, NSApplicationDelegate {
 @MainActor
 struct AndrewDictateApp: App {
     @StateObject private var coordinator = DictationCoordinator()
+    @StateObject private var updates = DailyUpdateCheck.live()
     @NSApplicationDelegateAdaptor(AppLifecycleDelegate.self)
     private var lifecycleDelegate
+
+    /// what clicking the update line does. the one-click brew upgrade
+    /// replaces this, and only this (ADR 0043).
+    private var updateHandOff: any UpdateHandOff {
+        ManualHandOff(confirm: { [weak coordinator] message in
+            coordinator?.sayWhenIdle(message)
+        })
+    }
 
     /// the badge carries hue and corner and nothing else. voiceover gets the
     /// sentence, including which mic is live.
@@ -239,6 +248,16 @@ struct AndrewDictateApp: App {
 
             Divider()
 
+            // a newer version is a line here and nothing else (ADR 0043):
+            // no dot on the badge, because a dot means the app needs you
+            // and an old version still works. a meeting owns the menu while
+            // it runs, so the line waits for it.
+            if let line = updates.line, !coordinator.meetings.isRecording {
+                Button(line.title) {
+                    updateHandOff.perform(line.action)
+                }
+            }
+
             // back from settings (reversing part of ADR 0030, recorded in
             // 0034): the mac-standard home for a menu bar app's identity.
             Button("about Andrew Dictate") {
@@ -265,6 +284,15 @@ struct AndrewDictateApp: App {
                 lifecycleDelegate.onTerminate = { [weak coordinator] in
                     coordinator?.prepareToQuit() ?? .terminateNow
                 }
+                // busy is anything but idle: loading the model, a take, a
+                // meeting. the check waits for the next tick.
+                updates.start(isDictating: { [weak coordinator] in
+                    guard let coordinator else {
+                        return true
+                    }
+                    return coordinator.state != .idle
+                        || coordinator.meetings.isRecording
+                })
             }
         }
 

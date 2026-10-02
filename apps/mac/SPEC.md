@@ -9,7 +9,7 @@ decisions in this spec are backed by ADRs kept in `docs/adr/` and research in `~
 
 - **name:** Andrew Dictate. binary/app: `Andrew Dictate.app`, cask `andrew-dictate`, repo `jassuwu/andrew-dictate` (MIT, public day one — ADR 0010).
 - **platform:** macOS 26+, Apple Silicon only. *(was 14+ until 0.8.0; the glass windows and the meeting tap both need 26, and a floor that moves once is better than two features that each say "not on this mac".)*
-- **thesis:** frontier-fast dictation, with the smallest possible surface: no account, no cloud, no settings maze, no subscription. trust is architectural — the app contains no networking code except the model downloader.
+- **thesis:** frontier-fast dictation, with the smallest possible surface: no account, no cloud, no settings maze, no subscription. trust is architectural. the app goes online in three places and no others: the model download, the about window's `check for updates`, and the daily update check, which sends dictate.jass.gg the running version and nothing else (ADR 0043).
 - **non-goals (v1):** windows/linux, iOS, always-on listening (deferred — ADR 0003), ~~meeting transcription~~ (**crossed 2026-08-22 — ADR 0023**: manual start and stop, the app never observes which processes hold the mic), ~~history browser~~ (**superseded — ADR 0022**), App Store.
 - **voice command mode: removed (2026-08-06).** shipped in early v1 (router tiers, agent delegation, ask/screen-ask), cut entirely to focus the product on dictation. this spec describes the app as it is; command-mode sections and terms are gone from here and the glossary.
 
@@ -48,7 +48,7 @@ one nonactivating, click-through `NSPanel` (borderless, floating, all-spaces): a
 
 the rule: **a failed dictation must never look like a successful one.** anything that goes wrong cuts the afterglow short and says why. the input device changing mid-take counts: airpods connecting discards the capture, so it is a loss path and speaks like one. sleep and screen-lock stay silent — nobody is there to read the pill.
 
-no dock icon. menu-bar item: the brand badge → menu: fix a word…, try that again, record a meeting ▸, settings, finish setup / run onboarding again, about, quit. `try that again` appears only in the two minutes after the speech model threw on a dictation — the samples are still in memory, and re-running them beats saying the whole paragraph over. a gold dot on the badge means the mic is live. a red dot on the badge means setup is wrong — a missing permission, or a speech model that never finished downloading. both leave the app unable to transcribe a word, so both wear the dot until they are fixed.
+no dock icon. menu-bar item: the brand badge → menu: fix a word…, try that again, record a meeting ▸, settings, finish setup / run onboarding again, update to <x>, about, quit. `update to <x>` appears only when the daily check heard of a newer version, and never during a meeting. it gets no dot on the badge, because an old version still works. `try that again` appears only in the two minutes after the speech model threw on a dictation — the samples are still in memory, and re-running them beats saying the whole paragraph over. a gold dot on the badge means the mic is live. a red dot on the badge means setup is wrong — a missing permission, or a speech model that never finished downloading. both leave the app unable to transcribe a word, so both wear the dot until they are fixed.
 
 ## 5. onboarding (once, one app click)
 
@@ -84,6 +84,7 @@ working targets, not commitments: key-up → transcript ≤ 250ms, key-up → in
 
 - unsigned in v1 (ADR 0009): github releases dmg + personal tap cask `jassuwu/tap/andrew-dictate`; README documents the gatekeeper step honestly. signing + notarization + sparkle gate the "tell other people" milestone.
 - **about screen:** FluidAudio (Apache-2.0) notice, parakeet weights (CC-BY-4.0) attribution, MIT license.
+- **the update check (ADR 0043):** once a day, and when the menu opens on a check more than a day old, the app asks `dictate.jass.gg/api/latest?version=<running>`. the user agent and accept-language are pinned, so every copy sends the same request apart from the version. it waits out a dictation, a model load, or a meeting. offline doesn't count as the day's check; a reply without a version does. any failure shows nothing, and the automatic path never falls back to github. the endpoint (`apps/site/api/latest.ts`) reads github's `/releases/latest` redirect and is cached at vercel's edge for an hour. clicking the line copies the `brew upgrade` command and the pill says `copied — paste it in terminal`, or it opens the releases page for a dmg install. settings › general › `check for updates` turns it off, and off means no request.
 
 ## 9. milestones
 

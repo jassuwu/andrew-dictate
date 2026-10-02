@@ -237,6 +237,41 @@ final class AppSettingsTests: XCTestCase {
         )
     }
 
+    /// ADR 0043: the daily update check ships on, and has never asked.
+    func testTheUpdateCheckIsOnAndHasNeverAsked() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppSettings(userDefaults: userDefaults)
+
+        XCTAssertTrue(settings.checksForUpdates)
+        XCTAssertNil(settings.updateCheckedAt)
+        XCTAssertNil(settings.newestVersionSeen)
+    }
+
+    /// the switch, and the last answer, survive a relaunch — otherwise
+    /// "once a day" would be "once a launch".
+    func testTheUpdateCheckSwitchAndItsLastAnswerPersist() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let checkedAt = Date(timeIntervalSince1970: 1_790_000_000)
+
+        let settings = AppSettings(userDefaults: userDefaults)
+        settings.checksForUpdates = false
+        settings.updateCheckedAt = checkedAt
+        settings.newestVersionSeen = "0.9.5"
+
+        let reloaded = AppSettings(userDefaults: userDefaults)
+        XCTAssertFalse(reloaded.checksForUpdates)
+        XCTAssertEqual(reloaded.updateCheckedAt, checkedAt)
+        XCTAssertEqual(reloaded.newestVersionSeen, "0.9.5")
+        XCTAssertEqual(
+            userDefaults.object(forKey: "AndrewDictate.checksForUpdates")
+                as? Bool,
+            false
+        )
+    }
+
     private func makeUserDefaults() -> (UserDefaults, String) {
         let suiteName = "AndrewDictateTests.AppSettings.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
