@@ -137,6 +137,7 @@ targets:
           - WhisperMeetingTranscriber.swift
           - ParakeetStretchEngine.swift
           - SileroDetector.swift
+          - WhisperStretchEngine.swift
       - Sources/Settings/MeetingsListModel.swift
       - Sources/Onboarding/OnboardingMeetingSetup.swift
       - Sources/App/AppIdentity.swift
