@@ -67,6 +67,81 @@ final class UtteranceMachineInterruptionTests: XCTestCase {
         XCTAssertEqual(keepAwake, [true, false])
     }
 
+    /// whatever ends the take lets the display sleep again, once, and a
+    /// take that never reached the mic never held it.
+    func testEveryEndingLetsTheDisplaySleep() async {
+        let endings: [(String, @MainActor (UtteranceMachine) async -> Void)] = [
+            ("released", { $0.keyUp() }),
+            ("esc", { _ = $0.escape() }),
+            ("brushed", { $0.keyCancelled() }),
+            ("the lock", { $0.captureInterrupted(.systemPaused) }),
+            ("the mic changed", { $0.captureInterrupted(.deviceChanged) }),
+            ("the cap", { _ = $0.capReached() }),
+            ("a setting rebuilt the mic", { $0.abandonRecording() }),
+            ("the speech model went", { $0.abandon() }),
+        ]
+        for (ending, end) in endings {
+            events = []
+            let m = machine()
+            m.keyDown()
+            await pass(.seconds(1))
+            await end(m)
+            await settle()
+            XCTAssertEqual(keepAwake, [true, false], ending)
+            m.abandon()
+            await pass(.seconds(2))
+        }
+    }
+
+    /// hands-free is the take most likely to run for minutes untouched.
+    func testALockedRecordingHoldsTheDisplayUntilTheTapThatEndsIt() async {
+        let m = machine()
+        m.doubleTapped()
+        await pass(.seconds(90))
+        XCTAssertEqual(keepAwake, [true])
+
+        m.keyUp()
+        XCTAssertEqual(keepAwake, [true, false])
+    }
+
+    /// a mic that refuses, never answers, or has no device behind it ends
+    /// the take before it was live, and lets go all the same.
+    func testAMicThatNeverWentLiveLetsTheDisplaySleep() async {
+        let failures: [(String, @MainActor () -> Void)] = [
+            ("refused", { self.mic.failsToStart = true }),
+            ("no device", { self.mic.hasNoDevice = true }),
+            ("never answered", { self.mic.holdsStart = true }),
+        ]
+        for (failure, arrange) in failures {
+            events = []
+            mic.release()
+            mic = FakeMic(clock: clock)
+            arrange()
+            let m = machine()
+            m.keyDown()
+            await pass(.seconds(2))
+            XCTAssertEqual(keepAwake, [true, false], failure)
+            XCTAssertEqual(m.state, .idle, failure)
+        }
+    }
+
+    /// a stop that throws, or never comes back, has already let the
+    /// display go: the take was over the moment it was asked.
+    func testAMicThatWillNotStopHasAlreadyLetTheDisplayGo() async {
+        for holds in [false, true] {
+            events = []
+            mic.release()
+            mic = FakeMic(clock: clock)
+            mic.failsToStop = !holds
+            mic.holdsStop = holds
+            let m = machine()
+            await hold(m, for: .seconds(1))
+            await pass(.seconds(2))
+            XCTAssertEqual(keepAwake, [true, false])
+            XCTAssertEqual(outcomes, [.recordingLost])
+        }
+    }
+
     // MARK: - helpers
 
     private var keepAwake: [Bool] {
