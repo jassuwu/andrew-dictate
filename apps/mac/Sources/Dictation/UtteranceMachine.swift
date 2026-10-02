@@ -126,6 +126,9 @@ final class UtteranceMachine {
     private let engine: any TranscriptionEngine
     private let inserter: any Inserter
     private let clock: any UtteranceClock
+    /// how long the mic gets to start, or to stop, before the press stops
+    /// waiting on it. a healthy one answers in tens of milliseconds.
+    static let microphoneDeadline = Duration.milliseconds(1_500)
     private let dictionary: @MainActor () -> [DictionaryEntry]
     private let ownBundleIdentifier: String?
     /// how long the lamp's afterglow runs (`HUDWaveMotion.coolDuration`).
@@ -135,6 +138,10 @@ final class UtteranceMachine {
     /// told to stop or cancel.
     private var capture: Capture?
     private var captureSequence: UInt64 = 0
+    /// the start still out, whichever press asked for it, and the deadline
+    /// it has to meet.
+    private var pendingStart: UInt64?
+    private var startDeadline: Task<Void, Never>?
     /// a double-tapped key leaves nothing to hold, so nothing to feel. the
     /// HUD has to carry the difference for as long as the capture runs.
     private var isRecordingLocked = false
@@ -275,6 +282,15 @@ final class UtteranceMachine {
         id: UInt64,
         timelineID: UInt64
     ) {
+        pendingStart = id
+        startDeadline?.cancel()
+        startDeadline = Task { @MainActor [weak self, clock] in
+            try? await clock.sleep(for: Self.microphoneDeadline)
+            guard !Task.isCancelled else {
+                return
+            }
+            self?.microphoneStartTimedOut(id)
+        }
         // immediate: the start is asked for inside this key-down, not a
         // run-loop turn later, and a mic that answers at once is live
         // before key-down returns.
@@ -294,6 +310,9 @@ final class UtteranceMachine {
     }
 
     private func microphoneStarted(_ id: UInt64) {
+        guard startAnswered(id) else {
+            return
+        }
         // a press that ended while its mic was opening asked for the
         // cancel after the start, so the cancel lands after it too.
         guard var capture, capture.id == id else {
@@ -335,8 +354,49 @@ final class UtteranceMachine {
         }
     }
 
-    private func microphoneFailedToStart(_ id: UInt64, error: any Error) {
+    /// the start answered. false when the deadline got there first: that
+    /// mic has already been given up on, and its late answer means nothing.
+    private func startAnswered(_ id: UInt64) -> Bool {
+        guard pendingStart == id else {
+            return false
+        }
+        pendingStart = nil
+        startDeadline?.cancel()
+        startDeadline = nil
+        return true
+    }
+
+    /// the mic never answered. a device still settling after a monitor or
+    /// the lid can wedge inside Core Audio for good, and the next press
+    /// must not queue behind it: the press ends now, out loud, and the app
+    /// throws that capture away whole.
+    private func microphoneStartTimedOut(_ id: UInt64) {
+        guard pendingStart == id else {
+            return
+        }
+        pendingStart = nil
+        startDeadline = nil
         guard let capture, capture.id == id else {
+            return
+        }
+
+        audioLogger.error("the microphone didn't start in time; dropping it")
+        setRecordingLocked(false)
+        activeFocusAnchor = nil
+        activeTimeline = nil
+        press?.mic = capture.microphone.deviceDescription
+        // not cancelled: a mic that never answered is asked nothing more.
+        self.capture = nil
+        emit(.microphoneDropped)
+        setState(.idle, fastHUDDismiss: true)
+        flashNotice("microphone isn't responding", duration: 2)
+        endPress(.micNotResponding)
+    }
+
+    private func microphoneFailedToStart(_ id: UInt64, error: any Error) {
+        guard startAnswered(id),
+              let capture,
+              capture.id == id else {
             return
         }
 

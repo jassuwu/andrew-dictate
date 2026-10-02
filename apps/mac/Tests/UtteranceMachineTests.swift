@@ -638,6 +638,42 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(outcomes, [.brushed])
     }
 
+    /// a mic that never answers ends the press within a moment and says so,
+    /// and is dropped: the next press is handed a fresh one, and records.
+    func testAMicThatNeverAnswersIsDroppedAndTheNextPressRecords() async {
+        let m = machine()
+        mic.holdsStart = true
+        m.keyDown()
+
+        await pass(.milliseconds(1_400))
+        XCTAssertEqual(m.state, .recording)
+        XCTAssertEqual(pills, [])
+
+        await pass(.milliseconds(100))
+        await settle { !self.pills.isEmpty }
+        XCTAssertEqual(pills, [Pill("microphone isn't responding", 2)])
+        XCTAssertTrue(events.contains(.microphoneDropped))
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(states.last, .init(.idle, fast: true))
+        XCTAssertEqual(chimes, [])
+        XCTAssertEqual(outcomes, [.micNotResponding])
+
+        let fresh = FakeMic(clock: clock)
+        micForPress = fresh
+        pillShowing = false
+        engine.reply = .success("second try")
+        await hold(m, for: .seconds(1))
+        await settle { self.inserter.inserted.count == 1 }
+        XCTAssertEqual(inserter.inserted, ["Second try."])
+        XCTAssertEqual(outcomes, [.micNotResponding, .delivered])
+
+        // the wedged mic answering at last changes nothing.
+        mic.finishStart()
+        await settle()
+        XCTAssertEqual(mic.stops, 0)
+        XCTAssertEqual(outcomes, [.micNotResponding, .delivered])
+    }
+
     // MARK: - the mac underneath
 
     /// today's behaviour, which ticket 06 reverses: sleep or the lock ends

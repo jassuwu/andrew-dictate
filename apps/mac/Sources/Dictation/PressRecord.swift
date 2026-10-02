@@ -26,6 +26,8 @@ struct PressRecord: Equatable, Sendable, Codable {
         /// the press was answered with a pill and never recorded.
         case refused(Refusal)
         case couldNotStartRecording
+        /// the mic never answered the start, and the press stopped waiting.
+        case micNotResponding
         case recordingLost
         /// the app took the take away: a setting that rebuilds the mic, or
         /// the speech model being switched or removed under it.
@@ -167,6 +169,7 @@ extension PressRecord.Outcome {
         case .interrupted: "interrupted"
         case .refused: "refused"
         case .couldNotStartRecording: "couldnt-start-recording"
+        case .micNotResponding: "mic-not-responding"
         case .recordingLost: "recording-lost"
         case .abandoned: "abandoned"
         case .droppedAsHung: "dropped-as-hung"
@@ -186,8 +189,8 @@ extension PressRecord.Outcome {
         case let .refused(refusal):
             refusal.rawValue
         case .delivered, .heardNothing, .brushed, .couldNotTranscribe,
-             .cancelled, .couldNotStartRecording, .recordingLost,
-             .abandoned, .droppedAsHung:
+             .cancelled, .couldNotStartRecording, .micNotResponding,
+             .recordingLost, .abandoned, .droppedAsHung:
             nil
         }
     }
@@ -200,6 +203,7 @@ extension PressRecord.Outcome {
         case ("couldnt-transcribe", nil): self = .couldNotTranscribe
         case ("cancelled", nil): self = .cancelled
         case ("couldnt-start-recording", nil): self = .couldNotStartRecording
+        case ("mic-not-responding", nil): self = .micNotResponding
         case ("recording-lost", nil): self = .recordingLost
         case ("abandoned", nil): self = .abandoned
         case ("dropped-as-hung", nil): self = .droppedAsHung
