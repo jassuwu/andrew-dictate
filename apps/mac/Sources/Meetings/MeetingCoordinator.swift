@@ -190,8 +190,9 @@ final class MeetingCoordinator: ObservableObject {
     private var session: MeetingSession
     private var health: TapHealthMonitor
     private var nudgePending = false
-    /// The tap hears this app too, so the start sound it plays to prove
-    /// itself lands in the far channel a moment after every rebuild. Until
+    /// The tap hears this app too, so the tones it plays to prove itself —
+    /// the start sound after every rebuild, the quiet probe when the far
+    /// side has gone quiet — land in the far channel a moment later. Until
     /// this mark passes, audio is proof the tap works and nothing more —
     /// counting our own chirp as the room speaking is what kept the quiet
     /// hour from ever coming round.
@@ -476,7 +477,8 @@ final class MeetingCoordinator: ObservableObject {
     /// sleep — which stops the callback outright — looks like nothing at all
     /// from inside `ingest`. The wall clock is the only witness: if nothing
     /// has arrived for five seconds across a system event, the tap is gone
-    /// and this takes the same route a zero-sample buffer would (SPEC §11).
+    /// and this takes the same route as a quiet probe the tap did not hear
+    /// (SPEC §11).
     func probeTapIsAlive() {
         noteTheTapStoppedCallingBack(after: Self.silentTapOnWaking)
     }
