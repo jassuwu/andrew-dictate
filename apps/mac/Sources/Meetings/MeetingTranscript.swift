@@ -129,8 +129,9 @@ enum MeetingTranscriptFile {
             lines.append("")
         }
 
-        for turn in transcript.turns {
-            lines.append("[\(turn.at.stamp)] \(turn.speaker.label): \(turn.text)")
+        for paragraph in paragraphs(of: transcript.turns) {
+            lines.append(
+                "[\(paragraph.at.stamp)] \(paragraph.speaker.label): \(paragraph.text)")
             lines.append("")
         }
         // every block above ends with an empty line, so the join already
@@ -268,6 +269,22 @@ enum MeetingTranscriptFile {
     }
 
     // MARK: - formatting
+
+    /// What one speaker said in a row, stamped with the first line's time —
+    /// the live pass hands over fragments, and a person reads turns.
+    private static func paragraphs(of turns: [MeetingTurn]) -> [MeetingTurn] {
+        var out: [MeetingTurn] = []
+        for turn in turns {
+            if let last = out.last, last.speaker == turn.speaker {
+                out[out.count - 1] = MeetingTurn(
+                    speaker: last.speaker, at: last.at,
+                    text: last.text + " " + turn.text)
+            } else {
+                out.append(turn)
+            }
+        }
+        return out
+    }
 
     private static func seconds(_ duration: Duration) -> Int64 {
         duration.components.seconds

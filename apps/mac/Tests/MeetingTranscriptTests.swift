@@ -112,6 +112,29 @@ final class MeetingTranscriptTests: XCTestCase {
         XCTAssertEqual(MeetingTranscriptFile.markdown(transcript, timeZone: tz), expected)
     }
 
+    // MARK: - turns
+
+    func testConsecutiveLinesBySameSpeakerAreOneParagraph() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(turns: [
+                .init(speaker: .you, at: .seconds(4), text: "so the thing is"),
+                .init(speaker: .you, at: .seconds(9), text: "we shipped it on friday."),
+                .init(speaker: .them(nil), at: .seconds(15), text: "right."),
+                .init(speaker: .you, at: .seconds(20), text: "and nobody noticed."),
+            ]),
+            in: parent, timeZone: tz)
+
+        XCTAssertEqual(
+            try body(of: url),
+            """
+            [00:00:04] you: so the thing is we shipped it on friday.
+
+            [00:00:15] them: right.
+
+            [00:00:20] you: and nobody noticed.
+            """)
+    }
+
     // MARK: - round trip
 
     func testWriteThenSummaryReadsTheFrontMatterBack() throws {
@@ -205,6 +228,25 @@ final class MeetingTranscriptTests: XCTestCase {
     }
 
     // MARK: -
+
+    private func meeting(
+        duration: Duration = .seconds(600),
+        gaps: [MeetingSession.Gap] = [],
+        turns: [MeetingTurn]
+    ) -> MeetingTranscript {
+        MeetingTranscript(
+            app: "zoom", started: started(), duration: duration,
+            engine: "whisper-large-v3-turbo", gaps: gaps, recovered: false,
+            turns: turns)
+    }
+
+    /// Everything the file says after its front matter, without the blank
+    /// lines that frame it.
+    private func body(of url: URL) throws -> String {
+        let text = try String(contentsOf: url, encoding: .utf8)
+        let close = try XCTUnwrap(text.range(of: "\n---\n"))
+        return text[close.upperBound...].trimmingCharacters(in: .newlines)
+    }
 
     private func permissions(of url: URL) -> Int? {
         (try? FileManager.default.attributesOfItem(atPath: url.path))?[.posixPermissions] as? Int
