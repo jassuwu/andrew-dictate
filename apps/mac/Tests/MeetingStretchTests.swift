@@ -164,6 +164,35 @@ final class MeetingStretchTests: XCTestCase {
         ])
     }
 
+    // MARK: - a model that takes its time
+
+    /// Whisper takes ten-odd seconds to load and the tap opens at once.
+    /// What is said in those seconds waits for it, rather than being lost.
+    func testWhatIsSaidWhileTheModelLoadsIsTranscribedOnceItHas() async throws {
+        engine.holdLoading()
+        let c = coordinator(stretches())
+        c.start(tapping: zoom)
+        await source.awaitStart()
+
+        await play([
+            you("can everyone see my screen", from: 1.3, to: 2.5),
+            them("yes", from: 3.3, to: 3.8),
+        ], through: 5.0, on: c)
+        XCTAssertEqual(handed(), [], "nothing reaches a model that has not loaded")
+        XCTAssertEqual(live(c), [])
+
+        engine.letLoad()
+        await waitFor { c.liveLines.count == 2 }
+
+        XCTAssertEqual(live(c), ["you 1.0 can everyone see my screen", "them 3.0 yes"])
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, [
+            "[00:00:01] you: can everyone see my screen",
+            "[00:00:03] them: yes",
+        ])
+    }
+
     // MARK: - an engine that fails
 
     func testAStretchTheEngineFailsOnOnceIsTriedAgain() async throws {
@@ -412,6 +441,7 @@ private final class PhraseEngine: StretchEngine, @unchecked Sendable {
     private var phrases: [String] = []
     private var decoded: [(phrase: String, samples: Int)] = []
     private var failures: [String: Int] = [:]
+    private var isHeld = false
 
     func loudness(of phrase: String) -> Float {
         lock.withLock {
@@ -431,7 +461,20 @@ private final class PhraseEngine: StretchEngine, @unchecked Sendable {
         lock.withLock { decoded }
     }
 
-    func load() async throws {}
+    /// `load` does not return until `letLoad`.
+    func holdLoading() {
+        lock.withLock { isHeld = true }
+    }
+
+    func letLoad() {
+        lock.withLock { isHeld = false }
+    }
+
+    func load() async throws {
+        while lock.withLock({ isHeld }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
 
     func text(of samples: [Float]) async throws -> String {
         let peak = samples.reduce(Float(0)) { max($0, abs($1)) }
