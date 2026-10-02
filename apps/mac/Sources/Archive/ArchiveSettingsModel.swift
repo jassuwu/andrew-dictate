@@ -14,9 +14,16 @@ final class ArchiveSettingsModel: ObservableObject {
     @Published private(set) var failure: String?
 
     private let archive: DictationArchive
+    /// no words in it, but it says when you were at your mac, so it goes
+    /// with the history rather than outliving it.
+    private let pressLog: PressLogStore
 
-    init(archive: DictationArchive = DictationArchive()) {
+    init(
+        archive: DictationArchive = DictationArchive(),
+        pressLog: PressLogStore = PressLogStore()
+    ) {
         self.archive = archive
+        self.pressLog = pressLog
         refresh()
     }
 
@@ -57,6 +64,7 @@ final class ArchiveSettingsModel: ObservableObject {
     func deleteEverything() {
         do {
             try archive.deleteAll()
+            try pressLog.deleteAll()
             count = 0
             failure = nil
         } catch {
