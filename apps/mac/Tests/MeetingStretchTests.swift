@@ -456,6 +456,21 @@ final class MeetingStretchTests: XCTestCase {
             MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).count, 0)
     }
 
+    /// Nobody spoke: nothing was cut, so nothing failed. That is a meeting
+    /// with no turns in it, written out like any other, not a spool kept
+    /// back to be tried again at every launch.
+    func testASpoolNobodySpokeInIsWrittenOutWithNoTurns() async throws {
+        let spool = try await spoolLeftBehind([])
+
+        let c = coordinator(stretches())
+        c.recoverOrphans()
+
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, [])
+        XCTAssertEqual(handed(), [])
+        XCTAssertEqual(spool.orphans().count, 0)
+    }
+
     // MARK: - the numbers
 
     /// What the meeting's record will be told: stretches decoded per side,
