@@ -677,15 +677,19 @@ final class MeetingCoordinator: ObservableObject {
     /// is a few seconds of compressing.
     private func keep(_ handle: MeetingSpool.Handle, as label: KeptAudio.Label) async {
         let keptAudio = keptAudio
-        await Task.detached(priority: .utility) {
+        let kept = await Task.detached(priority: .utility) {
             keptAudio.keep(handle, label: label)
         }.value
+        if !kept {
+            // the spool stays, marked: the next launch keeps it from there.
+            logger.error("a meeting's audio could not be kept yet; its spool stays")
+        }
     }
 
     /// After every meeting, and every recovery: whatever is past its date.
     private func sweepKeptAudio() async {
         let keptAudio = keptAudio
-        await Task.detached(priority: .utility) {
+        _ = await Task.detached(priority: .utility) {
             keptAudio.sweep()
         }.value
     }
