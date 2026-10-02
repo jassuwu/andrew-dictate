@@ -6,8 +6,7 @@ import WhisperKit
 /// translate). Each stretch is one decode with no window of its own to
 /// manage, because none is longer than the 30 s whisper reads at once.
 ///
-/// Loaded the way `WhisperMeetingTranscriber` loads it, from the folder
-/// setup downloaded it to and never from the network.
+/// Loaded from the folder setup downloaded it to and never from the network.
 actor WhisperStretchEngine: StretchEngine {
     enum Failure: Error, LocalizedError {
         case notLoaded

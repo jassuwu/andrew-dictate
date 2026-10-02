@@ -134,7 +134,6 @@ targets:
           # not link; the coordinator is tested through the seams instead
           - FluidDiarizer.swift
           - MeetingEngines.swift
-          - WhisperMeetingTranscriber.swift
           - ParakeetStretchEngine.swift
           - SileroDetector.swift
           - WhisperStretchEngine.swift

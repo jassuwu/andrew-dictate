@@ -51,11 +51,8 @@ enum MeetingEngines {
 
     /// What listens to a meeting, for the model it was started with.
     ///
-    /// Parakeet reads the meeting a stretch at a time: each side cut where
+    /// Every model reads the meeting a stretch at a time: each side cut where
     /// Silero hears speech begin and end, and each stretch decoded once.
-    /// Whisper does not yet — it still re-reads a rolling window of both
-    /// sides summed. Moving it over is the one line marked below, with
-    /// `WhisperStretchEngine`, and then `WhisperMeetingTranscriber` goes.
     static func makeTranscriber(for model: MeetingModel) async throws -> any MeetingTranscriber {
         guard isInstalled(model) else {
             throw Failure.notInstalled(model)
@@ -64,8 +61,7 @@ enum MeetingEngines {
         case .parakeetV3:
             return stretches(ParakeetStretchEngine(), ceiling: ParakeetStretchEngine.ceiling)
         case .whisperLargeV3, .whisperLargeV3Turbo:
-            // → stretches(WhisperStretchEngine(model: model), ceiling: WhisperStretchEngine.ceiling)
-            return WhisperMeetingTranscriber(model: model)
+            return stretches(WhisperStretchEngine(model: model), ceiling: WhisperStretchEngine.ceiling)
         }
     }
 
