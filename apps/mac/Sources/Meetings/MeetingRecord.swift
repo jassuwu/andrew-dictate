@@ -12,6 +12,10 @@ struct MeetingRecord: Equatable, Sendable, Codable {
     enum Outcome: Equatable, Sendable {
         /// the transcript is on disk.
         case saved
+        /// the transcript is on disk and the coverage check found it thin,
+        /// read again or not: it says `complete: false` and why, and the
+        /// audio is kept.
+        case savedThin
         /// nothing was captured, so there was nothing to write.
         case nothingKept(NothingKept)
         /// the model could not be made or would not load. the audio stays
@@ -71,6 +75,39 @@ struct MeetingRecord: Equatable, Sendable, Codable {
     var events: [Event] = []
     /// the engine's own count of its work, for an engine that keeps one.
     var decoding: Decoding?
+    /// what the coverage check made of the transcript, for a meeting that
+    /// got as far as being checked.
+    var coverage: Coverage?
+    /// whether the meeting's audio was kept after its transcript was
+    /// written, and until when. kept with no date is kept until you delete
+    /// it: the transcript did not cover the meeting.
+    var audioKept = false
+    var audioKeptUntil: Date?
+}
+
+// MARK: - coverage
+
+extension MeetingRecord {
+    /// the coverage check's result and the numbers it was reached from:
+    /// counts and seconds, never what was said.
+    struct Coverage: Equatable, Sendable, Codable {
+        var result: CoverageCheck.Result
+        /// the check's reason, in the front matter's words: why it stayed
+        /// thin, or, for a pass after a rerun, why it was read again.
+        var reason: String?
+        /// seconds of speech the transcriber cut, per side, and of that the
+        /// seconds it never read. nil for an engine that keeps no count.
+        var speechYouS: Double?
+        var speechThemS: Double?
+        var unreadYouS: Double?
+        var unreadThemS: Double?
+        /// `you` stretches let go as the far side coming back through the
+        /// mic: not speech of yours, and not counted as any.
+        var bleed: Int?
+        /// how long the far side was louder than the silence floor, from
+        /// the spool and not the transcriber.
+        var farSideLoudS: Double = 0
+    }
 }
 
 // MARK: - decoding
@@ -148,7 +185,28 @@ extension MeetingRecord {
             toDiskS: try container.decodeIfPresent(Double.self, forKey: .toDiskS),
             recovered: try container.decodeIfPresent(Bool.self, forKey: .recovered) ?? false,
             events: try container.decodeIfPresent([Event].self, forKey: .events) ?? [],
-            decoding: try container.decodeIfPresent(Decoding.self, forKey: .decoding)
+            decoding: try container.decodeIfPresent(Decoding.self, forKey: .decoding),
+            // a coverage this build cannot make out — a result it has no
+            // name for — is a coverage it does not have, not a record lost.
+            coverage: (try? container.decodeIfPresent(Coverage.self, forKey: .coverage)) ?? nil,
+            audioKept: try container.decodeIfPresent(Bool.self, forKey: .audioKept) ?? false,
+            audioKeptUntil: try container.decodeIfPresent(Date.self, forKey: .audioKeptUntil)
+        )
+    }
+}
+
+extension MeetingRecord.Coverage {
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            result: try container.decode(CoverageCheck.Result.self, forKey: .result),
+            reason: try container.decodeIfPresent(String.self, forKey: .reason),
+            speechYouS: try container.decodeIfPresent(Double.self, forKey: .speechYouS),
+            speechThemS: try container.decodeIfPresent(Double.self, forKey: .speechThemS),
+            unreadYouS: try container.decodeIfPresent(Double.self, forKey: .unreadYouS),
+            unreadThemS: try container.decodeIfPresent(Double.self, forKey: .unreadThemS),
+            bleed: try container.decodeIfPresent(Int.self, forKey: .bleed),
+            farSideLoudS: try container.decodeIfPresent(Double.self, forKey: .farSideLoudS) ?? 0
         )
     }
 }
@@ -192,7 +250,10 @@ extension MeetingRecord {
         toDisk: Duration? = nil,
         recovered: Bool = false,
         events: [Event] = [],
-        tally: StretchTally? = nil
+        tally: StretchTally? = nil,
+        coverage: Coverage? = nil,
+        audioKept: Bool = false,
+        audioKeptUntil: Date? = nil
     ) {
         self.init(
             outcome: outcome,
@@ -214,7 +275,10 @@ extension MeetingRecord {
                     failed: $0.failed,
                     mostBehindS: Self.seconds($0.mostBehind),
                     lastBehindS: Self.seconds($0.lastBehind))
-            }
+            },
+            coverage: coverage,
+            audioKept: audioKept,
+            audioKeptUntil: audioKeptUntil
         )
     }
 
@@ -246,6 +310,29 @@ extension MeetingRecord {
     }
 }
 
+extension MeetingRecord.Coverage {
+    /// the check's result, from the reading it settled on: the speech in
+    /// the transcriber's count, when it keeps one, and the far side as the
+    /// spool heard it.
+    init(
+        _ result: CoverageCheck.Result,
+        reason: String?,
+        tally: StretchTally?,
+        farSideLoud: Duration
+    ) {
+        let seconds = MeetingRecord.seconds
+        self.init(
+            result: result,
+            reason: reason,
+            speechYouS: tally.map { seconds($0.speechYou) },
+            speechThemS: tally.map { seconds($0.speechThem) },
+            unreadYouS: tally.map { seconds($0.speechYou - $0.readYou) },
+            unreadThemS: tally.map { seconds($0.speechThem - $0.readThem) },
+            bleed: tally?.bleed,
+            farSideLoudS: seconds(farSideLoud))
+    }
+}
+
 // MARK: - the meeting as it ends
 
 extension MeetingRecord {
@@ -272,6 +359,7 @@ extension MeetingRecord.Outcome {
     var name: String {
         switch self {
         case .saved: "saved"
+        case .savedThin: "saved-thin"
         case .nothingKept: "nothing-kept"
         case .modelFailed: "model-failed"
         case .couldNotWrite: "couldnt-write"
@@ -286,7 +374,7 @@ extension MeetingRecord.Outcome {
         switch self {
         case .nothingKept(.tapNeverHeard): "tap-never-heard"
         case .nothingKept(.stoppedBeforeCapture): "stopped-before-capture"
-        case .saved, .modelFailed, .couldNotWrite, .couldNotRecover, .setAside,
+        case .saved, .savedThin, .modelFailed, .couldNotWrite, .couldNotRecover, .setAside,
              .spoolUnreadable:
             nil
         }
@@ -295,6 +383,7 @@ extension MeetingRecord.Outcome {
     init?(name: String, why: String?) {
         switch (name, why) {
         case ("saved", nil): self = .saved
+        case ("saved-thin", nil): self = .savedThin
         case ("model-failed", nil): self = .modelFailed
         case ("couldnt-write", nil): self = .couldNotWrite
         case ("couldnt-recover", nil): self = .couldNotRecover

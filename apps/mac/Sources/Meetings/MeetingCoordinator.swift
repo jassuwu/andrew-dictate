@@ -745,6 +745,7 @@ final class MeetingCoordinator: ObservableObject {
             ? turns
             : await splitSpeakers(in: turns, them: them, gaps: recording.gaps)
 
+        let thin = covered.result == .thin
         let transcript = MeetingTranscript(
             app: app,
             started: started,
@@ -752,15 +753,22 @@ final class MeetingCoordinator: ObservableObject {
             engine: model.rawValue,
             gaps: recording.gaps,
             recovered: recovered,
-            reason: covered.result == .thin ? covered.reason : nil,
+            reason: thin ? covered.reason : nil,
             turns: split
         )
-        func record(_ outcome: MeetingRecord.Outcome, toDisk: Duration? = nil) -> MeetingRecord {
+        func record(
+            _ outcome: MeetingRecord.Outcome, toDisk: Duration? = nil,
+            audioKept: Bool = false
+        ) -> MeetingRecord {
             MeetingRecord(
                 outcome, app: app, model: model, startedAt: started,
                 duration: recording.duration, gaps: recording.gaps, turns: split,
                 toDisk: toDisk, recovered: recovered, events: notes.events,
-                tally: tally)
+                tally: tally,
+                coverage: .init(
+                    covered.result, reason: covered.reason, tally: tally,
+                    farSideLoud: covered.farSideLoud),
+                audioKept: audioKept)
         }
 
         let url: URL
@@ -776,7 +784,7 @@ final class MeetingCoordinator: ObservableObject {
             onEvent?(.saveFailed(error.localizedDescription))
             return nil
         }
-        if covered.result == .thin {
+        if thin {
             // the only way to check the file, or read it again: kept until
             // you delete it, and no longer a spool for the next launch to
             // write out a second time.
@@ -786,7 +794,9 @@ final class MeetingCoordinator: ObservableObject {
         } else {
             try? spool.finish(handle)
         }
-        keepMeetingRecord?(record(.saved, toDisk: notes.stopped.map { now() - $0 }))
+        keepMeetingRecord?(record(
+            thin ? .savedThin : .saved, toDisk: notes.stopped.map { now() - $0 },
+            audioKept: thin))
 
         let summary = (try? MeetingTranscriptFile.summary(of: url)) ?? MeetingSummary(
             fileURL: url, app: app, started: started, duration: recording.duration,

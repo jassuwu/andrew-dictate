@@ -135,6 +135,27 @@ final class MeetingCoverageTests: XCTestCase {
         XCTAssertEqual(try keptSpools(), 1)
     }
 
+    /// The record says so: a save of its own kind, the check's result and
+    /// reason, the numbers it was reached from, and the audio kept with no
+    /// date to go.
+    func testTheRecordOfAMeetingThatStayedThinSaysSo() async throws {
+        let (live, again) = stillThin()
+        transcribers.lineUp(live, again)
+
+        try await meeting(seconds: 2)
+
+        XCTAssertEqual(records.count, 1)
+        let record = try XCTUnwrap(records.first)
+        XCTAssertEqual(record.outcome, .savedThin)
+        XCTAssertEqual(record.outcome.name, "saved-thin")
+        XCTAssertEqual(record.coverage, .init(
+            result: .thin, reason: "far fewer words than the talk that was heard",
+            speechYouS: 0, speechThemS: 3_600, unreadYouS: 0, unreadThemS: 0,
+            bleed: 0, farSideLoudS: 2))
+        XCTAssertEqual(record.audioKept, true)
+        XCTAssertNil(record.audioKeptUntil)
+    }
+
     // MARK: - helpers
 
     /// Spool folders with their audio still in them.
