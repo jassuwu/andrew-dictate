@@ -177,7 +177,8 @@ final class DictationCoordinator: ObservableObject {
     // MARK: meetings (ADR 0023, 0040)
     /// built on first use: a mac that only dictates never pays for meetings.
     let meetings: LazyMeetings
-    let liveTranscript = LiveTranscriptModel(app: "", elapsed: .zero)
+    /// made by the first meeting, like the panel that shows it.
+    private lazy var liveTranscript = LiveTranscriptModel(app: "", elapsed: .zero)
     @Published private(set) var meetingModelDownloads: [MeetingModel: Double] = [:]
     @Published private(set) var isLiveTranscriptShown = false
     private let meetingNotifier = MeetingNudgeNotifier()
