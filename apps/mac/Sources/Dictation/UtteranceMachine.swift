@@ -386,6 +386,7 @@ final class UtteranceMachine {
             if let notice = CaptureInterruptionNotice.message(for: reason) {
                 flashNotice(notice, duration: 2)
             }
+            endPress(.interrupted(reason))
         case .idle, .prewarming, .transcribing:
             break
         }
@@ -432,6 +433,7 @@ final class UtteranceMachine {
         activeFocusAnchor = nil
         activeTimeline = nil
         setState(.idle)
+        endPress(.abandoned)
     }
 
     /// the speech model is being taken away: whatever is in flight goes,
@@ -445,6 +447,7 @@ final class UtteranceMachine {
             activeTimeline = nil
         }
         setState(.idle)
+        endPress(.abandoned)
     }
 
     // MARK: - retry

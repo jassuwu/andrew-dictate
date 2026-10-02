@@ -558,6 +558,7 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(pills, [])
         XCTAssertEqual(engine.heard, [])
         XCTAssertEqual(completions, [])
+        XCTAssertEqual(outcomes, [.interrupted(.systemPaused)])
     }
 
     /// a microphone that vanished mid-sentence is a loss, and losses speak.
@@ -573,6 +574,7 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(lockFlags, [true, false])
         XCTAssertEqual(m.state, .idle)
         XCTAssertEqual(engine.heard, [])
+        XCTAssertEqual(outcomes, [.interrupted(.deviceChanged)])
     }
 
     /// once the words are with the engine, the mic going away costs nothing.
@@ -589,6 +591,42 @@ final class UtteranceMachineTests: XCTestCase {
         engine.release()
         await settle { self.inserter.inserted.count == 1 }
         XCTAssertEqual(inserter.inserted, ["Still here."])
+        XCTAssertEqual(outcomes, [.delivered])
+    }
+
+    // MARK: - the app pulling the rug
+
+    /// a setting that rebuilds the mic cannot do it under a live take.
+    func testASettingThatRebuildsTheMicAbandonsTheTake() async {
+        let m = machine()
+        m.keyDown()
+        await pass(.seconds(1))
+
+        m.abandonRecording()
+        await settle()
+
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(mic.cancels, 1)
+        XCTAssertEqual(engine.heard, [])
+        XCTAssertEqual(outcomes, [.abandoned])
+    }
+
+    /// the speech model being taken away takes the sentence in flight with
+    /// it, and the engine's late answer goes nowhere.
+    func testTakingTheSpeechModelAwayAbandonsWhatIsInFlight() async {
+        let m = machine()
+        engine.holds = true
+        engine.reply = .success("too late")
+        await hold(m, for: .seconds(1))
+        await settle { self.engine.isWaiting }
+
+        m.abandon()
+        engine.release()
+        await settle()
+
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(inserter.inserted, [])
+        XCTAssertEqual(outcomes, [.abandoned])
     }
 
     // MARK: - when the mic fails
