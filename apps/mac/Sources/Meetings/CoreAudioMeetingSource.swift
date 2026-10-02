@@ -469,6 +469,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
     /// The old rig goes whatever else has happened: nothing else holds it.
     private func tookOver(_ takeover: Takeover) {
+        let quiet = Int(takeover.quiet.totalSeconds * 1_000)
+        logger.notice("mic: \(takeover.new.mic.name, privacy: .public) took over after \(quiet, privacy: .public) ms with nothing delivered")
         if let old = takeover.old {
             hal.async { self.teardown(old) }
         }
@@ -718,6 +720,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         player?.prepareToPlay()
         player?.play()
         lock.withLock { self.player = player }
+        logger.info("probe tone played")
     }
 
     // MARK: - the IO proc
@@ -745,8 +748,11 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             // An old rig still delivering left off a moment ago, and the
             // clock carries straight on; one whose mic went stopped
             // seconds back, and the clock skips the time nothing came.
-            skipOutage(until: ContinuousClock.now)
-            let takeover = Takeover(old: old, new: standby, at: nextStamp, epoch: epoch)
+            let now = ContinuousClock.now
+            let quiet = lastDelivery.map { now - $0 } ?? .zero
+            skipOutage(until: now)
+            let takeover = Takeover(
+                old: old, new: standby, at: nextStamp, quiet: quiet, epoch: epoch)
             return (standby, self.continuation, takeover)
         }
         if let takeover {
@@ -851,6 +857,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         let new: Rig
         /// The `at` of the new rig's first chunk.
         let at: Duration
+        /// How long nothing had been delivered when it took over.
+        let quiet: Duration
         let epoch: Int
     }
 
