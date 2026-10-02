@@ -168,12 +168,71 @@ final class UtteranceMachineInterruptionTests: XCTestCase {
         ])
         XCTAssertTrue(events.contains(.dictated("The whole paragraph.")))
         XCTAssertEqual(m.state, .idle)
-        XCTAssertEqual(pills, [
-            Pill("copied — what you said before the lock · ⌘V to paste", 4),
-        ])
+    }
+
+    /// the pill would land on the lock screen and be gone before anyone
+    /// saw it. it waits for the mac to come back, and is said once.
+    func testThePillWaitsUntilYouAreBack() async {
+        let m = machine()
+        m.keyDown()
+        await pass(.seconds(3))
+        m.captureInterrupted(.systemPaused)
+        await settle { !self.outcomes.isEmpty }
+        await pass(.seconds(60))
+        XCTAssertEqual(pills, [])
+
+        m.systemResumed()
+        XCTAssertEqual(pills, [Self.copiedBeforeTheLock])
+        m.systemResumed()
+        XCTAssertEqual(pills, [Self.copiedBeforeTheLock])
+    }
+
+    /// back before the words were: the pill rides the copy, as any other
+    /// copy's does.
+    func testBackBeforeTheWordsAreWrittenOutThePillRidesTheCopy() async {
+        let m = machine()
+        engine.holds = true
+        m.keyDown()
+        await pass(.seconds(3))
+        m.captureInterrupted(.systemPaused)
+        await settle { self.engine.isWaiting }
+
+        m.systemResumed()
+        XCTAssertEqual(pills, [])
+        engine.release()
+        await settle { !self.outcomes.isEmpty }
+
+        XCTAssertEqual(inserter.inserted, [])
+        XCTAssertEqual(inserter.copied, ["Hello."])
+        XCTAssertEqual(pills, [Self.copiedBeforeTheLock])
+    }
+
+    /// keys only reach the app from a session someone is sitting at. a
+    /// press is proof the mac is back even if the unlock never said so:
+    /// what was held is said, and nothing after it is held.
+    func testAPressIsProofTheMacIsBack() async {
+        let m = machine()
+        m.keyDown()
+        await pass(.seconds(3))
+        m.captureInterrupted(.systemPaused)
+        await settle { !self.outcomes.isEmpty }
+        await pass(.seconds(1))
+
+        engine.reply = .success("")
+        m.keyDown()
+        XCTAssertEqual(pills, [Self.copiedBeforeTheLock])
+        await pass(.seconds(1))
+        m.keyUp()
+        await settle { self.pills.count == 2 }
+        XCTAssertEqual(pills.last, Pill("heard nothing", 2.4))
     }
 
     // MARK: - helpers
+
+    private static let copiedBeforeTheLock = Pill(
+        "copied — what you said before the lock · ⌘V to paste",
+        4
+    )
 
     private var keepAwake: [Bool] {
         events.compactMap {

@@ -174,6 +174,10 @@ final class UtteranceMachine {
     /// the lock came down on this take, recording or transcribing: what it
     /// heard is copied when it is written out, never pasted.
     private var copiesInsteadOfPasting = false
+    /// asleep or locked: nobody is there to read a pill, so the last one
+    /// said waits for `systemResumed`.
+    private var isSystemPaused = false
+    private var heldPill: (message: String, duration: TimeInterval)?
     private var timelineSequence: UInt64 = 0
     private var activeTimeline: UtteranceTimelineBuilder?
     /// Held between delivery and the timeline completing, because that is the
@@ -215,6 +219,9 @@ final class UtteranceMachine {
     // MARK: - the key
 
     func keyDown() {
+        // keys only reach the app from a session someone is sitting at:
+        // a press is proof the mac is back, even if the unlock never said.
+        systemResumed()
         // a take already running is the same hold arriving twice, not a new
         // press, and the mic it holds is not the app's to hand out again.
         // one whose mic is still being stopped is the last sentence on its
@@ -698,11 +705,26 @@ final class UtteranceMachine {
     /// pasted. pasting on the way back in could land in whatever you are
     /// typing by then.
     private func systemPaused() {
+        isSystemPaused = true
         guard state == .recording || state == .transcribing else {
             return
         }
         copiesInsteadOfPasting = true
         endTake(releasedAt: clock.now)
+    }
+
+    /// the mac is back and someone is looking at it: unlocked, or woken
+    /// with no lock to get past. what was said while it was away is said
+    /// now.
+    func systemResumed() {
+        guard isSystemPaused else {
+            return
+        }
+        isSystemPaused = false
+        if let heldPill {
+            self.heldPill = nil
+            emit(.pill(heldPill.message, duration: heldPill.duration))
+        }
     }
 
     /// thirty seconds of runway. the wave comes back on its own when the
@@ -1230,7 +1252,7 @@ final class UtteranceMachine {
         duration: TimeInterval = 1.6
     ) {
         Task { @MainActor [weak self] in
-            self?.emit(.pill(message, duration: duration))
+            self?.say(message, duration: duration)
         }
     }
 
@@ -1245,6 +1267,17 @@ final class UtteranceMachine {
         _ message: String,
         duration: TimeInterval = 2.4
     ) {
+        say(message, duration: duration)
+    }
+
+    /// a pill said onto a sleeping or locked screen is gone before anyone
+    /// sees it: it waits for the mac to come back. one take's ending is
+    /// one pill, so the last one said is the one kept.
+    private func say(_ message: String, duration: TimeInterval) {
+        guard !isSystemPaused else {
+            heldPill = (message, duration)
+            return
+        }
         emit(.pill(message, duration: duration))
     }
 
