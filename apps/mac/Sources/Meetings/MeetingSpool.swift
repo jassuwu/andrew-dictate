@@ -373,6 +373,20 @@ struct MeetingSpool: Sendable {
         return found.sorted { $0.manifest.started < $1.manifest.started }
     }
 
+    /// One spool, looked at again: its manifest as it now reads, when it is
+    /// still an orphan — its audio there and its meeting not written out —
+    /// and nil when it is gone, set aside, written out, or will not read.
+    func orphan(_ handle: Handle) -> Manifest? {
+        guard FileManager.default.fileExists(atPath: handle.audioURL.path),
+              let data = try? Data(contentsOf: handle.manifestURL),
+              let manifest = try? Self.decoder.decode(Manifest.self, from: data),
+              manifest.transcript == nil
+        else {
+            return nil
+        }
+        return manifest
+    }
+
     /// Spools whose meeting is written out and whose audio is still here:
     /// on its way to being kept when the app stopped, or kept here because
     /// it could not be moved.

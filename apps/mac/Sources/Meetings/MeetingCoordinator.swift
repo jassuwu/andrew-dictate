@@ -812,13 +812,26 @@ final class MeetingCoordinator: ObservableObject {
                     recovering = nil
                     await until { self.current == nil }
                 }
-                await recover(
-                    orphan.handle, manifest: orphan.manifest, tryingAgain: tryingAgain)
+                // the list is as it was when the pass was asked for. by its
+                // turn a pass before it may have written this one out, or
+                // set it aside: it is looked at again, and read only if it
+                // is still waiting, with its manifest as it now stands.
+                guard let manifest = stillAnOrphan(orphan.handle) else { continue }
+                await recover(orphan.handle, manifest: manifest, tryingAgain: tryingAgain)
                 recovering = nil
             }
         }
         recovery = pass
         return pass
+    }
+
+    /// The spool's manifest, when it is still an orphan: its folder is
+    /// there with its audio, its meeting is not written out, and it is not
+    /// a meeting being recorded or written out now.
+    private func stillAnOrphan(_ handle: MeetingSpool.Handle) -> MeetingSpool.Manifest? {
+        let ours = ([current] + writingOut).compactMap { $0?.handle }
+        guard !ours.contains(handle) else { return nil }
+        return spool.orphan(handle)
     }
 
     // MARK: - audio

@@ -346,6 +346,32 @@ final class MeetingRecoveryTests: XCTestCase {
         XCTAssertEqual(records.map(\.outcome), [.saved, .saved])
     }
 
+    /// `try again` clicked in the seconds before launch looks for spools:
+    /// the recording it brought home is in both lists. Its turn in the
+    /// second comes after the first wrote it out, and it is looked at again
+    /// then — gone, so nothing is done: no record saying it would not read,
+    /// and no second file.
+    func testARecordingInTwoPassesIsWrittenOutOnceAndNotCalledUnreadable() async throws {
+        let handle = try await orphan("teams", started: started)
+        spool.setAside(handle)
+        transcribers.transcriber.batchTurns = [
+            .init(speaker: .them(nil), at: .zero, text: "recovered words here")]
+        transcribers.transcriber.holds = true
+        let c = coordinator()
+
+        let again = Task { await c.tryAgainSetAside() }
+        await held(transcribers.transcriber)
+        c.recoverOrphans()
+        transcribers.transcriber.release()
+        await again.value
+        try? await Task.sleep(for: .milliseconds(300))
+
+        XCTAssertEqual(records.map(\.outcome), [.saved])
+        XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).count, 1)
+        XCTAssertEqual(spool.unreadableCount(), 0)
+        XCTAssertEqual(transcribers.made.count, 1)
+    }
+
     // MARK: - the main actor
 
     /// Three hours of spool is gigabytes and seconds of reading, five
