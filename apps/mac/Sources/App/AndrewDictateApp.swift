@@ -89,6 +89,9 @@ struct AndrewDictateApp: App {
         if coordinator.meetings.isRecording {
             return "Andrew Dictate — recording a meeting"
         }
+        if let call = coordinator.unrecordedCall {
+            return "Andrew Dictate — \(call) call, not recording"
+        }
         return "Andrew Dictate"
     }
 
@@ -282,12 +285,10 @@ struct AndrewDictateApp: App {
             }
             .keyboardShortcut("q")
         } label: {
+            // the badge wears what the coordinator says it is: a take, a
+            // meeting's rim, a call nobody records, or a setup gap.
             Image(
-                nsImage: MenuBarBrandIcon.image(
-                    for: coordinator.state,
-                    needsAttention: coordinator.needsAttention,
-                    isRecordingMeeting: coordinator.meetings.isRecording
-                )
+                nsImage: MenuBarBrandIcon.image(for: coordinator.badgeLook)
             )
             .accessibilityLabel(menuBarLabel)
             .task {
