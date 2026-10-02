@@ -492,6 +492,24 @@ final class UpdateCheckTests: XCTestCase {
         XCTAssertFalse(click.state.isEnabled)
     }
 
+    /// a take or a meeting running: the click is refused the way the check
+    /// waits, quietly. the line stays as it was.
+    func testABusyAppRefusesTheClick() {
+        let click = UpdateOffer.click(
+            .available(brewLine),
+            busy: true,
+            brew: optBrew
+        )
+
+        XCTAssertEqual(click, UpdateOffer.Click(state: .available(brewLine), effect: nil))
+    }
+
+    func testAClickWhileUpdatingDoesNothing() {
+        let click = UpdateOffer.click(.updating, busy: false, brew: optBrew)
+
+        XCTAssertEqual(click, UpdateOffer.Click(state: .updating, effect: nil))
+    }
+
     // MARK: - the hand-off: what the click does today
 
     /// the menu closes on the click, so the pill says what happened.

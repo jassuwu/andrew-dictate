@@ -186,13 +186,15 @@ enum UpdateOffer {
         let effect: Effect?
     }
 
-    /// a click on the line as it is shown. `brew` is where brew lives.
+    /// a click on the line as it is shown. `busy` — a take, a model load or
+    /// a meeting — refuses every click quietly, the way the check waits.
+    /// `brew` is where brew lives.
     static func click(
         _ state: LineState,
         busy: Bool,
         brew: URL?
     ) -> Click {
-        guard case .available = state, let brew else {
+        guard !busy, case .available = state, let brew else {
             return Click(state: state, effect: nil)
         }
         return Click(state: .updating, effect: .upgrade(brew: brew))
