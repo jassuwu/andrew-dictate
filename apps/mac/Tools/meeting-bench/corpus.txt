@@ -1,0 +1,243 @@
+# sentences for make-audio.py. a turn is a few of these in a row.
+# [you] is the side that runs the call, [them] answers, [hindi] is a them
+# voice speaking Hindi. blank lines and lines starting with # are ignored.
+
+[you]
+Okay, let's get started, thanks everyone for joining.
+Before we go through the list, does anyone have something urgent that should jump the queue?
+Let's start with the checkout work, since that is the one with a date on it.
+Can you walk me through where the payment retries stand right now?
+So if I understand correctly, the retries are done but the dashboards are not.
+That sounds reasonable to me.
+What would it take to get that out by Thursday?
+I'm not comfortable shipping it without a second pair of eyes on the migration.
+Who has the context on the old billing tables?
+Let's not spend the whole call on this one, we can take it offline after.
+Right, so the decision is that we keep the current provider for another quarter.
+I'll write that down and send it round after the meeting.
+Can someone remind me why we picked the smaller instance size in the first place?
+Okay, that is fair, I hadn't thought about the cold start.
+Let me push back a little on that.
+We have talked about this three times and we keep landing in the same place.
+So the real question is whether we fix it now or live with it until the rewrite.
+Last week we said we would measure before deciding, did anyone get numbers?
+Thirty percent is a big number, are we sure that is not noise?
+Can you share the graph in the channel so everyone can look at it afterwards?
+I want to make sure we do not lose the thread on the customer escalation.
+How many accounts are affected, roughly?
+And have we told them anything yet?
+Good, then let's hold off on the announcement until we know more.
+Let me summarise what I heard so far.
+There are two options on the table, a quick patch this week, or a proper fix next sprint.
+My instinct is the patch, as long as we write the ticket for the real fix today.
+Does anyone disagree?
+Okay, nobody is objecting, so let's go with that.
+Next item, hiring.
+We have two final rounds this week and one offer waiting on approval.
+I'll chase finance for the approval, that one is on me.
+Could you send me the interview feedback before Wednesday, so I can read it properly?
+What did the team think of the take home exercise, was it too long?
+Fair enough, we can cut it down to a couple of hours.
+Let me know if the recruiter needs anything else from us.
+Moving on to the roadmap.
+I want to be honest that we are behind on the search work.
+The estimate we gave in March assumed one engineer full time, and that did not happen.
+So either the date moves or the scope shrinks, and I would rather shrink the scope.
+What is the smallest version of search that we would be proud to ship?
+Can we do filters first and ranking later?
+That makes sense, ranking is the part that keeps growing.
+How confident are you in that estimate on a scale of one to ten?
+Seven is fine, I just want to know where the risk is.
+Let's put a checkpoint in the calendar for two weeks from now.
+Thanks, that was clear.
+One more thing on the incident from Tuesday.
+The postmortem draft is out, please read it and add what is missing.
+I would like us to agree on the action items before the end of this week.
+The first one is an alert on queue depth, who wants to own it?
+Great, thank you for picking that up.
+The second one is a runbook, the page that woke people up had no instructions at all.
+Let's make sure the runbook lives next to the code, not in a wiki nobody opens.
+Did the rollback work the way we expected?
+How long did it take from the first alert to the fix?
+Forty minutes is too long for something that simple.
+What slowed us down?
+So the dashboard we needed was not shared with the on call person.
+That is a process problem and an easy one to fix.
+I will ask the platform team to give the whole rotation access.
+Okay, any questions on the incident before I move on?
+Let's talk about the pricing page.
+I looked at the new copy over the weekend and I think it is much better.
+My only concern is the third tier, the name does not tell you what you get.
+Can we try a couple of names with a few customers this week?
+I do not want to run a big experiment, just five or six conversations.
+Who talks to customers regularly and could ask?
+Perfect, send me a note if anything surprising comes up.
+Let me switch topics for a second.
+How is the new person settling in?
+Has she got her laptop and access to everything?
+Good, I want to make sure her first week is not wasted on setup.
+Please pair with her on something small but real, not a toy task.
+A bug fix in the notifications code would be a good start.
+We can review her first pull request together on Friday.
+Okay, I think we have covered most of the list.
+Is there anything we missed, anything that is bothering you?
+No pressure, but if something is blocked please say so today and not on Friday.
+Let me repeat the actions so we all leave with the same list.
+You are taking the migration review, you are chasing the offer, and I am talking to finance.
+Does that match what everyone has written down?
+Great, then we are done, thanks everyone.
+Hold on, I think I might have been muted.
+Sorry, can you say that again, the line dropped for a second.
+I did not catch the last part, something about the staging environment?
+Can you put the link in the chat, I'll open it while we talk?
+Let me share my screen, one moment.
+Can everyone see the spreadsheet now?
+So this column is the actual number and this one is what we forecast.
+The gap is mostly the two enterprise deals that slipped into next quarter.
+If those close in the first month, we are back on plan.
+If they do not, we need to talk about the budget for contractors.
+I do not think we need to decide that today.
+Let's agree to look at it again at the end of the month.
+What are the biggest risks you see between now and the release?
+I am worried about the data import, it has too many edge cases.
+We found three new ones last week, and that is usually a sign there are more.
+Can we ask a couple of customers to try it early?
+Beta users would be ideal, people who are forgiving and will tell us the truth.
+How do we feel about the testing situation?
+Are we relying too much on manual checks before every release?
+I would like to see the top five flows covered by automated tests before the next release.
+That is not a huge amount of work, is it?
+Let's say two days, and if it grows we will talk again.
+Remind me, who is on call this weekend?
+Okay, then please swap with someone if you are travelling.
+The last thing from me is the offsite.
+We have budget for two days, and I would like to spend one of them on planning and one on fun.
+Please send ideas by next Monday, anything is welcome.
+
+[them]
+Thanks, yes, I have a quick update on the checkout work.
+The retry logic is done and merged, and we have been running it on ten percent of traffic since Monday.
+So far the error rate has dropped from about four percent to just under one percent.
+The dashboards are not finished, I only have the basic chart for now.
+I expect to finish them tomorrow, as long as nothing else comes up.
+The migration is the part that worries me a bit.
+It touches the old billing tables, and honestly only two people remember how those work.
+One of them left in the spring, so it is really just Priya now.
+I could pair with her, but she is also covering the support rotation this week.
+If we can free up a day of her time, I think we can do it safely.
+My estimate would be about three days of work, plus a day for testing.
+Yes, Thursday is possible if we skip the nice to have items.
+The nice to have items are the export button and the extra filters.
+I would rather ship without them than ship late.
+I checked the numbers this morning, and the improvement is real, not noise.
+It held steady across three days and across both regions.
+I can put the graph in the channel right after the call.
+We picked the smaller instance because of cost, but the cold start turned out to be painful.
+It adds nearly two seconds to the first request after a deploy.
+There is a setting to keep a few instances warm, it costs a little more but solves most of it.
+I tried it in staging and the p95 went from four seconds to under two.
+I am not sure it is worth a full rewrite just for that.
+On the customer escalation, it is around forty accounts, mostly on the older plan.
+We have not told them anything yet because we are still not sure what caused it.
+I think it is related to the cache change we made last month, but I cannot prove it.
+I can have a clear answer by end of day tomorrow if I get the logs from the platform team.
+I already asked, but they have not replied.
+For hiring, the first final round went well, strong on system design, a bit quiet on communication.
+I would hire, but I would want to give her a mentor in the first month.
+The second candidate was a very good coder but did not ask a single question about the product.
+That is a yellow flag for me, though I know others might see it differently.
+The take home was fine for most people, but a couple said it ate their whole weekend.
+Cutting it down sounds good.
+On search, we have filters working end to end, but ranking is still very rough.
+The main trouble is that the results look fine for common queries and strange for rare ones.
+I think we need a proper evaluation set before we touch the ranking again.
+Otherwise we are just guessing and arguing about taste.
+I can build a small set of two hundred queries over a few days.
+It would also help to ask support which searches people complain about.
+My confidence is about seven, mostly because of the data quality problems.
+There are duplicates in the index that we have not cleaned up yet.
+Two hundred thousand of them, give or take.
+I looked at the incident timeline and the first alert fired at ten past two.
+Nobody acknowledged it for fifteen minutes, because the page went to the wrong channel.
+After that, the fix itself took about ten minutes, but we spent a long time finding the right dashboard.
+I can take the alert on queue depth, I already have a draft rule.
+Let me also add a link to the runbook inside the alert message.
+The rollback worked, but it took longer than it should because of a stuck deployment lock.
+That lock needs a timeout, I will open a ticket for it.
+On pricing, I like the new copy too, but I think the middle tier is the one that confuses people.
+We could call it team instead of plus, since that is what it is really for.
+I spoke to four customers last week, and three of them did not know what plus meant.
+One of them thought it was a discount.
+I can ask a few more people this week, it is easy.
+The new hire is doing well, she picked up the codebase faster than I expected.
+She had a couple of questions about the build setup, and I think we should write that down properly.
+The README for the project is out of date, to be honest.
+I will update it as part of her onboarding, so the next person has an easier time.
+She already fixed a small bug in the settings page on her second day.
+I will make sure her first review gets done on time.
+On the forecast, the two enterprise deals are both in legal review right now.
+One of them should sign next week, the other is less certain.
+I would not plan around the second one.
+For the data import, the biggest problem is dates, every customer has a different format.
+We have a parser that handles most of them, but there are always strange ones.
+I found one yesterday where the year came first and the month last, with dots between.
+I am writing a few more tests for those cases, so we do not break them again.
+For testing, I agree we rely too much on manual checks.
+The login, checkout and import flows are the ones that hurt most when they break.
+I can write the automated tests for those three in two days.
+The other two flows might take longer, because they depend on a third party service.
+We could use a fake for that service, but then we are not really testing the real thing.
+I think a fake is fine for now, and we add one real check per night.
+I am on call this weekend, but I am travelling on Sunday, so I will need to swap.
+Let me ask Daniel, he owes me a favour.
+For the offsite, could we do something outdoors, maybe a hike?
+Last year we were stuck in a meeting room for two days and I think people did not enjoy it.
+I will put together a few ideas and send them on Monday.
+Sorry, I was on mute, can you hear me now?
+Yes, I can see the spreadsheet, but the text is a little small.
+Could you zoom in a bit on the second column?
+Right, that is much better, thank you.
+I will have the update ready before the next meeting.
+Sure, no problem, I will send it in writing as well.
+That works for me.
+
+[hindi]
+सबको नमस्ते, मैं आज का छोटा सा अपडेट देता हूँ।
+कल की रिलीज़ में एक छोटी सी दिक्कत आई थी, हमने उसे सुबह ठीक कर दिया।
+ग्राहकों को इसका ज़्यादा असर नहीं पड़ा, सिर्फ़ कुछ लोगों को लॉगिन में परेशानी हुई।
+मुझे लगता है कि हमें इस पर और टेस्ट लिखने चाहिए।
+अगले हफ़्ते तक मैं पूरी रिपोर्ट भेज दूँगा।
+क्या हम इस मीटिंग के बाद पाँच मिनट बात कर सकते हैं?
+मैंने पुराने सिस्टम का कोड देखा, वहाँ बहुत सारी चीज़ें बिना दस्तावेज़ के हैं।
+इसे समझने में मुझे लगभग दो दिन लगे।
+मेरा सुझाव है कि हम पहले छोटा हिस्सा बदलें और फिर धीरे धीरे बाकी।
+इससे जोखिम कम रहेगा और ग्राहकों को कुछ पता भी नहीं चलेगा।
+बजट के बारे में, मुझे लगता है कि हमें थोड़ा और समय चाहिए।
+वित्त विभाग से मैंने बात की है, उन्होंने कहा कि मंज़ूरी अगले सोमवार तक मिल जाएगी।
+नए इंजीनियर ने पहले हफ़्ते में ही बहुत अच्छा काम किया है।
+हमें उसे और ज़िम्मेदारी देनी चाहिए, लेकिन धीरे धीरे।
+ग्राहक की शिकायत का कारण हमें मिल गया है, यह कैश की गलत सेटिंग थी।
+हमने सेटिंग बदल दी है और अब सब कुछ ठीक चल रहा है।
+मैं चाहता हूँ कि हम इसकी निगरानी के लिए एक अलर्ट भी लगाएँ।
+इस काम में लगभग एक दिन लगेगा, ज़्यादा नहीं।
+मुझे उम्मीद है कि हम गुरुवार तक सब पूरा कर लेंगे।
+अगर कोई समस्या आई तो मैं तुरंत सबको बता दूँगा।
+टीम में सभी ने बहुत मेहनत की है, इसके लिए सबको धन्यवाद।
+अगली बार हमें योजना थोड़ी पहले बनानी चाहिए, ताकि आख़िरी दिन भागदौड़ न हो।
+मैंने डेटा इम्पोर्ट वाले हिस्से में तीन नई गलतियाँ पकड़ी हैं।
+उनमें से दो तारीख़ के प्रारूप की वजह से थीं।
+मैं इन सबके लिए टेस्ट जोड़ रहा हूँ ताकि ये दोबारा न हों।
+कल मैं ग्राहकों से भी बात करूँगा और उनकी राय लूँगा।
+उन्हें नई कीमतों का पन्ना पसंद आया, लेकिन बीच वाले प्लान का नाम उलझाने वाला है।
+हम कोई आसान नाम सोच सकते हैं, जैसे टीम प्लान।
+मुझे नहीं लगता कि इसमें ज़्यादा समय लगेगा।
+इस हफ़्ते मैं कुछ ग्राहकों से इस पर बात कर लूँगा।
+सर्वर की लागत इस महीने थोड़ी बढ़ गई है, इसकी वजह नया परीक्षण वातावरण है।
+मैं देखता हूँ कि क्या हम उसे रात में बंद कर सकते हैं।
+इससे लगभग बीस प्रतिशत बचत हो सकती है।
+मेरी तरफ़ से बस इतना ही, अगर कोई सवाल हो तो बताइए।
+ठीक है, मैं इसे आज ही देख लेता हूँ और शाम तक जवाब देता हूँ।
+आप चिंता मत कीजिए, यह काम समय पर हो जाएगा।
+कृपया मुझे दस्तावेज़ का लिंक भेज दीजिए, मैं पढ़कर बताऊँगा।
+हम सब एक ही बात कह रहे हैं, बस तरीका थोड़ा अलग है।
+इसलिए मेरा सुझाव है कि हम शुक्रवार को दोबारा मिलें।
