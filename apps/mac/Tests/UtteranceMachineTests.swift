@@ -15,13 +15,15 @@ final class UtteranceMachineTests: XCTestCase {
     /// the next state change, or by a test saying its time ran out.
     private var pillShowing = false
     /// nil is the app refusing the press itself — a model still loading, a
-    /// missing grant, no input device.
+    /// missing grant, no input device — for `refusal`'s reason.
     private var micForPress: FakeMic?
+    private var refusal: PressRecord.Refusal = .modelNotReady
 
     override func setUp() async throws {
         clock = FakeClock()
         mic = FakeMic(clock: clock)
         micForPress = mic
+        refusal = .modelNotReady
         engine = FakeEngine()
         inserter = FakeInserter(clock: clock)
         events = []
@@ -54,7 +56,12 @@ final class UtteranceMachineTests: XCTestCase {
                 break
             }
         }
-        machine.microphoneForPress = { [weak self] in self?.micForPress }
+        machine.microphoneForPress = { [weak self] in
+            guard let self else {
+                return .refused(.modelNotReady)
+            }
+            return self.micForPress.map { .ready($0) } ?? .refused(self.refusal)
+        }
         machine.isPillShowing = { [weak self] in self?.pillShowing ?? false }
         machine.engineVersion = { "v2" }
         return machine
@@ -459,6 +466,7 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(m.state, .idle)
         XCTAssertEqual(lockFlags, [])
         XCTAssertEqual(pills, [])
+        XCTAssertEqual(outcomes, [.refused(.modelNotReady)])
     }
 
     func testADoubleTapMidRecordingIsNotASecondRecording() async {
@@ -670,15 +678,41 @@ final class UtteranceMachineTests: XCTestCase {
 
     /// a press the app answered itself — a model still loading, a missing
     /// grant, no input device — leaves the machine where it was.
-    func testAPressTheAppAnsweredLeavesNoTrace() async {
+    func testAPressTheAppAnsweredLeavesOnlyItsRecord() async {
         let m = machine()
         micForPress = nil
 
-        m.keyDown()
+        for why in [
+            PressRecord.Refusal.modelNotReady,
+            .microphonePermissionOff,
+            .noMicrophone,
+        ] {
+            refusal = why
+            m.keyDown()
+        }
         await settle()
 
-        XCTAssertEqual(events, [])
+        XCTAssertEqual(outcomes, [
+            .refused(.modelNotReady),
+            .refused(.microphonePermissionOff),
+            .refused(.noMicrophone),
+        ])
+        XCTAssertEqual(events.count, 3)
         XCTAssertEqual(m.state, .idle)
+    }
+
+    /// a meeting owns the mic: the app refuses before the machine is asked
+    /// for anything, and the press still leaves its record.
+    func testAPressRefusedForAMeetingLeavesItsRecordAndNothingElse() async {
+        let m = machine()
+
+        m.refusePress(.meetingRunning)
+        await settle()
+
+        XCTAssertEqual(outcomes, [.refused(.meetingRunning)])
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(mic.starts, 0)
+        XCTAssertEqual(presses.first?.engine, "v2")
     }
 
     // MARK: - the press log

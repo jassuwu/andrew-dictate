@@ -95,14 +95,21 @@ final class UtteranceMachine {
         case end
     }
 
+    /// the app's half of a press: a mic to record with, or why not.
+    enum MicrophoneAnswer {
+        case ready(any MicCapture)
+        /// the app has already said why, in a pill of its own; the machine
+        /// only writes it down.
+        case refused(PressRecord.Refusal)
+    }
+
     private(set) var state: State = .idle
 
     var onEvent: (@MainActor (UtteranceEvent) -> Void)?
     /// asked once per press, after the machine's own answers to it (a retry
     /// on offer, a sentence still being written out). it is the app's say —
-    /// a speech model still loading, a missing grant, no input device — and
-    /// nil means the app has already answered the press itself.
-    var microphoneForPress: (@MainActor () -> (any MicCapture)?)?
+    /// a speech model still loading, a missing grant, no input device.
+    var microphoneForPress: (@MainActor () -> MicrophoneAnswer)?
     /// whether a pill is on screen right now. only the HUD knows: its own
     /// timing, the setup window and the next state change all clear it.
     var isPillShowing: (@MainActor () -> Bool)?
@@ -213,8 +220,20 @@ final class UtteranceMachine {
             }
         }
 
-        guard let microphone = microphoneForPress?(),
-              state == .idle else {
+        let microphone: any MicCapture
+        switch microphoneForPress?() ?? .refused(.modelNotReady) {
+        case let .ready(answer):
+            microphone = answer
+        case let .refused(why):
+            refuse(why)
+            return
+        }
+        guard state == .idle else {
+            // a take already running is the same hold arriving twice, not
+            // a new press. a model still loading is the app's to answer.
+            if state == .prewarming {
+                refuse(.modelNotReady)
+            }
             return
         }
 
@@ -891,6 +910,12 @@ final class UtteranceMachine {
         duration: TimeInterval = 2.4
     ) {
         emit(.pill(message, duration: duration))
+    }
+
+    /// a press the app refused before the machine heard of it (a meeting
+    /// owns the mic). it still ends in a record, like every press.
+    func refusePress(_ why: PressRecord.Refusal) {
+        refuse(why)
     }
 
     /// a press answered with a pill before anything was recorded. its own

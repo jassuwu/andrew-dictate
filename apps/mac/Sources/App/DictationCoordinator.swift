@@ -1394,6 +1394,7 @@ final class DictationCoordinator: ObservableObject {
         // one would still be spec §4's forbidden shape.
         if meetings.dictationResponse == .refuseAndSayWhy {
             flashNotice("recording a meeting — stop it to dictate", duration: 2)
+            machine.refusePress(.meetingRunning)
             return
         }
         if locked {
@@ -1405,9 +1406,9 @@ final class DictationCoordinator: ObservableObject {
 
     /// the app's half of a press, asked by the machine once its own answers
     /// (a retry on offer, a sentence still being written out) are spent: a
-    /// speech model, a mic grant, an input device. nil means the press has
-    /// been answered here.
-    private func microphoneForPress() -> AudioRecorder? {
+    /// speech model, a mic grant, an input device. a refusal has already
+    /// been said here; the machine only writes it down.
+    private func microphoneForPress() -> UtteranceMachine.MicrophoneAnswer {
         guard isPrewarmed else {
             // the key is a statement of intent: from here the ember is an
             // answer, so it may show even if the warm-up began at login.
@@ -1443,7 +1444,7 @@ final class DictationCoordinator: ObservableObject {
                 // the alternative is a lamp that breathes forever.
                 retryEnginePrewarm()
                 flashNotice("speech model failed — retrying")
-                return nil
+                return .refused(.modelNotReady)
             case .downloading, .warmingUp, .ready:
                 break
             }
@@ -1460,20 +1461,20 @@ final class DictationCoordinator: ObservableObject {
             if let notice {
                 flashNotice(notice)
             }
-            return nil
+            return .refused(.modelNotReady)
         }
         // the one grant we can verify at the point of use: if the hotkey
         // reached us at all, accessibility is alive. the mic may not be.
         guard SystemPermissions.snapshot().microphoneGranted else {
             refreshPermissions(moment: .midSession)
             announcePermissionGap("microphone access is off")
-            return nil
+            return .refused(.microphonePermissionOff)
         }
         guard let audioRecorder = ensureAudioRecorder() else {
             flashNotice("no microphone available")
-            return nil
+            return .refused(.noMicrophone)
         }
-        return audioRecorder
+        return .ready(audioRecorder)
     }
 
     /// the menu's door to the samples the engine threw on; a press while the
@@ -1663,7 +1664,7 @@ extension DictationCoordinator {
             self?.handle(event)
         }
         machine.microphoneForPress = { [weak self] in
-            self?.microphoneForPress()
+            self?.microphoneForPress() ?? .refused(.modelNotReady)
         }
         machine.isPillShowing = { [weak self] in
             self?.activeFeedbackGeneration != nil
