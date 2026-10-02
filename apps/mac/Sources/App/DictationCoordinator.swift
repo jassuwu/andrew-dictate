@@ -2236,7 +2236,10 @@ extension DictationCoordinator {
             if let model {
                 // the menu listed it when it was drawn, and it has gone since.
                 // setup fetches the default, so this is only said.
-                flashNotice("\(model.shortName) is not on this mac")
+                flashNotice(
+                    "\(model.shortName) is not on this mac",
+                    aboutAMeeting: true
+                )
             } else {
                 meetingWaitsOnSetup = true
                 runOnboardingAgain(scope: .meetingsOnly)
