@@ -608,6 +608,49 @@ final class MeetingCoordinatorTests: XCTestCase {
         XCTAssertEqual(MeetingSpool(root: dir.appendingPathComponent("spool")).orphans().count, 0)
     }
 
+    /// One meeting model at a time: the next spool waits for the meeting
+    /// being recorded to stop, and the menu does not claim a recovery that
+    /// is only waiting its turn.
+    func testRecoveryWaitsForTheMeetingBeingRecordedBeforeTheNextSpool() async throws {
+        try await orphan("teams", started: Date(timeIntervalSince1970: 1_787_000_000))
+        try await orphan("meet", started: Date(timeIntervalSince1970: 1_787_001_000))
+        let teams = FakeTranscriber(batchTurns: [
+            .init(speaker: .them(nil), at: .zero, text: "from teams")])
+        let live = FakeTranscriber(finalTurns: [
+            .init(speaker: .you, at: .seconds(1), text: "live words")])
+        let meet = FakeTranscriber(batchTurns: [
+            .init(speaker: .them(nil), at: .zero, text: "from meet")])
+        teams.holds = true
+        transcribers.lineUp(teams, live, meet)
+        let c = coordinator(starting: [Date(timeIntervalSince1970: 1_787_090_000)])
+        let recoveries = { [unowned self] in
+            events.filter { if case .recovering = $0 { true } else { false } }
+        }
+
+        c.recoverOrphans()
+        await held(teams)
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+        teams.release()
+        await settle()
+
+        XCTAssertEqual(recoveries(), [.recovering(app: "teams")])
+        XCTAssertNil(c.recovering)
+        XCTAssertEqual(
+            MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).map(\.app),
+            ["teams"])
+
+        c.stop()
+        await settle(for: 1.0)
+
+        XCTAssertEqual(recoveries(), [.recovering(app: "teams"), .recovering(app: "meet")])
+        XCTAssertEqual(
+            MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).map(\.app),
+            ["zoom", "meet", "teams"])
+    }
+
     // MARK: - helpers
 
     /// A spool a crash left behind, with a second of audio on it.

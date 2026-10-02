@@ -118,7 +118,12 @@ final class MeetingCoordinator: ObservableObject {
     private let logger = Logger(subsystem: AppIdentity.loggingSubsystem, category: "meeting")
 
     /// The meeting being recorded, from `start` until it stops.
-    private var current: Meeting?
+    private var current: Meeting? {
+        didSet { wakeWhoeverIsWaiting() }
+    }
+    /// Whoever is waiting on the meetings to move on — recovery between
+    /// spools. Each looks again at what it waits for when woken.
+    private var waiting: [CheckedContinuation<Void, Never>] = []
     /// The last tap being closed, while it still is. One source, one tap:
     /// the next meeting opens it after this, never during it.
     private var tapClosing: Task<Void, Never>?
@@ -409,6 +414,13 @@ final class MeetingCoordinator: ObservableObject {
             guard let self else { return }
             defer { recovering = nil }
             for orphan in orphans {
+                // one meeting model at a time: a spool waits for the meeting
+                // being recorded to stop, and is not called recovering until
+                // its turn comes.
+                if current != nil {
+                    recovering = nil
+                    await until { self.current == nil }
+                }
                 recovering = orphan.manifest.app
                 onEvent?(.recovering(app: orphan.manifest.app))
                 await recover(orphan.handle, manifest: orphan.manifest)
@@ -697,6 +709,22 @@ final class MeetingCoordinator: ObservableObject {
 
     private func publish() {
         state = session.state
+    }
+
+    /// Returns once `done` is true, looking again each time a meeting starts
+    /// or stops.
+    private func until(_ done: () -> Bool) async {
+        while !done() {
+            await withCheckedContinuation { waiting.append($0) }
+        }
+    }
+
+    private func wakeWhoeverIsWaiting() {
+        let woken = waiting
+        waiting = []
+        for continuation in woken {
+            continuation.resume()
+        }
     }
 
     private static func freshMonitor(_ t: MeetingThresholds) -> TapHealthMonitor {
