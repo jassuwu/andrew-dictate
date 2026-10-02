@@ -22,15 +22,45 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         case coreAudio(String, OSStatus)
         case noMicrophone
         case noStartSound
+        /// A native call that did not come back in time, and what it was.
+        case noAnswer(Stage)
 
         var errorDescription: String? {
             switch self {
             case .coreAudio(let call, let status): "\(call) failed (\(status))"
             case .noMicrophone: "no microphone"
             case .noStartSound: "the start sound is missing from the app"
+            case .noAnswer(let stage): stage.description
             }
         }
     }
+
+    /// How far a build or a teardown had got, so one that never comes back
+    /// can be told by what it was waiting on.
+    enum Stage: Equatable, Sendable, CustomStringConvertible {
+        /// Not begun: queued behind a call that has not come back.
+        case waiting
+        case openingTheTap
+        case startingTheMic(String)
+        case closing
+
+        var description: String {
+            let build = Int(CoreAudioMeetingSource.buildDeadline.totalSeconds)
+            let teardown = Int(CoreAudioMeetingSource.teardownDeadline.totalSeconds)
+            return switch self {
+            case .waiting: "the last tap had still not closed after \(build) s"
+            case .openingTheTap: "the tap did not open within \(build) s"
+            case .startingTheMic(let mic): "the mic (\(mic)) did not start within \(build) s"
+            case .closing: "the tap did not close within \(teardown) s"
+            }
+        }
+    }
+
+    /// How long a rig may take to build and start before it is called
+    /// failed, and to stop and go before it is left behind. A native call
+    /// can wedge in the audio server, and nothing may wait on one for ever.
+    static let buildDeadline = Duration.seconds(8)
+    static let teardownDeadline = Duration.seconds(5)
 
     /// The aggregate device's uid: one per build of the app, the same every
     /// session. A uid made fresh each time left a setting behind in the
@@ -91,7 +121,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             self.framesDelivered = 0
             self.lastDelivery = ContinuousClock.now
         }
-        let rig = try await onHAL { try self.build() }
+        let rig = try await bringUp()
         lock.withLock { live = rig }
         keepAskingWhatIsPlaying()
         playProbeTone()
@@ -103,10 +133,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             defer { live = nil }
             return live
         }
-        let rig = try await onHAL {
-            if let old { self.teardown(old) }
-            return try self.build()
-        }
+        if let old { await retire([old]) }
+        let rig = try await bringUp()
         lock.withLock { live = rig }
         skipTheTimeNothingWasDelivered()
         // The tone again: a rebuilt tap must prove itself like a new one.
@@ -170,9 +198,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             defer { live = nil }
             return live
         }
-        if let rig {
-            try? await onHAL { self.teardown(rig) }
-        }
+        if let rig { await retire([rig]) }
         let continuation = lock.withLock { () -> AsyncStream<MeetingAudioChunk>.Continuation? in
             defer { self.continuation = nil }
             return self.continuation
@@ -216,11 +242,62 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
     // MARK: - building the rig
 
-    /// `work` on the HAL queue, awaited.
-    private func onHAL<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {
+    /// A rig on the default input, built and started on the HAL queue with
+    /// eight seconds to do it. One that comes back later is nobody's, and
+    /// is torn down where it lands.
+    private func bringUp() async throws -> Rig {
+        let progress = BuildProgress()
+        return try await onHAL(
+            within: Self.buildDeadline,
+            late: { Failure.noAnswer(progress.stage) },
+            abandoned: { [weak self] rig in
+                self?.logger.notice("a rig came up after its deadline; tearing it down")
+                self?.teardown(rig)
+            },
+            { try self.build(progress) })
+    }
+
+    /// Tears `rigs` down on the HAL queue, and waits five seconds for it at
+    /// most. A teardown that never comes back is left to finish or not
+    /// where it is: whoever waits on this — a stop, with a meeting's file
+    /// still to write — goes on.
+    private func retire(_ rigs: [Rig]) async {
+        guard !rigs.isEmpty else { return }
+        do {
+            try await onHAL(within: Self.teardownDeadline, late: { Failure.noAnswer(.closing) }) {
+                for rig in rigs { self.teardown(rig) }
+            }
+        } catch {
+            logger.error("\(error.localizedDescription, privacy: .public); left behind")
+        }
+    }
+
+    /// `work` on the HAL queue, given `limit` to come back. Whichever comes
+    /// first is the answer: the work's own, or `late()`'s error. The clock
+    /// runs off the HAL queue, which a call that never returns holds for
+    /// good, along with everything queued behind it. Work that comes back
+    /// after its deadline is handed to `abandoned`, there, to undo.
+    private func onHAL<T: Sendable>(
+        within limit: Duration,
+        late: @escaping @Sendable () -> any Error,
+        abandoned: @escaping @Sendable (T) -> Void = { _ in },
+        _ work: @escaping @Sendable () throws -> T
+    ) async throws -> T {
         try await withCheckedThrowingContinuation { (done: CheckedContinuation<T, Error>) in
+            let answer = FirstAnswer()
             hal.async {
-                done.resume(with: Result { try work() })
+                let result = Result { try work() }
+                if answer.claim() {
+                    done.resume(with: result)
+                } else if case .success(let value) = result {
+                    abandoned(value)
+                }
+            }
+            let milliseconds = Int(limit.totalSeconds * 1_000)
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(
+                deadline: .now() + .milliseconds(milliseconds)
+            ) {
+                if answer.claim() { done.resume(throwing: late()) }
             }
         }
     }
@@ -242,7 +319,9 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     }
 
     /// A rig on the default input, started. Only ever on the HAL queue.
-    private func build() throws -> Rig {
+    /// `progress` is told how far it got.
+    private func build(_ progress: BuildProgress) throws -> Rig {
+        progress.stage = .openingTheTap
         // Everything, ours included: the probe tone (ADR 0021) is played by
         // *this* process, and a tap that left us out could never hear it.
         // The cost is a third of a second of our own start sound at the
@@ -263,6 +342,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         }
         let mic = MicHandoff.Mic(uid: micUID, name: CoreAudioProperties.name(micDevice) ?? micUID)
         let micChannels = CoreAudioProperties.inputChannels(micDevice).reduce(0, +)
+        progress.stage = .startingTheMic(mic.name)
 
         destroyStaleAggregate()
         let aggregate: [String: Any] = [
@@ -449,6 +529,32 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             self.micChannels = micChannels
             self.rate = rate
             assembler = ChunkAssembler(inputRate: rate)
+        }
+    }
+}
+
+/// How far a build has got, written on the HAL queue and read by its
+/// deadline, which is not on it.
+private final class BuildProgress: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _stage: CoreAudioMeetingSource.Stage = .waiting
+
+    var stage: CoreAudioMeetingSource.Stage {
+        get { lock.withLock { _stage } }
+        set { lock.withLock { _stage = newValue } }
+    }
+}
+
+/// A native call and its deadline race; this is the finish line. Whichever
+/// claims it first answers, and the other knows it lost.
+private final class FirstAnswer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var claimed = false
+
+    func claim() -> Bool {
+        lock.withLock {
+            defer { claimed = true }
+            return !claimed
         }
     }
 }
