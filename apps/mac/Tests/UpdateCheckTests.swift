@@ -94,6 +94,78 @@ final class UpdateCheckTests: XCTestCase {
         )
     }
 
+    // MARK: - the update line: which version earns it
+
+    func testANewerVersionEarnsTheLine() {
+        let line = UpdateOffer.line(
+            latest: "0.9.5",
+            running: "0.9.4",
+            install: .dmg
+        )
+
+        XCTAssertEqual(line?.title, "update to 0.9.5")
+    }
+
+    /// numeric, not lexicographic, all the way to the menu.
+    func testZeroNineTenBeatsZeroNineNine() {
+        let line = UpdateOffer.line(
+            latest: "0.9.10",
+            running: "0.9.9",
+            install: .dmg
+        )
+
+        XCTAssertEqual(line?.title, "update to 0.9.10")
+    }
+
+    func testTheSameOrAnOlderVersionHasNoLine() {
+        for latest in ["0.9.4", "v0.9.4", "0.9.3", "0.8.12"] {
+            XCTAssertNil(
+                UpdateOffer.line(
+                    latest: latest,
+                    running: "0.9.4",
+                    install: .homebrew
+                ),
+                latest
+            )
+        }
+    }
+
+    /// no answer, or an answer that is not a version, is silence.
+    func testNoAnswerHasNoLine() {
+        for latest in [nil, "", "latest", "v0.9.beta"] {
+            XCTAssertNil(
+                UpdateOffer.line(
+                    latest: latest,
+                    running: "0.9.4",
+                    install: .homebrew
+                ),
+                latest ?? "nil"
+            )
+        }
+    }
+
+    /// brew already put the new bundle on disk; this process is the old
+    /// one. offering the same upgrade again would be a lie.
+    func testAnUpgradeAlreadyOnDiskHasNoLine() {
+        XCTAssertNil(
+            UpdateOffer.line(
+                latest: "0.9.5",
+                running: "0.9.4",
+                onDisk: "0.9.5",
+                install: .homebrew
+            )
+        )
+        XCTAssertEqual(
+            UpdateOffer.line(
+                latest: "0.9.6",
+                running: "0.9.4",
+                onDisk: "0.9.5",
+                install: .homebrew
+            )?.title,
+            "update to 0.9.6"
+        )
+    }
+
     /// a throwaway `Andrew Dictate.app`, with or without a readable plist.
     private func makeBundle(
         version: String?,
