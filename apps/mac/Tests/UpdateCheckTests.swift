@@ -287,6 +287,48 @@ final class UpdateCheckTests: XCTestCase {
         )
     }
 
+    // MARK: - the update check: what it sends and what it hears
+
+    /// the version, and nothing else: no id, no cookie, and a user agent
+    /// that names the app but not its build or the mac's os.
+    func testTheRequestCarriesTheVersionAndNothingElse() {
+        let request = UpdateOffer.request(version: "0.9.4")
+
+        XCTAssertEqual(
+            request.url?.absoluteString,
+            "https://dictate.jass.gg/api/latest?version=0.9.4"
+        )
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(
+            request.allHTTPHeaderFields,
+            ["User-Agent": "andrew-dictate"]
+        )
+        XCTAssertFalse(request.httpShouldHandleCookies)
+        XCTAssertNil(request.httpBody)
+    }
+
+    func testTheAnswerIsTheLatestVersion() {
+        XCTAssertEqual(
+            UpdateOffer.answer(
+                status: 200,
+                body: Data(#"{"latest":"0.9.5"}"#.utf8)
+            ),
+            .latest("0.9.5")
+        )
+    }
+
+    /// the site answered, just not with a version: that still counts as
+    /// today's check, so a broken endpoint is asked once a day, not hourly.
+    func testAnythingElseFromTheSiteIsAnAnswerWithoutAVersion() {
+        let answers = [
+            UpdateOffer.answer(status: 502, body: Data(#"{"error":"x"}"#.utf8)),
+            UpdateOffer.answer(status: 200, body: Data("<html>".utf8)),
+            UpdateOffer.answer(status: 200, body: Data(#"{"latest":5}"#.utf8)),
+        ]
+
+        XCTAssertEqual(answers, [.noVersion, .noVersion, .noVersion])
+    }
+
     /// a throwaway `Andrew Dictate.app`, with or without a readable plist.
     private func makeBundle(
         version: String?,

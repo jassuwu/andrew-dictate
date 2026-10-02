@@ -57,6 +57,52 @@ enum UpdateOffer {
         }
     }
 
+    /// the site's answer, never github's: the automatic check has no
+    /// fallback (apps/site/api/latest.ts).
+    static let endpoint = URL(string: "https://dictate.jass.gg/api/latest")!
+
+    /// what the site said. `unreachable` — offline, a timeout, dns — is
+    /// not an answer, so it is not today's check either: the next tick
+    /// tries again, which matters on wake, when the timer beats the wi-fi.
+    enum Answer: Equatable, Sendable {
+        case latest(String)
+        case noVersion
+        case unreachable
+    }
+
+    /// the running version as one query item, and nothing else. the user
+    /// agent is set rather than left to URLSession, whose default carries
+    /// the build number and the mac's darwin version.
+    static func request(version: String) -> URLRequest {
+        var components = URLComponents(
+            url: endpoint,
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [URLQueryItem(name: "version", value: version)]
+        var request = URLRequest(
+            url: components.url!,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            timeoutInterval: 15
+        )
+        request.httpMethod = "GET"
+        request.httpShouldHandleCookies = false
+        request.setValue("andrew-dictate", forHTTPHeaderField: "User-Agent")
+        return request
+    }
+
+    static func answer(status: Int, body: Data) -> Answer {
+        struct Body: Decodable {
+            let latest: String
+        }
+
+        guard status == 200,
+              let decoded = try? JSONDecoder().decode(Body.self, from: body)
+        else {
+            return .noVersion
+        }
+        return .latest(decoded.latest)
+    }
+
     static let checkInterval: TimeInterval = 24 * 60 * 60
 
     /// once a day, and never while a dictation or a meeting is running:
