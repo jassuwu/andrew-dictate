@@ -56,7 +56,7 @@ nowhere. the speech models run on your mac, so nothing you say leaves it. the ap
 
 that last one is new. i used to say the app only went online when you clicked something. but fixes weren't reaching people, so now it asks once a day, and you can turn it off.
 
-there's no account, no analytics, and no crash reporting. audio is never written to disk, except during a meeting, where a temp file holds it until the transcript is saved and then it's deleted. dictations are kept in a local history you can switch off or wipe.
+there's no account, no analytics, and no crash reporting. audio is never written to disk, except during a meeting, where a temp file holds it until the transcript is saved and then it's deleted. dictations are kept in a local history you can switch off or wipe. the app also keeps a small log on your mac of how each press ended, with none of your words in it, so you can send me `copy diagnostics` when something breaks, and wiping your history wipes it too.
 
 it's about 22k lines of swift. read it.
 
