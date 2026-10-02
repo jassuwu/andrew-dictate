@@ -86,6 +86,85 @@ final class UtteranceMachineTimeoutTests: XCTestCase {
         XCTAssertEqual(presses.first?.line().contains("timed_out=1"), true)
     }
 
+    /// once the pill has gone, a press is a new sentence: the mic opens and
+    /// the take is written out, while the hung call is still out there.
+    func testTheNextPressRecordsWhileTheHungCallIsStillOut() async {
+        let m = machine()
+        engine.holds = true
+        await timeOut(m)
+
+        // the hung call keeps waiting; the next one is answered at once.
+        engine.holds = false
+        engine.reply = .success("second try")
+        pillShowing = false
+        m.keyDown()
+        XCTAssertEqual(m.state, .recording)
+        XCTAssertEqual(mic.starts, 2)
+        await pass(.seconds(1))
+        m.keyUp()
+        await settle { self.inserter.inserted.count == 1 }
+
+        XCTAssertTrue(engine.isWaiting)
+        XCTAssertEqual(inserter.inserted, ["Second try."])
+        XCTAssertEqual(outcomes, [.couldNotTranscribe, .delivered])
+        XCTAssertEqual(retryOffers, [true, false])
+    }
+
+    /// the engine answering after the press gave up on it pastes nothing,
+    /// says nothing, and leaves the retry where it was.
+    func testALateAnswerLandsNowhere() async {
+        let m = machine()
+        engine.holds = true
+        engine.reply = .success("too late")
+        await timeOut(m)
+        let eventsAtTheTimeout = events.count
+
+        engine.release()
+        await settle()
+        await pass(.seconds(1))
+
+        XCTAssertEqual(inserter.inserted, [])
+        XCTAssertEqual(events.count, eventsAtTheTimeout)
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(outcomes, [.couldNotTranscribe])
+        XCTAssertEqual(retryOffers, [true])
+    }
+
+    /// a minute of audio gets fifteen seconds, not four: a long take that
+    /// is simply slow is not a hang.
+    func testALongTakeGetsAQuarterOfItsLength() async {
+        let m = machine()
+        mic.samples = [Float](repeating: 0.1, count: 16_000 * 60)
+        engine.holds = true
+        await hold(m, for: .seconds(60))
+        await settle { self.engine.isWaiting }
+
+        await pass(.milliseconds(14_900))
+        XCTAssertEqual(m.state, .transcribing)
+        XCTAssertEqual(pills, [])
+
+        await pass(.milliseconds(100))
+        await settle { !self.pills.isEmpty }
+        XCTAssertEqual(pills, [Pill("couldn't transcribe — tap to try again", 4)])
+        XCTAssertEqual(outcomes, [.couldNotTranscribe])
+    }
+
+    /// esc while the engine hangs ends the press once: the deadline it left
+    /// behind says nothing when it comes due.
+    func testEscWhileHungLeavesNoDeadlineBehind() async {
+        let m = machine()
+        engine.holds = true
+        await hold(m, for: .seconds(1))
+        await settle { self.engine.isWaiting }
+
+        XCTAssertTrue(m.escape())
+        await pass(.seconds(5))
+
+        XCTAssertEqual(pills, [])
+        XCTAssertEqual(retryOffers, [])
+        XCTAssertEqual(outcomes, [.cancelled])
+    }
+
     // MARK: - helpers
 
     private var presses: [PressRecord] {
@@ -126,6 +205,16 @@ final class UtteranceMachineTimeoutTests: XCTestCase {
             }
             return nil
         }
+    }
+
+    /// a one-second take the engine never answers, until the press gives up
+    /// on it and the pill says so.
+    private func timeOut(_ machine: UtteranceMachine) async {
+        await hold(machine, for: .seconds(1))
+        await settle { self.engine.isWaiting }
+        let pillsBefore = pills.count
+        await pass(TranscriptionDeadline.floor)
+        await settle { self.pills.count > pillsBefore }
     }
 
     /// a press held for `duration`, then let go.
