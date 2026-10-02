@@ -1,3 +1,23 @@
+## 0.10.0
+
+the trust release. two bugs made restarting the app the only fix. both are gone, along with everything shaped like them.
+
+plugging in a monitor, closing the lid or waking the mac no longer leaves fn loading forever. the mic is reopened fresh after any change to your audio, displays or sleep, and nothing to do with audio runs where it can freeze the app.
+
+airpods taken by a call no longer leave a lamp that pastes nothing. each press uses whatever mic your mac is on right now: airpods when they're connected, the built-in one when they're not. if the mic changes mid-sentence, what you said up to then is pasted.
+
+only you throw a dictation away. `esc` still does. sleep, the lock and the five-minute cap end a dictation and keep it. the screen stays awake while the mic is on, and if it locks anyway, the text is on your clipboard when you come back.
+
+the start sound and the lamp now mean the mic is hearing you, not just that you pressed a key. a mic that sends nothing says so by name, `no sound from airpods pro`, instead of pretending to listen. a speech model that stops answering gets restarted, and nothing waits forever.
+
+the menu tells you when there's a new version, and clicking `update to …` runs brew for you. to know about one, the app asks dictate.jass.gg once a day, sending only the version you're running. i count those asks per version per day and keep nothing else. settings › general has the switch. if you're on 0.9.2, this is the last `brew upgrade` you'll have to type.
+
+fix the same misheard word twice and it's learned. `learned: jass.gg` says so once, and one click takes it back.
+
+`copy diagnostics` in the menu copies how your last fifty dictations ended. it has none of your words in it, and it's what to send me when something breaks.
+
+and it's quicker. the speech model wakes up when you press, so it's ready when you let go.
+
 ## 0.9.4
 
 the lamp. the gold line at the bottom of the screen is now a glass tube: a translucent body that takes the window behind it, a pale rim, a shade, a halo that spills when you speak. it waves to your voice and lights up with it, and it holds over a white page as well as a black one — the old line vanished on a document. a locked recording pins it with a bead at each end.
