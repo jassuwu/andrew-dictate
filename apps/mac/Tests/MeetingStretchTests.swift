@@ -539,6 +539,65 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(lines, ["[00:00:01] them: are we all here"])
     }
 
+    // MARK: - the decision alone
+
+    /// Loudness for 40 frames of 50 ms — two seconds — none of them quiet. The
+    /// far side's, and an unrelated one for the mic.
+    private static let theirFrames: [Float] = [
+        0.04, 0.03, 0.06, 0.03, 0.09, 0.09, 0.09, 0.08, 0.05, 0.03, 0.09, 0.02, 0.08, 0.08,
+        0.02, 0.09, 0.06, 0.05, 0.03, 0.07, 0.02, 0.02, 0.02, 0.10, 0.02, 0.08, 0.05, 0.08,
+        0.02, 0.10, 0.05, 0.09, 0.09, 0.10, 0.05, 0.07, 0.05, 0.05, 0.09, 0.06,
+    ]
+    private static let otherFrames: [Float] = [
+        0.06, 0.04, 0.10, 0.10, 0.08, 0.03, 0.03, 0.08, 0.05, 0.04, 0.06, 0.06, 0.05, 0.09,
+        0.02, 0.08, 0.06, 0.08, 0.02, 0.07, 0.05, 0.04, 0.09, 0.02, 0.10, 0.10, 0.09, 0.08,
+        0.03, 0.02, 0.05, 0.05, 0.09, 0.08, 0.09, 0.10, 0.10, 0.04, 0.03, 0.02,
+    ]
+
+    /// A side's loudness, a value to each 50 ms from the start of the meeting:
+    /// every frame a square wave at exactly that loudness.
+    private func trail(_ frames: [Float]) -> LoudnessTrail {
+        var trail = LoudnessTrail()
+        trail.hear(frames.flatMap { rms in (0..<800).map { $0.isMultiple(of: 2) ? rms : -rms } }, at: .zero)
+        return trail
+    }
+
+    /// What the mic makes of a far side: a fifth as loud, `delay` frames late.
+    private func copy(of frames: [Float], late delay: Int = 0) -> [Float] {
+        [Float](repeating: 0, count: delay) + frames.dropLast(delay).map { $0 * 0.2 }
+    }
+
+    /// The far side with nothing said in its first `frames`.
+    private func theirsAfter(_ quiet: Int) -> [Float] {
+        [Float](repeating: 0, count: quiet) + Self.theirFrames.dropFirst(quiet)
+    }
+
+    /// The decision for a stretch of the mic from 0.5 s to 1.5 s: frames 10
+    /// up to 30, with the 6 before for the delay.
+    private func verdict(mic: [Float], far: [Float]) -> BleedJudge.Verdict {
+        BleedJudge.verdict(
+            mic: trail(mic), far: trail(far), from: .milliseconds(500), to: .milliseconds(1500))
+    }
+
+    /// Their loudness is the evidence, and only where they were talking. A mic
+    /// that follows a far side exactly is still not hearing it if the far
+    /// side was quiet for most of the stretch — the quiet is what is shared.
+    func testAFarSideQuietForMoreThanThreeTenthsOfTheStretchIsNotWhatTheMicHeard() {
+        // quiet for 8 frames of the 20, then talking: copied to the letter.
+        XCTAssertEqual(
+            verdict(mic: copy(of: theirsAfter(18)), far: theirsAfter(18)), .keep)
+        // quiet for 4 of the 20: talking through most of it.
+        XCTAssertEqual(
+            verdict(mic: copy(of: theirsAfter(14)), far: theirsAfter(14)), .drop)
+    }
+
+    /// Too quiet to be heard at all, as loud as the room it is in: nothing
+    /// came out of the speakers to come back.
+    func testAFarSideBelowTheFloorIsNotWhatTheMicHeard() {
+        let faint = Self.theirFrames.map { $0 * 0.08 }
+        XCTAssertEqual(verdict(mic: copy(of: faint), far: faint), .keep)
+    }
+
     // MARK: - building a meeting
 
     private func stretches(

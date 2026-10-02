@@ -98,6 +98,11 @@ enum BleedJudge {
     // behave, and tried on synthetic speech. They want a real call or two on
     // the mac's own speakers before anyone trusts them.
 
+    /// Quieter than this, a side is not talking: the room, not a voice.
+    static let quiet: Float = 0.01
+    /// The share of a stretch's frames the far side must have been talking
+    /// in, to have been talking through it.
+    static let talkingShare = 0.7
     /// How far behind the far side the mic may run: the speakers, the air,
     /// the input buffer.
     static let reach = Duration.milliseconds(300)
@@ -124,6 +129,8 @@ enum BleedJudge {
         }
         // played[lead + i] is the far side when heard[i] was the mic; the
         // `lead` before it are what the mic may be hearing late.
+        let talking = played.suffix(heard.count).filter { $0 > quiet }.count
+        guard Double(talking) >= talkingShare * Double(heard.count) else { return .keep }
         let best = (0...lead).map { delay in
             correlation(heard[...], played[(lead - delay)..<(lead - delay + heard.count)])
         }.max() ?? 0
