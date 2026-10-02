@@ -1,7 +1,30 @@
 import { describe, expect, test } from "bun:test";
-import { answer, cachedTag, tagFromGitHub } from "../api/latest";
+import { answer, cachedTag, createHandler, tagFromGitHub } from "../api/latest";
 
 const url = new URL("https://dictate.jass.gg/api/latest?version=0.9.4");
+
+/** github and upstash as the function sees them, recording what it asked. */
+function fakeInternet() {
+  const githubLookups: string[] = [];
+  const fetchStub = async (input: string | URL | Request) => {
+    const target = String(input);
+    if (target.startsWith("https://github.com/")) {
+      githubLookups.push(target);
+      return new Response(null, {
+        status: 302,
+        headers: {
+          location: "https://github.com/jassuwu/andrew-dictate/releases/tag/v0.9.5",
+        },
+      });
+    }
+    throw new Error(`unexpected request to ${target}`);
+  };
+  return { fetch: fetchStub as typeof fetch, githubLookups };
+}
+
+function checkRequest(version: string) {
+  return new Request(`https://dictate.jass.gg/api/latest?version=${version}`);
+}
 
 describe("answer", () => {
   test("says the newest version, without the tag's v", async () => {
@@ -12,13 +35,12 @@ describe("answer", () => {
     expect(response.headers.get("content-type")).toContain("application/json");
   });
 
-  // dozens of installs, one github lookup an hour per cached url.
-  test("is cached at the edge for an hour, then served stale while it refreshes", async () => {
+  // an edge cache would answer most checks before the function ran, and a
+  // check the function never sees is a check nobody counted.
+  test("is never cached, so every check reaches the function", async () => {
     const response = await answer(url, { latestTag: async () => "v0.9.5" });
 
-    expect(response.headers.get("cache-control")).toBe(
-      "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400",
-    );
+    expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
   test("a tag that is not a version is no answer", async () => {
@@ -28,7 +50,7 @@ describe("answer", () => {
     }
   });
 
-  test("github being down is no answer, cached only briefly", async () => {
+  test("github being down is no answer, and not cached either", async () => {
     const unreachable = await answer(url, {
       latestTag: async () => {
         throw new Error("offline");
@@ -38,9 +60,7 @@ describe("answer", () => {
 
     for (const response of [unreachable, nothing]) {
       expect(response.status).toBe(502);
-      expect(response.headers.get("cache-control")).toBe(
-        "public, max-age=0, s-maxage=60",
-      );
+      expect(response.headers.get("cache-control")).toBe("no-store");
     }
   });
 });
@@ -173,5 +193,24 @@ describe("cachedTag", () => {
     clock = hour + 2;
     expect(await latestTag()).toBe("v0.9.5");
     expect(github.calls()).toBe(2);
+  });
+});
+
+describe("the handler", () => {
+  test("a day of checks is one github lookup, every one of them answered", async () => {
+    const internet = fakeInternet();
+    let clock = Date.UTC(2026, 9, 2, 8);
+    const handle = createHandler({ env: {}, fetch: internet.fetch, now: () => clock });
+
+    for (const version of ["0.9.4", "0.9.3", "0.9.4", "0.9.2", "0.9.4"]) {
+      clock += 60_000;
+      const response = await handle(checkRequest(version));
+      expect(await response.json()).toEqual({ latest: "0.9.5" });
+    }
+    expect(internet.githubLookups).toHaveLength(1);
+
+    clock += 60 * 60 * 1000;
+    await handle(checkRequest("0.9.4"));
+    expect(internet.githubLookups).toHaveLength(2);
   });
 });

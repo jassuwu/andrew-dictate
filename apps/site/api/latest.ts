@@ -8,29 +8,17 @@
 const RELEASES_LATEST =
   "https://github.com/jassuwu/andrew-dictate/releases/latest";
 
-// an hour at the edge, then up to a day of the old answer while one request
-// refreshes it. a few dozen installs cost github one lookup an hour per
-// cached url (the url includes `?version=`), never a request each.
-const ANSWERED = "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400";
-
-// a failed lookup is cached for a minute, so a github outage costs it one
-// retry a minute rather than one per install.
-const UNANSWERED = "public, max-age=0, s-maxage=60";
+// no response is cached anywhere. an edge cache would answer most checks
+// before this function ran, and a check the function never sees is a check
+// nobody counted. what is cached is github's answer, in `cachedTag` below.
+const NOT_CACHED = "no-store";
 
 export type Sources = {
   /** the newest release's tag, e.g. "v0.9.5"; null or a throw when unknown. */
   latestTag: () => Promise<string | null>;
 };
 
-/**
- * the whole endpoint, with github passed in so it can be tested offline.
- *
- * ticket 10 counts check-ins per (day, version) here: it adds the counter
- * to `Sources` and reads `url.searchParams.get("version")` before answering.
- * nothing else about the request is read, then or now. note the cache: a
- * request the edge answers from cache never reaches this function, so the
- * counter has to move the caching off this response before it can count.
- */
+/** the whole endpoint, with github passed in so it can be tested offline. */
 export async function answer(url: URL, sources: Sources): Promise<Response> {
   let tag: string | null;
   try {
@@ -41,9 +29,9 @@ export async function answer(url: URL, sources: Sources): Promise<Response> {
 
   const version = tag?.replace(/^v/i, "");
   if (!version || !/^\d+(\.\d+)*$/.test(version)) {
-    return json({ error: "no release found" }, 502, UNANSWERED);
+    return json({ error: "no release found" }, 502);
   }
-  return json({ latest: version }, 200, ANSWERED);
+  return json({ latest: version }, 200);
 }
 
 /**
@@ -112,18 +100,36 @@ export function cachedTag(
   };
 }
 
-export function GET(request: Request): Promise<Response> {
-  return answer(new URL(request.url), {
-    latestTag: () => tagFromGitHub(),
-  });
+export type Env = Record<string, string | undefined>;
+
+export type Deps = {
+  env: Env;
+  fetch: typeof fetch;
+  now: () => number;
+};
+
+/**
+ * the endpoint wired to its outside world: github through `deps.fetch`, with
+ * its tag remembered by the handler for as long as the handler lives. the
+ * function instance builds one at load, so the memory lasts the instance.
+ */
+export function createHandler(deps: Deps): (request: Request) => Promise<Response> {
+  const latestTag = cachedTag(() => tagFromGitHub(deps.fetch), deps.now);
+  return (request) => answer(new URL(request.url), { latestTag });
 }
 
-function json(body: unknown, status: number, cacheControl: string): Response {
+export const GET = createHandler({
+  env: process.env,
+  fetch,
+  now: Date.now,
+});
+
+function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      "cache-control": cacheControl,
+      "cache-control": NOT_CACHED,
     },
   });
 }
