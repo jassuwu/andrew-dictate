@@ -150,6 +150,9 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     private var handoffEpoch = 0
     private var lookTimer: DispatchSourceTimer?
     private var listeners: [Listener] = []
+    /// Whether the meeting's mic is muted on the mac, as last read.
+    private var mute = MicMute()
+    private var muteTimer: DispatchSourceTimer?
 
     /// Built with the rest of the meeting machinery, and that is when a
     /// device an earlier session left under either uid is swept away.
@@ -346,15 +349,44 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             handoffEpoch = epoch
             listen()
             scheduleLook()
+            keepReadingTheMute()
         }
     }
 
+    /// The meeting is over: the next one reads its mic's mute afresh.
     private func unfollow() {
         following.async { [self] in
             stopListening()
             lookTimer?.cancel()
             lookTimer = nil
+            muteTimer?.cancel()
+            muteTimer = nil
+            mute = MicMute()
             handoff = MicHandoff()
+        }
+    }
+
+    /// Every two seconds while the meeting is followed, the mic's own mute
+    /// switch and input volume: a meeting must tell a mic muted on purpose
+    /// from one that has stopped delivering. Read rather than listened to,
+    /// because the mic to read is whichever the meeting is on, and that
+    /// moves. Kept across a rebuild: still muted is not news.
+    private func keepReadingTheMute() {
+        guard muteTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: following)
+        timer.schedule(deadline: .now(), repeating: .seconds(2), leeway: .milliseconds(200))
+        timer.setEventHandler { [weak self] in self?.readTheMute() }
+        timer.resume()
+        muteTimer = timer
+    }
+
+    private func readTheMute() {
+        guard isFollowing, let mic = handoff.mic,
+              let device = CoreAudioProperties.device(uid: mic.uid)
+        else { return }
+        let controls = CoreAudioProperties.inputControls(device)
+        if let kind = mute.read(mute: controls.mute, volume: controls.volume) {
+            tell(kind, mic: mic, at: nil)
         }
     }
 
@@ -1251,6 +1283,38 @@ private enum CoreAudioProperties {
         }
         guard status == noErr, device != kAudioObjectUnknown else { return nil }
         return device
+    }
+
+    /// The mic's own controls, as the sound settings set them: its mute
+    /// switch and its input volume, nil for one it does not have. On the
+    /// device as a whole, or on each input channel when it keeps them per
+    /// channel: muted only if every channel is, and as loud as its loudest.
+    static func inputControls(_ device: AudioObjectID) -> (mute: Bool?, volume: Float?) {
+        func read<T: BitwiseCopyable>(_ selector: AudioObjectPropertySelector, _ zero: T) -> [T] {
+            if let whole = inputValue(selector, of: device, element: kAudioObjectPropertyElementMain, zero) {
+                return [whole]
+            }
+            let channels = UInt32(inputChannels(device).reduce(0, +))
+            guard channels > 0 else { return [] }
+            return (1...channels).compactMap { inputValue(selector, of: device, element: $0, zero) }
+        }
+        let mutes = read(kAudioDevicePropertyMute, UInt32(0))
+        let volumes = read(kAudioDevicePropertyVolumeScalar, Float32(0))
+        return (mutes.isEmpty ? nil : mutes.allSatisfy { $0 != 0 }, volumes.max())
+    }
+
+    /// One input-side value of `device`, nil when it has no such property.
+    private static func inputValue<T: BitwiseCopyable>(
+        _ selector: AudioObjectPropertySelector, of device: AudioObjectID,
+        element: AudioObjectPropertyElement, _ zero: T
+    ) -> T? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector, mScope: kAudioObjectPropertyScopeInput, mElement: element)
+        guard AudioObjectHasProperty(device, &address) else { return nil }
+        var value = zero
+        var size = UInt32(MemoryLayout<T>.size)
+        let status = AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value)
+        return status == noErr ? value : nil
     }
 
     static func nominalSampleRate(_ device: AudioObjectID) -> Double {
