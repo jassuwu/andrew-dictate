@@ -154,6 +154,66 @@ final class MeetingAgainTests: XCTestCase {
         XCTAssertNil(entry.label.until, "kept until you delete it")
     }
 
+    /// Audio that already has a date keeps it: made again is not a reason
+    /// to keep someone's voice longer. The label says the new model.
+    func testTheAudioOfAMeetingThatWasNotThinKeepsItsDate() async throws {
+        let until = Date(timeIntervalSince1970: 1_790_050_000)
+        let file = try await existingMeeting(audioUntil: until)
+        let again = FakeTranscriber()
+        again.batchTurns = [.init(speaker: .you, at: .seconds(1), text: "namaste")]
+        again.tally = passing
+        transcribers.lineUp(again)
+
+        await coordinator().transcribeAgain(file, with: .whisperLargeV3)
+
+        let entry = try XCTUnwrap(kept.entry(for: file))
+        XCTAssertEqual(entry.label.until, until)
+        XCTAssertEqual(entry.label.model, .whisperLargeV3)
+    }
+
+    /// With the setting at delete at once, a thin meeting that is whole now
+    /// is due now. The rerun does not delete it — the next sweep does, as it
+    /// would have for any meeting whose day came.
+    func testAThinMeetingWhoseRerunPassesIsDueAtOnceWhenTheSettingSaysDeleteAtOnce() async throws {
+        keepAudio = .deleteAtOnce
+        let file = try await existingMeeting(thin: true, audioUntil: nil)
+        let again = FakeTranscriber()
+        again.batchTurns = [.init(speaker: .you, at: .seconds(1), text: "namaste")]
+        again.tally = passing
+        transcribers.lineUp(again)
+
+        await coordinator().transcribeAgain(file, with: .whisperLargeV3)
+
+        let entry = try XCTUnwrap(kept.entry(for: file), "not deleted by the rerun")
+        XCTAssertEqual(entry.label.until, rerunAt)
+    }
+
+    /// A whole transcript is not swapped for a hollow one because you tried
+    /// another model on it. It stays as it was, and the lamp says why; the
+    /// audio is there to try a third.
+    func testAReadingThatIsThinDoesNotReplaceAWholeTranscript() async throws {
+        let until = Date(timeIntervalSince1970: 1_790_050_000)
+        let file = try await existingMeeting(audioUntil: until)
+        let before = try Data(contentsOf: file)
+        let again = FakeTranscriber()
+        again.batchTurns = [.init(speaker: .them(nil), at: .seconds(1), text: "hmm right")]
+        again.tally = StretchTally(
+            decodedThem: 900, speechThem: .seconds(3_600), readThem: .seconds(3_600))
+        transcribers.lineUp(again)
+
+        await coordinator().transcribeAgain(file, with: .whisperLargeV3Turbo)
+
+        XCTAssertEqual(try Data(contentsOf: file), before)
+        XCTAssertEqual(events, [
+            .transcribingAgain(.whisperLargeV3Turbo),
+            .couldNotTranscribeAgain(
+                "whisper turbo read it thin: far fewer words than the talk that was heard"),
+        ])
+        let entry = try XCTUnwrap(kept.entry(for: file))
+        XCTAssertEqual(entry.label.until, until)
+        XCTAssertEqual(entry.label.model, .parakeetV3, "the label still says what wrote the file")
+    }
+
     // MARK: - when it fails
 
     /// The model threw. The file is exactly the bytes it was, the lamp says

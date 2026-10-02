@@ -1529,6 +1529,18 @@ extension MeetingCoordinator {
 // MARK: - transcribing again
 
 extension MeetingCoordinator {
+    private enum AgainFailure: LocalizedError {
+        /// The new reading did not cover what was said, over a transcript
+        /// that did.
+        case thin(MeetingModel, String)
+
+        var errorDescription: String? {
+            switch self {
+            case .thin(let model, let reason): "\(model.shortName) read it thin: \(reason)"
+            }
+        }
+    }
+
     func transcribeAgain(_ transcript: URL, with model: MeetingModel) async {
         onEvent?(.transcribingAgain(model))
         do {
@@ -1549,6 +1561,14 @@ extension MeetingCoordinator {
                 ? reading.turns
                 : await splitSpeakers(in: reading.turns, them: audio.them, gaps: header.gaps)
             let thin = covered.result == .thin
+            // a thin file is the one whose audio is kept until you delete it.
+            let wasThin = entry.label.until == nil && !header.complete
+            // a thin reading may stand in for a thin one — you asked, and
+            // the file says so — but never for a whole transcript, which is
+            // lost the moment it is replaced.
+            if thin, !wasThin {
+                throw AgainFailure.thin(model, covered.reason ?? "")
+            }
             let again = MeetingTranscript(
                 app: header.app, started: header.started, duration: header.duration,
                 engine: model.rawValue, gaps: header.gaps, recovered: header.recovered,
@@ -1563,7 +1583,7 @@ extension MeetingCoordinator {
             // was, and the audio is not deleted here either way.
             let prefs = preferences()
             var until = entry.label.until
-            if until == nil, !thin {
+            if wasThin, !thin {
                 until = keptAudio.now().addingTimeInterval(prefs.keepAudio.keptFor ?? 0)
             }
             if !keptAudio.relabel(entry, model: model, until: until) {
