@@ -227,6 +227,38 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// the daily update check (ADR 0043): once a day the app sends its
+    /// version to dictate.jass.gg and hears back the newest. on unless
+    /// switched off; off means no request at all.
+    @Published var checksForUpdates: Bool {
+        didSet {
+            guard checksForUpdates != oldValue else {
+                return
+            }
+            userDefaults.set(checksForUpdates, forKey: Self.checksForUpdatesKey)
+        }
+    }
+
+    /// when the site last answered, and what it said. state rather than a
+    /// choice, kept here so "once a day" survives a relaunch.
+    var updateCheckedAt: Date? {
+        get {
+            userDefaults.object(forKey: Self.updateCheckedAtKey) as? Date
+        }
+        set {
+            userDefaults.set(newValue, forKey: Self.updateCheckedAtKey)
+        }
+    }
+
+    var newestVersionSeen: String? {
+        get {
+            userDefaults.string(forKey: Self.newestVersionSeenKey)
+        }
+        set {
+            userDefaults.set(newValue, forKey: Self.newestVersionSeenKey)
+        }
+    }
+
     @Published private(set) var totalWordsDictated: Int {
         didSet {
             guard totalWordsDictated != oldValue else {
@@ -273,6 +305,10 @@ final class AppSettings: ObservableObject {
         "AndrewDictate.meetingHookLastRunAt"
     private static let meetingHookLastRunLabelKey =
         "AndrewDictate.meetingHookLastRunLabel"
+    private static let checksForUpdatesKey = "AndrewDictate.checksForUpdates"
+    private static let updateCheckedAtKey = "AndrewDictate.updateCheckedAt"
+    private static let newestVersionSeenKey =
+        "AndrewDictate.newestVersionSeen"
 
     /// `~/andrew-dictate` — no spaces anywhere the app creates a path, so a
     /// hook can be a one-line shell script (SPEC §11). deliberately not
@@ -381,6 +417,12 @@ final class AppSettings: ObservableObject {
             .object(forKey: Self.meetingHookLastRunAtKey) as? Date
         meetingHookLastRunLabel = userDefaults
             .string(forKey: Self.meetingHookLastRunLabelKey)
+        // unset means on (ADR 0043).
+        checksForUpdates = userDefaults.object(
+            forKey: Self.checksForUpdatesKey
+        ) == nil
+            ? true
+            : userDefaults.bool(forKey: Self.checksForUpdatesKey)
 
         // an install from before the default left ~/Documents keeps the
         // folder its transcripts are in — written down, so the choice
