@@ -47,9 +47,11 @@ enum BadgeLook: Equatable, Sendable, CaseIterable {
             self = .recordingMeeting
         case .gettingReady:
             self = .gettingReady
+        // a take is the mic live right now. a call nobody records is only
+        // a chance to start one, and it is still there when the take ends.
         case .none,
              .callNotRecorded:
-            self = .idle
+            self = isDictating ? .dictating : .idle
         }
     }
 }

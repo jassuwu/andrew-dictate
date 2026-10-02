@@ -76,4 +76,21 @@ final class BadgeLookTests: XCTestCase {
             )
         }
     }
+
+    /// a take is the mic live right now; a call nobody records is only a
+    /// chance to start one, and it is still there when the take ends.
+    func testDictatingOutranksACallNotRecorded() {
+        XCTAssertEqual(
+            BadgeLook(
+                needsSetup: false,
+                isDictating: true,
+                meeting: .callNotRecorded
+            ),
+            .dictating
+        )
+        XCTAssertEqual(
+            BadgeLook(needsSetup: false, isDictating: true, meeting: .none),
+            .dictating
+        )
+    }
 }
