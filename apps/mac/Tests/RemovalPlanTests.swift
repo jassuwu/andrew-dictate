@@ -136,6 +136,34 @@ final class RemovalPlanTests: XCTestCase {
         )
     }
 
+    /// the press log rides with the dictations: no words in it, but left
+    /// behind it would be the one file keeping the folder alive.
+    func testRemovingDictationsTakesThePressLogAndTheFolder() throws {
+        try write("dictations.jsonl")
+        try write("presses.jsonl", bytes: 256)
+
+        let entry = remover().plan().entries.first { $0.item == .dictations }
+        XCTAssertGreaterThanOrEqual(entry?.bytes ?? 0, 256)
+
+        XCTAssertTrue(remover().remove([.dictations]).isEmpty)
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: support.appendingPathComponent("presses.jsonl").path
+            )
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: support.path))
+    }
+
+    /// a press log with no dictations beside it is still something to remove.
+    func testAPressLogAloneStillCountsAsDictations() throws {
+        try write("presses.jsonl")
+
+        XCTAssertEqual(
+            remover().plan().entries.first { $0.item == .dictations }?.exists,
+            true
+        )
+    }
+
     /// Something the plan did not know about is not something it may delete.
     func testAnUnknownFileKeepsTheFolderAlive() throws {
         try write("dictations.jsonl")
