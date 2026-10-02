@@ -27,6 +27,68 @@ final class StretchCoverageTests: XCTestCase {
         XCTAssertEqual(tally.readThem, .seconds(1))
     }
 
+    /// The engine threw on your stretch twice and let it go: it was speech,
+    /// and it was not read.
+    func testAStretchThatFailedTwiceIsSpeechThatWasNotRead() async throws {
+        let engine = WordsEngine()
+        engine.failFirst(2)
+        let transcriber = stretches(engine)
+        try await transcriber.begin()
+
+        await play([
+            .init(side: .you, from: 1.3, to: 2.5),
+            .init(side: .them, from: 3.3, to: 4.0),
+        ], through: 5.0, into: transcriber)
+        _ = await transcriber.finish()
+
+        let tally = await transcriber.tally
+        XCTAssertEqual(tally.speechYou, .seconds(1.5))
+        XCTAssertEqual(tally.readYou, .zero)
+        XCTAssertEqual(tally.speechThem, .seconds(1))
+        XCTAssertEqual(tally.readThem, .seconds(1))
+    }
+
+    /// The model never loaded, and the meeting stopped with its speech still
+    /// waiting for it: all of it cut, none of it read.
+    func testStretchesStillWaitingWhenTheEngineNeverCameAreSpeechThatWasNotRead() async throws {
+        let engine = WordsEngine()
+        engine.refuseToLoad()
+        let transcriber = stretches(engine)
+        await XCTAssertThrowsErrorAsync(try await transcriber.begin())
+
+        await play([
+            .init(side: .you, from: 1.3, to: 2.5),
+            .init(side: .them, from: 3.3, to: 4.0),
+        ], through: 5.0, into: transcriber)
+        let turns = await transcriber.finish()
+
+        XCTAssertEqual(turns, [])
+        let tally = await transcriber.tally
+        XCTAssertEqual(tally.speechYou, .seconds(1.5))
+        XCTAssertEqual(tally.readYou, .zero)
+        XCTAssertEqual(tally.speechThem, .seconds(1))
+        XCTAssertEqual(tally.readThem, .zero)
+    }
+
+    /// A spool read again at the end counts the same way the meeting did.
+    func testASpoolReadWholeCountsItsSpeechTheSameWay() async throws {
+        let engine = WordsEngine()
+        let transcriber = stretches(engine)
+        let said: [Said] = [
+            .init(side: .you, from: 1.3, to: 2.5),
+            .init(side: .them, from: 3.3, to: 4.0),
+        ]
+        let (you, them) = sides(of: said, from: 0, count: 5 * 16_000)
+
+        _ = try await transcriber.transcribe(you: you, them: them)
+
+        let tally = await transcriber.tally
+        XCTAssertEqual(tally.speechYou, .seconds(1.5))
+        XCTAssertEqual(tally.readYou, .seconds(1.5))
+        XCTAssertEqual(tally.speechThem, .seconds(1))
+        XCTAssertEqual(tally.readThem, .seconds(1))
+    }
+
     // MARK: - building a meeting
 
     private func stretches(_ engine: WordsEngine) -> StretchTranscriber {
@@ -72,6 +134,16 @@ final class StretchCoverageTests: XCTestCase {
         }
         return (you, them)
     }
+}
+
+private func XCTAssertThrowsErrorAsync(
+    _ expression: @autoclosure () async throws -> Void,
+    file: StaticString = #filePath, line: UInt = #line
+) async {
+    do {
+        try await expression()
+        XCTFail("expected it to throw", file: file, line: line)
+    } catch {}
 }
 
 // MARK: - fakes
