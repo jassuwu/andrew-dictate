@@ -163,9 +163,9 @@ final class CallMonitorTests: XCTestCase {
     }
 
     /// Muted, and the call app closed the mic: nobody holds it, but the app
-    /// still plays everyone else, so the call goes on and is not offered a
-    /// second time. It ends once the app has done neither for thirty
-    /// seconds.
+    /// still plays everyone else, so the call goes on — five minutes here,
+    /// inside the ten audio alone is given — and is not offered a second
+    /// time. It ends once the app has done neither for thirty seconds.
     func testACallWhoseAppLetsGoOfTheMicButKeepsPlayingGoesOn() async {
         processes = [
             AudioProcess(pid: 900, bundleID: "us.zoom.xos", isRunningInput: true, isRunningOutput: true)
@@ -181,7 +181,7 @@ final class CallMonitorTests: XCTestCase {
             AudioProcess(pid: 900, bundleID: "us.zoom.xos", isRunningInput: false, isRunningOutput: true)
         ]
         mic.say(false)
-        await run(until: { false }, for: .seconds(600))
+        await run(until: { false }, for: .seconds(300))
         XCTAssertEqual(monitor.currentCall, "zoom")
         XCTAssertEqual(monitor.unrecordedCall, "zoom")
 
@@ -201,6 +201,37 @@ final class CallMonitorTests: XCTestCase {
         XCTAssertNil(monitor.currentCall)
         XCTAssertEqual(clock.now - left, .seconds(32), accuracy: .seconds(2))
         XCTAssertEqual(suggestions, [.record("zoom")])
+        monitor.stop()
+    }
+
+    /// A call in arc ends and arc plays a video: ten minutes off the mic and
+    /// thirty seconds more, the call is over, and the reads stop with it
+    /// instead of running all afternoon.
+    func testABrowserThatPlaysOnAfterItsCallStopsBeingReadAfterTenMinutes() async {
+        processes = [
+            AudioProcess(
+                pid: 900, bundleID: "company.thebrowser.Browser",
+                isRunningInput: true, isRunningOutput: true)
+        ]
+        let monitor = monitor()
+        monitor.start()
+        mic.say(true)
+        await run(until: { monitor.currentCall == "arc" })
+
+        processes = [
+            AudioProcess(
+                pid: 900, bundleID: "company.thebrowser.Browser",
+                isRunningInput: false, isRunningOutput: true)
+        ]
+        mic.say(false)
+        let left = clock.now
+        await run(until: { monitor.currentCall == nil }, for: .seconds(3_600))
+        XCTAssertNil(monitor.currentCall)
+        XCTAssertEqual(clock.now - left, .seconds(632), accuracy: .seconds(4))
+
+        let stoppedAt = clock.now
+        for _ in 0..<200 { await Task.yield() }
+        XCTAssertEqual(clock.now, stoppedAt)
         monitor.stop()
     }
 }
