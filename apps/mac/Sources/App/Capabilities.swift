@@ -30,9 +30,10 @@ struct Capabilities: Equatable, Sendable {
     /// released app has no reason to talk about itself.
     let announcesItself: Bool
 
-    /// Open the lamp lab and honour the `lampGround` default that picks a
-    /// lamp variant for the live HUD. **Development only** — an audition
-    /// surface, not a setting.
+    /// Open the lamp lab and rehearse the lamp. **Development only** — an
+    /// audition surface, not a setting. The one capability that is also
+    /// `#if DEBUG`: release does not carry the lab, the rehearsal or the
+    /// grounds it auditioned, so this answers inside a debug build only.
     let hasLampLab: Bool
     /// Quit rather than become a second copy. **Release only** — one archive,
     /// one spool, one pasteboard: a second instance sweeps the first one's

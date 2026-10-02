@@ -175,6 +175,32 @@ final class AppSettingsTests: XCTestCase {
         )
     }
 
+    /// the default is where meetings would go, not a choice anybody made;
+    /// a pick, or the old folder pinned, is.
+    func testOnlyAChosenOrPinnedFolderCountsAsChosen() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let untouched = AppSettings(
+            userDefaults: userDefaults,
+            unpickedMeetingsFolder: AppSettings.defaultMeetingsFolder
+        )
+        XCTAssertFalse(untouched.meetingsFolderWasChosen)
+
+        untouched.meetingsFolder = URL(
+            fileURLWithPath: "/tmp/meetings", isDirectory: true)
+        XCTAssertTrue(untouched.meetingsFolderWasChosen)
+
+        let (pinnedDefaults, pinnedSuite) = makeUserDefaults()
+        defer { pinnedDefaults.removePersistentDomain(forName: pinnedSuite) }
+        let pinned = AppSettings(
+            userDefaults: pinnedDefaults,
+            unpickedMeetingsFolder: URL(
+                fileURLWithPath: "/tmp/andrew-legacy", isDirectory: true)
+        )
+        XCTAssertTrue(pinned.meetingsFolderWasChosen)
+    }
+
     func testAFolderInsideMobileDocumentsIsKnownToSync() {
         let synced = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library", isDirectory: true)

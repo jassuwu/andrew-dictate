@@ -119,6 +119,18 @@ struct MeetingSpool: Sendable {
         return names.filter { !$0.hasPrefix(".") }.count
     }
 
+    /// One directory read, so launch can tell "a crash left something" from
+    /// "nothing to do" without building what recovers it. True can still
+    /// come to nothing — junk `orphans()` sweeps, a meeting just begun —
+    /// but false is always nothing.
+    func mayHoldOrphans() -> Bool {
+        let names = (try? FileManager.default.contentsOfDirectory(
+            atPath: root.path)) ?? []
+        return names.contains {
+            !$0.hasPrefix(".") && $0 != Self.unreadableFolderName
+        }
+    }
+
     /// Spools with a manifest and audio, oldest first. A folder whose manifest
     /// cannot be read is junk and is swept; a manifest without audio is a
     /// meeting that has just begun and is left alone; one set aside as

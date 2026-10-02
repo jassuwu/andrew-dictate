@@ -1,6 +1,9 @@
 import AppKit
 import SwiftUI
 
+// compiled into the debug build only: `Capabilities.hasLampLab` decides
+// whether it opens, this decides whether release carries it at all.
+#if DEBUG
 /// dev only: every lamp ground over every background the lamp meets, in one
 /// window, drawn by the real lamp code with the real transitions. the
 /// audition is done by eye here; the pick is then lived with through
@@ -418,3 +421,4 @@ private struct RowTransition: ViewModifier {
         }
     }
 }
+#endif

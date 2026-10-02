@@ -61,6 +61,32 @@ final class MeetingSpoolTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: junk.path))
     }
 
+    // MARK: - the look launch takes first
+
+    /// No folder at all is the mac that has never recorded a meeting.
+    func testASpoolThatWasNeverMadeHoldsNothing() {
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+        XCTAssertFalse(spool.mayHoldOrphans())
+    }
+
+    func testAnythingLeftInTheSpoolIsWorthALook() throws {
+        let handle = try spool.begin(manifest())
+        XCTAssertTrue(spool.mayHoldOrphans())
+
+        try spool.finish(handle)
+        XCTAssertFalse(spool.mayHoldOrphans())
+    }
+
+    /// Set aside means never retried, so it is no reason to build anything.
+    func testOnlySetAsideSpoolsAreNothingToDo() throws {
+        let handle = try spool.begin(manifest())
+        try Data([0]).write(to: handle.audioURL)
+
+        spool.setAside(handle)
+
+        XCTAssertFalse(spool.mayHoldOrphans())
+    }
+
     // MARK: - the ones it could not read
 
     func testAnAttemptIsWrittenDownAndSurvivesARelaunch() throws {

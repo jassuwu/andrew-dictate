@@ -174,7 +174,9 @@ final class DictationCoordinator: ObservableObject {
     )?
     private let timelineStore = UtteranceTimelineStore()
     private var aboutWindowController: AboutWindowController?
+    #if DEBUG
     private var lampLabWindowController: LampLabWindowController?
+    #endif
     /// Rebuilt per transcript rather than reused: the window is *about* one
     /// dictation, so keeping a stale one around would show the wrong words.
     private let dictationArchive = DictationArchive()
@@ -193,11 +195,12 @@ final class DictationCoordinator: ObservableObject {
     private var wordFixerWindowController: WordFixerWindowController?
 
     // MARK: meetings (ADR 0023, 0040)
-    let meetings: MeetingCoordinator
-    let liveTranscript = LiveTranscriptModel(app: "", elapsed: .zero)
+    /// built on first use: a mac that only dictates never pays for meetings.
+    let meetings: LazyMeetings
+    /// made by the first meeting, like the panel that shows it.
+    private lazy var liveTranscript = LiveTranscriptModel(app: "", elapsed: .zero)
     @Published private(set) var meetingModelDownloads: [MeetingModel: Double] = [:]
     @Published private(set) var isLiveTranscriptShown = false
-    private let meetingNotifier = MeetingNudgeNotifier()
     /// the app `record a meeting ▸ zoom` named, held while setup runs. the
     /// click already happened; setup is the detour, not a new question.
     private var pendingMeetingApp: RunningApp?
@@ -248,18 +251,22 @@ final class DictationCoordinator: ObservableObject {
         }
         audioRecorder = recorder
         feedbackSounds = FeedbackSounds(settings: settings)
-        meetings = MeetingCoordinator(
-            source: CoreAudioMeetingSource(),
-            makeTranscriber: { try await MeetingEngines.makeTranscriber(for: $0) },
-            diarizer: MeetingEngines.makeDiarizer(),
-            preferences: {
-                MeetingPreferences(
-                    folder: settings.meetingsFolder,
-                    hook: settings.meetingHook,
-                    model: settings.meetingModel
-                )
-            }
-        )
+        meetings = LazyMeetings(coordinator: {
+            MeetingCoordinator(
+                source: CoreAudioMeetingSource(),
+                makeTranscriber: { try await MeetingEngines.makeTranscriber(for: $0) },
+                diarizer: MeetingEngines.makeDiarizer(),
+                preferences: {
+                    MeetingPreferences(
+                        folder: settings.meetingsFolder,
+                        hook: settings.meetingHook,
+                        model: settings.meetingModel
+                    )
+                }
+            )
+        }, notifier: {
+            MeetingNudgeNotifier()
+        })
 
         let viewModel = HUDViewModel(
             state: .prewarming,
@@ -398,6 +405,7 @@ final class DictationCoordinator: ObservableObject {
             }
         }
 
+        #if DEBUG
         if Capabilities.current.hasLampLab,
            UserDefaults.standard.bool(
                forKey: LampLabWindowController.atLaunchKey
@@ -420,6 +428,7 @@ final class DictationCoordinator: ObservableObject {
                 }
             }
         }
+        #endif
         // "fix a word…" is the menu's only time-sensitive action, and it used
         // to be grey until this session's first dictation — while the words
         // it wants sat in the archive the whole time. detached, because the
@@ -466,6 +475,7 @@ final class DictationCoordinator: ObservableObject {
         flashNotice(message, duration: 2)
     }
 
+    #if DEBUG
     /// Development only (`Capabilities.hasLampLab`): walk the real HUD
     /// through a dictation without a mic or a key — warm, record, cool,
     /// one line of feedback — so the lamp can be seen over a real desktop.
@@ -537,6 +547,7 @@ final class DictationCoordinator: ObservableObject {
         }
         controller.present()
     }
+    #endif
 
     /// The door ticket 011 chose. It opens on `lastHeard` — the engine's
     /// untouched words — because a dictionary entry's `wrong` side has to be
@@ -1824,14 +1835,14 @@ extension DictationCoordinator {
         liveTranscript.clear()
         liveTranscript.app = MeetingApps.displayName(app)
         liveTranscript.elapsed = .zero
-        Task { [meetingNotifier] in
-            await meetingNotifier.requestPermissionIfNeeded()
+        Task { [notifier = meetings.notifier] in
+            await notifier.requestPermissionIfNeeded()
         }
-        meetings.start(tapping: app)
+        meetings.coordinator.start(tapping: app)
     }
 
     func stopMeeting() {
-        meetingNotifier.withdraw()
+        meetings.withdrawNudge()
         meetings.stop()
     }
 
@@ -1879,17 +1890,59 @@ extension DictationCoordinator {
     }
 
     private func wireMeetings() {
-        meetings.onEvent = { [weak self] event in
+        meetings.onCoordinatorBuilt = { [weak self] built in
+            self?.wire(built)
+        }
+        meetings.onNotifierBuilt = { [weak self] notifier in
+            self?.wire(notifier)
+        }
+        // recovery loads the meeting model and can run for a quarter of an
+        // hour. five seconds of head start keeps it off the dictation
+        // model's prewarm, so the first fn press is not slower for it. the
+        // number is a guess, like the rest of MeetingThresholds.
+        meetings.launch(
+            setUp: hasMeetingsSetUp,
+            transcripts: settings.meetingsFolder,
+            spool: MeetingSpool(),
+            recoveryDelay: .seconds(5)
+        )
+    }
+
+    /// a meeting model on disk, or a folder somebody chose. both are a
+    /// stat, so a mac that only dictates learns it has nothing to repair
+    /// without walking the transcripts folder.
+    private var hasMeetingsSetUp: Bool {
+        !installedMeetingModels.isEmpty || settings.meetingsFolderWasChosen
+    }
+
+    /// the notifier's buttons. a nudge or a stop from a banner the last run
+    /// left behind finds no meeting, and does nothing.
+    private func wire(_ notifier: MeetingNudgeNotifier) {
+        notifier.onKeepGoing = { [weak self] in
+            self?.meetings.keepGoing()
+        }
+        notifier.onStop = { [weak self] in
+            self?.stopMeeting()
+        }
+        notifier.onShowFile = { url in
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+    }
+
+    /// the coordinator's half of the wiring, run once, the moment it is
+    /// built — before anything it does can need answering.
+    private func wire(_ built: MeetingCoordinator) {
+        built.onEvent = { [weak self] event in
             self?.handle(event)
         }
-        meetings.onLine = { [weak self] line in
+        built.onLine = { [weak self] line in
             self?.liveTranscript.upsert(line)
         }
-        meetings.recordHookRun = { [weak self] run in
+        built.recordHookRun = { [weak self] run in
             self?.settings.meetingHookLastRunAt = run.finishedAt
             self?.settings.meetingHookLastRunLabel = run.outcome.label
         }
-        meetings.$elapsed
+        built.$elapsed
             .sink { [weak self] elapsed in
                 self?.liveTranscript.elapsed = elapsed
             }
@@ -1897,45 +1950,21 @@ extension DictationCoordinator {
         // The menu observes *this* object, not the one nested inside it: a
         // meeting that starts without this line leaves the menu drawing the
         // idle version, with no way to stop what it cannot see.
-        meetings.$state
+        built.$state
             .removeDuplicates()
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &meetingCancellables)
-        meetings.$elapsed
+        built.$elapsed
             .map { $0.components.seconds }
             .removeDuplicates()
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &meetingCancellables)
         // same reason as the two above: the menu watches this object, and
         // the recovery line lives on the one nested inside it.
-        meetings.$recovering
+        built.$recovering
             .removeDuplicates()
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &meetingCancellables)
-        meetingNotifier.onKeepGoing = { [weak self] in
-            self?.meetings.keepGoing()
-        }
-        meetingNotifier.onStop = { [weak self] in
-            self?.stopMeeting()
-        }
-        meetingNotifier.onShowFile = { url in
-            NSWorkspace.shared.activateFileViewerSelecting([url])
-        }
-        // transcripts written before the app started locking them down are
-        // still 0644 — other people's words, readable by every account on
-        // the machine. repaired once, off the main thread.
-        let folder = settings.meetingsFolder
-        Task.detached(priority: .utility) {
-            MeetingTranscriptFile.lockDown(in: folder)
-        }
-        // recovery loads the meeting model and can run for a quarter of an
-        // hour. five seconds of head start keeps it off the dictation
-        // model's prewarm, so the first fn press is not slower for it. the
-        // number is a guess, like the rest of MeetingThresholds.
-        Task { [weak self] in
-            try? await Task.sleep(for: .seconds(5))
-            self?.meetings.recoverOrphans()
-        }
     }
 
     private func handle(_ event: MeetingEvent) {
@@ -1946,21 +1975,25 @@ extension DictationCoordinator {
                 toggleLiveTranscript()
             }
         case .nudge:
-            meetingNotifier.ask(app: meetingAppName, quietFor: meetings.thresholds.quietNudgeAfter)
+            // only a built coordinator says anything, so this builds nothing
+            meetings.notifier.ask(
+                app: meetingAppName,
+                quietFor: meetings.coordinator.thresholds.quietNudgeAfter
+            )
         case .saved(let summary):
             liveTranscriptPanel?.dismissKeepingPreference()
             // the file *is* the feature, and the pill that names it is gone
             // in two seconds — often before you are back at the mac.
             lastMeeting = summary
             lastMeetingSavedAt = Date()
-            meetingNotifier.saved(summary)
+            meetings.notifier.saved(summary)
             // the transcript has landed, so a quit that was waiting on it
             // can go through. the hook runs after this and may not finish;
             // the file it was told about is already written.
             finishQuitting()
         case .saveFailed:
             liveTranscriptPanel?.dismissKeepingPreference()
-            meetingNotifier.saveFailed()
+            meetings.notifier.saveFailed()
             // nothing more will be written, so a quit waiting on the file
             // goes through here too.
             finishQuitting()
@@ -2005,8 +2038,10 @@ extension DictationCoordinator {
 }
 
 
+#if DEBUG
 /// development only: dump a window's layer tree with the properties that
 /// could carry an active/inactive look, to diff the panel against the lab.
+/// the lab is its only caller, so release carries neither.
 enum HUDHierarchyDump {
     static let keys = [
         "effect", "filters", "compositingFilter", "backgroundFilters",
@@ -2080,3 +2115,4 @@ enum HUDHierarchyDump {
         )
     }
 }
+#endif

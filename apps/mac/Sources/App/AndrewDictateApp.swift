@@ -237,6 +237,7 @@ struct AndrewDictateApp: App {
                 }
             }
 
+            #if DEBUG
             if Capabilities.current.hasLampLab {
                 Button("lamp lab (dev)") {
                     coordinator.openLampLab()
@@ -245,6 +246,7 @@ struct AndrewDictateApp: App {
                     coordinator.rehearseHUDForDevelopment()
                 }
             }
+            #endif
 
             Divider()
 
