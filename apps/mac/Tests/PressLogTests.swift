@@ -199,6 +199,38 @@ final class PressLogTests: XCTestCase {
         )
     }
 
+    /// a mic that sent no sound is its own ending, not "heard nothing":
+    /// the line names it, and the file reads it back.
+    func testAMicThatSentNoSoundIsItsOwnOutcome() throws {
+        let record = PressRecord(
+            outcome: .noAudio,
+            startedAt: noonish,
+            mic: MicDescription(name: "AirPods Pro", transport: .bluetooth),
+            samples: 9_600,
+            peak: 0,
+            words: nil,
+            stages: PressRecord.Stages(keyUp: 600, samplesReady: 610, ended: 610),
+            engine: "v2",
+            capped: false,
+            retry: false,
+            mainStallMs: nil
+        )
+
+        XCTAssertEqual(
+            record.line(in: kolkata),
+            [
+                "at=2026-10-02T12:22:31+05:30 outcome=no-audio",
+                #"mic="AirPods Pro" transport=bluetooth"#,
+                "key_up_ms=600 samples_ready_ms=610 end_ms=610 samples=9600 peak=0 engine=v2",
+            ].joined(separator: " ")
+        )
+        let file = try JSONEncoder().encode(record)
+        XCTAssertEqual(
+            try JSONDecoder().decode(PressRecord.self, from: file).outcome,
+            .noAudio
+        )
+    }
+
     /// a mic that sent almost nothing must not read as one that sent
     /// exactly nothing, and a quote in a device's name stays inside it.
     func testTheLineKeepsAFaintPeakAndAnAwkwardMicName() {
