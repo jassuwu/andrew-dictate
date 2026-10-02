@@ -26,8 +26,16 @@ enum MeetingApps {
         CallApp(bundleID: "com.microsoft.edgemac", name: "edge"),
     ]
 
-    /// The call app with this bundle id, or nil when it is not one.
+    /// The call app with this bundle id, or nil when it is not one. A helper
+    /// process counts for its app: Core Audio names whichever process opened
+    /// the audio, and a browser plays and listens through a helper
+    /// (`com.google.Chrome.helper`). Case is ignored, because Arc's helpers
+    /// do not keep the app's capitals.
     static func callApp(bundleID: String) -> CallApp? {
-        callApps.first { $0.bundleID == bundleID }
+        let id = bundleID.lowercased()
+        return callApps.first { app in
+            let own = app.bundleID.lowercased()
+            return id == own || id.hasPrefix(own + ".")
+        }
     }
 }
