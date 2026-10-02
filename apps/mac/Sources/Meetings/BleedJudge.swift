@@ -103,7 +103,7 @@ enum BleedJudge {
 
     /// A stretch shorter than this is not judged. It is a handful of frames,
     /// and a handful of frames agree by chance as easily as by being a copy.
-    static let shortest = Duration.milliseconds(500)
+    static let shortest = Duration.seconds(1)
     /// Quieter than this, a side is not talking: the room, not a voice.
     static let quiet: Float = 0.01
     /// The share of a stretch's frames the far side must have been talking
@@ -117,7 +117,7 @@ enum BleedJudge {
     static let flat = 0.1
     /// How closely the mic's loudness must follow the far side's, at the
     /// best delay, for the stretch to be theirs. -1 to 1.
-    static let agreement = 0.6
+    static let agreement = 0.7
 
     /// `from` and `to` are the stretch's span on the meeting's clock, and
     /// `mic` and `far` how loud each side was over it.

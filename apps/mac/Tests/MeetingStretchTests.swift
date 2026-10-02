@@ -539,7 +539,7 @@ final class MeetingStretchTests: XCTestCase {
     func testTheFarSideComingBackThroughTheMicIsNotYou() async throws {
         let transcriber = stretches(threshold: Self.keen)
         let c = coordinator(transcriber)
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
 
         let theirs = them("are we all here", from: 1.3, to: 4.3, voice: .theirs)
@@ -563,7 +563,7 @@ final class MeetingStretchTests: XCTestCase {
     func testYouTalkingOverTheFarSideAreKept() async throws {
         let transcriber = stretches(threshold: Self.keen)
         let c = coordinator(transcriber)
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
 
         let theirs = them("are we all here", from: 1.3, to: 4.3, voice: .theirs)
@@ -595,7 +595,7 @@ final class MeetingStretchTests: XCTestCase {
     func testWhatYouSayInAPauseOfTheirsIsKept() async throws {
         let transcriber = stretches(threshold: Self.keen)
         let c = coordinator(transcriber)
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
 
         let theirs = them("are we all here", from: 1.3, to: 2.5, voice: .theirs)
@@ -626,7 +626,7 @@ final class MeetingStretchTests: XCTestCase {
     func testAMicStretchTooShortToJudgeIsKept() async throws {
         let transcriber = stretches()
         let c = coordinator(transcriber)
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
 
         let theirs = them("are we all here", from: 1.3, to: 5.3, voice: .theirs)
@@ -717,15 +717,16 @@ final class MeetingStretchTests: XCTestCase {
             verdict(mic: copy(of: Self.theirFrames), far: [Float](repeating: 0, count: 40)), .keep)
     }
 
-    /// Half a second is the least that is judged: 0.5 s is ten frames, and
-    /// 0.45 s is nine.
-    func testHalfASecondIsTheLeastThatIsJudged() {
+    /// A second is the least that is judged: 1 s is twenty frames, and
+    /// 0.95 s is nineteen. Shorter than that, a "yes" said over the far side
+    /// agrees with it by chance too often to risk.
+    func testASecondIsTheLeastThatIsJudged() {
         let theirs = Self.theirFrames
         XCTAssertEqual(
-            verdict(mic: copy(of: theirs), far: theirs, from: .milliseconds(500), to: .milliseconds(1000)),
+            verdict(mic: copy(of: theirs), far: theirs, from: .milliseconds(500), to: .milliseconds(1500)),
             .drop)
         XCTAssertEqual(
-            verdict(mic: copy(of: theirs), far: theirs, from: .milliseconds(500), to: .milliseconds(950)),
+            verdict(mic: copy(of: theirs), far: theirs, from: .milliseconds(500), to: .milliseconds(1450)),
             .keep)
     }
 
