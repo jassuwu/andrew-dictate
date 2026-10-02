@@ -163,6 +163,7 @@ targets:
       - Sources/HUD/HUDPresentation.swift
       - Sources/HUD/WaveLevelShaper.swift
       - Sources/HUD/HUDLayoutEngine.swift
+      - Sources/HUD/HUDQuestionSlot.swift
       - Sources/UI/BrandUI.swift
       - Sources/Settings/AppSettings.swift
       - Sources/Settings/DictationOption.swift
