@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-struct UtteranceTimeline: Sendable {
+struct UtteranceTimeline: Equatable, Sendable {
     typealias Instant = ContinuousClock.Instant
 
     enum CompletionStage: String, Sendable {
