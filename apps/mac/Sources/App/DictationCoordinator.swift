@@ -2206,7 +2206,8 @@ extension DictationCoordinator {
             setUp: hasMeetingsSetUp,
             transcripts: settings.meetingsFolder,
             spool: MeetingSpool(),
-            recoveryDelay: .seconds(5)
+            recoveryDelay: .seconds(5),
+            keptAudio: KeptAudio()
         )
     }
 
