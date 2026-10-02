@@ -624,20 +624,24 @@ final class DictationCoordinator: ObservableObject {
 
     /// "copy diagnostics": who is running what, then the last fifty
     /// presses. read through the press log's own queue, so a press that
-    /// ended a moment ago is already in it.
+    /// ended a moment ago is already in it — and so is the default mic,
+    /// since asking the audio server is never done on the main thread.
     func copyDiagnostics() {
         let info = Bundle.main.infoDictionary ?? [:]
         let system = ProcessInfo.processInfo.operatingSystemVersion
-        let setup = PressDiagnostics.Setup(
-            appVersion: info["CFBundleShortVersionString"] as? String ?? "?",
-            build: info["CFBundleVersion"] as? String ?? "?",
-            macOS: "\(system.majorVersion).\(system.minorVersion)."
-                + "\(system.patchVersion)",
-            engine: activeEngineVersion.rawValue,
-            defaultMic: MicDescription.systemDefaultInput()
-        )
+        let appVersion = info["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info["CFBundleVersion"] as? String ?? "?"
+        let engine = activeEngineVersion.rawValue
         let store = pressLog
         pressLogQueue.async {
+            let setup = PressDiagnostics.Setup(
+                appVersion: appVersion,
+                build: build,
+                macOS: "\(system.majorVersion).\(system.minorVersion)."
+                    + "\(system.patchVersion)",
+                engine: engine,
+                defaultMic: MicDescription.systemDefaultInput()
+            )
             let text = PressDiagnostics.text(
                 setup: setup,
                 presses: try? store.recent(PressDiagnostics.pressCount)
