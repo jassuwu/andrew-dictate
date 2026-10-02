@@ -469,6 +469,29 @@ final class UpdateCheckTests: XCTestCase {
         XCTAssertEqual(relaunched.line?.title, "update to 0.9.5")
     }
 
+    // MARK: - the update line: one click, from available to restart
+
+    private let brewLine = UpdateOffer.Line(
+        version: "0.9.5",
+        action: .brewUpgrade("brew upgrade --cask jassuwu/tap/andrew-dictate")
+    )
+
+    private let optBrew = URL(fileURLWithPath: "/opt/homebrew/bin/brew")
+
+    /// the click runs brew where it lives, and the line says so at once.
+    func testClickingABrewLineStartsTheUpgrade() {
+        let click = UpdateOffer.click(
+            .available(brewLine),
+            busy: false,
+            brew: optBrew
+        )
+
+        XCTAssertEqual(click.state, .updating)
+        XCTAssertEqual(click.effect, .upgrade(brew: optBrew))
+        XCTAssertEqual(click.state.title, "updating…")
+        XCTAssertFalse(click.state.isEnabled)
+    }
+
     // MARK: - the hand-off: what the click does today
 
     /// the menu closes on the click, so the pill says what happened.

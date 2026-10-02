@@ -150,4 +150,51 @@ enum UpdateOffer {
             .joined(separator: ".")
         return Line(version: version, action: action(for: install))
     }
+
+    /// the line from the click on. a brew line runs the upgrade itself, so
+    /// the line has to say how that went: the menu is where the click was,
+    /// so the menu is where the answer is.
+    enum LineState: Equatable, Sendable {
+        /// `update to <x>`: the daily check's line, not clicked yet.
+        case available(Line)
+        /// brew is running. a second click has nothing to add.
+        case updating
+
+        var title: String {
+            switch self {
+            case let .available(line):
+                line.title
+            case .updating:
+                "updating…"
+            }
+        }
+
+        var isEnabled: Bool {
+            self != .updating
+        }
+    }
+
+    /// what a click asks of the world. the line decides; `UpdateHandOff`
+    /// does it.
+    enum Effect: Equatable, Sendable {
+        /// `brew upgrade` with the brew at this path.
+        case upgrade(brew: URL)
+    }
+
+    struct Click: Equatable, Sendable {
+        let state: LineState
+        let effect: Effect?
+    }
+
+    /// a click on the line as it is shown. `brew` is where brew lives.
+    static func click(
+        _ state: LineState,
+        busy: Bool,
+        brew: URL?
+    ) -> Click {
+        guard case .available = state, let brew else {
+            return Click(state: state, effect: nil)
+        }
+        return Click(state: .updating, effect: .upgrade(brew: brew))
+    }
 }
