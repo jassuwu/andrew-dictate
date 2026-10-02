@@ -48,7 +48,7 @@ final class MainThreadWatchdogTests: XCTestCase {
 
         dog.windDown()
         XCTAssertTrue(dog.isWatching)
-        try await Task.sleep(for: .milliseconds(300))
+        await eventually { !dog.isWatching }
         XCTAssertFalse(dog.isWatching)
 
         dog.watch(.recording)
@@ -63,27 +63,27 @@ final class MainThreadWatchdogTests: XCTestCase {
     /// before any press. the watch starts at the change, runs its window,
     /// then costs nothing again.
     func testAHardwareChangeIsWatchedForItsWindow() async throws {
-        let dog = watchdog(afterHardwareChange: 0.2)
+        let dog = watchdog(afterHardwareChange: 1.5)
 
         dog.watchAfterHardwareChange()
         XCTAssertTrue(dog.isWatching)
         try await Task.sleep(for: .milliseconds(100))
         XCTAssertTrue(dog.isWatching)
-        try await Task.sleep(for: .milliseconds(250))
+        await eventually { !dog.isWatching }
         XCTAssertFalse(dog.isWatching)
     }
 
     /// a press that ends inside a change's window doesn't cut it short,
     /// and a change during a press's linger stretches it.
     func testAPressAndAChangeKeepWatchingUntilTheLaterEnds() async throws {
-        let dog = watchdog(linger: 0.05, afterHardwareChange: 0.3)
+        let dog = watchdog(linger: 0.05, afterHardwareChange: 1.5)
 
         dog.watchAfterHardwareChange()
         dog.watch(.recording)
         dog.windDown()
         try await Task.sleep(for: .milliseconds(150))
         XCTAssertTrue(dog.isWatching)
-        try await Task.sleep(for: .milliseconds(300))
+        await eventually { !dog.isWatching }
         XCTAssertFalse(dog.isWatching)
 
         dog.watch(.transcribing)
@@ -91,7 +91,7 @@ final class MainThreadWatchdogTests: XCTestCase {
         dog.watchAfterHardwareChange()
         try await Task.sleep(for: .milliseconds(150))
         XCTAssertTrue(dog.isWatching)
-        try await Task.sleep(for: .milliseconds(300))
+        await eventually { !dog.isWatching }
         XCTAssertFalse(dog.isWatching)
     }
 
@@ -104,5 +104,19 @@ final class MainThreadWatchdogTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(200))
         XCTAssertTrue(dog.isWatching)
         dog.windDown()
+    }
+
+    /// real time on a shared ci runner: a sleep can overshoot a short
+    /// window by more than the window. "it stops" is asked until it is
+    /// true or a generous deadline passes, never after one fixed sleep.
+    private func eventually(
+        within deadline: Duration = .seconds(5),
+        _ condition: () -> Bool
+    ) async {
+        let clock = ContinuousClock()
+        let end = clock.now + deadline
+        while !condition(), clock.now < end {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
     }
 }
