@@ -23,7 +23,7 @@ struct RemovalPlan {
             switch self {
             case .dictations: "everything you've dictated"
             case .dictionary: "your dictionary"
-            case .meetingLeftovers: "unfinished meeting audio and the hook log"
+            case .meetingLeftovers: "meeting audio and the hook log"
             case .settings: "settings and preferences"
             case .speechModels: "the speech models"
             case .permissions: "the permissions you granted"
@@ -119,8 +119,9 @@ struct Remover {
         case .dictionary:
             supportDirectory.appendingPathComponent(DictionaryStore.fileName)
         case .meetingLeftovers:
-            // two things, one item: the spool folder and hooks.log. the
-            // folder is the url; the log goes with it in `remove`.
+            // three things, one item: the spool folder, the kept audio and
+            // hooks.log. the spool is the url; the other two go with it in
+            // `remove`.
             supportDirectory.appendingPathComponent("meeting-spool", isDirectory: true)
         case .speechModels:
             modelDirectory
@@ -129,8 +130,9 @@ struct Remover {
         }
     }
 
-    /// files that go with an item without being its url: the meeting
-    /// hook's log; the press log, which is evidence about your dictations
+    /// files that go with an item without being its url: the meeting audio
+    /// kept after a transcript (ADR 0048) and the meeting hook's log, with
+    /// the spool; the press log, which is evidence about your dictations
     /// and has no reason to outlive them, and the meeting records beside it,
     /// which say when you were on a call; and the never-learn list, the
     /// learned rows you turned down, which belongs to the dictionary they
@@ -145,7 +147,10 @@ struct Remover {
         case .dictionary:
             [supportDirectory.appendingPathComponent(DictionaryStore.neverLearnFileName)]
         case .meetingLeftovers:
-            [supportDirectory.appendingPathComponent("hooks.log")]
+            [
+                supportDirectory.appendingPathComponent(KeptAudio.folderName, isDirectory: true),
+                supportDirectory.appendingPathComponent("hooks.log"),
+            ]
         case .settings, .speechModels, .permissions:
             []
         }
