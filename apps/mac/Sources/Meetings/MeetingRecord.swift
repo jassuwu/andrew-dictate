@@ -6,7 +6,7 @@ import Foundation
 /// never any of the words. not what was said, not a file name that took its
 /// name from it — counts and times are all a record knows about the talk,
 /// which is what makes it safe to send to jass.
-struct MeetingRecord: Equatable, Sendable {
+struct MeetingRecord: Equatable, Sendable, Codable {
     /// every way a meeting ends. a recovery is not one of them: it ends in
     /// one of these like any other, and `recovered` says the rest.
     enum Outcome: Equatable, Sendable {
@@ -40,7 +40,7 @@ struct MeetingRecord: Equatable, Sendable {
     }
 
     /// what one side of the call said, as counts.
-    struct Side: Equatable, Sendable {
+    struct Side: Equatable, Sendable, Codable {
         var turns = 0
         var words = 0
     }
@@ -78,7 +78,7 @@ struct MeetingRecord: Equatable, Sendable {
 extension MeetingRecord {
     /// what a stretch-by-stretch engine's decoding came to: counts and
     /// seconds, never what any stretch said.
-    struct Decoding: Equatable, Sendable {
+    struct Decoding: Equatable, Sendable, Codable {
         var decodedYou = 0
         var decodedThem = 0
         /// stretches the engine threw on twice. their words are not in the
@@ -97,7 +97,7 @@ extension MeetingRecord {
     /// something a meeting went through, as a short fixed label. a string
     /// underneath, not a case list: a label a later build adds is still a
     /// label to an earlier one reading the file, and adding one is a line.
-    struct Label: RawRepresentable, Hashable, Sendable {
+    struct Label: RawRepresentable, Hashable, Sendable, Codable {
         let rawValue: String
 
         init(rawValue: String) {
@@ -112,7 +112,7 @@ extension MeetingRecord {
         static let rebuildFailed = Label(rawValue: "rebuild-failed")
     }
 
-    struct Event: Equatable, Sendable {
+    struct Event: Equatable, Sendable, Codable {
         var label: Label
         /// seconds into the meeting.
         var atS: Double
@@ -121,6 +121,58 @@ extension MeetingRecord {
             self.label = label
             self.atS = atS
         }
+    }
+}
+
+// MARK: - reading an older record
+
+/// the file outlives the build that wrote it, so a field added later must
+/// not make an earlier record unreadable. what a record cannot be without —
+/// how it ended, what it was, when it began, how long — is required; every
+/// other field is read if it is there and is what it would have been had
+/// nothing happened if it is not. a later field is a property and one line
+/// here, in its own part's reader if it is inside one.
+extension MeetingRecord {
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            outcome: try container.decode(Outcome.self, forKey: .outcome),
+            app: try container.decode(String.self, forKey: .app),
+            model: try container.decode(String.self, forKey: .model),
+            startedAt: try container.decode(Date.self, forKey: .startedAt),
+            durationS: try container.decode(Double.self, forKey: .durationS),
+            gaps: try container.decodeIfPresent(Int.self, forKey: .gaps) ?? 0,
+            gapsLostS: try container.decodeIfPresent(Double.self, forKey: .gapsLostS) ?? 0,
+            you: try container.decodeIfPresent(Side.self, forKey: .you) ?? Side(),
+            them: try container.decodeIfPresent(Side.self, forKey: .them) ?? Side(),
+            toDiskS: try container.decodeIfPresent(Double.self, forKey: .toDiskS),
+            recovered: try container.decodeIfPresent(Bool.self, forKey: .recovered) ?? false,
+            events: try container.decodeIfPresent([Event].self, forKey: .events) ?? [],
+            decoding: try container.decodeIfPresent(Decoding.self, forKey: .decoding)
+        )
+    }
+}
+
+extension MeetingRecord.Side {
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            turns: try container.decodeIfPresent(Int.self, forKey: .turns) ?? 0,
+            words: try container.decodeIfPresent(Int.self, forKey: .words) ?? 0
+        )
+    }
+}
+
+extension MeetingRecord.Decoding {
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            decodedYou: try container.decodeIfPresent(Int.self, forKey: .decodedYou) ?? 0,
+            decodedThem: try container.decodeIfPresent(Int.self, forKey: .decodedThem) ?? 0,
+            failed: try container.decodeIfPresent(Int.self, forKey: .failed) ?? 0,
+            mostBehindS: try container.decodeIfPresent(Double.self, forKey: .mostBehindS) ?? 0,
+            lastBehindS: try container.decodeIfPresent(Double.self, forKey: .lastBehindS) ?? 0
+        )
     }
 }
 
@@ -238,5 +290,48 @@ extension MeetingRecord.Outcome {
              .spoolUnreadable:
             nil
         }
+    }
+
+    init?(name: String, why: String?) {
+        switch (name, why) {
+        case ("saved", nil): self = .saved
+        case ("model-failed", nil): self = .modelFailed
+        case ("couldnt-write", nil): self = .couldNotWrite
+        case ("couldnt-recover", nil): self = .couldNotRecover
+        case ("set-aside", nil): self = .setAside
+        case ("spool-unreadable", nil): self = .spoolUnreadable
+        case ("nothing-kept", "tap-never-heard"): self = .nothingKept(.tapNeverHeard)
+        case ("nothing-kept", "stopped-before-capture"): self = .nothingKept(.stoppedBeforeCapture)
+        default: return nil
+        }
+    }
+}
+
+/// one string on disk, `name` or `name:why`, so a record written today
+/// still reads after a case is added.
+extension MeetingRecord.Outcome: Codable {
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        let parts = raw.split(
+            separator: ":",
+            maxSplits: 1,
+            omittingEmptySubsequences: false
+        ).map(String.init)
+        guard let outcome = Self(
+            name: parts[0],
+            why: parts.count > 1 ? parts[1] : nil
+        ) else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "unknown meeting outcome \(raw)"
+            )
+        }
+        self = outcome
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(why.map { "\(name):\($0)" } ?? name)
     }
 }

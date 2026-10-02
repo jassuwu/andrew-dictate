@@ -178,6 +178,7 @@ targets:
       - Sources/Instrumentation/UtteranceTimeline.swift
       - Sources/Instrumentation/TimelineSummary.swift
       - Sources/Instrumentation/PressLogStore.swift
+      - Sources/Instrumentation/MeetingRecordStore.swift
       - Sources/Instrumentation/PressDiagnostics.swift
       - Sources/Instrumentation/LogLine.swift
       - Sources/Instrumentation/MainThreadWatchdog.swift
