@@ -9,9 +9,14 @@ private let transcriptionLogger = Logger(
 )
 
 actor ParakeetEngine: TranscriptionEngine {
+    /// a manager and the gate every call into it goes through. made
+    /// together and dropped together: a restart's fresh manager comes with
+    /// a fresh gate, so a call wedged in the old one holds up nothing on
+    /// the new one.
     private struct ActiveManager {
         let version: EngineVersion
         let manager: AsrManager
+        let gate: SerialGate
     }
 
     private struct Preparation {
@@ -22,11 +27,6 @@ actor ParakeetEngine: TranscriptionEngine {
 
     private var activeManager: ActiveManager?
     private var preparation: Preparation?
-    /// the key-down wake still running. a take waits for it rather than
-    /// run beside it: the two would share the manager's buffers mid-call,
-    /// and what is pasted has to be what the take alone gives. it is short
-    /// (~60 ms warm) and started the length of a held key earlier.
-    private var waking: Task<Void, Never>?
     /// half a second of silence: past the model's 0.3 s floor, and padded
     /// to the same 15 s window a short take is, so it wakes everything the
     /// take will use.
@@ -57,10 +57,7 @@ actor ParakeetEngine: TranscriptionEngine {
             progressHandler: progressHandler
         )
         try Task.checkCancellation()
-        activeManager = ActiveManager(
-            version: version,
-            manager: manager
-        )
+        activate(manager, version: version)
     }
 
     func prepareAndSwap(
@@ -81,66 +78,83 @@ actor ParakeetEngine: TranscriptionEngine {
 
         // The current manager remains readable across every suspension above.
         // Replacing this actor-isolated value is the atomic commit point.
-        activeManager = ActiveManager(
-            version: version,
-            manager: manager
-        )
+        activate(manager, version: version)
         fallbackVersion = version
-        // a wake on the old manager has nothing to say about the new one.
-        waking = nil
     }
 
     /// not loaded yet means nothing to wake: the load runs its own
-    /// warm-up. a wake already running is the same question.
+    /// warm-up. anything already in the gate — a wake, a take still
+    /// finishing, a probe — means the engine is awake, and a wake queued
+    /// behind it would stand between the take asked next and the engine.
     func wake() async {
-        guard waking == nil, let manager = activeManager?.manager else {
+        guard let manager = activeManager?.manager,
+              let gate = activeManager?.gate else {
             return
         }
-        let wake = Task {
-            let decoderLayerCount = await manager.decoderLayerCount
-            var decoderState = TdtDecoderState.make(
-                decoderLayers: decoderLayerCount
-            )
-            _ = try? await manager.transcribe(
-                Self.wakeSilence,
-                decoderState: &decoderState
-            )
-        }
-        waking = wake
-        await wake.value
-        if waking == wake {
-            waking = nil
+        _ = try? await gate.runIfIdle {
+            _ = try await Self.transcribe(Self.wakeSilence, with: manager)
         }
     }
 
+    /// one at a time per manager, in the order asked (`SerialGate`): a
+    /// take asked while the wake runs waits for it, and a probe or a retry
+    /// asked while a hung take is still inside waits behind it rather than
+    /// run beside it.
     func transcribe(_ samples: [Float]) async throws -> String {
-        await waking?.value
-        let manager: AsrManager
+        let active: ActiveManager
         if let activeManager {
-            manager = activeManager.manager
+            active = activeManager
         } else {
             let version = fallbackVersion
-            manager = try await preparedManager(
+            let manager = try await preparedManager(
                 for: version,
                 progressHandler: nil
             )
             try Task.checkCancellation()
-            activeManager = ActiveManager(
-                version: version,
-                manager: manager
-            )
+            active = activate(manager, version: version)
         }
+        let manager = active.manager
+        return try await active.gate.run {
+            transcriptionLogger.debug("transcribing audio")
+            let text = try await Self.transcribe(samples, with: manager)
+            transcriptionLogger.debug("transcription complete")
+            return text
+        }
+    }
+
+    /// the only call into a published manager, and only ever from inside
+    /// its gate.
+    private static func transcribe(
+        _ samples: [Float],
+        with manager: AsrManager
+    ) async throws -> String {
         let decoderLayerCount = await manager.decoderLayerCount
         var decoderState = TdtDecoderState.make(decoderLayers: decoderLayerCount)
-
-        transcriptionLogger.debug("transcribing audio")
-        let result = try await manager.transcribe(
+        return try await manager.transcribe(
             samples,
             decoderState: &decoderState
-        )
-        transcriptionLogger.debug("transcription complete")
+        ).text
+    }
 
-        return result.text
+    /// the manager on record, with its gate. a manager already on record
+    /// keeps the gate it has: two takes that both found nothing loaded
+    /// await the same preparation, and two gates on one manager would let
+    /// them run side by side.
+    @discardableResult
+    private func activate(
+        _ manager: AsrManager,
+        version: EngineVersion
+    ) -> ActiveManager {
+        if let activeManager, activeManager.manager === manager {
+            return activeManager
+        }
+        let active = ActiveManager(
+            version: version,
+            manager: manager,
+            gate: SerialGate()
+        )
+        activeManager = active
+        return active
     }
 
     func cancelPreparation() {
@@ -148,12 +162,11 @@ actor ParakeetEngine: TranscriptionEngine {
         preparation = nil
     }
 
+    /// the manager goes, and its gate with it: a call stuck in the engine
+    /// being restarted holds up nothing on the one replacing it.
     func unloadModels() {
         cancelPreparation()
         activeManager = nil
-        // a wake stuck in the engine being restarted must not hold up the
-        // first take of the one replacing it.
-        waking = nil
     }
 
     private func preparedManager(

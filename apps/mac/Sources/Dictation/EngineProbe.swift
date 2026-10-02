@@ -6,7 +6,9 @@ enum EngineProbe {
 
     /// false for an error or for no answer in time. a call that never
     /// comes back is left behind: a wedged engine can't be cancelled, only
-    /// replaced, and a task group would wait on it for good.
+    /// replaced, and a task group would wait on it for good. the engine
+    /// takes one call at a time, so a probe asked while a hung take is
+    /// still inside waits behind it and runs out of time the same way.
     static func answers(
         _ engine: any TranscriptionEngine,
         within deadline: Duration = TranscriptionDeadline.floor,
