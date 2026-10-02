@@ -76,6 +76,28 @@ final class AudioRecorder: MicCapture {
         levelStorage.currentLevel
     }
 
+    /// the device the engine's input is actually bound to, which after a
+    /// route change is not necessarily the system default — the gap the
+    /// press log exists to show.
+    var deviceDescription: MicDescription? {
+        guard let unit = engine.inputNode.audioUnit else {
+            return nil
+        }
+        var device = AudioObjectID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        guard AudioUnitGetProperty(
+            unit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &device,
+            &size
+        ) == noErr else {
+            return nil
+        }
+        return MicDescription(device: device)
+    }
+
     init(preRollEnabled: Bool = false) throws {
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode

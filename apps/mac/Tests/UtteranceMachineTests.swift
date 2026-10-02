@@ -802,6 +802,10 @@ private struct MicFailure: Error {}
 @MainActor
 private final class FakeMic: MicCapture {
     let samples: [Float] = (0..<1_600).map { Float($0 % 7) * 0.01 }
+    let deviceDescription: MicDescription? = MicDescription(
+        name: "AirPods Pro",
+        transport: .bluetooth
+    )
     var failsToStart = false
     var failsToStop = false
     private(set) var starts = 0

@@ -12,6 +12,9 @@ protocol MicCapture: AnyObject {
     /// 16 kHz mono float, the shape the engine takes.
     func stop() throws -> [Float]
     func cancel()
+    /// the device this capture is bound to, if it will say. read for the
+    /// press log, never to decide anything.
+    var deviceDescription: MicDescription? { get }
 }
 
 /// the mic a press was heard through, as the press log names it: what the
