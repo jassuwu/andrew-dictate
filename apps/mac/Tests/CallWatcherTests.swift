@@ -67,6 +67,17 @@ final class CallWatcherTests: XCTestCase {
         )
     }
 
+    /// Asking to record what is already being recorded would be a question
+    /// with only one sensible answer.
+    func testNothingIsSuggestedWhenARecordingIsAlreadyRunning() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+
+        XCTAssertEqual(watcher.observe([zoom], isRecording: true, at: .seconds(0)), [])
+        XCTAssertEqual(watcher.observe([zoom], isRecording: true, at: .seconds(3)), [])
+        XCTAssertEqual(watcher.observe([zoom], isRecording: true, at: .seconds(10)), [])
+    }
+
     /// A browser tab playing music is not a call, and neither is a podcast.
     func testAudioAloneIsNotACall() {
         var watcher = watcher()

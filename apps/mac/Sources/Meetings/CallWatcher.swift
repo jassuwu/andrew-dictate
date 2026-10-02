@@ -61,6 +61,6 @@ struct CallWatcher {
             return []
         }
         call = Call(app: app.name)
-        return [.record(app.name)]
+        return isRecording ? [] : [.record(app.name)]
     }
 }
