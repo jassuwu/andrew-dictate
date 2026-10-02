@@ -616,6 +616,48 @@ final class UpdateCheckTests: XCTestCase {
         }
     }
 
+    // MARK: - the brew run: what is run, where, with what
+
+    /// the copied command and the run command are the same words, so the
+    /// fallback never teaches something other than what was tried.
+    func testTheRunIsTheCopiedCommandAtAnAbsolutePath() {
+        let command = BrewUpgrade.command(
+            brew: URL(fileURLWithPath: "/usr/local/bin/brew"),
+            environment: ["HOME": "/Users/someone", "PATH": "/usr/bin:/bin"]
+        )
+
+        XCTAssertEqual(command.executable.path, "/usr/local/bin/brew")
+        XCTAssertEqual(
+            command.arguments,
+            ["upgrade", "--cask", "jassuwu/tap/andrew-dictate"]
+        )
+        XCTAssertEqual(
+            "brew " + command.arguments.joined(separator: " "),
+            UpdateCheck.upgradeCommand
+        )
+        XCTAssertEqual(command.timeout, 600)
+    }
+
+    /// an app launched by launchd has a PATH with no brew in it, and brew
+    /// run with no terminal must never stop to ask.
+    func testTheRunHasBrewsPrefixOnThePathAndNeverAsks() {
+        let command = BrewUpgrade.command(
+            brew: URL(fileURLWithPath: "/opt/homebrew/bin/brew"),
+            environment: ["HOME": "/Users/someone", "PATH": "/usr/bin:/bin"]
+        )
+
+        XCTAssertEqual(
+            command.environment,
+            [
+                "HOME": "/Users/someone",
+                "PATH": "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin",
+                "HOMEBREW_NO_ENV_HINTS": "1",
+                "HOMEBREW_NO_INSTALL_CLEANUP": "1",
+                "NONINTERACTIVE": "1",
+            ]
+        )
+    }
+
     /// a run's end only moves a line that is waiting on it.
     func testOnlyAnUpdatingLineIsFinished() {
         for state: UpdateOffer.LineState in [.available(brewLine), .restartToFinish, .failedCopied] {
