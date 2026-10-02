@@ -200,8 +200,88 @@ final class CallWatcherTests: XCTestCase {
 
         let muted = app("zoom", mic: false, audio: true)
         XCTAssertEqual(watcher.observe([muted], isRecording: true, at: .seconds(100)), [])
-        XCTAssertEqual(watcher.observe([muted], isRecording: true, at: .seconds(1_000)), [])
-        XCTAssertEqual(watcher.observe([muted], isRecording: true, at: .seconds(5_000)), [])
+        XCTAssertEqual(watcher.observe([muted], isRecording: true, at: .seconds(400)), [])
+        XCTAssertEqual(watcher.observe([muted], isRecording: true, at: .seconds(699)), [])
+        XCTAssertEqual(watcher.currentCall, "zoom")
+    }
+
+    /// A call in a browser ends, and the same browser plays a video. Audio
+    /// alone is a call on mute for so long and no longer: ten minutes after
+    /// the app was last on the mic it stops counting, and the call ends the
+    /// way any call does, thirty seconds of nothing later.
+    func testAudioAloneKeepsACallGoingForTenMinutesAfterTheMicAndNoLonger() {
+        XCTAssertEqual(CallWatcher.audioAloneKeepsACallFor, .seconds(600))
+        var watcher = watcher()
+        let arc = app("arc")
+        _ = watcher.observe([arc], isRecording: false, at: .seconds(0))
+        _ = watcher.observe([arc], isRecording: false, at: .seconds(3))
+        _ = watcher.observe([arc], isRecording: true, at: .seconds(5))
+
+        let video = app("arc", mic: false, audio: true)
+        XCTAssertEqual(watcher.observe([video], isRecording: true, at: .seconds(100)), [])
+        XCTAssertEqual(watcher.observe([video], isRecording: true, at: .seconds(699)), [])
+        XCTAssertEqual(watcher.observe([video], isRecording: true, at: .seconds(700)), [])
+        XCTAssertEqual(watcher.observe([video], isRecording: true, at: .seconds(729)), [])
+        XCTAssertEqual(
+            watcher.observe([video], isRecording: true, at: .seconds(730)),
+            [.stop("arc")]
+        )
+        XCTAssertNil(watcher.currentCall)
+    }
+
+    /// Nothing recording: the call is over all the same, so the menu stops
+    /// naming it and the reads can stop.
+    func testAnUnrecordedCallWhoseAppOnlyPlaysAudioEndsAfterTenMinutes() {
+        var watcher = watcher()
+        let arc = app("arc")
+        _ = watcher.observe([arc], isRecording: false, at: .seconds(0))
+        _ = watcher.observe([arc], isRecording: false, at: .seconds(3))
+
+        let video = app("arc", mic: false, audio: true)
+        XCTAssertEqual(watcher.observe([video], isRecording: false, at: .seconds(100)), [])
+        XCTAssertEqual(watcher.observe([video], isRecording: false, at: .seconds(700)), [])
+        XCTAssertEqual(watcher.unrecordedCall, "arc")
+        XCTAssertEqual(watcher.observe([video], isRecording: false, at: .seconds(730)), [])
+
+        XCTAssertNil(watcher.currentCall)
+        XCTAssertNil(watcher.unrecordedCall)
+    }
+
+    /// Unmuting, however briefly, is the app on the mic again: the ten
+    /// minutes start over from the next time it lets go.
+    func testTheMicComingBackStartsTheTenMinutesOver() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(0))
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(3))
+        _ = watcher.observe([zoom], isRecording: true, at: .seconds(5))
+
+        let muted = app("zoom", mic: false, audio: true)
+        XCTAssertEqual(watcher.observe([muted], isRecording: true, at: .seconds(100)), [])
+        XCTAssertEqual(watcher.observe([muted], isRecording: true, at: .seconds(650)), [])
+        XCTAssertEqual(watcher.observe([zoom], isRecording: true, at: .seconds(660)), [])
+        XCTAssertEqual(watcher.observe([muted], isRecording: true, at: .seconds(700)), [])
+        XCTAssertEqual(watcher.observe([muted], isRecording: true, at: .seconds(1_250)), [])
+        XCTAssertEqual(watcher.currentCall, "zoom")
+    }
+
+    /// Past the ten minutes, the mic is what keeps the call: taking it again
+    /// inside the last thirty seconds is the same call, not a new one to ask
+    /// about.
+    func testTheMicTakenAgainBeforeTheEndIsTheSameCall() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(0))
+        XCTAssertEqual(
+            watcher.observe([zoom], isRecording: false, at: .seconds(3)),
+            [.record("zoom")]
+        )
+
+        let muted = app("zoom", mic: false, audio: true)
+        _ = watcher.observe([muted], isRecording: false, at: .seconds(100))
+        _ = watcher.observe([muted], isRecording: false, at: .seconds(710))
+        XCTAssertEqual(watcher.observe([zoom], isRecording: false, at: .seconds(720)), [])
+        XCTAssertEqual(watcher.observe([zoom], isRecording: false, at: .seconds(800)), [])
         XCTAssertEqual(watcher.currentCall, "zoom")
     }
 

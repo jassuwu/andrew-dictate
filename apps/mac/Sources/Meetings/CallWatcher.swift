@@ -12,9 +12,11 @@ import Foundation
 /// A call is one app that holds the mic *and* plays audio, for a while. Either
 /// alone is not a call: the mic is dictation, a screen recorder, a voice memo,
 /// and audio is a video or music. Once it is a call it carries on while either
-/// half is there, because a participant who mutes still hears everyone else,
-/// and ends when the app has done neither for long enough that nobody is
-/// coming back.
+/// half is there, because a participant who mutes still hears everyone else —
+/// audio alone for ten minutes after the app was last on the mic, since a
+/// call that ended and a video that plays after it look just the same — and
+/// ends when the app has done neither for long enough that nobody is coming
+/// back.
 ///
 /// Time is whatever the caller passes in, never a clock of the watcher's own,
 /// and observations may arrive at any cadence. Between two of them the watcher
@@ -35,10 +37,6 @@ struct CallWatcher {
 
         /// Only both together look like a call.
         var looksLikeACall: Bool { holdsMic && playsAudio }
-
-        /// Either is enough to keep a call going. Losing the mic alone is the
-        /// most ordinary thing that happens in a call.
-        var keepsACallGoing: Bool { holdsMic || playsAudio }
     }
 
     enum Suggestion: Equatable, Sendable {
@@ -57,6 +55,13 @@ struct CallWatcher {
     /// a meeting nobody has left, does not end it.
     let endAfter: Duration
 
+    /// How long the call's app playing audio, off the mic, keeps the call
+    /// going, from the first observation that showed it off the mic. A
+    /// participant on mute still hears everyone else, but an app whose call
+    /// ended and that now plays a video looks just the same, and only time
+    /// tells them apart. Provisional, like the rest.
+    static let audioAloneKeepsACallFor: Duration = .seconds(600)
+
     init(startAfter: Duration = .seconds(3), endAfter: Duration = .seconds(30)) {
         self.startAfter = startAfter
         self.endAfter = endAfter
@@ -64,9 +69,12 @@ struct CallWatcher {
 
     private struct Call {
         let app: String
-        /// The first observation that showed the app doing neither, if it
-        /// still is. Cleared the moment either comes back.
+        /// The first observation that showed the app doing nothing that
+        /// keeps the call going, if it still is. Cleared the moment it does.
         var quietSince: Duration?
+        /// The first observation that showed the app off the mic, if it
+        /// still is. Cleared the moment it takes the mic again.
+        var offTheMicSince: Duration?
     }
 
     private struct Candidate {
@@ -132,7 +140,13 @@ struct CallWatcher {
         guard var current = call else {
             return nil
         }
-        if apps.contains(where: { $0.name == current.app && $0.keepsACallGoing }) {
+        let app = apps.first { $0.name == current.app }
+        if app?.holdsMic == true {
+            current.offTheMicSince = nil
+        } else if current.offTheMicSince == nil {
+            current.offTheMicSince = now
+        }
+        if let app, keepsTheCallGoing(app, offTheMicSince: current.offTheMicSince, at: now) {
             current.quietSince = nil
             call = current
             return nil
@@ -145,6 +159,23 @@ struct CallWatcher {
         }
         call = nil
         return current.app
+    }
+
+    /// The mic keeps a call going: losing it alone is the most ordinary thing
+    /// that happens in one. Audio alone keeps it going too, until the app
+    /// has been off the mic for `audioAloneKeepsACallFor`.
+    private func keepsTheCallGoing(
+        _ app: App,
+        offTheMicSince: Duration?,
+        at now: Duration
+    ) -> Bool {
+        if app.holdsMic {
+            return true
+        }
+        guard app.playsAudio, let offTheMicSince else {
+            return false
+        }
+        return now - offTheMicSince < Self.audioAloneKeepsACallFor
     }
 
     /// Times every app that looks like a call, and begins the call of the one
