@@ -465,6 +465,94 @@ final class CallWatcherTests: XCTestCase {
         )
     }
 
+    // MARK: - whenever observations happen to arrive
+
+    /// The clock is the time passed in. How many observations it took to
+    /// get there is not a thing the watcher can see.
+    func testTheStartThresholdIsMeasuredByTheTimePassedNotTheObservationsCounted() {
+        let zoom = app("zoom")
+
+        var sparse = watcher()
+        XCTAssertEqual(sparse.observe([zoom], isRecording: false, at: .seconds(100)), [])
+        XCTAssertEqual(
+            sparse.observe([zoom], isRecording: false, at: .seconds(103)),
+            [.record("zoom")]
+        )
+
+        var dense = watcher()
+        for tenth in 0..<30 {
+            XCTAssertEqual(
+                dense.observe([zoom], isRecording: false, at: .milliseconds(tenth * 100)),
+                []
+            )
+        }
+        XCTAssertEqual(
+            dense.observe([zoom], isRecording: false, at: .milliseconds(3_000)),
+            [.record("zoom")]
+        )
+
+        var irregular = watcher()
+        XCTAssertEqual(irregular.observe([zoom], isRecording: false, at: .milliseconds(0)), [])
+        XCTAssertEqual(irregular.observe([zoom], isRecording: false, at: .milliseconds(400)), [])
+        XCTAssertEqual(irregular.observe([zoom], isRecording: false, at: .milliseconds(2_900)), [])
+        XCTAssertEqual(
+            irregular.observe([zoom], isRecording: false, at: .milliseconds(3_200)),
+            [.record("zoom")]
+        )
+    }
+
+    func testTheEndThresholdIsMeasuredByTheTimePassedNotTheObservationsCounted() {
+        let zoom = app("zoom")
+
+        var sparse = watcher()
+        _ = sparse.observe([zoom], isRecording: true, at: .seconds(0))
+        _ = sparse.observe([zoom], isRecording: true, at: .seconds(3))
+        XCTAssertEqual(sparse.observe([], isRecording: true, at: .seconds(1_000)), [])
+        XCTAssertEqual(
+            sparse.observe([], isRecording: true, at: .seconds(1_030)),
+            [.stop("zoom")]
+        )
+
+        var dense = watcher()
+        _ = dense.observe([zoom], isRecording: true, at: .seconds(0))
+        _ = dense.observe([zoom], isRecording: true, at: .seconds(3))
+        for tenth in 0..<300 {
+            XCTAssertEqual(
+                dense.observe([], isRecording: true, at: .milliseconds(10_000 + tenth * 100)),
+                []
+            )
+        }
+        XCTAssertEqual(
+            dense.observe([], isRecording: true, at: .milliseconds(40_000)),
+            [.stop("zoom")]
+        )
+    }
+
+    // MARK: - the thresholds
+
+    func testTheThresholdsAreAskedForAndProvisionallyThreeAndThirtySeconds() {
+        let provisional = CallWatcher()
+        XCTAssertEqual(provisional.startAfter, .seconds(3))
+        XCTAssertEqual(provisional.endAfter, .seconds(30))
+
+        let zoom = app("zoom")
+        var patient = CallWatcher(startAfter: .seconds(10), endAfter: .seconds(60))
+        _ = patient.observe([zoom], isRecording: false, at: .seconds(0))
+        XCTAssertEqual(patient.observe([zoom], isRecording: false, at: .seconds(9)), [])
+        XCTAssertEqual(
+            patient.observe([zoom], isRecording: false, at: .seconds(10)),
+            [.record("zoom")]
+        )
+
+        _ = patient.observe([zoom], isRecording: true, at: .seconds(20))
+        _ = patient.observe([], isRecording: true, at: .seconds(100))
+        XCTAssertEqual(patient.observe([], isRecording: true, at: .seconds(159)), [])
+        XCTAssertEqual(
+            patient.observe([], isRecording: true, at: .seconds(160)),
+            [.stop("zoom")]
+        )
+    }
+
     // MARK: - recordings the watcher did not ask for
 
     /// Dictating notes to yourself, or a lecture: you started it, there was
