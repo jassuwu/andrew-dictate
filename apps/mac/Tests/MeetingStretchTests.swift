@@ -83,6 +83,30 @@ final class MeetingStretchTests: XCTestCase {
         ])
     }
 
+    /// A two-word turn at the start, and unrelated speech 15 s on. The first
+    /// ended at 1.9 s and the second began at 16.0, so they are two
+    /// paragraphs with a time each, not one stamped 1.0 with 14 s of silence
+    /// in the middle of it.
+    func testSpeechThatPicksUpAfterALongSilenceIsAParagraphOfItsOwn() async throws {
+        let c = coordinator(stretches())
+        c.start()
+        await source.awaitStart()
+
+        await play([
+            them("okay so", from: 1.3, to: 1.9),
+            them("now about the budget", from: 16.3, to: 17.5),
+        ], through: 19.0, on: c)
+        await waitFor { c.liveLines.count == 2 }
+
+        XCTAssertEqual(live(c), ["them 1.0 okay so", "them 16.0 now about the budget"])
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, [
+            "[00:00:01] them: okay so",
+            "[00:00:16] them: now about the budget",
+        ])
+    }
+
     /// Talking over each other is two people saying two things. Neither is
     /// folded into the other or lost under it.
     func testBothSidesAtOnceIsATurnEach() async throws {

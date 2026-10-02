@@ -361,7 +361,8 @@ actor StretchTranscriber: MeetingTranscriber {
         MeetingTurn(
             speaker: stretch.side == .you ? .you : .them(nil),
             at: stretch.at,
-            text: text)
+            text: text,
+            end: stretch.end)
     }
 
     /// By the time each was said. Two that began together stay in the order
