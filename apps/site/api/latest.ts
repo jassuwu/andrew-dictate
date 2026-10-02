@@ -72,8 +72,11 @@ export function versionField(sent: string | null): string {
 /** one redis command: its name, then its arguments. */
 export type Command = Array<string | number>;
 
-/** runs the commands together, in order; throws when any of them fails. */
-export type Store = (commands: Command[]) => Promise<void>;
+/**
+ * runs the commands together, in order, and resolves with each one's result.
+ * throws when the store is unreachable or any command fails.
+ */
+export type Store = (commands: Command[]) => Promise<unknown[]>;
 
 // a day's hash expires about 400 days after its last check. the key for a
 // day stops changing when the day ends, so that is 400 days of history.
@@ -97,12 +100,50 @@ export function checkInCounter(
   store: Store,
   now: () => number,
 ): (field: string) => Promise<void> {
-  return (field) => {
+  return async (field) => {
     const key = checkinKey(utcDay(now()));
-    return store([
+    await store([
       ["HINCRBY", key, field, 1],
       ["EXPIRE", key, RETENTION_SECONDS],
     ]);
+  };
+}
+
+export type Env = Record<string, string | undefined>;
+
+/**
+ * upstash redis over its rest api, with plain fetch. the url and token come
+ * from the variables vercel's upstash integration injects (KV_REST_API_*), or
+ * upstash's own names; a url and a token from different families are not
+ * mixed. null when neither pair is there, which means "do not count".
+ */
+export function storeFromEnv(env: Env, fetchImpl: typeof fetch): Store | null {
+  const pairs = [
+    [env.KV_REST_API_URL, env.KV_REST_API_TOKEN],
+    [env.UPSTASH_REDIS_REST_URL, env.UPSTASH_REDIS_REST_TOKEN],
+  ];
+  const pair = pairs.find(([url, token]) => url && token);
+  if (!pair) return null;
+  const [base, token] = pair as [string, string];
+
+  return async (commands) => {
+    const response = await fetchImpl(`${base.replace(/\/+$/, "")}/pipeline`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(commands),
+      signal: AbortSignal.timeout(2000),
+    });
+    if (!response.ok) throw new Error(`store answered ${response.status}`);
+
+    const replies: unknown = await response.json();
+    if (!Array.isArray(replies)) throw new Error("store answered with no list");
+    for (const reply of replies) {
+      if (reply?.error) throw new Error(`store refused a command: ${reply.error}`);
+    }
+    return replies.map((reply) => reply?.result);
   };
 }
 
@@ -171,8 +212,6 @@ export function cachedTag(
     return pending;
   };
 }
-
-export type Env = Record<string, string | undefined>;
 
 export type Deps = {
   env: Env;

@@ -4,6 +4,7 @@ import {
   cachedTag,
   checkInCounter,
   createHandler,
+  storeFromEnv,
   tagFromGitHub,
   type Command,
   type Store,
@@ -79,6 +80,7 @@ function fakeStore(failure?: Error) {
   const store: Store = async (commands) => {
     if (failure) throw failure;
     writes.push(commands);
+    return [];
   };
   return { store, writes };
 }
@@ -210,6 +212,82 @@ describe("counting a check", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ latest: "0.9.5" });
+  });
+});
+
+describe("storeFromEnv", () => {
+  type Sent = { url: string; init: RequestInit };
+
+  function upstash(reply: () => Response = () => Response.json([{ result: 1 }, { result: 1 }])) {
+    const sent: Sent[] = [];
+    const fetchStub = async (input: string | URL | Request, init?: RequestInit) => {
+      sent.push({ url: String(input), init: init ?? {} });
+      return reply();
+    };
+    return { fetch: fetchStub as typeof fetch, sent };
+  }
+
+  const commands: Command[] = [
+    ["HINCRBY", "checkins:2026-10-02", "0.9.4", 1],
+    ["EXPIRE", "checkins:2026-10-02", 34560000],
+  ];
+
+  test("with the vercel integration's variables, posts the commands as one pipeline", async () => {
+    const { fetch, sent } = upstash();
+    const store = storeFromEnv(
+      { KV_REST_API_URL: "https://eu1-x.upstash.io", KV_REST_API_TOKEN: "write-token" },
+      fetch,
+    );
+
+    await store!(commands);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe("https://eu1-x.upstash.io/pipeline");
+    expect(sent[0].init.method).toBe("POST");
+    expect(new Headers(sent[0].init.headers).get("authorization")).toBe("Bearer write-token");
+    expect(JSON.parse(String(sent[0].init.body))).toEqual(commands);
+    expect(sent[0].init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  test("upstash's own variable names work too, and a trailing slash does not matter", async () => {
+    const { fetch, sent } = upstash();
+    const store = storeFromEnv(
+      { UPSTASH_REDIS_REST_URL: "https://eu1-x.upstash.io/", UPSTASH_REDIS_REST_TOKEN: "t" },
+      fetch,
+    );
+
+    await store!(commands);
+
+    expect(sent[0].url).toBe("https://eu1-x.upstash.io/pipeline");
+  });
+
+  test("a url and a token from different families are not mixed", () => {
+    const env = { KV_REST_API_URL: "https://a.upstash.io", UPSTASH_REDIS_REST_TOKEN: "t" };
+    expect(storeFromEnv(env, upstash().fetch)).toBeNull();
+  });
+
+  test("without the variables there is no store, which is no counting", () => {
+    for (const env of [
+      {},
+      { KV_REST_API_URL: "https://a.upstash.io" },
+      { KV_REST_API_TOKEN: "t" },
+      { KV_REST_API_URL: "", KV_REST_API_TOKEN: "" },
+    ]) {
+      expect(storeFromEnv(env, upstash().fetch)).toBeNull();
+    }
+  });
+
+  test("a refusal is a failure, whether the http status or a command says so", async () => {
+    const env = { KV_REST_API_URL: "https://a.upstash.io", KV_REST_API_TOKEN: "t" };
+    const replies = [
+      () => Response.json({ error: "Unauthorized" }, { status: 401 }),
+      () => Response.json([{ error: "ERR wrong number of arguments" }, { result: 1 }]),
+      () => new Response("<html>", { status: 200 }),
+    ];
+    for (const reply of replies) {
+      const store = storeFromEnv(env, upstash(reply).fetch);
+      await expect(store!(commands)).rejects.toThrow();
+    }
   });
 });
 
