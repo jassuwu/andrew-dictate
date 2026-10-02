@@ -57,6 +57,12 @@ enum MeetingEngines {
         guard isInstalled(model) else {
             throw Failure.notInstalled(model)
         }
+        // the speaker split is read at the end of the meeting; a mac that
+        // was set up before its models came down with the meeting model
+        // gets them now, in the background, so they are there by then.
+        if !FluidDiarizer.isOnDisk {
+            Task.detached(priority: .utility) { await fetchWhatSetupOwes(model) }
+        }
         switch model {
         case .parakeetV3:
             return stretches(ParakeetStretchEngine(), ceiling: ParakeetStretchEngine.ceiling)
@@ -102,6 +108,23 @@ enum MeetingEngines {
             hubApi: HubApiWrapper(downloadBase: modelDirectory))
     }
 
+    /// What `prepare` fetches after the model, for a mac whose model was
+    /// downloaded before these came with it: the tokenizer and the
+    /// speaker-split models, whichever is missing. The same two requests
+    /// setup makes, made late and once. Failing is logged and nothing more.
+    static func fetchWhatSetupOwes(_ model: MeetingModel) async {
+        do {
+            try await fetchTokenizer(for: model)
+        } catch {
+            logger.error("whisper's tokenizer did not download: \(error.localizedDescription, privacy: .public)")
+        }
+        do {
+            try await FluidDiarizer.fetch()
+        } catch {
+            logger.error("the speaker-split models did not download: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     /// Downloads (or verifies) the model, reporting 0…1. False means it did
     /// not finish; the caller shows "try again".
     ///
@@ -132,16 +155,7 @@ enum MeetingEngines {
         } catch {
             return false
         }
-        do {
-            try await fetchTokenizer(for: model)
-        } catch {
-            logger.error("whisper's tokenizer did not download: \(error.localizedDescription, privacy: .public)")
-        }
-        do {
-            try await FluidDiarizer.fetch()
-        } catch {
-            logger.error("the speaker-split models did not download: \(error.localizedDescription, privacy: .public)")
-        }
+        await fetchWhatSetupOwes(model)
         progress(1)
         return isInstalled(model)
     }

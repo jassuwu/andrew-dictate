@@ -43,12 +43,20 @@ actor WhisperStretchEngine: StretchEngine {
             throw Failure.notWhisper(model)
         }
         // WhisperKit fetches a tokenizer it cannot find or cannot read from
-        // the Hugging Face Hub, in the middle of loading. Read here first,
-        // a tokenizer that is missing or damaged stops the load instead.
-        do {
-            _ = try await AutoTokenizerWrapper.from(modelFolder: tokenizerFolder)
-        } catch {
-            throw Failure.noTokenizer(model)
+        // the Hugging Face Hub, in the middle of loading. Read here first.
+        //
+        // A mac set up before the tokenizer came down with the model has
+        // the model and no tokenizer. That is fetched once, here, the way
+        // setup would have: failing a meeting over a 2 mb file the download
+        // owed it would be the wrong thing to be strict about. Only when it
+        // still cannot be read does the load stop.
+        if (try? await AutoTokenizerWrapper.from(modelFolder: tokenizerFolder)) == nil {
+            await MeetingEngines.fetchWhatSetupOwes(model)
+            do {
+                _ = try await AutoTokenizerWrapper.from(modelFolder: tokenizerFolder)
+            } catch {
+                throw Failure.noTokenizer(model)
+            }
         }
         whisper = try await WhisperKit(WhisperKitConfig(
             model: variant,
