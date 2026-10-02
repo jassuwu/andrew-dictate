@@ -32,13 +32,30 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         }
     }
 
+    /// The aggregate device's uid: one per build of the app, the same every
+    /// session. A uid made fresh each time left a setting behind in the
+    /// audio server for every session that did not stop cleanly. The
+    /// release and development builds each have their own (`AppIdentity`),
+    /// so neither can clear away the other's.
+    static var meetingDeviceUID: String {
+        "\(AppIdentity.bundleID).meeting"
+    }
+
+    /// Setup's proof opens a tap of its own, and clearing a stale device
+    /// before it builds must never take a meeting's from under it.
+    static var proofDeviceUID: String {
+        "\(AppIdentity.bundleID).meeting.proof"
+    }
+
     private let logger = Logger(subsystem: AppIdentity.loggingSubsystem, category: "tap")
     private let queue = DispatchQueue(label: "gg.jass.dictate.meeting-io", qos: .userInitiated)
-    /// Where the HAL is asked what is playing. Not the main thread, which
-    /// only reads the answer, and not the IO queue, which has audio to keep
-    /// up with.
-    private let asking = DispatchQueue(label: "gg.jass.dictate.meeting-playing", qos: .utility)
+    /// Everything said to the HAL that is not the audio itself: building and
+    /// tearing down the rig, clearing a stale device, asking what is
+    /// playing. One serial queue, so the sweep can never land on a device
+    /// just built — and never the main thread, which only reads answers.
+    private let hal = DispatchQueue(label: "gg.jass.dictate.meeting-hal", qos: .userInitiated)
     private let lock = NSLock()
+    private let deviceUID: String
 
     // All guarded by `lock`, touched from the caller and the IO queue.
     private var rig: Rig?
@@ -49,8 +66,19 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     private var player: AVAudioPlayer?
     private var playingTimer: DispatchSourceTimer?
     private var playing: Bool?
+    /// The device the last teardown destroyed. The HAL's answer to a uid
+    /// lags a destroy, so for a moment it still names this one, which is
+    /// gone rather than stale.
+    private var lastDestroyed: AudioObjectID?
 
-    init() {}
+    /// Built with the rest of the meeting machinery, and that is when a
+    /// device an earlier session left under this uid is swept away.
+    init(deviceUID: String = CoreAudioMeetingSource.meetingDeviceUID) {
+        self.deviceUID = deviceUID
+        hal.async { [weak self] in
+            self?.destroyStaleAggregate()
+        }
+    }
 
     // MARK: - MeetingAudioSource
 
@@ -62,15 +90,17 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             self.framesDelivered = 0
             self.lastDelivery = ContinuousClock.now
         }
-        try build()
+        try await onHAL { try self.build() }
         keepAskingWhatIsPlaying()
         playProbeTone()
         return stream
     }
 
     func rebuild() async throws {
-        teardown()
-        try build()
+        try await onHAL {
+            self.teardown()
+            try self.build()
+        }
         skipTheTimeNothingWasDelivered()
         // The tone again: a rebuilt tap must prove itself like a new one.
         playProbeTone()
@@ -104,7 +134,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     /// answer, and whenever the HAL will not list its processes — an answer
     /// we cannot get must not be read as "no".
     private func keepAskingWhatIsPlaying() {
-        let timer = DispatchSource.makeTimerSource(queue: asking)
+        let timer = DispatchSource.makeTimerSource(queue: hal)
         timer.schedule(deadline: .now(), repeating: .seconds(1), leeway: .milliseconds(100))
         timer.setEventHandler { [weak self] in
             guard let self else { return }
@@ -129,7 +159,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
     func stop() async {
         stopAskingWhatIsPlaying()
-        teardown()
+        try? await onHAL { self.teardown() }
         let continuation = lock.withLock { () -> AsyncStream<MeetingAudioChunk>.Continuation? in
             defer { self.continuation = nil }
             return self.continuation
@@ -147,7 +177,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     /// proof of a grant — every real capture proves it again, which is the
     /// doctrine anyway.
     static func proveSystemAudio(within window: Duration = .seconds(1.5)) async -> Bool {
-        let source = CoreAudioMeetingSource()
+        let source = CoreAudioMeetingSource(deviceUID: proofDeviceUID)
         guard let stream = try? await source.start() else { return false }
         // The deadline is a task of its own: a tap that never yields a
         // chunk would otherwise leave the row "proving…" forever, which is
@@ -173,6 +203,32 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
     // MARK: - building the rig
 
+    /// `work` on the HAL queue, awaited.
+    private func onHAL(_ work: @escaping @Sendable () throws -> Void) async throws {
+        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+            hal.async {
+                done.resume(with: Result { try work() })
+            }
+        }
+    }
+
+    /// The aggregate device under this source's uid, destroyed if there is
+    /// one. There is one only when a session before this did not get to
+    /// destroy its own, and the HAL refuses a second device under a uid
+    /// that is taken. Only ever on the HAL queue.
+    private func destroyStaleAggregate() {
+        guard let stale = CoreAudioProperties.device(uid: deviceUID),
+              stale != lock.withLock({ lastDestroyed })
+        else { return }
+        let status = AudioHardwareDestroyAggregateDevice(stale)
+        if status == noErr {
+            logger.notice("cleared a stale aggregate device: \(self.deviceUID, privacy: .public)")
+        } else {
+            logger.error("could not clear a stale aggregate device \(self.deviceUID, privacy: .public) (\(status, privacy: .public))")
+        }
+    }
+
+    /// Only ever on the HAL queue.
     private func build() throws {
         // Everything, ours included: the probe tone (ADR 0021) is played by
         // *this* process, and a tap that left us out could never hear it.
@@ -194,9 +250,10 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         }
         let micChannels = CoreAudioProperties.inputChannels(micDevice).reduce(0, +)
 
+        destroyStaleAggregate()
         let aggregate: [String: Any] = [
             kAudioAggregateDeviceNameKey: "andrew dictate meeting",
-            kAudioAggregateDeviceUIDKey: "gg.jass.dictate.meeting.\(UUID().uuidString)",
+            kAudioAggregateDeviceUIDKey: deviceUID,
             kAudioAggregateDeviceMainSubDeviceKey: micUID,
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceIsStackedKey: false,
@@ -241,9 +298,10 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             teardown()
             throw error
         }
-        logger.info("tap up: the whole mac, at \(rate, privacy: .public) Hz")
+        logger.info("tap up: the whole mac, at \(rate, privacy: .public) Hz, through \(self.deviceUID, privacy: .public)")
     }
 
+    /// Only ever on the HAL queue, or inside `build`, which is.
     private func teardown() {
         let rig = lock.withLock { () -> Rig? in
             defer { self.rig = nil; self.assembler = nil }
@@ -255,6 +313,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         AudioDeviceDestroyIOProcID(rig.aggregateID, rig.procID)
         AudioHardwareDestroyAggregateDevice(rig.aggregateID)
         AudioHardwareDestroyProcessTap(rig.tapID)
+        lock.withLock { lastDestroyed = rig.aggregateID }
     }
 
     /// The start sound, played whether or not sound feedback is on: it is the
@@ -424,6 +483,22 @@ private enum CoreAudioProperties {
         }
         guard status == noErr, let value else { return nil }
         return value as String
+    }
+
+    /// The device with this uid, if there is one. The HAL answers
+    /// `kAudioObjectUnknown`, not an error, for a uid nothing has.
+    static func device(uid: String) -> AudioObjectID? {
+        var address = address(kAudioHardwarePropertyTranslateUIDToDevice)
+        var qualifier = uid as CFString
+        var device = AudioObjectID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        let status = withUnsafeMutablePointer(to: &qualifier) {
+            AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject), &address,
+                UInt32(MemoryLayout<CFString>.size), $0, &size, &device)
+        }
+        guard status == noErr, device != kAudioObjectUnknown else { return nil }
+        return device
     }
 
     static func nominalSampleRate(_ device: AudioObjectID) -> Double {
