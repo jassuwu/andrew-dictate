@@ -1437,9 +1437,9 @@ final class DictationCoordinator: ObservableObject {
     }
 
     /// a take went unanswered. the engine is asked a second of silence
-    /// with a deadline of its own — awaited, never waited on, so the main
-    /// thread and the next press go on meanwhile — and one that doesn't
-    /// answer is restarted.
+    /// with a deadline of its own, and one that doesn't answer is
+    /// restarted. the probe is awaited, never waited on: the main thread
+    /// and the next press go on meanwhile.
     private func checkEngineAnswers() {
         // a restart, a switch or a first load is already building a fresh
         // engine; a check already out is the same question.
@@ -1470,7 +1470,7 @@ final class DictationCoordinator: ObservableObject {
     /// goes and the same one loads fresh, in the background. a press
     /// meanwhile hears "loading the speech model…"; a restart that fails
     /// leaves `.failed`, which the next press retries out loud. the lamp is
-    /// left alone — a pill may be saying why, and a take may be in flight.
+    /// left alone: a pill may be saying why, and a take may be in flight.
     private func restartEngine() {
         guard isPrewarmed,
               enginePrewarmTask == nil,

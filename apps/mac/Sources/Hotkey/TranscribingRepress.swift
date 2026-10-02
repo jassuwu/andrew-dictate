@@ -11,8 +11,10 @@ enum TranscribingRepress {
         case dropAndRestart
     }
 
-    /// above the measured worst case by a wide margin, because there is no
-    /// transcription timeout anywhere else in the app.
+    /// above the measured worst case by a wide margin. a take the engine
+    /// never answers also ends on its own deadline (`TranscriptionDeadline`),
+    /// but that one runs longer for a long take, and a press this late
+    /// doesn't wait for it.
     static let patience: TimeInterval = 3
 
     static func response(transcribingFor elapsed: TimeInterval) -> Response {

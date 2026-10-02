@@ -901,8 +901,8 @@ final class UtteranceMachine {
     }
 
     /// the engine never answered. the press ends now, out loud, with its
-    /// samples kept for a tap — the same ending as an engine that threw,
-    /// and the record says which.
+    /// samples kept for a tap. it is the same ending as an engine that
+    /// threw, and the record says which.
     private func transcriptionTimedOut(_ samples: [Float], generation: Int) {
         guard generation == pipelineGeneration,
               state == .transcribing else {

@@ -37,7 +37,7 @@ extension EnginePreparationState {
     enum EarlyPress: Equatable, Sendable {
         /// nothing has asked for one: the press is the ask.
         case startPreparing
-        /// the last load failed. usually a blip, so try again, out loud —
+        /// the last load failed. usually a blip, so try again, out loud.
         /// the alternative is a key that never answers again.
         case retryPreparing
         /// already on its way.
