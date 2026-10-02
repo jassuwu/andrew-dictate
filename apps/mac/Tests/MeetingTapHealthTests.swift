@@ -83,6 +83,32 @@ final class MeetingTapHealthTests: XCTestCase {
         XCTAssertEqual(records.first?.events, [])
     }
 
+    /// The call ended and the recording ran on: an hour with nothing
+    /// playing. It used to chirp, rebuild and cut a gap every two minutes;
+    /// now it asks nothing at all.
+    func testAnHourOfSilenceAfterEverythingStoppedPlayingAsksNothing() async throws {
+        source.anythingIsPlaying = true
+        let c = coordinator()
+        c.start()
+        await source.awaitStart()
+        await play(loud(at: .zero), loud(at: .seconds(1)))
+
+        source.anythingIsPlaying = false
+        for s in stride(from: 10, through: 3_600, by: 10) {
+            source.send(quiet(at: .seconds(s)))
+        }
+        await until { c.elapsed >= .seconds(3_600) }
+
+        XCTAssertEqual(source.quietProbes, 0)
+        XCTAssertEqual(source.rebuilds, 0)
+        XCTAssertEqual(events, [.started])
+
+        c.stop()
+        await c.untilWrittenOut()
+        XCTAssertTrue(try savedFile().complete)
+        XCTAssertEqual(records.first?.events, [])
+    }
+
     // MARK: - the quiet probe
 
     /// You present for longer than the timeout while the call app plays
