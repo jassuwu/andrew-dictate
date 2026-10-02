@@ -950,9 +950,11 @@ final class MeetingCoordinator: ObservableObject {
             return
         }
         guard !audio.them.isEmpty || !audio.you.isEmpty else {
+            // it reads, and there is nothing in it: a meeting that never
+            // captured a sample. the only audio recovery lets go.
             spool.discard(handle)
             keepMeetingRecord?(MeetingRecord(
-                .spoolUnreadable, app: manifest.app, model: manifest.model,
+                .nothingKept(.spoolEmpty), app: manifest.app, model: manifest.model,
                 startedAt: manifest.started, duration: .zero, recovered: true))
             return
         }

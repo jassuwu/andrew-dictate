@@ -74,6 +74,29 @@ final class MeetingRecoveryTests: XCTestCase {
         XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).count, 0)
     }
 
+    /// Audio that reads fine and has no frames in it is a meeting that never
+    /// captured anything: there is nothing to keep, and the record says why
+    /// the folder is gone.
+    func testAudioThatReadsAndIsEmptyIsDiscarded() async throws {
+        let handle = try spool.begin(.init(
+            app: "teams", started: started, engine: "whisperLargeV3Turbo",
+            model: .whisperLargeV3Turbo))
+        // the file is made and closed with nothing written to it.
+        do { _ = try SpoolAudioFile(url: handle.audioURL) }
+        let c = coordinator()
+
+        c.recoverOrphans()
+        await awaitRecords(1)
+
+        XCTAssertEqual(records.map(\.outcome), [.nothingKept(.spoolEmpty)])
+        XCTAssertEqual(records.first?.recovered, true)
+        XCTAssertEqual(records.first?.app, "teams")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: handle.folder.path))
+        XCTAssertEqual(spool.unreadableCount(), 0)
+        XCTAssertEqual(transcribers.made, [])
+        XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).count, 0)
+    }
+
     // MARK: - helpers
 
     /// A spool a crash left behind, with a second of audio on it.
