@@ -85,7 +85,7 @@ targets:
       path: Sources/Info.plist
       properties:
         CFBundleDisplayName: $(PRODUCT_NAME)
-        CFBundleShortVersionString: "0.9.4"
+        CFBundleShortVersionString: "0.10.0"
         CFBundleVersion: "6"
         LSUIElement: true
         # deliberately no LSMultipleInstancesProhibited: this block is
