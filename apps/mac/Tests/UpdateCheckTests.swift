@@ -200,15 +200,47 @@ final class UpdateCheckTests: XCTestCase {
 
     func testTheInstallIsHomebrewOnlyWhenTheCaskroomHasIt() throws {
         let caskroom = root.appendingPathComponent("andrew-dictate")
-        XCTAssertEqual(UpdateOffer.Install.detect(caskroom: caskroom), .dmg)
+        XCTAssertEqual(UpdateOffer.Install.detect(caskrooms: [caskroom]), .dmg)
 
         try FileManager.default.createDirectory(
             at: caskroom,
             withIntermediateDirectories: true
         )
         XCTAssertEqual(
-            UpdateOffer.Install.detect(caskroom: caskroom),
+            UpdateOffer.Install.detect(caskrooms: [caskroom]),
             .homebrew
+        )
+    }
+
+    /// a brew at /usr/local — moved over from an intel mac, run under
+    /// rosetta — keeps its caskroom there, and the upgrade runs that brew
+    /// as readily as the one at /opt/homebrew.
+    func testACaskroomUnderEitherBrewPrefixIsAHomebrewInstall() throws {
+        let appleSilicon = root.appendingPathComponent("opt/Caskroom/andrew-dictate")
+        let rosetta = root.appendingPathComponent("usr-local/Caskroom/andrew-dictate")
+        XCTAssertEqual(
+            UpdateOffer.Install.detect(caskrooms: [appleSilicon, rosetta]),
+            .dmg
+        )
+
+        try FileManager.default.createDirectory(
+            at: rosetta,
+            withIntermediateDirectories: true
+        )
+        XCTAssertEqual(
+            UpdateOffer.Install.detect(caskrooms: [appleSilicon, rosetta]),
+            .homebrew
+        )
+    }
+
+    /// the caskrooms are where the brews the upgrade looks for keep theirs.
+    func testTheCaskroomsSitBesideEveryBrewTheUpgradeRuns() {
+        XCTAssertEqual(
+            UpdateOffer.Install.caskrooms.map { $0.path(percentEncoded: false) },
+            [
+                "/opt/homebrew/Caskroom/andrew-dictate/",
+                "/usr/local/Caskroom/andrew-dictate/",
+            ]
         )
     }
 

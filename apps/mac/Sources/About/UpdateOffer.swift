@@ -7,18 +7,26 @@ enum UpdateOffer {
         case homebrew
         case dmg
 
-        static let caskroom = URL(
-            fileURLWithPath: "/opt/homebrew/Caskroom/andrew-dictate",
-            isDirectory: true
-        )
+        /// beside each brew `BrewUpgrade` knows to run: /opt/homebrew, and
+        /// /usr/local — a rosetta brew moved over from an intel mac, which
+        /// installs this arm64 app as readily.
+        static let caskrooms = BrewUpgrade.candidates.map { brew in
+            brew.deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appending(
+                    path: "Caskroom/andrew-dictate",
+                    directoryHint: .isDirectory
+                )
+        }
 
-        /// brew put it there, brew replaces it. apple silicon only, so
-        /// /opt/homebrew is the only caskroom there is.
+        /// brew put it there, brew replaces it — whichever brew that was.
         static func detect(
-            caskroom: URL = Install.caskroom,
+            caskrooms: [URL] = Install.caskrooms,
             fileManager: FileManager = .default
         ) -> Install {
-            fileManager.fileExists(atPath: caskroom.path(percentEncoded: false))
+            caskrooms.contains {
+                fileManager.fileExists(atPath: $0.path(percentEncoded: false))
+            }
                 ? .homebrew
                 : .dmg
         }
