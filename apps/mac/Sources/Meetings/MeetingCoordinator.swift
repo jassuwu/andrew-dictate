@@ -1574,9 +1574,10 @@ extension MeetingCoordinator {
     /// to pay for. Whatever goes wrong leaves the file as it was, says so on
     /// the lamp, and leaves the audio for another try.
     ///
-    /// The kept audio is read whole — `transcribe(you:them:)` takes the two
-    /// sides as arrays, as a recovery's does — so an hour of it is in memory
-    /// while it runs, as that is.
+    /// The kept audio is read whole, not a block at a time:
+    /// `transcribe(you:them:)` takes the two sides as arrays, as a
+    /// recovery's does, so an hour of the meeting is in memory while it
+    /// runs.
     func transcribeAgain(_ transcript: URL, with model: MeetingModel) async {
         if isRecording {
             onEvent?(.couldNotTranscribeAgain(AgainFailure.recording.localizedDescription))

@@ -26,6 +26,13 @@ final class MeetingsListModel: ObservableObject {
     /// the audio kept for each meeting that still has some, by the path of
     /// its transcript.
     @Published private(set) var audio: [String: KeptAudio.Entry] = [:]
+    /// the meeting models on this mac, in the order the settings lists them.
+    @Published private(set) var meetingModels: [MeetingModel] = []
+    /// what the coordinator is doing that a row has to say, set by the pane
+    /// as it changes: a meeting is being recorded, and the transcript being
+    /// made again, if one is.
+    @Published var isRecording = false
+    @Published var transcribingAgain: URL?
 
     /// a retry of those is running. it can take a quarter of an hour a
     /// recording, so the line says so instead of offering the button again.
@@ -35,6 +42,8 @@ final class MeetingsListModel: ObservableObject {
     private let countSetAside: () -> Int
     private let retrySetAside: (@MainActor () async -> Void)?
     private let keptAudio: KeptAudio?
+    private let installedModels: () -> Set<MeetingModel>
+    private let startAgain: ((URL, MeetingModel) -> Void)?
     private let now: () -> Date
     private let locale: Locale
     private let timeZone: TimeZone
@@ -49,6 +58,8 @@ final class MeetingsListModel: ObservableObject {
         countSetAside: @escaping () -> Int = { 0 },
         tryAgain: (@MainActor () async -> Void)? = nil,
         keptAudio: KeptAudio? = nil,
+        installedModels: @escaping () -> Set<MeetingModel> = { [] },
+        transcribeAgain: ((URL, MeetingModel) -> Void)? = nil,
         now: @escaping () -> Date = { Date() },
         locale: Locale = .current,
         timeZone: TimeZone = .current,
@@ -59,6 +70,8 @@ final class MeetingsListModel: ObservableObject {
         self.countSetAside = countSetAside
         self.retrySetAside = tryAgain
         self.keptAudio = keptAudio
+        self.installedModels = installedModels
+        self.startAgain = transcribeAgain
         self.now = now
         self.locale = locale
         self.timeZone = timeZone
@@ -94,6 +107,10 @@ final class MeetingsListModel: ObservableObject {
         audio = Dictionary(
             (keptAudio?.all() ?? []).map { (Self.key($0.label.transcript), $0) },
             uniquingKeysWith: { first, _ in first })
+        // a stat of each model's folder, so it is asked when the pane
+        // reads the disk and not each time a row is drawn.
+        let installed = installedModels()
+        meetingModels = MeetingModel.allCases.filter(installed.contains)
     }
 
     // MARK: - recordings that could not be transcribed
@@ -142,6 +159,38 @@ final class MeetingsListModel: ObservableObject {
     func deleteAudio(of meeting: MeetingSummary) {
         keptAudio?.deleteAudio(of: meeting.fileURL)
         reload()
+    }
+
+    // MARK: - transcribing again
+
+    /// what a row offers while its meeting's audio is kept.
+    enum Again: Equatable {
+        /// no audio to read again, or nothing to read it with: no action.
+        case none
+        /// `transcribe again with ▸` and these models, every one on this mac.
+        case offer([MeetingModel])
+        /// the action, off, and why in a word or two.
+        case wait(String)
+        /// this meeting's transcript is being made again.
+        case running
+    }
+
+    func again(for meeting: MeetingSummary) -> Again {
+        guard startAgain != nil, audio[Self.key(meeting.fileURL)] != nil else { return .none }
+        if transcribingAgain.map(Self.key) == Self.key(meeting.fileURL) { return .running }
+        if isRecording { return .wait("recording") }
+        if transcribingAgain != nil { return .wait("one at a time") }
+        if meetingModels.isEmpty { return .wait("no model installed") }
+        return .offer(meetingModels)
+    }
+
+    /// the menu's choice. one made when the row would not have offered it —
+    /// the menu was open while a meeting started — is not started.
+    func transcribeAgain(_ meeting: MeetingSummary, with model: MeetingModel) {
+        guard case .offer(let models) = again(for: meeting), models.contains(model) else {
+            return
+        }
+        startAgain?(meeting.fileURL, model)
     }
 
     /// the day and the time, in the row's own locale and side by side: a
