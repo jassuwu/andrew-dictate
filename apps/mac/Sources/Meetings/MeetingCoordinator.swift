@@ -998,8 +998,12 @@ final class MeetingCoordinator: ObservableObject {
             guard let ready = try await transcriberForRecovery(preferring: manifest.model) else {
                 // nothing to read it with, which is nothing wrong with the
                 // spool: no attempt is counted and it is not set aside. a
-                // launch with a model on this mac writes it out.
+                // launch with a model on this mac writes it out. one that
+                // was asked for goes back, so the line that counts it does.
                 logger.error("no meeting model is installed, so a spool waits")
+                if tryingAgain {
+                    spool.setAside(handle)
+                }
                 keepMeetingRecord?(MeetingRecord(
                     .waitingForModel, app: manifest.app, model: manifest.model,
                     startedAt: manifest.started, duration: duration, recovered: true))

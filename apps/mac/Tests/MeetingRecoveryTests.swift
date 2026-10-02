@@ -243,6 +243,23 @@ final class MeetingRecoveryTests: XCTestCase {
         XCTAssertEqual(spool.unreadableCount(), 0)
     }
 
+    /// A try that cannot run for want of a model is not a recording that
+    /// left the line: it goes back where it was, so the history row still
+    /// counts it instead of it quietly waiting in a folder nobody looks in.
+    func testTryingAgainWithNoModelInstalledLeavesTheRecordingSetAside() async throws {
+        let handle = try await orphan("teams", started: started)
+        spool.setAside(handle)
+        transcribers.installed = []
+        let c = coordinator()
+
+        await c.tryAgainSetAside()
+
+        XCTAssertEqual(records.map(\.outcome), [.waitingForModel])
+        XCTAssertEqual(spool.unreadableCount(), 1)
+        XCTAssertEqual(spool.orphans().count, 0)
+        XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).count, 0)
+    }
+
     // MARK: - helpers
 
     /// A spool a crash left behind, with a second of audio on it.
