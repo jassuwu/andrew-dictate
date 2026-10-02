@@ -644,8 +644,8 @@ final class MeetingCoordinator: ObservableObject {
         }
         try? spool.finish(handle)
         keepMeetingRecord?(MeetingRecord(
-            outcome: .saved, app: app, model: model.rawValue,
-            startedAt: started, durationS: recording.duration.totalSeconds))
+            .saved, app: app, model: model, startedAt: started,
+            duration: recording.duration, gaps: recording.gaps, turns: split))
 
         let summary = (try? MeetingTranscriptFile.summary(of: url)) ?? MeetingSummary(
             fileURL: url, app: app, started: started, duration: recording.duration,

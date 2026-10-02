@@ -81,6 +81,44 @@ final class MeetingRecordTests: XCTestCase {
         XCTAssertEqual(record.durationS, 2)
     }
 
+    /// two sides, four turns, and a mac that slept through most of an hour:
+    /// the record has the numbers the file has, and none of the talk.
+    func testTheRecordCountsTheTurnsAndWordsOfEachSideAndTheGap() async throws {
+        transcriber.finalTurns = [
+            .init(speaker: .you, at: .seconds(1), text: "alpha beta gamma"),
+            .init(speaker: .them(nil), at: .seconds(2), text: "delta epsilon"),
+            .init(speaker: .them(nil), at: .seconds(3), text: "zeta"),
+            .init(speaker: .you, at: .seconds(5), text: "eta theta"),
+        ]
+        let clock = FakeClock()
+        let c = coordinator(clock: clock)
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        source.send(loud(at: .seconds(1_082)))
+        await settle()
+
+        // the lid closes at 00:18:03 and the mac wakes at 00:58:18.
+        clock.advance(by: .seconds(3_498))
+        c.probeTapIsAlive()
+        await settle()
+        source.send(loud(at: .seconds(3_498)))
+        await settle()
+        clock.advance(by: .seconds(230))
+
+        c.stop()
+        await c.untilWrittenOut()
+
+        let record = try XCTUnwrap(records.first)
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(record.durationS, 3_728)
+        XCTAssertEqual(record.gaps, 1)
+        // the gap is [1083, 3499].
+        XCTAssertEqual(record.gapsLostS, 2_416)
+        XCTAssertEqual(record.you, .init(turns: 2, words: 5))
+        XCTAssertEqual(record.them, .init(turns: 2, words: 3))
+    }
+
     // MARK: - helpers
 
     private func loud(at: Duration) -> MeetingAudioChunk {
