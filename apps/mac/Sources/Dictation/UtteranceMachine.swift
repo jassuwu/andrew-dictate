@@ -139,8 +139,20 @@ final class UtteranceMachine {
     /// waiting on it. a healthy one answers in tens of milliseconds.
     static let microphoneDeadline = Duration.milliseconds(1_500)
     /// how long a mic that answered gets to send its first audio. a
-    /// healthy one is heard within a tap buffer, about a tenth of that.
-    static let firstAudioDeadline = Duration.seconds(1)
+    /// healthy one is heard within a tap buffer, about a tenth of that. a
+    /// bluetooth headset is the exception: macOS moves it to its call
+    /// profile only once it is opened, and that switch alone can run past
+    /// a second — a second of silence there is the switch, not a dead mic.
+    static func firstAudioDeadline(
+        for transport: MicDescription.Transport?
+    ) -> Duration {
+        switch transport {
+        case .bluetooth, .continuity:
+            .seconds(3)
+        default:
+            .seconds(1)
+        }
+    }
     /// the least a take must hand back to be one: a tenth of a second at
     /// 16 kHz.
     static let usableSamples = 1_600
@@ -378,11 +390,15 @@ final class UtteranceMachine {
     }
 
     /// a mic can open and still send nothing — one the phone took for a
-    /// call, a driver that wedged — so it gets a second to be heard.
+    /// call, a driver that wedged — so it gets a second to be heard, or
+    /// three if it is a headset still switching profile.
     private func awaitFirstAudio(_ id: UInt64) {
         firstAudioWait?.cancel()
+        let deadline = Self.firstAudioDeadline(
+            for: capture?.microphone.deviceDescription?.transport
+        )
         firstAudioWait = Task { @MainActor [weak self, clock] in
-            try? await clock.sleep(for: Self.firstAudioDeadline)
+            try? await clock.sleep(for: deadline)
             guard !Task.isCancelled else {
                 return
             }
@@ -390,7 +406,7 @@ final class UtteranceMachine {
         }
     }
 
-    /// a second since it answered, and not a sound.
+    /// its deadline since it answered, and not a sound.
     private func microphoneStayedSilent(_ id: UInt64) {
         firstAudioWait = nil
         guard let capture,

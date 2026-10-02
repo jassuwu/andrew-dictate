@@ -181,6 +181,47 @@ final class UtteranceMachineHearingTests: XCTestCase {
         XCTAssertEqual(m.state, .recording)
     }
 
+    /// a bluetooth headset opens before it can be heard: macOS has to move
+    /// it to its call profile first, which can take well over a second. a
+    /// second of silence there is the switch, not a dead mic, so it gets
+    /// three before it is named.
+    func testABluetoothMicGetsLongerToBeHeard() async {
+        mic.deviceDescription = MicDescription(
+            name: "AirPods Pro",
+            transport: .bluetooth
+        )
+        let m = machine()
+
+        m.keyDown()
+        await pass(.milliseconds(2_900))
+        XCTAssertEqual(m.state, .recording)
+        XCTAssertEqual(pills, [])
+        XCTAssertEqual(outcomes, [])
+
+        await pass(.milliseconds(100))
+        XCTAssertEqual(pills, [Pill("no sound from AirPods Pro", 2.4)])
+        XCTAssertEqual(outcomes, [.noAudio])
+    }
+
+    /// the switch is slow, not broken: a headset heard at two seconds is
+    /// a take like any other.
+    func testABluetoothMicHeardLateIsATake() async {
+        mic.deviceDescription = MicDescription(
+            name: "AirPods Pro",
+            transport: .bluetooth
+        )
+        let m = machine()
+
+        m.keyDown()
+        await pass(.seconds(2))
+        mic.hear()
+        await settle()
+
+        XCTAssertTrue(lamp.contains(.hearing))
+        XCTAssertEqual(pills, [])
+        XCTAssertEqual(m.state, .recording)
+    }
+
     /// a lamp that says "locked" over a mic that sends nothing is a lie:
     /// the lock goes with the take, and the tap meant to end it ends
     /// nothing more.
