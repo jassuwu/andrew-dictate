@@ -42,6 +42,8 @@ struct CallWatcher {
 
     private var call: Call?
     private var qualifyingSince: Duration?
+    /// As of the last observation. The watcher has no other way to know.
+    private var recording = false
 
     /// The app whose call is on now, recorded or not. The recording's file is
     /// named after it.
@@ -49,13 +51,14 @@ struct CallWatcher {
 
     /// The app whose call is on while nothing is recording it: what the menu
     /// bar icon shows to say there is a call you could be keeping.
-    var unrecordedCall: String? { call?.app }
+    var unrecordedCall: String? { recording ? nil : call?.app }
 
     mutating func observe(
         _ apps: [App],
         isRecording: Bool,
         at now: Duration
     ) -> [Suggestion] {
+        recording = isRecording
         guard call == nil else {
             return []
         }

@@ -116,6 +116,31 @@ final class CallWatcherTests: XCTestCase {
         XCTAssertEqual(watcher.unrecordedCall, "zoom")
     }
 
+    func testACallThatIsBeingRecordedIsNotReportedAsUnrecorded() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+
+        _ = watcher.observe([zoom], isRecording: true, at: .seconds(0))
+        _ = watcher.observe([zoom], isRecording: true, at: .seconds(3))
+
+        XCTAssertNil(watcher.unrecordedCall)
+    }
+
+    /// The reply to the record suggestion is the user pressing record, and
+    /// the icon should follow the moment they do.
+    func testPressingRecordTurnsTheCallIntoARecordedOne() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(0))
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(3))
+        XCTAssertEqual(watcher.unrecordedCall, "zoom")
+
+        _ = watcher.observe([zoom], isRecording: true, at: .seconds(5))
+        XCTAssertNil(watcher.unrecordedCall)
+        XCTAssertEqual(watcher.currentCall, "zoom")
+    }
+
     /// A browser tab playing music is not a call, and neither is a podcast.
     func testAudioAloneIsNotACall() {
         var watcher = watcher()
