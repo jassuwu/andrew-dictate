@@ -352,6 +352,23 @@ final class HotkeyLogicTests: XCTestCase {
                 .refusal(againstDictationKey: .fn))
     }
 
+    /// while the row listens, ⌘W and ⌘Q on their own are a hand leaving:
+    /// the row lets them through to the window instead of taking them.
+    func testABareCommandWOrQIsHowYouLeaveNotAShortcut() {
+        XCTAssertTrue(
+            MeetingShortcut(keyCode: 13, modifiers: [.command], keyName: "W").closesOrQuits)
+        XCTAssertTrue(
+            MeetingShortcut(keyCode: 12, modifiers: [.command], keyName: "Q").closesOrQuits)
+        XCTAssertFalse(
+            MeetingShortcut(keyCode: 13, modifiers: [.command, .shift], keyName: "W")
+                .closesOrQuits)
+        XCTAssertFalse(
+            MeetingShortcut(keyCode: 12, modifiers: [.control, .command], keyName: "Q")
+                .closesOrQuits)
+        XCTAssertFalse(
+            MeetingShortcut(keyCode: 9, modifiers: [.command], keyName: "V").closesOrQuits)
+    }
+
     /// esc is the dictation key's own cancel, heard everywhere: a shortcut
     /// on it would end a take every time it started or stopped a meeting.
     func testAShortcutCannotBeOnEscape() {

@@ -88,10 +88,10 @@ struct MeetingShortcutRow: View {
         isListening = true
         coordinator.holdMeetingShortcut(true)
         // every key goes to this row until one is taken, so nothing typed
-        // meanwhile reaches the pane behind it.
+        // meanwhile reaches the pane behind it — except ⌘W and ⌘Q, which
+        // end listening and go on to the window.
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             heard(event)
-            return nil
         }
     }
 
@@ -107,16 +107,17 @@ struct MeetingShortcutRow: View {
         coordinator.holdMeetingShortcut(false)
     }
 
-    private func heard(_ event: NSEvent) {
+    /// the event, to pass it on, or nil to keep it from the window.
+    private func heard(_ event: NSEvent) -> NSEvent? {
         guard !event.isARepeat else {
-            return
+            return nil
         }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         // esc on its own is how you leave without choosing.
         if event.keyCode == MeetingShortcut.escapeKeyCode,
            flags.isDisjoint(with: [.control, .option, .command, .shift]) {
             stopListening()
-            return
+            return nil
         }
 
         var modifiers: MeetingShortcut.Modifiers = []
@@ -131,13 +132,21 @@ struct MeetingShortcutRow: View {
                 forKeyCode: event.keyCode,
                 characters: event.charactersIgnoringModifiers ?? ""))
 
+        // ⌘W and ⌘Q are a hand leaving, not a choice: the window closes, or
+        // the app quits, as it would anywhere else.
+        if shortcut.closesOrQuits {
+            refusal = nil
+            stopListening()
+            return event
+        }
         if let reason = settings.setMeetingShortcut(shortcut) {
             // still listening: the next combination may be fine.
             refusal = reason.message
-            return
+            return nil
         }
         refusal = nil
         stopListening()
+        return nil
     }
 
     private func clear() {

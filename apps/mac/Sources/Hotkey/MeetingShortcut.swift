@@ -108,6 +108,18 @@ struct MeetingShortcut: Codable, Hashable, Sendable {
         return nil
     }
 
+    /// ⌘W or ⌘Q with nothing else held: a hand leaving settings, or the
+    /// app. While the row listens these are not taken; listening stops and
+    /// the key goes on to the window.
+    var closesOrQuits: Bool {
+        modifiers == .command
+            && (keyCode == Self.wKeyCode || keyCode == Self.qKeyCode
+                || keyName == "W" || keyName == "Q")
+    }
+
+    private static let wKeyCode: UInt16 = 13
+    private static let qKeyCode: UInt16 = 12
+
     /// With ⌘, or ⌘⇧, what every mac app answers: select all, copy, find,
     /// hide, minimise, new, open, print, quit, save, a new tab, paste,
     /// close, cut, undo; and switching apps, spotlight, a default button,
