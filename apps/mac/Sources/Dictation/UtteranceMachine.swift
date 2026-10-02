@@ -400,6 +400,12 @@ final class UtteranceMachine {
         return true
     }
 
+    /// a press the app refused before the machine heard of it (a meeting
+    /// owns the mic). it still ends in a record, like every press.
+    func refusePress(_ why: PressRecord.Refusal) {
+        refuse(why)
+    }
+
     // MARK: - the mic, from underneath
 
     func captureInterrupted(_ reason: CaptureInterruption) {
@@ -930,12 +936,6 @@ final class UtteranceMachine {
         duration: TimeInterval = 2.4
     ) {
         emit(.pill(message, duration: duration))
-    }
-
-    /// a press the app refused before the machine heard of it (a meeting
-    /// owns the mic). it still ends in a record, like every press.
-    func refusePress(_ why: PressRecord.Refusal) {
-        refuse(why)
     }
 
     /// a press answered with a pill before anything was recorded. its own
