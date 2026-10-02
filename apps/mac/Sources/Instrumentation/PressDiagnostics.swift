@@ -18,9 +18,11 @@ enum PressDiagnostics {
         var defaultMic: MicDescription?
     }
 
+    /// `presses` is nil when the log would not read — which has to say
+    /// so, not pass for a mac that never pressed the key.
     static func text(
         setup: Setup,
-        presses: [PressRecord],
+        presses: [PressRecord]?,
         timeZone: TimeZone = .current
     ) -> String {
         var lines = [
@@ -33,6 +35,10 @@ enum PressDiagnostics {
                 } ?? "none"),
         ]
 
+        guard let presses else {
+            lines.append("couldn't read the press log")
+            return lines.joined(separator: "\n")
+        }
         let newest = presses.suffix(pressCount)
         if newest.isEmpty {
             lines.append("no presses yet")

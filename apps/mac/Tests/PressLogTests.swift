@@ -128,6 +128,13 @@ final class PressLogTests: XCTestCase {
         )
     }
 
+    /// a log that will not read is not an empty one.
+    func testAnUnreadableLogDoesNotPassForAnEmptyOne() {
+        let text = PressDiagnostics.text(setup: setup, presses: nil, timeZone: kolkata)
+
+        XCTAssertTrue(text.hasSuffix("\ncouldn't read the press log"), text)
+    }
+
     func testOnePressIsNotCalledPresses() {
         let text = PressDiagnostics.text(
             setup: setup,
