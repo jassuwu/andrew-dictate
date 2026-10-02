@@ -474,6 +474,23 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(spool.orphans().count, 0)
     }
 
+    /// A spool is heard the way the meeting was, and the mic's copy of the
+    /// far side is let go in it too: the file has them once, and no you.
+    func testASpoolWithTheFarSideOnTheMicHasNoYouTurnForIt() async throws {
+        let theirs = them("are we all here", from: 1.3, to: 4.3, voice: .theirs)
+        _ = try await spoolLeftBehind([theirs, theirs.asBleed()])
+
+        let transcriber = stretches(threshold: Self.keen)
+        let c = coordinator(transcriber)
+        c.recoverOrphans()
+
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, ["[00:00:01] them: are we all here"])
+        XCTAssertEqual(handed(), ["are we all here 52800"])
+        let tally = await transcriber.tally
+        XCTAssertEqual(tally, StretchTally(decodedThem: 1, bleed: 1))
+    }
+
     // MARK: - the numbers
 
     /// What the meeting's record will be told: stretches decoded per side,

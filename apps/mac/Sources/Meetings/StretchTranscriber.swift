@@ -127,7 +127,7 @@ actor StretchTranscriber: MeetingTranscriber {
     func finish() async -> [MeetingTurn] {
         await hearing?.value
         isFinished = true
-        queue(withoutBleed(you.flush()) + them.flush())
+        queue(withoutBleed(you.flush(), mic: micLoudness, far: farLoudness) + them.flush())
         // A model still loading is waited for: a meeting stopped in its
         // first seconds must not be written out with none of its words. One
         // that failed, or was never asked to load, has nothing to wait for.
@@ -143,10 +143,15 @@ actor StretchTranscriber: MeetingTranscriber {
     }
 
     /// A whole spool, heard the way the meeting was: in the chunks the
-    /// capture layer hands over, through a fresh detector per side. Each
-    /// stretch is decoded as soon as it is cut, so the speech is not copied
-    /// out whole beside a recording that is already all in memory. A spool
-    /// has no gaps in it, so its clock is its sample count.
+    /// capture layer hands over, through a fresh detector per side, and the
+    /// far side coming back through the mic let go the same way. Each stretch
+    /// is decoded as soon as it is cut, so the speech is not copied out whole
+    /// beside a recording that is already all in memory. A spool has no gaps
+    /// in it, so its clock is its sample count.
+    ///
+    /// The two sides are walked together, a chunk at a time: a `you` stretch
+    /// is held against how loud the far side was while it was said, and that
+    /// is only known once the far side has been heard up to there.
     ///
     /// It throws when there was speech and not one stretch of it decoded:
     /// written out, that would read as a meeting where nobody spoke, and the
@@ -158,24 +163,36 @@ actor StretchTranscriber: MeetingTranscriber {
         var turns: [MeetingTurn] = []
         var cut = 0
         let failedBefore = tally.failed
-        for (side, samples) in [(Stretch.Side.you, you), (.them, them)] {
-            let detector = makeDetector()
-            var cutter = StretchCutter(side: side, ceiling: ceiling)
-            var start = 0
-            while start < samples.count {
-                let end = min(start + Self.spoolChunk, samples.count)
-                let chunk = Array(samples[start..<end])
-                let edges = await detector.hear(chunk)
-                let at = StretchCutter.duration(of: start)
-                let stretches = cutter.take(chunk, at: at, edges: edges)
-                cut += stretches.count
-                turns += await decodeAlone(stretches)
-                start = end
+        let youDetector = makeDetector()
+        let themDetector = makeDetector()
+        var youCutter = StretchCutter(side: .you, ceiling: ceiling)
+        var themCutter = StretchCutter(side: .them, ceiling: ceiling)
+        var mic = LoudnessTrail()
+        var far = LoudnessTrail()
+        var start = 0
+        while start < max(you.count, them.count) {
+            let at = StretchCutter.duration(of: start)
+            let youChunk = Self.chunk(of: you, from: start)
+            let themChunk = Self.chunk(of: them, from: start)
+            mic.hear(youChunk, at: at)
+            far.hear(themChunk, at: at)
+            var stretches: [Stretch] = []
+            if !youChunk.isEmpty {
+                let edges = await youDetector.hear(youChunk)
+                stretches += withoutBleed(
+                    youCutter.take(youChunk, at: at, edges: edges), mic: mic, far: far)
             }
-            let last = cutter.flush()
-            cut += last.count
-            turns += await decodeAlone(last)
+            if !themChunk.isEmpty {
+                let edges = await themDetector.hear(themChunk)
+                stretches += themCutter.take(themChunk, at: at, edges: edges)
+            }
+            cut += stretches.count
+            turns += await decodeAlone(stretches)
+            start += Self.spoolChunk
         }
+        let last = withoutBleed(youCutter.flush(), mic: mic, far: far) + themCutter.flush()
+        cut += last.count
+        turns += await decodeAlone(last)
         if cut > 0, tally.failed - failedBefore == cut {
             throw Failure.nothingDecoded(stretches: cut)
         }
@@ -194,19 +211,22 @@ actor StretchTranscriber: MeetingTranscriber {
         farLoudness.hear(chunk.them, at: chunk.at)
         let youEdges = await youDetector.hear(chunk.you)
         let themEdges = await themDetector.hear(chunk.them)
-        queue(withoutBleed(you.take(chunk.you, at: chunk.at, edges: youEdges))
+        queue(withoutBleed(
+            you.take(chunk.you, at: chunk.at, edges: youEdges),
+            mic: micLoudness, far: farLoudness)
             + them.take(chunk.them, at: chunk.at, edges: themEdges))
     }
 
     /// A `you` stretch that is only the far side coming back through the mic
     /// goes no further: it is counted, and the engine never hears it.
     /// `them` is never in doubt.
-    private func withoutBleed(_ stretches: [Stretch]) -> [Stretch] {
+    private func withoutBleed(
+        _ stretches: [Stretch], mic: LoudnessTrail, far: LoudnessTrail
+    ) -> [Stretch] {
         var kept: [Stretch] = []
         for stretch in stretches {
             if stretch.side == .you,
-               BleedJudge.verdict(
-                   mic: micLoudness, far: farLoudness, from: stretch.at, to: stretch.end) == .drop
+               BleedJudge.verdict(mic: mic, far: far, from: stretch.at, to: stretch.end) == .drop
             {
                 tally.bleed += 1
             } else {
@@ -295,6 +315,13 @@ actor StretchTranscriber: MeetingTranscriber {
     }
 
     // MARK: -
+
+    /// The chunk of a spool's side that begins at `start`: the last may be
+    /// short, and a side that has ended is empty.
+    private static func chunk(of samples: [Float], from start: Int) -> [Float] {
+        guard start < samples.count else { return [] }
+        return Array(samples[start..<min(start + spoolChunk, samples.count)])
+    }
 
     /// The words in what the engine said, or nil when there are none.
     /// Whisper names a stretch with no speech in it — `[BLANK_AUDIO]`,
