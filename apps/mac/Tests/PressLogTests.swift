@@ -68,6 +68,107 @@ final class PressLogTests: XCTestCase {
         )
     }
 
+    // MARK: - copy diagnostics
+
+    /// what a friend pastes to jass: who is running what, then the presses
+    /// as the log wrote them, newest last.
+    func testDiagnosticsAreTheSetupThenTheLastPresses() {
+        let presses = [
+            refused(.modelNotReady, endingAt: 0),
+            refused(.noMicrophone, endingAt: 1),
+        ]
+
+        XCTAssertEqual(
+            PressDiagnostics.text(
+                setup: setup,
+                presses: presses,
+                timeZone: kolkata
+            ),
+            [
+                "Andrew Dictate 0.9.4 (6)",
+                "macOS 27.0.1",
+                "speech model v2",
+                "default mic: MacBook Pro Microphone (built-in)",
+                "last 2 presses, newest last:",
+                "at=2026-10-02T12:22:31+05:30 outcome=refused why=model-not-ready end_ms=0 engine=v2",
+                "at=2026-10-02T12:22:31+05:30 outcome=refused why=no-microphone end_ms=1 engine=v2",
+            ].joined(separator: "\n")
+        )
+    }
+
+    /// fifty is enough to see a pattern and short enough to paste anywhere.
+    func testDiagnosticsCarryOnlyTheNewestFifty() {
+        let presses = (0..<60).map { refused(.modelNotReady, endingAt: $0) }
+
+        let lines = PressDiagnostics.text(
+            setup: setup,
+            presses: presses,
+            timeZone: kolkata
+        ).split(separator: "\n")
+
+        XCTAssertEqual(lines.count, 5 + 50)
+        XCTAssertEqual(lines[4], "last 50 presses, newest last:")
+        XCTAssertTrue(lines[5].hasSuffix("end_ms=10 engine=v2"))
+        XCTAssertTrue(lines.last!.hasSuffix("end_ms=59 engine=v2"))
+    }
+
+    func testDiagnosticsWithNothingToShowSaySo() {
+        var bare = setup
+        bare.defaultMic = nil
+
+        XCTAssertEqual(
+            PressDiagnostics.text(setup: bare, presses: [], timeZone: kolkata),
+            [
+                "Andrew Dictate 0.9.4 (6)",
+                "macOS 27.0.1",
+                "speech model v2",
+                "default mic: none",
+                "no presses yet",
+            ].joined(separator: "\n")
+        )
+    }
+
+    func testOnePressIsNotCalledPresses() {
+        let text = PressDiagnostics.text(
+            setup: setup,
+            presses: [refused(.noMicrophone, endingAt: 0)],
+            timeZone: kolkata
+        )
+
+        XCTAssertTrue(text.contains("\nlast press:\n"), text)
+    }
+
+    private var setup: PressDiagnostics.Setup {
+        PressDiagnostics.Setup(
+            appVersion: "0.9.4",
+            build: "6",
+            macOS: "27.0.1",
+            engine: "v2",
+            defaultMic: MicDescription(name: "MacBook Pro Microphone", transport: .builtIn)
+        )
+    }
+
+    private func refused(
+        _ why: PressRecord.Refusal,
+        endingAt end: Int
+    ) -> PressRecord {
+        PressRecord(
+            outcome: .refused(why),
+            startedAt: noonish,
+            mic: nil,
+            samples: nil,
+            peak: nil,
+            words: nil,
+            stages: PressRecord.Stages(ended: end),
+            engine: "v2",
+            capped: false,
+            retry: false,
+            mainStallMs: nil
+        )
+    }
+
+    // MARK: - the line
+
     /// a mic that sent almost nothing must not read as one that sent
     /// exactly nothing, and a quote in a device's name stays inside it.
     func testTheLineKeepsAFaintPeakAndAnAwkwardMicName() {
