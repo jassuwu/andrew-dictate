@@ -207,6 +207,31 @@ final class UtteranceMachineInterruptionTests: XCTestCase {
         XCTAssertEqual(pills, [Self.copiedBeforeTheLock])
     }
 
+    /// the words were already with the engine when the lock came down:
+    /// they are still written out, and still copied rather than pasted —
+    /// the field they were going to is behind the lock screen too.
+    func testTheLockWhileTranscribingStillCopiesWhatWasSaid() async {
+        let m = machine()
+        engine.holds = true
+        engine.reply = .success("almost there")
+        await hold(m, for: .seconds(2))
+        await settle { self.engine.isWaiting }
+
+        m.captureInterrupted(.systemPaused)
+        XCTAssertEqual(m.state, .transcribing)
+        engine.release()
+        await settle { !self.outcomes.isEmpty }
+
+        XCTAssertEqual(inserter.inserted, [])
+        XCTAssertEqual(inserter.copied, ["Almost there."])
+        XCTAssertEqual(outcomes, [.leftOnPasteboard(.locked)])
+        XCTAssertEqual(archived.map(\.inserted), ["Almost there."])
+        XCTAssertEqual(pills, [])
+
+        m.systemResumed()
+        XCTAssertEqual(pills, [Self.copiedBeforeTheLock])
+    }
+
     /// keys only reach the app from a session someone is sitting at. a
     /// press is proof the mac is back even if the unlock never said so:
     /// what was held is said, and nothing after it is held.

@@ -679,14 +679,13 @@ final class UtteranceMachine {
     // MARK: - the mic, from underneath
 
     func captureInterrupted(_ reason: CaptureInterruption) {
-        guard state == .recording else {
-            // once the words are with the engine, the mic going away costs
-            // nothing.
-            return
-        }
-
         switch reason {
         case .deviceChanged:
+            guard state == .recording else {
+                // once the words are with the engine, the mic going away
+                // costs nothing.
+                return
+            }
             // the mic moved under the take: airpods taken by a call, a
             // display's audio arriving, the engine rebuilt underneath. what
             // it heard up to the change is the user's sentence, so the take
