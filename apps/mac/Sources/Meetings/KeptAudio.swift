@@ -274,20 +274,45 @@ struct KeptAudio: Sendable {
         }
     }
 
+    /// How long audio kept until you delete it stays once its transcript is
+    /// gone from where it was written: long enough to put a file moved by
+    /// mistake back, and no longer than the longest the setting keeps any.
+    static let keptWithoutItsTranscriptFor: TimeInterval = 7 * 86_400
+
     /// Everything past its date, deleted without asking. Audio kept until
-    /// you delete it has no date and is never touched. A look at one folder
-    /// and the small files in it, so launch can afford it. Returns how many
-    /// went.
+    /// you delete it has no date and is not deleted — but it is deleted
+    /// from its transcript's row, so once its transcript has been moved,
+    /// renamed or deleted outside the app it is given a date a week out,
+    /// and goes then like any other. A look at one folder, the small files
+    /// in it and the transcripts they name, so launch can afford it.
+    /// Returns how many went.
     @discardableResult
     func sweep() -> Int {
         let now = now()
         var swept = 0
         for (id, label) in labelled() {
-            guard let until = label.until, until <= now else { continue }
+            guard let until = label.until else {
+                if !FileManager.default.fileExists(atPath: label.transcript.path) {
+                    dateAudioWithNoTranscript(id, label, now: now)
+                }
+                continue
+            }
+            guard until <= now else { continue }
             delete(id: id)
             swept += 1
         }
         return swept
+    }
+
+    private func dateAudioWithNoTranscript(_ id: String, _ label: Label, now: Date) {
+        let dated = Label(
+            transcript: label.transcript, started: label.started, model: label.model,
+            until: now.addingTimeInterval(Self.keptWithoutItsTranscriptFor))
+        do {
+            try write(dated, to: labelURL(id))
+        } catch {
+            Self.logger.error("could not date kept audio whose transcript is gone: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     // MARK: -

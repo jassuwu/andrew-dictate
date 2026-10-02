@@ -65,7 +65,46 @@ final class KeptAudioSweepTests: XCTestCase {
         XCTAssertEqual(coordinatorsBuilt, 0)
     }
 
+    /// Audio kept until you delete it is deleted from its transcript's row.
+    /// One whose transcript was moved, renamed or deleted outside the app
+    /// has no row left to delete it from: the sweep gives it a week, and
+    /// then it goes like any other. The one whose transcript is still there
+    /// still waits for you.
+    func testAudioKeptUntilYouDeleteItWhoseTranscriptIsGoneGetsAWeekThenGoes() async throws {
+        let here = "2026-10-02-0900-meeting.md"
+        let gone = "2026-10-01-0900-meeting.md"
+        try writeTranscript(here)
+        try await keepAudio(for: here, until: nil)
+        try await keepAudio(for: gone, until: nil)
+
+        kept.sweep()
+
+        let until = Dictionary(
+            uniqueKeysWithValues: kept.all().map { ($0.label.transcript.lastPathComponent, $0.label.until) })
+        XCTAssertEqual(until.count, 2)
+        XCTAssertEqual(until[here], .some(nil), "its transcript is there")
+        XCTAssertEqual(until[gone], keptAt.addingTimeInterval(KeptAudio.keptWithoutItsTranscriptFor))
+        XCTAssertEqual(KeptAudio.keptWithoutItsTranscriptFor, 7 * 86_400)
+
+        wall.advance(by: KeptAudio.keptWithoutItsTranscriptFor - 1)
+        kept.sweep()
+        XCTAssertEqual(kept.all().count, 2, "not yet")
+
+        wall.advance(by: 1)
+        kept.sweep()
+        XCTAssertEqual(kept.all().map(\.label.transcript.lastPathComponent), [here])
+    }
+
     // MARK: -
+
+    private var transcripts: URL {
+        dir.appendingPathComponent("transcripts/meetings/2026-10")
+    }
+
+    private func writeTranscript(_ name: String) throws {
+        try FileManager.default.createDirectory(at: transcripts, withIntermediateDirectories: true)
+        try Data("---\n".utf8).write(to: transcripts.appendingPathComponent(name))
+    }
 
     /// Two seconds of a meeting's audio, kept for `transcript` until `until`.
     private func keepAudio(for transcript: String, until: Date?) async throws {
