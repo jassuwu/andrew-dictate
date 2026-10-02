@@ -94,6 +94,57 @@ final class UtteranceMachineTests: XCTestCase {
         ])
     }
 
+    // MARK: - left on the pasteboard
+
+    /// a password field gets the words, concealed, on the clipboard — and a
+    /// password is not a dictation, so nothing is kept.
+    func testASecureFieldLeavesItOnThePasteboardAndKeepsNothing() async {
+        let m = machine()
+        engine.reply = .success("hunter two")
+        inserter.result = .leftOnPasteboard(.secureField)
+
+        await hold(m, for: .seconds(1))
+        await settle { !self.pills.isEmpty }
+
+        XCTAssertEqual(pills, [Pill("copied — secure field · ⌘V to paste", 4)])
+        XCTAssertEqual(completions, [.leftOnPasteboardSecure])
+        XCTAssertEqual(archived, [])
+        // the pill is the goodbye here, not the afterglow.
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(states.last, .init(.idle, fast: false))
+    }
+
+    /// focus moved during the wait: the words reached you another way, so
+    /// they still count and are still kept.
+    func testFocusThatMovedLeavesItOnThePasteboardAndStillKeepsIt() async {
+        let m = machine()
+        engine.reply = .success("ship it")
+        inserter.result = .leftOnPasteboard(.focusChanged)
+
+        await hold(m, for: .seconds(1))
+        await settle { !self.pills.isEmpty }
+
+        XCTAssertEqual(pills, [Pill("copied — focus changed · ⌘V to paste", 4)])
+        XCTAssertEqual(completions, [.leftOnPasteboard])
+        XCTAssertEqual(archived, [.init(heard: "ship it", inserted: "Ship it.")])
+        XCTAssertTrue(events.contains(.dictated("Ship it.")))
+        XCTAssertEqual(m.state, .idle)
+    }
+
+    /// the one hand-off with nothing sitting on the clipboard: it says so,
+    /// and the words do not count as dictated.
+    func testABusyClipboardSaysNothingWasCopied() async {
+        let m = machine()
+        engine.reply = .success("ship it")
+        inserter.result = .leftOnPasteboard(.pasteboardUnavailable)
+
+        await hold(m, for: .seconds(1))
+        await settle { !self.pills.isEmpty }
+
+        XCTAssertEqual(pills, [Pill("the clipboard is busy — nothing was copied", 4)])
+        XCTAssertFalse(events.contains(.dictated("Ship it.")))
+    }
+
     // MARK: - helpers
 
     private var pills: [Pill] {
@@ -139,6 +190,16 @@ final class UtteranceMachineTests: XCTestCase {
             }
             return nil
         }
+    }
+
+    /// a press held for `duration`, then let go.
+    private func hold(
+        _ machine: UtteranceMachine,
+        for duration: Duration
+    ) async {
+        machine.keyDown()
+        await pass(duration)
+        machine.keyUp()
     }
 
     /// time passes on the machine's clock. whatever is queued gets a turn to
