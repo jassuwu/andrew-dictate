@@ -1,0 +1,88 @@
+# fidelity
+
+a developer tool, not part of the app. it answers one question: does feeding
+audio to FluidAudio's sliding-window manager while you speak give the same
+words as transcribing the whole utterance at key-up, which is what the app
+does today?
+
+same model both ways: parakeet v2, read from the cache the app already keeps
+(`~/Library/Application Support/FluidAudio/Models`). nothing is downloaded. if
+the models are missing, run the app once.
+
+## build
+
+```
+cd apps/mac/Tools/fidelity
+swift build -c release
+```
+
+the first build fetches FluidAudio, pinned to the same version as
+`apps/mac/project.yml`. if you move that pin, move the one in `Package.swift`.
+
+## 1. pick passages
+
+```
+.build/release/fidelity passages
+```
+
+reads `~/Library/Application Support/Andrew Dictate Dev/dictations.jsonl` and
+picks about 20 distinct dictations of 60 to 250 words, spread across that
+range, as things to read aloud. it prints a count and nothing of the text. the
+prompts go to `prompts.json` in the recordings folder below. it will not
+overwrite them unless you pass `--force`, because new prompts would no longer
+match the recordings already made.
+
+## 2. record them
+
+```
+.build/release/fidelity record 1
+.build/release/fidelity record 2
+...
+```
+
+shows prompt n. press Enter, read it aloud the way you would dictate it, press
+Enter again. it saves `passage-NN.wav`, 16 kHz mono 32-bit float. record in the
+room and at the distance you dictate from. recording again replaces the file.
+
+the terminal needs microphone access (System Settings, Privacy & Security,
+Microphone).
+
+## 3. compare
+
+```
+.build/release/fidelity compare
+.build/release/fidelity compare --files a.wav b.wav
+```
+
+with no `--files`, every `passage-*.wav` in the recordings folder. for each file
+it prints batch and streaming timings and either `EQUAL` or a word diff:
+`[-word-]` is in batch only, `{+word+}` in streaming only. only whitespace is
+normalised; a different comma or capital counts. for a file that differs it
+adds a second line saying whether the words still differ once case and
+punctuation are ignored. that line is information, not the verdict.
+
+it exits 1 if any file differs, 2 if it could not run.
+
+the streaming settings are printed at the top of every run, as the call that
+builds them. defaults are FluidAudio's own: 2 s left context, 11 s chunk, 2 s
+right context, fed in 100 ms buffers. to try others:
+
+```
+--chunk 11 --left 2 --right 2 --buffer-ms 100
+```
+
+left + chunk + right can be at most 15 s, the model's input.
+
+how the timings are taken:
+
+- batch is `AsrManager.transcribe` on the whole file, as the app calls it.
+- streaming is the time from the last buffer handed over to the final text.
+  windows the earlier audio set off are allowed to finish first, because on a
+  real mic they run while you are still talking. the count of windows that ran
+  live is printed next to it.
+
+## where things are
+
+recordings and prompts are your voice and your own words. they live outside the
+repo, in `~/Library/Application Support/Andrew Dictate Dev/fidelity/`, and are
+never committed.

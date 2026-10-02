@@ -26,3 +26,6 @@ apps/mac/.build-dev/
 
 # per-session workflow worktrees
 .claude/worktrees/
+
+# the fidelity tool is its own package (apps/mac/Tools/fidelity)
+apps/mac/Tools/fidelity/.build/
