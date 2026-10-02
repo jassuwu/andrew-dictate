@@ -148,6 +148,12 @@ final class CallMonitor {
                 lastApps = []
                 return
             }
+            // what was just read may have ended the call, or shown somebody
+            // else on the mic: plan again before waiting, rather than wait
+            // a whole interval to find there is nothing left to follow.
+            if plan.step != nil {
+                continue
+            }
             let wait = next - now()
             if wait > .zero {
                 await sleep(wait)
