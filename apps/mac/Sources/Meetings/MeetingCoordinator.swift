@@ -207,6 +207,7 @@ final class MeetingCoordinator: ObservableObject {
     /// the date a meeting says it started on, in its file name and its front
     /// matter. injected so two meetings in one test can start on two.
     private let date: @Sendable () -> Date
+    private let keepAwake: KeepAwake
 
     /// A system event has already proven something happened, so this may be
     /// short: five seconds of a tap that has not called back is a dead tap.
@@ -225,6 +226,7 @@ final class MeetingCoordinator: ObservableObject {
         thresholds: MeetingThresholds = .provisional,
         now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now },
         date: @escaping @Sendable () -> Date = { Date() },
+        keepAwake: KeepAwake = .system,
         preferences: @escaping @MainActor () -> MeetingPreferences
     ) {
         self.source = source
@@ -240,6 +242,7 @@ final class MeetingCoordinator: ObservableObject {
         self.thresholds = thresholds
         self.now = now
         self.date = date
+        self.keepAwake = keepAwake
         self.preferences = preferences
         session = MeetingSession(quietNudgeAfter: thresholds.quietNudgeAfter)
         health = Self.freshMonitor(thresholds)
@@ -282,6 +285,7 @@ final class MeetingCoordinator: ObservableObject {
             app: name ?? Self.unnamed, started: date(),
             preferences: preferences())
         current = meeting
+        meeting.awake = keepAwake.hold()
 
         session.start()
         health = Self.freshMonitor(thresholds)
@@ -435,6 +439,12 @@ final class MeetingCoordinator: ObservableObject {
         // a rebuild still waiting its turn is cut short; one already
         // talking to the HAL is let finish, and the tap's close waits on it.
         meeting.rebuild?.cancel()
+        // every ending comes through here once — a stop, a model that
+        // failed, a tap never heard — so this is where the mac is let go.
+        if let awake = meeting.awake {
+            keepAwake.release(awake)
+            meeting.awake = nil
+        }
         let recording = session.finish(at: end)
         startedOn = nil
         publish()
@@ -1300,6 +1310,29 @@ final class MeetingCoordinator: ObservableObject {
 }
 
 extension MeetingCoordinator {
+    /// The mac kept out of idle sleep while a meeting records: a quiet
+    /// hour is still a meeting, and a mac that sleeps through it ends the
+    /// recording by itself. The display may sleep; the mac may not. A pair,
+    /// so a test can count what is taken and given back.
+    struct KeepAwake {
+        let hold: @MainActor () -> any NSObjectProtocol
+        let release: @MainActor (any NSObjectProtocol) -> Void
+
+        /// ProcessInfo's activity, like dictation's display assertion: the
+        /// same IOKit assertion underneath, listed by `pmset -g assertions`
+        /// as "recording a meeting", and dropped by the system if the app
+        /// dies.
+        static var system: KeepAwake {
+            KeepAwake(
+                hold: {
+                    ProcessInfo.processInfo.beginActivity(
+                        options: .idleSystemSleepDisabled,
+                        reason: "recording a meeting")
+                },
+                release: { ProcessInfo.processInfo.endActivity($0) })
+        }
+    }
+
     /// One meeting's own things: the spool it writes to, the engine that
     /// listens to it, and what it started as. A meeting that has stopped
     /// keeps them until it is written out, and the next one is handed its
@@ -1323,6 +1356,8 @@ extension MeetingCoordinator {
         var watchdog: Task<Void, Never>?
         /// A rebuild of its tap, while one is in flight.
         var rebuild: Task<Void, Never>?
+        /// The mac kept from idle sleep, from its start until it is let go.
+        var awake: (any NSObjectProtocol)?
         /// What its record will say besides what the file does.
         var notes = MeetingRecord.Notes()
 

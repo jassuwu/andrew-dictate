@@ -11,6 +11,7 @@ final class MeetingTapHealthTests: XCTestCase {
     private var transcriber: FakeTranscriber!
     private var events: [MeetingEvent] = []
     private var records: [MeetingRecord] = []
+    private var awake: Wakefulness!
 
     override func setUp() async throws {
         dir = FileManager.default.temporaryDirectory
@@ -20,6 +21,7 @@ final class MeetingTapHealthTests: XCTestCase {
         transcriber = FakeTranscriber()
         events = []
         records = []
+        awake = Wakefulness()
     }
 
     override func tearDown() {
@@ -37,6 +39,7 @@ final class MeetingTapHealthTests: XCTestCase {
         clock: FakeClock = FakeClock()
     ) -> MeetingCoordinator {
         let docs = dir.appendingPathComponent("docs")
+        let awake = awake!
         let c = MeetingCoordinator(
             source: source,
             makeTranscriber: { [transcriber] _ in transcriber! },
@@ -45,6 +48,12 @@ final class MeetingTapHealthTests: XCTestCase {
             hookRunner: HookRunner(logURL: dir.appendingPathComponent("hooks.log")),
             thresholds: thresholds,
             now: { clock.now },
+            keepAwake: .init(
+                hold: {
+                    awake.held += 1
+                    return NSObject()
+                },
+                release: { _ in awake.released += 1 }),
             preferences: {
                 MeetingPreferences(folder: docs, hook: nil, model: .whisperLargeV3Turbo)
             }
@@ -52,6 +61,50 @@ final class MeetingTapHealthTests: XCTestCase {
         c.onEvent = { [weak self] in self?.events.append($0) }
         c.keepMeetingRecord = { [weak self] in self?.records.append($0) }
         return c
+    }
+
+    // MARK: - the mac stays awake
+
+    /// A quiet meeting is still a meeting: the mac is kept from idle sleep
+    /// from the start, and let go once, at the stop.
+    func testTheMacIsKeptAwakeFromTheStartToTheStop() async throws {
+        let c = coordinator()
+        c.start()
+        XCTAssertEqual(awake.held, 1)
+        await source.awaitStart()
+        await play(loud(at: .zero))
+        XCTAssertEqual(awake.released, 0, "recording")
+
+        c.stop()
+        XCTAssertEqual(awake.released, 1)
+        await c.untilWrittenOut()
+        XCTAssertEqual(awake.held, 1)
+        XCTAssertEqual(awake.released, 1)
+    }
+
+    /// A model that will not load ends the meeting, and lets the mac go.
+    func testAModelThatWillNotLoadLetsTheMacSleep() async throws {
+        transcriber.willNotLoad = true
+        let c = coordinator()
+        c.start()
+        await until { c.state == .idle }
+
+        XCTAssertEqual(awake.held, 1)
+        XCTAssertEqual(awake.released, 1)
+    }
+
+    /// The start sound never came back: the meeting ends before it began,
+    /// and lets the mac go.
+    func testATapThatNeverHeardTheStartSoundLetsTheMacSleep() async throws {
+        let c = coordinator()
+        c.start()
+        await source.awaitStart()
+        await play(quiet(at: .zero), quiet(at: .seconds(2)))
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(events, [.cannotHear])
+        XCTAssertEqual(awake.held, 1)
+        XCTAssertEqual(awake.released, 1)
     }
 
     // MARK: - a tone that cannot be played
@@ -751,12 +804,21 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
 
 private struct DeviceGone: Error {}
 private struct NoOutput: Error {}
+private struct WillNotLoad: Error {}
+
+/// What the coordinator took to keep the mac awake, and gave back.
+@MainActor
+private final class Wakefulness {
+    var held = 0
+    var released = 0
+}
 
 /// Counts what it is fed; says nothing.
 private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
     let lines: AsyncStream<LiveLine>
     private let lock = NSLock()
     private var _fed: [MeetingAudioChunk] = []
+    private var _willNotLoad = false
 
     init() {
         (lines, _) = AsyncStream<LiveLine>.makeStream()
@@ -766,7 +828,15 @@ private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
         lock.withLock { _fed }
     }
 
-    func begin() async throws {}
+    /// While set, the model will not load.
+    var willNotLoad: Bool {
+        get { lock.withLock { _willNotLoad } }
+        set { lock.withLock { _willNotLoad = newValue } }
+    }
+
+    func begin() async throws {
+        if willNotLoad { throw WillNotLoad() }
+    }
     func feed(_ chunk: MeetingAudioChunk) async {
         lock.withLock { _fed.append(chunk) }
     }
