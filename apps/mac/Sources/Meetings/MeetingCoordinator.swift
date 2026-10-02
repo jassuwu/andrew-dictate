@@ -154,6 +154,9 @@ final class MeetingCoordinator: ObservableObject {
     /// The last tap being closed, while it still is. One source, one tap:
     /// the next meeting opens it after this, never during it.
     private var tapClosing: Task<Void, Never>?
+    /// The last round of recovery, while it still runs. The next waits
+    /// behind it, so two never have a meeting model loaded at once.
+    private var recovery: Task<Void, Never>?
     private var session: MeetingSession
     private var health: TapHealthMonitor
     private var nudgePending = false
@@ -489,22 +492,47 @@ final class MeetingCoordinator: ObservableObject {
             }
         }
         let orphans = spool.orphans().filter { !ours.contains($0.handle) }
-        guard !orphans.isEmpty else { return }
-        Task { [weak self] in
+        _ = startRecovering(orphans, tryingAgain: false)
+    }
+
+    /// Every recording set aside, brought back to the spool with its tries
+    /// cleared and written out once more: what history's `try again` does.
+    /// Returns when they have been. Only these are tried — a spool that
+    /// failed once at this launch keeps the one try it has left for the
+    /// next. One that fails again goes straight back aside, not into
+    /// another round of tries nobody asked for.
+    func tryAgainSetAside() async {
+        let back = spool.bringBackSetAside().filter { $0.manifest.transcript == nil }
+        await startRecovering(back, tryingAgain: true)?.value
+    }
+
+    /// The spools, one after the other, in the background. One meeting model
+    /// at a time, whoever asked: a pass starts when the one before it is
+    /// done.
+    private func startRecovering(
+        _ orphans: [(handle: MeetingSpool.Handle, manifest: MeetingSpool.Manifest)],
+        tryingAgain: Bool
+    ) -> Task<Void, Never>? {
+        guard !orphans.isEmpty else { return nil }
+        let before = recovery
+        let pass = Task { [weak self] in
+            await before?.value
             guard let self else { return }
             defer { recovering = nil }
             for orphan in orphans {
-                // one meeting model at a time: a spool waits for the meeting
-                // being recorded to stop, and is not called recovering until
-                // its turn comes.
+                // a spool waits for the meeting being recorded to stop, and
+                // is not called recovering until its turn comes.
                 if current != nil {
                     recovering = nil
                     await until { self.current == nil }
                 }
-                await recover(orphan.handle, manifest: orphan.manifest)
+                await recover(
+                    orphan.handle, manifest: orphan.manifest, tryingAgain: tryingAgain)
                 recovering = nil
             }
         }
+        recovery = pass
+        return pass
     }
 
     // MARK: - audio
@@ -933,7 +961,11 @@ final class MeetingCoordinator: ObservableObject {
         }
     }
 
-    private func recover(_ handle: MeetingSpool.Handle, manifest: MeetingSpool.Manifest) async {
+    private func recover(
+        _ handle: MeetingSpool.Handle,
+        manifest: MeetingSpool.Manifest,
+        tryingAgain: Bool
+    ) async {
         let audio: (you: [Float], them: [Float])
         do {
             audio = try SpoolAudioFile.read(handle.audioURL)

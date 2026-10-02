@@ -187,6 +187,27 @@ final class MeetingRecoveryTests: XCTestCase {
         XCTAssertEqual(spool.orphans().count, 0)
     }
 
+    // MARK: - trying again
+
+    /// What history's `try again` asks of the coordinator: the recordings
+    /// set aside are brought home and written out, and it comes back once
+    /// they have been.
+    func testTryingAgainBringsASetAsideRecordingBackAndWritesItOut() async throws {
+        let handle = try await orphan("teams", started: started)
+        spool.setAside(handle)
+        transcribers.transcriber.batchTurns = [
+            .init(speaker: .them(nil), at: .zero, text: "recovered words here")]
+        let c = coordinator()
+
+        await c.tryAgainSetAside()
+
+        XCTAssertEqual(records.map(\.outcome), [.saved])
+        XCTAssertEqual(records.first?.recovered, true)
+        XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).map(\.app), ["teams"])
+        XCTAssertEqual(spool.unreadableCount(), 0)
+        XCTAssertEqual(spool.orphans().count, 0)
+    }
+
     // MARK: - helpers
 
     /// A spool a crash left behind, with a second of audio on it.
