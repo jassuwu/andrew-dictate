@@ -127,6 +127,41 @@ final class MeetingTapHealthTests: XCTestCase {
         XCTAssertEqual(records.first?.events, [.init(.probeHeard, atS: 7.3)])
     }
 
+    /// Asked, and the window passes with nothing: that is a dead tap. The
+    /// gap begins where the question went unanswered, the tap is rebuilt,
+    /// the rebuilt tap hears its start sound, and the gap ends there.
+    func testAQuietProbeTheTapMissesIsAGapARebuildAndARecovery() async throws {
+        source.anythingIsPlaying = true
+        let c = coordinator()
+        c.start()
+        await source.awaitStart()
+        await play(loud(at: .zero))
+        for s in 2...6 {
+            await play(quiet(at: .seconds(s)))
+        }
+        await until { source.quietProbes == 1 }
+
+        await play(quiet(at: .seconds(7)), quiet(at: .seconds(8)))
+        XCTAssertEqual(source.rebuilds, 0, "the window is not over")
+        await play(quiet(at: .seconds(9)))
+        await until { events.contains(.gapEnded) }
+
+        XCTAssertEqual(source.rebuilds, 1)
+        XCTAssertEqual(events, [.started, .gapBegan, .gapEnded])
+        XCTAssertEqual(c.state, .recording)
+
+        c.stop()
+        await c.untilWrittenOut()
+        let saved = try savedFile()
+        XCTAssertFalse(saved.complete)
+        XCTAssertEqual(saved.gapCount, 1)
+        XCTAssertEqual(records.first?.events, [
+            .init(.probeUnheard, atS: 9.1),
+            .init(.gapBegan, atS: 9.1),
+            .init(.gapEnded, atS: 9.4),
+        ])
+    }
+
     // MARK: - helpers
 
     private func savedFile() throws -> MeetingSummary {
@@ -222,8 +257,16 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
         return stream
     }
 
+    /// A rebuilt tap plays the start sound, and hears it come back a moment
+    /// later as far-side audio, the way the real one does.
     func rebuild() async throws {
-        lock.withLock { _rebuilds += 1 }
+        let at = lock.withLock { () -> Duration in
+            _rebuilds += 1
+            return nextAt
+        }
+        let n = 4_800
+        send(.init(you: Array(repeating: 0, count: n),
+                   them: (0..<n).map { sin(Float($0) * 0.05) * 0.3 }, at: at))
     }
 
     func playQuietProbe() async throws {
