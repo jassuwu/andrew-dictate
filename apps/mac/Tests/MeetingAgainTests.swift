@@ -123,6 +123,22 @@ final class MeetingAgainTests: XCTestCase {
         XCTAssertEqual(transcribers.made, [], "no model was loaded for nothing")
     }
 
+    /// A model that finds no speech at all is not a reason to say nobody
+    /// spoke over a transcript that has words in it. The file stays.
+    func testAReadingOfNobodySpeakingDoesNotReplaceATranscriptWithWords() async throws {
+        let file = try await existingMeeting(audioUntil: Date(timeIntervalSince1970: 1_790_050_000))
+        let before = try Data(contentsOf: file)
+        let again = FakeTranscriber()
+        again.tally = StretchTally()
+        transcribers.lineUp(again)
+
+        await coordinator().transcribeAgain(file, with: .whisperLargeV3Turbo)
+
+        XCTAssertEqual(try Data(contentsOf: file), before)
+        XCTAssertEqual(
+            events.last, .couldNotTranscribeAgain("whisper turbo heard nobody speak"))
+    }
+
     /// Audio with nothing in it is not a meeting that was silent: reading it
     /// would replace a transcript with "nobody spoke". It is left alone.
     func testAudioWithNothingInItLeavesTheFileAlone() async throws {

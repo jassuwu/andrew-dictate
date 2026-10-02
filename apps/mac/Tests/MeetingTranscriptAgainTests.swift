@@ -43,6 +43,7 @@ final class MeetingTranscriptAgainTests: XCTestCase {
         ])
         XCTAssertTrue(header.recovered)
         XCTAssertFalse(header.complete)
+        XCTAssertEqual(header.words, 2)
     }
 
     func testAFileWithNoGapsHasNoneAndASaidWholeFileIsComplete() throws {

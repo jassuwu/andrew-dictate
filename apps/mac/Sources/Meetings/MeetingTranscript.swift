@@ -341,6 +341,8 @@ enum MeetingTranscriptFile {
         let gaps: [MeetingSession.Gap]
         let recovered: Bool
         let complete: Bool
+        /// How many words the file says it has.
+        let words: Int
     }
 
     static func header(of url: URL) throws -> Header {
@@ -363,7 +365,8 @@ enum MeetingTranscriptFile {
             duration: front.duration,
             gaps: gaps,
             recovered: front.recovered,
-            complete: front.complete)
+            complete: front.complete,
+            words: front.words)
     }
 
     /// The top of a file, read once for both of the ways it is read: the
@@ -375,6 +378,7 @@ enum MeetingTranscriptFile {
         let duration: Duration
         let complete: Bool
         let recovered: Bool
+        let words: Int
         let gapLines: [String]
     }
 
@@ -417,6 +421,7 @@ enum MeetingTranscriptFile {
             duration: .seconds(durationSeconds),
             complete: fields["complete"] == "true",
             recovered: fields["recovered"] == "true",
+            words: fields["words"].flatMap { Int($0) } ?? 0,
             gapLines: gapLines)
     }
 

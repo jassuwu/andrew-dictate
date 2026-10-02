@@ -1549,6 +1549,8 @@ extension MeetingCoordinator {
         /// The new reading did not cover what was said, over a transcript
         /// that did.
         case thin(MeetingModel, String)
+        /// It found no speech on either side, over a transcript with words.
+        case nobodySpoke(MeetingModel)
 
         var errorDescription: String? {
             switch self {
@@ -1559,6 +1561,7 @@ extension MeetingCoordinator {
             case .emptyAudio: "the audio is empty"
             case .deleted: "the transcript was deleted"
             case .thin(let model, let reason): "\(model.shortName) read it thin: \(reason)"
+            case .nobodySpoke(let model): "\(model.shortName) heard nobody speak"
             }
         }
     }
@@ -1676,6 +1679,11 @@ extension MeetingCoordinator {
         // the moment it is replaced.
         if thin, !wasThin {
             throw AgainFailure.thin(model, covered.reason ?? "")
+        }
+        // the same for a model that heard nobody: that passes the check, and
+        // would say so over a transcript that has words in it.
+        if reading.nobodySpoke, header.words > 0 {
+            throw AgainFailure.nobodySpoke(model)
         }
         let again = MeetingTranscript(
             app: header.app, started: header.started, duration: header.duration,
