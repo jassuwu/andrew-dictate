@@ -100,6 +100,9 @@ final class MeetingRecordStoreTests: XCTestCase {
             .couldNotRecover,
             .setAside,
             .spoolUnreadable,
+            .nothingKept(.spoolEmpty),
+            .setAsideUnreadable,
+            .waitingForModel,
         ]
         for outcome in endings {
             try store.append(meeting(lasting: 1, outcome: outcome))

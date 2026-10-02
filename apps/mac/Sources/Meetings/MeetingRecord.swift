@@ -30,8 +30,19 @@ struct MeetingRecord: Equatable, Sendable, Codable {
         /// the second failure of a recovery: the spool is kept, out of the
         /// retry loop, and settings says it is there.
         case setAside
-        /// a recovery found audio it could not read at all, and let it go.
+        /// an earlier build's: a recovery found audio it could not read at
+        /// all, and let it go. nothing writes it now — that audio is set
+        /// aside — but a record that says so still reads.
         case spoolUnreadable
+        /// a recovery found audio it could not read at all. it is set aside
+        /// with the rest, kept and out of the retry loop, and settings says
+        /// it is there.
+        case setAsideUnreadable
+        /// a recovery found no meeting model on this mac to read the audio
+        /// with. nothing is counted and nothing is set aside: the spool
+        /// waits for a later launch. one being tried again from settings
+        /// goes back aside instead, so the line that counts it still does.
+        case waitingForModel
     }
 
     enum NothingKept: Equatable, Sendable {
@@ -41,6 +52,9 @@ struct MeetingRecord: Equatable, Sendable, Codable {
         /// stopped before the tap had been heard, so nothing is known to
         /// be wrong with it.
         case stoppedBeforeCapture
+        /// a recovery found audio that reads and has nothing in it: a
+        /// meeting that never captured a sample.
+        case spoolEmpty
     }
 
     /// what one side of the call said, as counts.
@@ -366,6 +380,8 @@ extension MeetingRecord.Outcome {
         case .couldNotRecover: "couldnt-recover"
         case .setAside: "set-aside"
         case .spoolUnreadable: "spool-unreadable"
+        case .setAsideUnreadable: "set-aside-unreadable"
+        case .waitingForModel: "waiting-for-model"
         }
     }
 
@@ -374,8 +390,9 @@ extension MeetingRecord.Outcome {
         switch self {
         case .nothingKept(.tapNeverHeard): "tap-never-heard"
         case .nothingKept(.stoppedBeforeCapture): "stopped-before-capture"
+        case .nothingKept(.spoolEmpty): "spool-empty"
         case .saved, .savedThin, .modelFailed, .couldNotWrite, .couldNotRecover, .setAside,
-             .spoolUnreadable:
+             .spoolUnreadable, .setAsideUnreadable, .waitingForModel:
             nil
         }
     }
@@ -389,8 +406,11 @@ extension MeetingRecord.Outcome {
         case ("couldnt-recover", nil): self = .couldNotRecover
         case ("set-aside", nil): self = .setAside
         case ("spool-unreadable", nil): self = .spoolUnreadable
+        case ("set-aside-unreadable", nil): self = .setAsideUnreadable
+        case ("waiting-for-model", nil): self = .waitingForModel
         case ("nothing-kept", "tap-never-heard"): self = .nothingKept(.tapNeverHeard)
         case ("nothing-kept", "stopped-before-capture"): self = .nothingKept(.stoppedBeforeCapture)
+        case ("nothing-kept", "spool-empty"): self = .nothingKept(.spoolEmpty)
         default: return nil
         }
     }

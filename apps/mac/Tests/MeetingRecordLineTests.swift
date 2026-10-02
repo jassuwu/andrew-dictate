@@ -72,6 +72,9 @@ final class MeetingRecordLineTests: XCTestCase {
             (.couldNotRecover, "outcome=couldnt-recover"),
             (.setAside, "outcome=set-aside"),
             (.spoolUnreadable, "outcome=spool-unreadable"),
+            (.nothingKept(.spoolEmpty), "outcome=nothing-kept why=spool-empty"),
+            (.setAsideUnreadable, "outcome=set-aside-unreadable"),
+            (.waitingForModel, "outcome=waiting-for-model"),
         ]
 
         for (outcome, words) in endings {
