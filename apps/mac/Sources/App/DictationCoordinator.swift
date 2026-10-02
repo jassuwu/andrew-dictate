@@ -1906,6 +1906,8 @@ extension DictationCoordinator {
         case let .transcribed(heard, inserted):
             lastTranscript = inserted
             lastHeard = heard
+        case .delivered:
+            break
         case let .retryOffered(offered):
             canRetryLastFailure = offered
         case .microphoneDropped:

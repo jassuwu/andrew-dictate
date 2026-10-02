@@ -103,6 +103,31 @@ final class UtteranceMachineTests: XCTestCase {
         ])
     }
 
+    /// a delivered dictation says what landed, for whoever watches what you
+    /// do to it next (ADR 0046). words left on the clipboard landed nowhere
+    /// we can see.
+    func testOnlyADeliveredDictationSaysWhatLanded() async {
+        let m = machine()
+        engine.reply = .success("send it to jaz dot dev")
+
+        await hold(m, for: .seconds(1))
+        await settle { self.inserter.inserted.count == 1 }
+
+        XCTAssertEqual(
+            events.filter { if case .delivered = $0 { true } else { false } },
+            [.delivered(heard: "send it to jaz dot dev", inserted: "Send it to jaz.dev")]
+        )
+
+        events = []
+        inserter.result = .leftOnPasteboard(.focusChanged)
+        await pass(.seconds(1))
+        await hold(m, for: .seconds(1))
+        await settle { self.inserter.inserted.count == 2 }
+        await pass(.seconds(1))
+
+        XCTAssertFalse(events.contains { if case .delivered = $0 { true } else { false } })
+    }
+
     // MARK: - where the words land
 
     /// a second dictation into a running sentence gets no capital and a
