@@ -23,6 +23,21 @@ struct MeetingSpool: Sendable {
         /// its meeting is on disk, and writing it out again would be a
         /// second file for one meeting — but audio on its way to being kept.
         var transcript: URL?
+        /// The meeting's gaps, noted as each began and ended, with where
+        /// the spool's clock was at each: a recovery's file keeps them, and
+        /// its turns land where the meeting had them. Optional, like
+        /// `attempts`: a manifest from before them reads as a meeting that
+        /// had none.
+        var gaps: [Gap]?
+        /// How long the meeting had run by the wall, in seconds, when this
+        /// was last written: at each end of a gap, and at the stop. A spool
+        /// holds only the audio it was given, and a sleep gives it none.
+        var durationS: Double?
+
+        var duration: Duration? {
+            get { durationS.map { .seconds($0) } }
+            set { durationS = newValue?.totalSeconds }
+        }
     }
 
     /// A gap as a meeting notes it while it runs: where it began on the
@@ -119,6 +134,29 @@ struct MeetingSpool: Sendable {
             // intended, which is better than losing the spool over it.
         }
         return updated
+    }
+
+    /// The meeting's gaps so far and how long it has run, written over the
+    /// last ones as they change: a launch after a crash finds what the
+    /// meeting was, and not only what its spool holds. False when the
+    /// manifest could not be read or rewritten; the meeting records on.
+    @discardableResult
+    func note(_ handle: Handle, gaps: [Gap], duration: Duration) -> Bool {
+        guard let data = try? Data(contentsOf: handle.manifestURL),
+              var manifest = try? Self.decoder.decode(Manifest.self, from: data)
+        else {
+            return false
+        }
+        manifest.gaps = gaps
+        manifest.duration = duration
+        guard let updated = try? Self.encoder.encode(manifest),
+              (try? updated.write(to: handle.manifestURL, options: .atomic)) != nil
+        else {
+            return false
+        }
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: handle.manifestURL.path)
+        return true
     }
 
     /// Its meeting is written out, into `transcript`, and the audio is to be
@@ -323,4 +361,53 @@ struct MeetingSpool: Sendable {
         d.dateDecodingStrategy = .iso8601
         return d
     }()
+}
+
+extension MeetingSpool.Manifest {
+    /// The meeting a spool was, from what its manifest noted and the
+    /// `spooled` audio it holds: its gaps on both clocks, and how long it
+    /// ran — as long as last noted, or as far as its audio reaches on the
+    /// meeting's clock, whichever is later. A gap still open is one the app
+    /// died in, and it runs to that end. A manifest that noted nothing is a
+    /// meeting with no gaps, as long as its audio.
+    func meeting(spooled: Duration) -> (recording: MeetingSession.Recording, clock: SpoolClock) {
+        var noted = gaps ?? []
+        if let last = noted.indices.last, noted[last].ended == nil {
+            let reached = noted[last].began + max(.zero, spooled - noted[last].spooledAtBegan)
+            noted[last].ended = max(duration ?? .zero, reached)
+            noted[last].spooledAtEnded = spooled
+        }
+        let clock = SpoolClock(noted.compactMap(\.closed))
+        let ran = max(duration ?? .zero, clock.onTheMeetingsClock(spooled))
+        return (MeetingSession.Recording(duration: ran, gaps: clock.meetingGaps), clock)
+    }
+}
+
+/// Seconds on disk, like the file's gaps: whoever opens a manifest can read
+/// it, and an open gap has no end yet.
+extension MeetingSpool.Gap: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case began
+        case spooledAtBegan
+        case ended
+        case spooledAtEnded
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            began: .seconds(try container.decode(Double.self, forKey: .began)),
+            spooledAtBegan: .seconds(try container.decode(Double.self, forKey: .spooledAtBegan)),
+            ended: try container.decodeIfPresent(Double.self, forKey: .ended).map { .seconds($0) },
+            spooledAtEnded: try container.decodeIfPresent(Double.self, forKey: .spooledAtEnded)
+                .map { .seconds($0) })
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(began.totalSeconds, forKey: .began)
+        try container.encode(spooledAtBegan.totalSeconds, forKey: .spooledAtBegan)
+        try container.encodeIfPresent(ended?.totalSeconds, forKey: .ended)
+        try container.encodeIfPresent(spooledAtEnded?.totalSeconds, forKey: .spooledAtEnded)
+    }
 }

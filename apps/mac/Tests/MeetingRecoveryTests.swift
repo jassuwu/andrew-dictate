@@ -6,9 +6,13 @@ import XCTest
 @MainActor
 final class MeetingRecoveryTests: XCTestCase {
     private var dir: URL!
+    private var source: FakeSource!
     private var transcribers: FakeTranscribers!
     private var events: [MeetingEvent] = []
     private var records: [MeetingRecord] = []
+    /// Meetings a test recorded and left recording, as a crash leaves them:
+    /// stopped once the test is over.
+    private var recordings: [MeetingCoordinator] = []
 
     /// 2026-08-23 06:13:20 UTC.
     private let started = Date(timeIntervalSince1970: 1_787_000_000)
@@ -17,12 +21,19 @@ final class MeetingRecoveryTests: XCTestCase {
         dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("meeting-recovery-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        source = FakeSource()
         transcribers = FakeTranscribers()
         events = []
         records = []
+        recordings = []
     }
 
     override func tearDown() async throws {
+        for c in recordings {
+            c.stop()
+            await c.untilWrittenOut()
+        }
+        recordings = []
         try? FileManager.default.removeItem(at: dir)
     }
 
@@ -330,7 +341,161 @@ final class MeetingRecoveryTests: XCTestCase {
         XCTAssertEqual(records.map(\.outcome), [.saved, .saved])
     }
 
+    // MARK: - a meeting with a gap in it
+
+    /// The lid shut ten seconds in and opened ten minutes later, and the
+    /// app died four seconds after that: its spool holds fourteen seconds of
+    /// a meeting six hundred and four long. The manifest noted the gap as it
+    /// began and ended, so the recovered file has it, is not whole, runs as
+    /// long as the meeting did, and stamps what was said after the lid where
+    /// it was said.
+    func testAMeetingRecoveredAfterAGapKeepsItsGapItsLengthAndItsTimes() async throws {
+        let clock = FakeClock()
+        let live = recording(clock: clock)
+        live.start()
+        await source.awaitStart()
+        await send(0..<10, to: live)
+        clock.advance(by: .seconds(600))
+        live.probeTapIsAlive()
+        await send(600..<604, to: live)
+        try theAppDies(recording: live)
+
+        transcribers.transcriber.batchTurns = [
+            .init(speaker: .you, at: .seconds(2), text: "before the lid"),
+            .init(speaker: .them(nil), at: .seconds(12.5), text: "after the lid"),
+        ]
+        let c = coordinator()
+        c.recoverOrphans()
+        await awaitRecords(1)
+
+        let file = try XCTUnwrap(MeetingTranscriptFile.listAll(in: docs).first)
+        XCTAssertTrue(file.recovered)
+        XCTAssertFalse(file.complete)
+        XCTAssertEqual(file.gapCount, 1)
+        XCTAssertEqual(file.duration, .seconds(604))
+        let body = try String(contentsOf: file.fileURL, encoding: .utf8)
+        XCTAssertTrue(body.contains("- [10.0, 601.0]"), body)
+        XCTAssertEqual(turns(in: body), [
+            "[00:00:02] you: before the lid",
+            "[00:10:02] them: after the lid",
+        ])
+        XCTAssertEqual(records.map(\.outcome), [.saved])
+        XCTAssertEqual(records.first?.gaps, 1)
+        XCTAssertEqual(records.first?.durationS, 604)
+    }
+
+    /// The app died while the lid was still being woken from: the gap was
+    /// open, and the spool holds the ten seconds before it. It runs to the
+    /// last the meeting was known to have run.
+    func testAMeetingThatDiedInAGapIsRecoveredWithTheGapRunningToTheEnd() async throws {
+        let clock = FakeClock()
+        let live = recording(clock: clock)
+        live.start()
+        await source.awaitStart()
+        await send(0..<10, to: live)
+        clock.advance(by: .seconds(600))
+        live.probeTapIsAlive()
+        try theAppDies(recording: live)
+
+        let c = coordinator()
+        c.recoverOrphans()
+        await awaitRecords(1)
+
+        let file = try XCTUnwrap(MeetingTranscriptFile.listAll(in: docs).first)
+        XCTAssertFalse(file.complete)
+        XCTAssertEqual(file.duration, .seconds(600))
+        let body = try String(contentsOf: file.fileURL, encoding: .utf8)
+        XCTAssertTrue(body.contains("- [10.0, 600.0]"), body)
+    }
+
+    /// Stopped with the call still unheard, and quit: the quit's ceiling
+    /// cut the write-out short. The stop had already noted where the gap
+    /// and the meeting ended, so the recovery says the same as the file
+    /// would have.
+    func testAStopWhoseFileWasNeverWrittenIsRecoveredAsItStopped() async throws {
+        let clock = FakeClock()
+        let live = recording(clock: clock)
+        live.start()
+        await source.awaitStart()
+        await send(0..<10, to: live)
+        clock.advance(by: .seconds(600))
+        live.probeTapIsAlive()
+        clock.advance(by: .seconds(30))
+        live.stop()
+        try theAppDies(recording: live)
+
+        let c = coordinator()
+        c.recoverOrphans()
+        await awaitRecords(1)
+
+        let file = try XCTUnwrap(MeetingTranscriptFile.listAll(in: docs).first)
+        XCTAssertFalse(file.complete)
+        XCTAssertEqual(file.duration, .seconds(630))
+        let body = try String(contentsOf: file.fileURL, encoding: .utf8)
+        XCTAssertTrue(body.contains("- [10.0, 630.0]"), body)
+    }
+
     // MARK: - helpers
+
+    /// A coordinator recording a meeting, on a wall the test moves, with a
+    /// spool of its own: what it leaves is copied where the coordinator
+    /// under test looks, as a crash would leave it.
+    private func recording(clock: FakeClock) -> MeetingCoordinator {
+        let liveDocs = dir.appendingPathComponent("live-docs")
+        let c = MeetingCoordinator(
+            source: source,
+            makeTranscriber: { _ in FakeTranscriber() },
+            diarizer: FakeDiarizer(),
+            spool: liveSpool,
+            hookRunner: HookRunner(logURL: dir.appendingPathComponent("hooks.log")),
+            now: { clock.now },
+            preferences: {
+                MeetingPreferences(
+                    folder: liveDocs, hook: nil, model: .whisperLargeV3Turbo,
+                    keepAudio: .deleteAtOnce)
+            }
+        )
+        recordings.append(c)
+        return c
+    }
+
+    private var liveSpool: MeetingSpool {
+        MeetingSpool(root: dir.appendingPathComponent("live-spool"))
+    }
+
+    /// The spool of the meeting `live` is recording, as it stands now, left
+    /// where launch looks — and nothing more of that meeting.
+    private func theAppDies(recording live: MeetingCoordinator) throws {
+        let fm = FileManager.default
+        let names = try fm.contentsOfDirectory(atPath: liveSpool.root.path)
+            .filter { !$0.hasPrefix(".") }
+        XCTAssertEqual(names.count, 1)
+        try fm.createDirectory(at: spool.root, withIntermediateDirectories: true)
+        for name in names {
+            try fm.copyItem(
+                at: liveSpool.root.appendingPathComponent(name),
+                to: spool.root.appendingPathComponent(name))
+        }
+    }
+
+    /// A second of both sides talking for each of `seconds`, taken in: the
+    /// meeting's clock is past the last, and a moment more for it to reach
+    /// the spool, so the wall moved next does not move under it.
+    private func send(_ seconds: Range<Int>, to c: MeetingCoordinator) async {
+        for s in seconds {
+            source.send(loud(at: .seconds(s)))
+        }
+        let end = Duration.seconds(seconds.upperBound)
+        for _ in 0..<200 where c.elapsed < end {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+    }
+
+    /// The turns of a transcript's body, as it has them.
+    private func turns(in body: String) -> [String] {
+        body.split(separator: "\n").map(String.init).filter { $0.hasPrefix("[0") }
+    }
 
     /// A spool a crash left behind, with a second of audio on it.
     @discardableResult
@@ -373,14 +538,57 @@ final class MeetingRecoveryTests: XCTestCase {
 
 // MARK: - fakes
 
-/// The tap. Recovery never opens it.
+/// A wall the test moves by hand — the coordinator only ever reads it.
+private final class FakeClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private let origin = ContinuousClock.now
+    private var offset: Duration = .zero
+
+    var now: ContinuousClock.Instant {
+        lock.withLock { origin + offset }
+    }
+
+    func advance(by amount: Duration) {
+        lock.withLock { offset += amount }
+    }
+}
+
+/// The tap. Recovery never opens it; a meeting recorded to leave a spool
+/// behind is handed what the test sends.
 private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: AsyncStream<MeetingAudioChunk>.Continuation?
+    private var starts = 0
+
     func start() async throws -> AsyncStream<MeetingAudioChunk> {
-        AsyncStream<MeetingAudioChunk>.makeStream().stream
+        let (stream, continuation) = AsyncStream<MeetingAudioChunk>.makeStream()
+        lock.withLock {
+            self.continuation = continuation
+            starts += 1
+        }
+        return stream
     }
 
     func rebuild() async throws {}
-    func stop() async {}
+
+    func stop() async {
+        lock.withLock { () -> AsyncStream<MeetingAudioChunk>.Continuation? in
+            defer { continuation = nil }
+            return continuation
+        }?.finish()
+    }
+
+    func send(_ chunk: MeetingAudioChunk) {
+        _ = lock.withLock { continuation }?.yield(chunk)
+    }
+
+    /// Until the tap has been opened, or two seconds.
+    func awaitStart() async {
+        for _ in 0..<200 {
+            if lock.withLock({ starts > 0 }) { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
 }
 
 private struct Unreadable: Error {}

@@ -610,11 +610,24 @@ final class MeetingCoordinator: ObservableObject {
             meeting.awake = nil
         }
         let recording = session.finish(at: end)
-        // a gap still open runs to the end, as the session's does.
+        // a gap still open runs to the end, as the session's does, and the
+        // manifest says so now: a write-out the quit cuts short, or one
+        // that fails, leaves a spool that says how this meeting ended.
         meeting.gapEnded(at: end)
+        noteGaps(of: meeting, ran: end)
         startedOn = nil
         publish()
         return recording
+    }
+
+    /// The meeting's gaps and how long it has run, in its manifest, each
+    /// time a gap begins or ends and at the stop: a launch after a crash
+    /// finds the meeting there, and not only what the spool holds.
+    private func noteGaps(of meeting: Meeting, ran: Duration? = nil) {
+        guard let handle = meeting.handle else { return }
+        if !spool.note(handle, gaps: meeting.gaps, duration: ran ?? max(elapsed, wallElapsed)) {
+            logger.error("could not note a meeting's gaps in its manifest")
+        }
     }
 
     /// The source's stop, once the meeting is done with it: an open or a
@@ -1037,6 +1050,7 @@ final class MeetingCoordinator: ObservableObject {
     private func loseTheTap(_ meeting: Meeting, at lost: Duration) {
         session.tapWentSilent(at: lost)
         meeting.gapBegan(at: lost)
+        noteGaps(of: meeting)
         meeting.notes.note(.gapBegan, at: lost)
         publish()
         onEvent?(.gapBegan)
@@ -1049,6 +1063,7 @@ final class MeetingCoordinator: ObservableObject {
     private func tapIsBack(_ meeting: Meeting) {
         session.tapRecovered(at: elapsed)
         meeting.gapEnded(at: elapsed)
+        noteGaps(of: meeting)
         meeting.notes.note(.gapEnded, at: elapsed)
         guard session.problem(.cannotHearTheCall) != nil else {
             publish()
@@ -1514,8 +1529,11 @@ final class MeetingCoordinator: ObservableObject {
                 startedAt: manifest.started, duration: .zero, recovered: true))
             return
         }
-        let duration = Duration.seconds(
-            Double(max(audio.you.count, audio.them.count)) / MeetingAudioChunk.sampleRate)
+        // the meeting as it was, not as long as its audio: a gap it had is a
+        // gap in the file, and the turns after it land where they were said.
+        let (recording, clock) = manifest.meeting(
+            spooled: StretchCutter.duration(of: max(audio.you.count, audio.them.count)))
+        let duration = recording.duration
         // the model that actually reads it, which the file and the record
         // name: not always the one the manifest does.
         var model = manifest.model
@@ -1531,7 +1549,8 @@ final class MeetingCoordinator: ObservableObject {
                 }
                 keepMeetingRecord?(MeetingRecord(
                     .waitingForModel, app: manifest.app, model: manifest.model,
-                    startedAt: manifest.started, duration: duration, recovered: true))
+                    startedAt: manifest.started, duration: duration,
+                    gaps: recording.gaps, recovered: true))
                 return
             }
             let transcriber = ready.transcriber
@@ -1541,7 +1560,8 @@ final class MeetingCoordinator: ObservableObject {
             recovering = manifest.app
             onEvent?(.recovering(app: manifest.app))
             let turns = try await transcriber.transcribe(you: audio.you, them: audio.them)
-            let reading = Reading(turns: turns, tally: await transcriber.decodeTally())
+            let reading = Reading(
+                turns: clock.onTheMeetingsClock(turns), tally: await transcriber.decodeTally())
             // checked like any meeting, and not read again: this was the
             // reading from the spool.
             let covered = Covered(
@@ -1551,8 +1571,8 @@ final class MeetingCoordinator: ObservableObject {
             let prefs = preferences()
             let saved = await save(
                 covered,
-                recording: .init(duration: duration, gaps: []),
-                clock: SpoolClock(),
+                recording: recording,
+                clock: clock,
                 handle: handle,
                 app: manifest.app,
                 started: manifest.started,
@@ -1584,7 +1604,7 @@ final class MeetingCoordinator: ObservableObject {
             keepMeetingRecord?(MeetingRecord(
                 setAside ? .setAside : .couldNotRecover, app: manifest.app,
                 model: model, startedAt: manifest.started,
-                duration: duration, recovered: true))
+                duration: duration, gaps: recording.gaps, recovered: true))
         }
     }
 

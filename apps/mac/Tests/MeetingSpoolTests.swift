@@ -152,6 +152,31 @@ final class MeetingSpoolTests: XCTestCase {
 
         XCTAssertEqual(spool.orphans().count, 1)
         XCTAssertNil(spool.orphans().first?.manifest.attempts)
+        // nor the gaps, nor how long it ran: a meeting from before they
+        // were noted reads as one that had none.
+        XCTAssertNil(spool.orphans().first?.manifest.gaps)
+        XCTAssertNil(spool.orphans().first?.manifest.duration)
+    }
+
+    /// The gaps a meeting has had, noted as they happen, and how long it
+    /// has run: a launch after a crash reads them back as they were.
+    func testTheGapsNotedAsTheyHappenSurviveARelaunch() throws {
+        let handle = try spool.begin(manifest())
+        try Data([0]).write(to: handle.audioURL)
+        let gaps = [
+            MeetingSpool.Gap(
+                began: .seconds(10), spooledAtBegan: .seconds(10),
+                ended: .seconds(601), spooledAtEnded: .seconds(11)),
+            MeetingSpool.Gap(began: .seconds(700.5), spooledAtBegan: .seconds(110.5)),
+        ]
+
+        XCTAssertTrue(spool.note(handle, gaps: gaps, duration: .seconds(720)))
+
+        let noted = try XCTUnwrap(spool.orphans().first?.manifest)
+        XCTAssertEqual(noted.gaps, gaps)
+        XCTAssertEqual(noted.duration, .seconds(720))
+        XCTAssertEqual(noted.app, manifest().app)
+        XCTAssertEqual(permissions(of: handle.manifestURL), 0o600)
     }
 
     /// Kept, never deleted, and never offered to the transcriber again.
