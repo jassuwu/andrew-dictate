@@ -130,6 +130,25 @@ enum HUDPresentation {
         return .steady
     }
 
+    /// whether the panel is left out of every screen capture: a share, a
+    /// recording, a screenshot. it is while a meeting is on or a pill about
+    /// one is up, so the people on the call see neither. dictation's lamp
+    /// and pills stay in, as they always were: a screenshot of one is how a
+    /// bug report shows it. a panel on screen is never put back in, so a
+    /// take that follows a meeting's pill cannot flicker into a share; it
+    /// goes back in the next time the panel comes up.
+    static func hidesFromCapture(
+        meetingLight: HUDMeetingLight,
+        meetingPillIsUp: Bool,
+        isHiddenNow: Bool,
+        isOnScreen: Bool
+    ) -> Bool {
+        if meetingLight != .off || meetingPillIsUp {
+            return true
+        }
+        return isHiddenNow && isOnScreen
+    }
+
     /// whether a question (a pill with a button, ADR 0047) may go up now.
     /// it waits for everything else: a take, a sentence, setup. an ember
     /// counts as busy even when it shows nothing, because the lamp settling

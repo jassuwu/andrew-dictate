@@ -176,3 +176,56 @@ final class HUDMeetingLightTests: XCTestCase {
     }
 }
 
+/// who can see the panel. a screen share, a recording or a screenshot sees a
+/// window unless it is excluded from capture, and while a meeting is on the
+/// people on the call must not see the light, or any pill about it.
+extension HUDMeetingLightTests {
+    private func hides(
+        _ light: HUDMeetingLight = .off,
+        meetingPillIsUp: Bool = false,
+        isHiddenNow: Bool = false,
+        isOnScreen: Bool = false
+    ) -> Bool {
+        HUDPresentation.hidesFromCapture(
+            meetingLight: light,
+            meetingPillIsUp: meetingPillIsUp,
+            isHiddenNow: isHiddenNow,
+            isOnScreen: isOnScreen
+        )
+    }
+
+    func testThePanelIsHiddenFromCaptureWhileAMeetingIsOn() {
+        for light in [
+            HUDMeetingLight.ember,
+            .steady,
+            .problem,
+            .coolingOut,
+        ] {
+            XCTAssertTrue(hides(light), "\(light)")
+            XCTAssertTrue(hides(light, isOnScreen: true), "\(light)")
+        }
+    }
+
+    /// the reminder, the stop question, the nudge, `writing it out…`,
+    /// `saved`: every pill about a meeting, recording or not.
+    func testAPillAboutAMeetingIsHiddenFromCapture() {
+        XCTAssertTrue(hides(meetingPillIsUp: true))
+        XCTAssertTrue(hides(meetingPillIsUp: true, isOnScreen: true))
+    }
+
+    /// dictation's lamp and pills stay in a screenshot, as they always
+    /// have: that is how a bug report shows one.
+    func testADictationIsSeenByCaptureWhenNoMeetingIsInvolved() {
+        XCTAssertFalse(hides())
+        XCTAssertFalse(hides(isOnScreen: true))
+        // hidden last time and gone since: the next take is seen.
+        XCTAssertFalse(hides(isHiddenNow: true, isOnScreen: false))
+    }
+
+    /// the panel never comes back into a capture while it is on screen: a
+    /// take right after a meeting's pill stays hidden until the panel goes,
+    /// so nothing on it flickers into a share mid-sentence.
+    func testThePanelNeverComesBackIntoACaptureWhileItIsOnScreen() {
+        XCTAssertTrue(hides(isHiddenNow: true, isOnScreen: true))
+    }
+}
