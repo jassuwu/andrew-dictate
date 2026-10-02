@@ -41,8 +41,11 @@ final class MeetingCoverageTests: XCTestCase {
             thresholds: .init(
                 probeTimeout: .seconds(1), silenceTimeout: .seconds(600),
                 silenceFloor: 0.001, quietNudgeAfter: .seconds(3_600)),
+            // a meeting that passes lets its audio go at once, so the audio
+            // left after one is only ever a thin one's.
             preferences: { [unowned self] in
-                MeetingPreferences(folder: docs, hook: hook, model: .parakeetV3)
+                MeetingPreferences(
+                    folder: docs, hook: hook, model: .parakeetV3, keepAudio: .deleteAtOnce)
             }
         )
         c.onEvent = { [weak self] in self?.events.append($0) }
@@ -138,13 +141,13 @@ final class MeetingCoverageTests: XCTestCase {
 
         try await meeting(seconds: 2)
 
-        XCTAssertEqual(try keptSpools(), 1)
+        XCTAssertEqual(try keptAudio(), 1)
         XCTAssertEqual(spool.orphans().count, 0)
         let launch = coordinator()
         launch.recoverOrphans()
         await settle()
         XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).count, 1)
-        XCTAssertEqual(try keptSpools(), 1)
+        XCTAssertEqual(try keptAudio(), 1)
     }
 
     /// The record says so: a save of its own kind, the check's result and
@@ -188,7 +191,7 @@ final class MeetingCoverageTests: XCTestCase {
         XCTAssertEqual(try lines(of: file), ["[00:00:01] them 1: hmm right"])
         let told = try await toldTheHook(beside: file)
         XCTAssertEqual(told["complete"] as? Bool, false)
-        XCTAssertEqual(try keptSpools(), 1)
+        XCTAssertEqual(try keptAudio(), 1)
         XCTAssertEqual(spool.orphans().count, 0)
         XCTAssertEqual(records.map(\.outcome), [.savedThin])
         XCTAssertEqual(records.first?.coverage?.result, .thin)
@@ -285,7 +288,7 @@ final class MeetingCoverageTests: XCTestCase {
             "the other side was heard and nothing of it was read")
         XCTAssertEqual(records.map(\.outcome), [.savedThin])
         XCTAssertEqual(records.first?.coverage?.farSideLoudS, 61)
-        XCTAssertEqual(try keptSpools(), 1)
+        XCTAssertEqual(try keptAudio(), 1)
     }
 
     // MARK: - recovery
@@ -315,7 +318,7 @@ final class MeetingCoverageTests: XCTestCase {
             try frontMatter(of: file)["reason"], "far fewer words than the talk that was heard")
         XCTAssertEqual(transcribers.made, [.whisperLargeV3Turbo], "read once")
         XCTAssertFalse(events.contains(.readingAgain))
-        XCTAssertEqual(try keptSpools(), 1)
+        XCTAssertEqual(try keptAudio(), 1)
         XCTAssertEqual(spool.orphans().count, 0)
         XCTAssertEqual(records.map(\.outcome), [.savedThin])
         XCTAssertEqual(records.first?.recovered, true)
@@ -343,15 +346,12 @@ final class MeetingCoverageTests: XCTestCase {
         return lines[(closing + 1)...].filter { !$0.isEmpty }
     }
 
-    /// Spool folders with their audio still in them.
-    private func keptSpools() throws -> Int {
-        let root = dir.appendingPathComponent("spool")
+    /// Meetings whose audio is kept, in the app's folder for it.
+    private func keptAudio() throws -> Int {
+        let root = dir.appendingPathComponent("meeting-audio")
+        guard FileManager.default.fileExists(atPath: root.path) else { return 0 }
         return try FileManager.default.contentsOfDirectory(atPath: root.path)
-            .filter { !$0.hasPrefix(".") }
-            .filter {
-                FileManager.default.fileExists(
-                    atPath: root.appendingPathComponent($0).appendingPathComponent("audio.caf").path)
-            }
+            .filter { $0.hasSuffix(".m4a") || $0.hasSuffix(".caf") }
             .count
     }
 

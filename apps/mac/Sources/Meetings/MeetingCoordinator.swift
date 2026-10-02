@@ -23,6 +23,8 @@ struct MeetingPreferences: Sendable {
     let folder: URL
     let hook: URL?
     let model: MeetingModel
+    /// How long its audio waits once its file is written.
+    var keepAudio: KeepMeetingAudio = .default
 }
 
 /// The moments the rest of the app shows. The HUD says these in words; the
@@ -130,6 +132,9 @@ final class MeetingCoordinator: ObservableObject {
     private let makeTranscriber: @Sendable (MeetingModel) async throws -> any MeetingTranscriber
     private let diarizer: any MeetingDiarizer
     private let spool: MeetingSpool
+    /// Where a meeting's audio goes once its file is written, for as long
+    /// as it was meant to stay.
+    private let keptAudio: KeptAudio
     private let preferences: @MainActor () -> MeetingPreferences
     private let hookRunner: HookRunner
     private let logger = Logger(subsystem: AppIdentity.loggingSubsystem, category: "meeting")
@@ -182,6 +187,7 @@ final class MeetingCoordinator: ObservableObject {
         diarizer: any MeetingDiarizer,
         spool: MeetingSpool = MeetingSpool(),
         hookRunner: HookRunner = HookRunner(logURL: HookRunner.defaultLogURL),
+        keptAudio: KeptAudio? = nil,
         thresholds: MeetingThresholds = .provisional,
         now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now },
         date: @escaping @Sendable () -> Date = { Date() },
@@ -191,6 +197,11 @@ final class MeetingCoordinator: ObservableObject {
         self.makeTranscriber = makeTranscriber
         self.diarizer = diarizer
         self.spool = spool
+        // beside the spool, wherever the spool is: the app's own folder, or
+        // a test's, so no meeting's audio lands anywhere else by default.
+        self.keptAudio = keptAudio ?? KeptAudio(
+            root: spool.root.deletingLastPathComponent()
+                .appendingPathComponent(KeptAudio.folderName, isDirectory: true))
         self.hookRunner = hookRunner
         self.thresholds = thresholds
         self.now = now
@@ -635,13 +646,35 @@ final class MeetingCoordinator: ObservableObject {
         let saved = await save(
             covered, recording: recording, handle: handle,
             app: meeting.app, started: meeting.started, model: prefs.model,
-            folder: prefs.folder, recovered: false, notes: meeting.notes)
+            folder: prefs.folder, keepAudio: prefs.keepAudio, recovered: false,
+            notes: meeting.notes)
+        if let label = saved?.keep {
+            await keep(handle, as: label)
+        }
+        await sweepKeptAudio()
         // written out — or never will be, and the spool waits for the next
         // launch. the hook is not part of it: it can take minutes.
         writingOut.removeAll { $0 === meeting }
         if let saved {
-            await runHook(prefs.hook, telling: saved)
+            await runHook(prefs.hook, telling: saved.event)
         }
+    }
+
+    /// The spool's audio into kept audio, off the main actor: an hour of it
+    /// is a few seconds of compressing.
+    private func keep(_ handle: MeetingSpool.Handle, as label: KeptAudio.Label) async {
+        let keptAudio = keptAudio
+        await Task.detached(priority: .utility) {
+            keptAudio.keep(handle, label: label)
+        }.value
+    }
+
+    /// After every meeting, and every recovery: whatever is past its date.
+    private func sweepKeptAudio() async {
+        let keptAudio = keptAudio
+        await Task.detached(priority: .utility) {
+            keptAudio.sweep()
+        }.value
     }
 
     /// The coverage check (ADR 0048), before any audio is let go: the
@@ -730,8 +763,17 @@ final class MeetingCoordinator: ObservableObject {
         }
     }
 
-    /// turns → diarize → write → delete spool. Returns what a hook is told
-    /// about the file, or nil when it could not be written.
+    /// What a written meeting leaves for after the file: what the hook is
+    /// told, and the label its audio is to be kept under, or nil when the
+    /// spool is already gone.
+    private struct Saved {
+        let event: MeetingSavedEvent
+        let keep: KeptAudio.Label?
+    }
+
+    /// turns → diarize → write → let the spool go, or mark it to be kept.
+    /// Returns what comes after the file, or nil when it could not be
+    /// written.
     private func save(
         _ covered: Covered,
         recording: MeetingSession.Recording,
@@ -740,9 +782,10 @@ final class MeetingCoordinator: ObservableObject {
         started: Date,
         model: MeetingModel,
         folder: URL,
+        keepAudio: KeepMeetingAudio,
         recovered: Bool,
         notes: MeetingRecord.Notes = .init()
-    ) async -> MeetingSavedEvent? {
+    ) async -> Saved? {
         let turns = covered.reading.turns
         let tally = covered.reading.tally
         let them = (try? SpoolAudioFile.read(handle.audioURL))?.them ?? []
@@ -764,7 +807,7 @@ final class MeetingCoordinator: ObservableObject {
         )
         func record(
             _ outcome: MeetingRecord.Outcome, toDisk: Duration? = nil,
-            audioKept: Bool = false
+            audioKept: Bool = false, until: Date? = nil
         ) -> MeetingRecord {
             MeetingRecord(
                 outcome, app: app, model: model, startedAt: started,
@@ -774,7 +817,7 @@ final class MeetingCoordinator: ObservableObject {
                 coverage: .init(
                     covered.result, reason: covered.reason, tally: tally,
                     farSideLoud: covered.farSideLoud),
-                audioKept: audioKept)
+                audioKept: audioKept, audioKeptUntil: until)
         }
 
         let url: URL
@@ -790,19 +833,26 @@ final class MeetingCoordinator: ObservableObject {
             onEvent?(.saveFailed(error.localizedDescription))
             return nil
         }
-        if thin {
-            // the only way to check the file, or read it again: kept until
-            // you delete it, and no longer a spool for the next launch to
-            // write out a second time.
+        // the audio waits as long as the setting said, and a thin
+        // meeting's until you delete it: it is the only way to check the
+        // file, or read it again.
+        var keep: KeptAudio.Label?
+        if thin || keepAudio.keptFor != nil {
+            keep = KeptAudio.Label(
+                transcript: url, started: started, model: model,
+                until: thin ? nil : keepAudio.keptFor.map { keptAudio.now().addingTimeInterval($0) })
+            // marked before anything is awaited: from here no launch writes
+            // this spool out a second time, whatever happens to the app
+            // while its audio is being kept.
             if !spool.keep(handle, writtenTo: url) {
-                logger.error("could not mark a thin meeting's spool as written out")
+                logger.error("could not mark a written-out spool as kept")
             }
         } else {
             try? spool.finish(handle)
         }
         keepMeetingRecord?(record(
             thin ? .savedThin : .saved, toDisk: notes.stopped.map { now() - $0 },
-            audioKept: thin))
+            audioKept: keep != nil, until: keep?.until))
 
         let summary = (try? MeetingTranscriptFile.summary(of: url)) ?? MeetingSummary(
             fileURL: url, app: app, started: started, duration: recording.duration,
@@ -810,15 +860,16 @@ final class MeetingCoordinator: ObservableObject {
             recovered: recovered)
         onEvent?(.saved(summary))
 
-        return MeetingSavedEvent(
-            transcript: url,
-            app: app,
-            startedAt: started,
-            durationS: Int(recording.duration.components.seconds),
-            complete: transcript.complete,
-            gaps: recording.gaps.map { [$0.began.totalSeconds, $0.ended.totalSeconds] },
-            recovered: recovered
-        )
+        return Saved(
+            event: MeetingSavedEvent(
+                transcript: url,
+                app: app,
+                startedAt: started,
+                durationS: Int(recording.duration.components.seconds),
+                complete: transcript.complete,
+                gaps: recording.gaps.map { [$0.began.totalSeconds, $0.ended.totalSeconds] },
+                recovered: recovered),
+            keep: keep)
     }
 
     private func runHook(_ hook: URL?, telling event: MeetingSavedEvent) async {
@@ -897,9 +948,14 @@ final class MeetingCoordinator: ObservableObject {
                 started: manifest.started,
                 model: manifest.model,
                 folder: prefs.folder,
+                keepAudio: prefs.keepAudio,
                 recovered: true)
+            if let label = saved?.keep {
+                await keep(handle, as: label)
+            }
+            await sweepKeptAudio()
             if let saved {
-                await runHook(prefs.hook, telling: saved)
+                await runHook(prefs.hook, telling: saved.event)
             }
         } catch {
             // Only logging it meant the same quarter of an hour was spent on

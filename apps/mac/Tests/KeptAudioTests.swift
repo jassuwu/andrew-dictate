@@ -1,0 +1,244 @@
+import AVFoundation
+import XCTest
+
+/// Kept audio, through the coordinator and its fakes: after a meeting's file
+/// is written its spool does not vanish, it is compressed into the app's
+/// private folder for as long as the setting says, and a wall the test moves
+/// by hand decides when that is up. Judged by the files a person or an agent
+/// would find there.
+@MainActor
+final class KeptAudioTests: XCTestCase {
+    private var dir: URL!
+    private var source: FakeSource!
+    private var transcribers: FakeTranscribers!
+    private var wall: FakeWall!
+    private var records: [MeetingRecord] = []
+    private var keepAudio: KeepMeetingAudio = .oneDay
+
+    /// 2026-10-02 06:52:31 UTC: when the meeting starts.
+    private let started = Date(timeIntervalSince1970: 1_790_923_951)
+    /// An hour on, when it is written out.
+    private let writtenAt = Date(timeIntervalSince1970: 1_790_927_551)
+
+    override func setUp() async throws {
+        dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kept-audio-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        source = FakeSource()
+        transcribers = FakeTranscribers()
+        wall = FakeWall(writtenAt)
+        records = []
+        keepAudio = .oneDay
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: dir)
+    }
+
+    private var docs: URL { dir.appendingPathComponent("docs") }
+    private var audioFolder: URL { dir.appendingPathComponent("meeting-audio") }
+    private var kept: KeptAudio { KeptAudio(root: audioFolder, now: { [wall] in wall!.now }) }
+
+    private func coordinator(kept: KeptAudio? = nil) -> MeetingCoordinator {
+        let started = started
+        let c = MeetingCoordinator(
+            source: source,
+            makeTranscriber: { [transcribers] _ in transcribers!.next() },
+            diarizer: FakeDiarizer(),
+            spool: MeetingSpool(root: dir.appendingPathComponent("spool")),
+            hookRunner: HookRunner(logURL: dir.appendingPathComponent("hooks.log")),
+            keptAudio: kept ?? self.kept,
+            thresholds: .init(
+                probeTimeout: .seconds(1), silenceTimeout: .seconds(600),
+                silenceFloor: 0.001, quietNudgeAfter: .seconds(3_600)),
+            date: { started },
+            preferences: { [unowned self] in
+                MeetingPreferences(
+                    folder: docs, hook: nil, model: .parakeetV3, keepAudio: keepAudio)
+            }
+        )
+        c.keepMeetingRecord = { [weak self] in self?.records.append($0) }
+        return c
+    }
+
+    // MARK: - kept after a pass
+
+    /// One day, the default: the meeting's audio is in the app's own folder,
+    /// compressed, with a label beside it saying whose it is and until
+    /// when. The spool it came from is gone.
+    func testAfterAPassTheAudioIsKeptForADayAndTheSpoolIsGone() async throws {
+        transcribers.lineUp(healthy())
+
+        try await meeting(seconds: 2)
+
+        let transcript = try XCTUnwrap(MeetingTranscriptFile.listAll(in: docs).first)
+        XCTAssertEqual(try keptFiles().map(\.pathExtension), ["json", "m4a"])
+        let label = try keptLabel()
+        XCTAssertEqual(label["transcript"] as? String, transcript.fileURL.path)
+        XCTAssertEqual(label["started"] as? String, "2026-10-02T06:52:31Z")
+        XCTAssertEqual(label["model"] as? String, "parakeetV3")
+        XCTAssertEqual(label["until"] as? String, "2026-10-03T07:52:31Z")
+        XCTAssertEqual(label["untilDeleted"] as? Bool, false)
+        XCTAssertEqual(try spoolFolders(), 0)
+        XCTAssertEqual(records.first?.audioKept, true)
+        XCTAssertEqual(records.first?.audioKeptUntil, writtenAt.addingTimeInterval(86_400))
+    }
+
+    // MARK: - helpers
+
+    /// A live reading the coverage check passes.
+    private func healthy() -> FakeTranscriber {
+        let live = FakeTranscriber()
+        live.finalTurns = [.init(speaker: .you, at: .seconds(1), text: "the deploy is blocked")]
+        live.tally = StretchTally(decodedYou: 1, speechYou: .seconds(1), readYou: .seconds(1))
+        return live
+    }
+
+    /// A meeting `seconds` long, loud on both sides, stopped and written out.
+    private func meeting(seconds length: Int, on c: MeetingCoordinator? = nil) async throws {
+        let c = c ?? coordinator()
+        c.start()
+        await source.awaitStart()
+        for s in 0..<length {
+            source.send(loud(at: Duration.seconds(s)))
+        }
+        await waitFor { c.elapsed >= Duration.seconds(length) }
+        c.stop()
+        await c.untilWrittenOut()
+    }
+
+    /// What is in the kept audio folder, by name.
+    private func keptFiles() throws -> [URL] {
+        guard FileManager.default.fileExists(atPath: audioFolder.path) else { return [] }
+        return try FileManager.default.contentsOfDirectory(atPath: audioFolder.path)
+            .filter { !$0.hasPrefix(".") }
+            .sorted()
+            .map { audioFolder.appendingPathComponent($0) }
+    }
+
+    /// The one label in the folder, as an agent reading it would.
+    private func keptLabel() throws -> [String: Any] {
+        let url = try XCTUnwrap(try keptFiles().first { $0.pathExtension == "json" })
+        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: url))
+        return try XCTUnwrap(object as? [String: Any])
+    }
+
+    private func spoolFolders() throws -> Int {
+        let root = dir.appendingPathComponent("spool")
+        guard FileManager.default.fileExists(atPath: root.path) else { return 0 }
+        return try FileManager.default.contentsOfDirectory(atPath: root.path)
+            .filter { !$0.hasPrefix(".") }.count
+    }
+
+    private func loud(at: Duration) -> MeetingAudioChunk {
+        let n = 16_000
+        return .init(you: Array(repeating: 0.05, count: n),
+                     them: (0..<n).map { sin(Float($0) * 0.05) * 0.3 }, at: at)
+    }
+
+    private func waitFor(_ seconds: Double = 5, _ condition: () -> Bool) async {
+        let deadline = ContinuousClock.now + .seconds(seconds)
+        while !condition(), ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+}
+
+// MARK: - fakes
+
+/// The date on the wall, moved by hand.
+private final class FakeWall: @unchecked Sendable {
+    private let lock = NSLock()
+    private var date: Date
+
+    init(_ date: Date) {
+        self.date = date
+    }
+
+    var now: Date {
+        lock.withLock { date }
+    }
+
+    func advance(by interval: TimeInterval) {
+        lock.withLock { date = date.addingTimeInterval(interval) }
+    }
+}
+
+private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: AsyncStream<MeetingAudioChunk>.Continuation?
+    private var starts = 0
+    private var startsSeen = 0
+
+    func start() async throws -> AsyncStream<MeetingAudioChunk> {
+        let (stream, continuation) = AsyncStream<MeetingAudioChunk>.makeStream()
+        lock.withLock {
+            self.continuation = continuation
+            starts += 1
+        }
+        return stream
+    }
+
+    func rebuild() async throws {}
+
+    func stop() async {
+        lock.withLock { () -> AsyncStream<MeetingAudioChunk>.Continuation? in
+            defer { continuation = nil }
+            return continuation
+        }?.finish()
+    }
+
+    func send(_ chunk: MeetingAudioChunk) {
+        _ = lock.withLock { continuation }?.yield(chunk)
+    }
+
+    /// Until the tap has been opened once more than the last call saw, or
+    /// two seconds.
+    func awaitStart() async {
+        for _ in 0..<200 {
+            let opened = lock.withLock {
+                guard starts > startsSeen else { return false }
+                startsSeen += 1
+                return true
+            }
+            if opened { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+}
+
+/// One per reading, the way the app builds them. Past the ones lined up,
+/// each hears nothing and keeps no count.
+private final class FakeTranscribers: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lined: [FakeTranscriber] = []
+
+    func lineUp(_ transcribers: FakeTranscriber...) {
+        lock.withLock { lined.append(contentsOf: transcribers) }
+    }
+
+    func next() -> FakeTranscriber {
+        lock.withLock { lined.isEmpty ? FakeTranscriber() : lined.removeFirst() }
+    }
+}
+
+private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
+    var finalTurns: [MeetingTurn] = []
+    var batchTurns: [MeetingTurn] = []
+    var tally: StretchTally?
+    let lines: AsyncStream<LiveLine>
+
+    init() {
+        (lines, _) = AsyncStream<LiveLine>.makeStream()
+    }
+
+    func begin() async throws {}
+    func feed(_ chunk: MeetingAudioChunk) async {}
+    func finish() async -> [MeetingTurn] { finalTurns }
+    func decodeTally() async -> StretchTally? { tally }
+    func transcribe(you: [Float], them: [Float]) async throws -> [MeetingTurn] { batchTurns }
+}
+
+private struct FakeDiarizer: MeetingDiarizer {
+    func split(them: [Float], turns: [MeetingTurn]) async -> [MeetingTurn] { turns }
+}
