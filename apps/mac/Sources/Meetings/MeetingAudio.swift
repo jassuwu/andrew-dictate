@@ -132,17 +132,66 @@ extension MeetingTranscriber {
     func decodeTally() async -> StretchTally? { nil }
 }
 
-/// Splits `them` into `them 1`, `them 2`… after the meeting. Given the far
-/// side's audio and the turns as transcribed, returns the same turns with
-/// speakers assigned. Leaves `them(nil)` when it finds one voice.
+/// Splits `them` into `them 1`, `them 2`…: who on the far side spoke when.
+/// The far side is heard a piece at a time while the meeting records
+/// (`SpeakerSplit` cuts the pieces and hands them over), so the end of a
+/// meeting has only its last few minutes left to hear.
 protocol MeetingDiarizer: Sendable {
+    /// One meeting's hearing, fresh: its pieces are handed to it in order,
+    /// and a voice keeps its id from one piece to the next. Nil when this
+    /// mac cannot split a meeting — its models are not here — and the turns
+    /// stay plain `them`.
+    func hearing() -> (any SpeakerHearing)?
+    /// The far side whole, and the turns as transcribed, on its clock: the
+    /// same turns with speakers assigned. Leaves `them(nil)` when it finds
+    /// one voice.
     func split(them: [Float], turns: [MeetingTurn]) async -> [MeetingTurn]
 }
 
+extension MeetingDiarizer {
+    /// A diarizer that can only hear a meeting whole is handed it whole, at
+    /// the end: every piece is held until then, so what it holds grows with
+    /// the meeting. `FluidDiarizer` hears in pieces.
+    func hearing() -> (any SpeakerHearing)? {
+        WholeMeeting(diarizer: self)
+    }
+}
+
+/// One meeting's far side as a diarizer hears it, a piece at a time.
+protocol SpeakerHearing: Sendable {
+    /// One piece of the far side, `at` into the spool, after the piece
+    /// before it. Throws when this piece could not be heard; the next one
+    /// still can be.
+    func hear(_ piece: [Float], at: Duration) async throws
+    /// The turns, on the spool's clock, with the speakers heard so far. It
+    /// answers from what it has: a piece still being heard is not waited
+    /// for, so a stop that gave up on one is not held up by it here.
+    func split(_ turns: [MeetingTurn]) async -> [MeetingTurn]
+}
+
+/// The pieces, kept, and handed to a diarizer that hears only whole
+/// meetings when the turns are asked about.
+private actor WholeMeeting: SpeakerHearing {
+    private let diarizer: any MeetingDiarizer
+    private var them: [Float] = []
+
+    init(diarizer: any MeetingDiarizer) {
+        self.diarizer = diarizer
+    }
+
+    func hear(_ piece: [Float], at: Duration) {
+        them += piece
+    }
+
+    func split(_ turns: [MeetingTurn]) async -> [MeetingTurn] {
+        await diarizer.split(them: them, turns: turns)
+    }
+}
+
 /// The spool on disk: one two-channel 16 kHz float caf, left = you,
-/// right = them. Written as the meeting runs, read back at the end for the
-/// coverage check and diarization (or at launch, for recovery), then kept
-/// compressed or deleted (ADR 0048).
+/// right = them. Written as the meeting runs, read back at the end a block
+/// at a time for the coverage check (or whole at launch, for recovery, and
+/// for a reading again), then kept compressed or deleted (ADR 0048).
 actor SpoolAudioFile {
     private let file: AVAudioFile
     private let format: AVAudioFormat
@@ -220,6 +269,35 @@ actor SpoolAudioFile {
             try body(
                 Array(UnsafeBufferPointer(start: channels[0], count: count)),
                 stereo ? Array(UnsafeBufferPointer(start: channels[1], count: count)) : [])
+        }
+    }
+
+    /// The far side alone, read a piece at a time when asked for: for what
+    /// hears a whole spool more slowly than the disk reads it, and so reads
+    /// the next piece only once it has heard the last. Reading ahead would
+    /// have the whole far side waiting in memory.
+    final class FarSide {
+        private let file: AVAudioFile
+        private var buffer: AVAudioPCMBuffer?
+
+        init(_ url: URL) throws {
+            file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
+        }
+
+        /// The next `frames` of the far side, fewer at the end, and none
+        /// once there is no more. A spool with one channel has no far side.
+        func next(_ frames: Int) throws -> [Float] {
+            guard file.processingFormat.channelCount > 1, file.framePosition < file.length else {
+                return []
+            }
+            let capacity = AVAudioFrameCount(max(1, frames))
+            if buffer == nil || buffer!.frameCapacity != capacity {
+                buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: capacity)
+            }
+            guard let buffer else { return [] }
+            try file.read(into: buffer, frameCount: capacity)
+            guard let channels = buffer.floatChannelData else { return [] }
+            return Array(UnsafeBufferPointer(start: channels[1], count: Int(buffer.frameLength)))
         }
     }
 
