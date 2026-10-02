@@ -21,9 +21,7 @@ final class RecordWithTests: XCTestCase {
             isRecording: false)
 
         XCTAssertEqual(choices.map(\.model), [.parakeetV3])
-        XCTAssertEqual(
-            choices.first?.title,
-            "parakeet — fastest · english and european languages only · anything else comes out as nonsense")
+        XCTAssertEqual(choices.first?.title, "parakeet")
     }
 
     func testTwoModelsOnThisMacListTheOneThatIsNotTheDefault() {
@@ -33,9 +31,7 @@ final class RecordWithTests: XCTestCase {
             isRecording: false)
 
         XCTAssertEqual(choices, [
-            RecordWith.Choice(
-                model: .whisperLargeV3Turbo,
-                title: "whisper turbo — every language, as spoken · faster"),
+            RecordWith.Choice(model: .whisperLargeV3Turbo, title: "whisper turbo"),
         ])
     }
 
