@@ -22,6 +22,41 @@ struct MeetingShortcut: Codable, Hashable, Sendable {
     /// keeps its display name: the layout can change, the row should not.
     let keyName: String
 
+    /// Why settings will not take a shortcut, in the few words the row says.
+    enum Refusal: Equatable, Sendable {
+        case includesTheDictationKey(HotkeyBinding)
+
+        var message: String {
+            switch self {
+            case .includesTheDictationKey(let key):
+                "includes your dictation key, \(key.displayName)"
+            }
+        }
+    }
+
+    func refusal(againstDictationKey key: HotkeyBinding) -> Refusal? {
+        if let held = Self.modifier(of: key), modifiers.contains(held) {
+            return .includesTheDictationKey(key)
+        }
+        return nil
+    }
+
+    /// The modifier a dictation key is, for a shortcut that holds it. Left
+    /// and right are one modifier here. fn is none: a shortcut cannot hold
+    /// it, so it never clashes.
+    private static func modifier(of key: HotkeyBinding) -> Modifiers? {
+        switch key.keyCode {
+        case HotkeyBinding.leftOption.keyCode, HotkeyBinding.rightOption.keyCode:
+            .option
+        case HotkeyBinding.leftCommand.keyCode, HotkeyBinding.rightCommand.keyCode:
+            .command
+        case HotkeyBinding.leftControl.keyCode, HotkeyBinding.rightControl.keyCode:
+            .control
+        default:
+            nil
+        }
+    }
+
     /// What a press of the shortcut does.
     enum Press: Equatable, Sendable {
         case start

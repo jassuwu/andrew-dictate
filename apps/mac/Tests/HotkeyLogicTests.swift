@@ -231,6 +231,27 @@ final class HotkeyLogicTests: XCTestCase {
         XCTAssertEqual(MeetingShortcut.press(whileRecording: true), .stop)
     }
 
+    /// the dictation key begins a take the moment it goes down, and any key
+    /// pressed with it ends that take as a chord. a shortcut with that
+    /// modifier in it would start a dictation and cancel it, every time, so
+    /// settings do not take one. left and right are one modifier to a
+    /// shortcut, so either side's key rules it out.
+    func testAShortcutThatHoldsTheDictationKeyIsRefusedAndSaysWhy() {
+        let optionCommandM = MeetingShortcut(
+            keyCode: 46, modifiers: [.option, .command], keyName: "M")
+
+        let refusal = optionCommandM.refusal(againstDictationKey: .rightOption)
+
+        XCTAssertEqual(refusal, .includesTheDictationKey(.rightOption))
+        XCTAssertEqual(refusal?.message, "includes your dictation key, right ⌥")
+        XCTAssertEqual(
+            optionCommandM.refusal(againstDictationKey: .leftOption),
+            .includesTheDictationKey(.leftOption))
+        XCTAssertEqual(
+            optionCommandM.refusal(againstDictationKey: .rightCommand),
+            .includesTheDictationKey(.rightCommand))
+    }
+
     private func lockedDetector() -> TapLockDetector {
         var detector = TapLockDetector()
         _ = detector.modifierPressed(at: 1.0)
