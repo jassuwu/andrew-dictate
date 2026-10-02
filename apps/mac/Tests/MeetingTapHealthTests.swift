@@ -78,6 +78,40 @@ final class MeetingTapHealthTests: XCTestCase {
         XCTAssertEqual(records.first?.events, [.init(.probeUnplayable, atS: 0)])
     }
 
+    /// Rebuilt, and no output to play the start sound on: the new tap was
+    /// asked nothing, so the try neither worked nor failed. No problem is
+    /// named for it, the gap stays open until the far side is heard, and
+    /// the tap is tried again at the slow pace meanwhile.
+    func testARebuiltTapWhoseStartSoundCannotPlayIsNoEvidenceEitherWay() async throws {
+        let clock = FakeClock()
+        let c = coordinator(thresholds: retrying, clock: clock)
+        c.start()
+        await source.awaitStart()
+        await play(loud(at: .zero), loud(at: .seconds(1)))
+
+        source.startSoundPlays = false
+        clock.advance(by: .seconds(60))
+        source.skip(to: .seconds(60))
+        c.probeTapIsAlive()
+        await until { source.rebuilds == 2 }
+
+        XCTAssertEqual(source.rebuilds, 2)
+        XCTAssertNil(c.problem)
+        XCTAssertEqual(c.state, .rebuilding)
+        XCTAssertEqual(events, [.started, .gapBegan])
+
+        await play(loud(at: .seconds(60)))
+        XCTAssertEqual(events, [.started, .gapBegan, .gapEnded])
+
+        c.stop()
+        await c.untilWrittenOut()
+        XCTAssertEqual(records.first?.events, [
+            .init(.gapBegan, atS: 2),
+            .init(.probeUnplayable, atS: 60),
+            .init(.gapEnded, atS: 61),
+        ])
+    }
+
     // MARK: - silence is not damage
 
     /// Presenting to a room that has nothing playing: five minutes of
@@ -648,7 +682,7 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
                 _rebuiltTapsThatHearNothing -= 1
                 return nil
             }
-            return nextAt
+            return _startSoundPlays ? nextAt : nil
         }
         guard let at else { return }
         let n = 4_800

@@ -734,6 +734,7 @@ final class MeetingCoordinator: ObservableObject {
     private func keepRebuilding(_ meeting: Meeting) async {
         var wait = thresholds.settleBeforeRebuild
         var failures = 0
+        var notedUnplayable = false
         while await pause(wait), isRebuilding(meeting) {
             let failed: MeetingRecord.Label
             // Set before the rebuild, not after: the tone can be heard the
@@ -741,6 +742,18 @@ final class MeetingCoordinator: ObservableObject {
             probeUntil = elapsed + thresholds.probeTimeout
             do {
                 try await source.rebuild()
+                // No output to play its start sound on: the rebuilt tap was
+                // asked nothing, so the try neither worked nor failed. The
+                // gap stays open until the far side is heard, and the tap
+                // is tried again at the slow pace meanwhile.
+                if source.startSoundPlayed == false {
+                    if !notedUnplayable, isRebuilding(meeting) {
+                        meeting.notes.note(.probeUnplayable, at: elapsed)
+                        notedUnplayable = true
+                    }
+                    wait = thresholds.retryWhileTheProblemStands
+                    continue
+                }
                 // A rebuilt tap must hear its start sound before it is
                 // trusted again, and `ingest` closes the gap the moment it
                 // does. One that hears nothing came back as dead as the tap
