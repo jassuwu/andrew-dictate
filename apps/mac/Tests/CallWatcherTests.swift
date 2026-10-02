@@ -254,6 +254,58 @@ final class CallWatcherTests: XCTestCase {
         XCTAssertNil(watcher.unrecordedCall)
     }
 
+    // MARK: - recordings the watcher did not ask for
+
+    /// Dictating notes to yourself, or a lecture: you started it, there was
+    /// never a call, and the watcher has no business telling you to stop.
+    func testARecordingStartedByHandWithNoCallNeverGetsAStopSuggestion() {
+        var watcher = watcher()
+
+        for second in stride(from: 0, through: 3_600, by: 60) {
+            XCTAssertEqual(
+                watcher.observe([], isRecording: true, at: .seconds(second)),
+                []
+            )
+        }
+        XCTAssertNil(watcher.currentCall)
+    }
+
+    /// Nor does a call app that only sounded like one: the mic and audio
+    /// for a moment, or the mic alone, never made a call that could end.
+    func testAnAppThatNeverQualifiedAsACallNeverEndsOne() {
+        var watcher = watcher()
+        let brief = app("chrome")
+        let listening = app("chrome", audio: false)
+
+        _ = watcher.observe([brief], isRecording: true, at: .seconds(0))
+        _ = watcher.observe([brief], isRecording: true, at: .seconds(2))
+        XCTAssertEqual(watcher.observe([], isRecording: true, at: .seconds(3)), [])
+        XCTAssertEqual(watcher.observe([], isRecording: true, at: .seconds(60)), [])
+
+        _ = watcher.observe([listening], isRecording: true, at: .seconds(100))
+        _ = watcher.observe([listening], isRecording: true, at: .seconds(200))
+        XCTAssertEqual(watcher.observe([], isRecording: true, at: .seconds(201)), [])
+        XCTAssertEqual(watcher.observe([], isRecording: true, at: .seconds(300)), [])
+    }
+
+    /// You pressed record first and the call started after. It is that
+    /// recording's call now, and its end is worth a question.
+    func testACallThatBeginsDuringAHandStartedRecordingEndsWithAStopSuggestion() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+
+        XCTAssertEqual(watcher.observe([], isRecording: true, at: .seconds(0)), [])
+        XCTAssertEqual(watcher.observe([zoom], isRecording: true, at: .seconds(60)), [])
+        XCTAssertEqual(watcher.observe([zoom], isRecording: true, at: .seconds(63)), [])
+        XCTAssertEqual(watcher.currentCall, "zoom")
+
+        XCTAssertEqual(watcher.observe([], isRecording: true, at: .seconds(1_000)), [])
+        XCTAssertEqual(
+            watcher.observe([], isRecording: true, at: .seconds(1_030)),
+            [.stop("zoom")]
+        )
+    }
+
     /// A browser tab playing music is not a call, and neither is a podcast.
     func testAudioAloneIsNotACall() {
         var watcher = watcher()
