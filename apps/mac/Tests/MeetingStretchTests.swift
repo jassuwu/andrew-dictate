@@ -452,6 +452,73 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(lines, [])
     }
 
+    /// Quiet is not enough: a quiet stretch that comes back as anything but
+    /// one of those phrases is words someone said softly.
+    func testAQuietStretchReadAsAnythingElseIsKept() async throws {
+        engine.inventsWords(forRoomNoise: ["see you tomorrow"])
+        let transcriber = stretches(threshold: Self.faint)
+        let c = coordinator(transcriber)
+        c.start()
+        await source.awaitStart()
+
+        await play([roomNoise(from: 1.3, to: 3.3)], through: 5.0, on: c)
+        await waitFor { c.liveLines.count == 1 }
+
+        XCTAssertEqual(live(c), ["you 1.0 see you tomorrow"])
+        let tally = await transcriber.tally
+        XCTAssertEqual(tally.quietDropped, 0)
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, ["[00:00:01] you: see you tomorrow"])
+    }
+
+    /// And loud is not enough either way: someone who says "thank you" at the
+    /// end of a call said it.
+    func testALoudStretchThatSaysThankYouIsKept() async throws {
+        let transcriber = stretches()
+        let c = coordinator(transcriber)
+        c.start()
+        await source.awaitStart()
+
+        await play([you("Thank you.", from: 1.3, to: 2.3)], through: 4.0, on: c)
+        await waitFor { c.liveLines.count == 1 }
+
+        XCTAssertEqual(live(c), ["you 1.0 Thank you."])
+        let tally = await transcriber.tally
+        XCTAssertEqual(tally.quietDropped, 0)
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, ["[00:00:01] you: Thank you."])
+    }
+
+    /// The phrases are matched however whisper cases and punctuates them:
+    /// each of these, over room noise, is let go.
+    func testEveryPhraseWhisperMakesUpOverRoomNoiseIsLetGoHoweverItIsWritten() async throws {
+        let written = [
+            "Thank you.", "THANK YOU VERY MUCH!", "Thanks for watching!", "Thank you for watching.",
+            "Thanks.", "Bye.", "Bye-bye!", "You", "Please subscribe.",
+            "Subtitles by the Amara.org community",
+        ]
+        engine.inventsWords(forRoomNoise: written)
+        let transcriber = stretches(threshold: Self.faint)
+        let c = coordinator(transcriber)
+        c.start()
+        await source.awaitStart()
+
+        // 1.2 s of noise, then 1 s of quiet, ten times.
+        await play(
+            (0..<written.count).map { roomNoise(from: 1.3 + 2.2 * Double($0), to: 2.5 + 2.2 * Double($0)) },
+            through: 25.0, on: c)
+        await waitForStretches(transcriber, 11)
+
+        XCTAssertEqual(live(c), [])
+        let tally = await transcriber.tally
+        XCTAssertEqual(tally.quietDropped, 10)
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, [])
+    }
+
     // MARK: - a spool found at launch
 
     /// The app died mid-meeting. At the next launch the spool is read back
@@ -501,6 +568,25 @@ final class MeetingStretchTests: XCTestCase {
             "[00:00:00] them: okay so",
             "[00:00:04] them: and the budget",
         ])
+    }
+
+    /// A spool found at launch is read the same way, and the room noise in it
+    /// is let go the same way.
+    func testASpoolsRoomNoiseReadAsThankYouIsNotATurn() async throws {
+        _ = try await spoolLeftBehind([
+            roomNoise(from: 1.3, to: 3.3),
+            you("are you recording this", from: 4.3, to: 5.3),
+        ])
+        engine.inventsWords(forRoomNoise: ["Thank you."])
+
+        let transcriber = stretches(threshold: Self.faint)
+        let c = coordinator(transcriber)
+        c.recoverOrphans()
+
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, ["[00:00:04] you: are you recording this"])
+        let tally = await transcriber.tally
+        XCTAssertEqual(tally.quietDropped, 1)
     }
 
     /// Every stretch of the spool failed to decode, twice. Writing that out
