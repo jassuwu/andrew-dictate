@@ -168,7 +168,9 @@ final class DictationCoordinator: ObservableObject {
     )?
     private let timelineStore = UtteranceTimelineStore()
     private var aboutWindowController: AboutWindowController?
+    #if DEBUG
     private var lampLabWindowController: LampLabWindowController?
+    #endif
     /// Rebuilt per transcript rather than reused: the window is *about* one
     /// dictation, so keeping a stale one around would show the wrong words.
     private let dictationArchive = DictationArchive()
@@ -385,6 +387,7 @@ final class DictationCoordinator: ObservableObject {
             }
         }
 
+        #if DEBUG
         if Capabilities.current.hasLampLab,
            UserDefaults.standard.bool(
                forKey: LampLabWindowController.atLaunchKey
@@ -393,6 +396,7 @@ final class DictationCoordinator: ObservableObject {
                 self?.openLampLab()
             }
         }
+        #endif
         if Capabilities.current.hasLampLab {
             // `defaults write <bundle> hudRehearseNow -bool true` fires the
             // rehearsal on demand, so a screenshot run needs no clicking
@@ -510,6 +514,7 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
+    #if DEBUG
     /// Development only (`Capabilities.hasLampLab`): the lamp audition.
     func openLampLab() {
         guard Capabilities.current.hasLampLab else {
@@ -524,6 +529,7 @@ final class DictationCoordinator: ObservableObject {
         }
         controller.present()
     }
+    #endif
 
     /// The door ticket 011 chose. It opens on `lastHeard` — the engine's
     /// untouched words — because a dictionary entry's `wrong` side has to be
