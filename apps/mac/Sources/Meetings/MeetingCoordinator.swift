@@ -645,7 +645,7 @@ final class MeetingCoordinator: ObservableObject {
             MeetingRecord(
                 outcome, app: app, model: model, startedAt: started,
                 duration: recording.duration, gaps: recording.gaps, turns: split,
-                toDisk: toDisk)
+                toDisk: toDisk, recovered: recovered)
         }
 
         let url: URL
@@ -731,6 +731,9 @@ final class MeetingCoordinator: ObservableObject {
               !audio.them.isEmpty || !audio.you.isEmpty
         else {
             spool.discard(handle)
+            keepMeetingRecord?(MeetingRecord(
+                .spoolUnreadable, app: manifest.app, model: manifest.model,
+                startedAt: manifest.started, duration: .zero, recovered: true))
             return
         }
         let duration = Duration.seconds(
@@ -760,9 +763,14 @@ final class MeetingCoordinator: ObservableObject {
             // settings › history.
             logger.error("could not recover a spool: \(error.localizedDescription, privacy: .public)")
             let noted = spool.noteAttempt(handle, manifest: manifest)
-            if (noted.attempts ?? 0) >= MeetingSpool.attemptsBeforeSettingAside {
+            let setAside = (noted.attempts ?? 0) >= MeetingSpool.attemptsBeforeSettingAside
+            if setAside {
                 spool.setAside(handle)
             }
+            keepMeetingRecord?(MeetingRecord(
+                setAside ? .setAside : .couldNotRecover, app: manifest.app,
+                model: manifest.model, startedAt: manifest.started,
+                duration: duration, recovered: true))
         }
     }
 

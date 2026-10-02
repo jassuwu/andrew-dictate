@@ -20,6 +20,14 @@ struct MeetingRecord: Equatable, Sendable {
         /// the transcript could not be written where it was asked to go.
         /// the audio stays for the next launch.
         case couldNotWrite
+        /// a recovery tried to write a spool out and the model failed it.
+        /// the attempt is counted, and the next launch tries again.
+        case couldNotRecover
+        /// the second failure of a recovery: the spool is kept, out of the
+        /// retry loop, and settings says it is there.
+        case setAside
+        /// a recovery found audio it could not read at all, and let it go.
+        case spoolUnreadable
     }
 
     enum NothingKept: Equatable, Sendable {
@@ -55,6 +63,9 @@ struct MeetingRecord: Equatable, Sendable {
     /// seconds from the stop to the transcript being on disk. nil when it
     /// never got there, and for a recovery, which has no stop of its own.
     var toDiskS: Double?
+    /// the ending is a recovery's: the audio came from a spool a past run
+    /// left, found at launch. true of a recovery that failed too.
+    var recovered = false
 }
 
 // MARK: - from a meeting
@@ -70,7 +81,8 @@ extension MeetingRecord {
         duration: Duration,
         gaps: [MeetingSession.Gap] = [],
         turns: [MeetingTurn] = [],
-        toDisk: Duration? = nil
+        toDisk: Duration? = nil,
+        recovered: Bool = false
     ) {
         self.init(
             outcome: outcome,
@@ -82,7 +94,8 @@ extension MeetingRecord {
             gapsLostS: Self.seconds(gaps.reduce(.zero) { $0 + $1.duration }),
             you: Self.side(.you, in: turns),
             them: Self.side(.them, in: turns),
-            toDiskS: toDisk.map(Self.seconds)
+            toDiskS: toDisk.map(Self.seconds),
+            recovered: recovered
         )
     }
 

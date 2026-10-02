@@ -182,6 +182,83 @@ final class MeetingRecordTests: XCTestCase {
         XCTAssertEqual(records.first?.durationS, 1)
     }
 
+    // MARK: - recovery
+
+    /// a spool the app died on, written out at the next launch: the same
+    /// record as any saved meeting, from the manifest and the audio, and
+    /// marked as the recovery it was.
+    func testARecoveredMeetingLeavesARecordMarkedRecovered() async throws {
+        try await orphan("teams", started: started)
+        transcriber.batchTurns = [
+            .init(speaker: .them(nil), at: .zero, text: "recovered words here")]
+        let c = coordinator()
+
+        c.recoverOrphans()
+        await awaitRecords(1)
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(records.count, 1)
+        let record = try XCTUnwrap(records.first)
+        XCTAssertEqual(record.outcome, .saved)
+        XCTAssertTrue(record.recovered)
+        XCTAssertEqual(record.app, "teams")
+        XCTAssertEqual(record.model, "whisperLargeV3Turbo")
+        XCTAssertEqual(record.startedAt, started)
+        XCTAssertEqual(record.durationS, 1)
+        XCTAssertEqual(record.you, .init(turns: 0, words: 0))
+        XCTAssertEqual(record.them, .init(turns: 1, words: 3))
+        // a recovery has no stop of its own to count from.
+        XCTAssertNil(record.toDiskS)
+        // and a meeting that was not one says so.
+        XCTAssertFalse(MeetingRecord(
+            .saved, app: "zoom", model: .whisperLargeV3, startedAt: started, duration: .zero
+        ).recovered)
+    }
+
+    /// two tries, then the spool is set aside: each failure is its own
+    /// record, so a spool that will not read shows as two before it stops.
+    func testARecoveryThatFailsIsCountedAndTheSecondFailureSetsTheSpoolAside() async throws {
+        try await orphan("teams", started: started)
+        transcriber.batchFailure = Unreadable()
+        let spool = MeetingSpool(root: dir.appendingPathComponent("spool"))
+        let c = coordinator()
+
+        c.recoverOrphans()
+        await awaitRecords(1)
+        XCTAssertEqual(records.map(\.outcome), [.couldNotRecover])
+        XCTAssertEqual(spool.orphans().count, 1, "one failure is not two")
+
+        c.recoverOrphans()
+        await awaitRecords(2)
+
+        XCTAssertEqual(records.map(\.outcome), [.couldNotRecover, .setAside])
+        XCTAssertEqual(spool.orphans().count, 0)
+        XCTAssertEqual(spool.unreadableCount(), 1)
+        XCTAssertEqual(records.map(\.recovered), [true, true])
+        XCTAssertEqual(records.map(\.app), ["teams", "teams"])
+        XCTAssertEqual(records.map(\.startedAt), [started, started])
+    }
+
+    /// audio the app cannot read at all: there is nothing to try, and the
+    /// record is the only thing that says the meeting is gone.
+    func testASpoolThatCannotBeReadLeavesARecordSayingSo() async throws {
+        let handle = try await orphan("teams", started: started)
+        try Data("not audio".utf8).write(to: handle.audioURL)
+        let c = coordinator()
+
+        c.recoverOrphans()
+        await awaitRecords(1)
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(records.count, 1)
+        let record = try XCTUnwrap(records.first)
+        XCTAssertEqual(record.outcome, .spoolUnreadable)
+        XCTAssertTrue(record.recovered)
+        XCTAssertEqual(record.app, "teams")
+        XCTAssertEqual(record.startedAt, started)
+        XCTAssertEqual(record.durationS, 0)
+    }
+
     // MARK: - the file
 
     /// the transcript could not be written where it was asked to go: the
@@ -252,6 +329,18 @@ final class MeetingRecordTests: XCTestCase {
     }
 
     // MARK: - helpers
+
+    /// A spool a crash left behind, with a second of audio on it.
+    @discardableResult
+    private func orphan(_ app: String, started: Date) async throws -> MeetingSpool.Handle {
+        let spool = MeetingSpool(root: dir.appendingPathComponent("spool"))
+        let handle = try spool.begin(.init(
+            app: app, started: started,
+            engine: "whisper-large-v3-turbo", model: .whisperLargeV3Turbo))
+        let file = try SpoolAudioFile(url: handle.audioURL)
+        try await file.append(loud(at: .zero))
+        return handle
+    }
 
     private func spoolFolders() throws -> Int {
         try FileManager.default.contentsOfDirectory(
