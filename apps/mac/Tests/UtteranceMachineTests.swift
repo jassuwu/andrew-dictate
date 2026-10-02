@@ -1603,8 +1603,20 @@ final class FakeEngine: TranscriptionEngine, @unchecked Sendable {
             return _holds
         }
         if holds {
+            // the hold is checked again in the same lock that registers
+            // the wait: a release landing between the two would otherwise
+            // leave this waiting on a release that already happened.
             await withCheckedContinuation { continuation in
-                lock.withLock { waiting.append(continuation) }
+                let goNow = lock.withLock {
+                    guard _holds else {
+                        return true
+                    }
+                    waiting.append(continuation)
+                    return false
+                }
+                if goNow {
+                    continuation.resume()
+                }
             }
         }
         return try reply.get()
