@@ -19,6 +19,9 @@ enum UtteranceEvent: Equatable, Sendable {
     /// `fastDismiss` is a brush, a cancel or a failure: a flicker, not the
     /// afterglow's slow cut.
     case state(UtteranceMachine.State, fastDismiss: Bool)
+    /// the take's first audio landed: the mic is hearing you. a recording
+    /// lamp is warming until this, and lit from it.
+    case hearing
     case chime(UtteranceMachine.Chime)
     /// an exceptional message, and how long it stays.
     case pill(String, duration: TimeInterval)
@@ -351,10 +354,11 @@ final class UtteranceMachine {
         capture.isHearing = true
         self.capture = capture
         guard !capture.isEnding else {
-            // let go before it was heard: a start chime after the release
-            // would be noise.
+            // let go before it was heard: lighting the lamp, or a start
+            // chime, after the release would be noise.
             return
         }
+        emit(.hearing)
         scheduleStartChime()
     }
 

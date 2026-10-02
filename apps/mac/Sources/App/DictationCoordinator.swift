@@ -1738,6 +1738,8 @@ extension DictationCoordinator {
         switch event {
         case let .state(state, fastDismiss):
             apply(state, fastHUDDismiss: fastDismiss)
+        case .hearing:
+            break
         case let .chime(chime):
             guard !isOnboardingPresented else {
                 return

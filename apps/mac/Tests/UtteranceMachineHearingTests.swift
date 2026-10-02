@@ -64,6 +64,25 @@ final class UtteranceMachineHearingTests: XCTestCase {
         return machine
     }
 
+    // MARK: - the lamp
+
+    /// pressed and hearing look different: the lamp comes up warming at
+    /// the key, and lights only when the mic's first audio lands.
+    func testTheLampWarmsAtThePressAndLightsOnTheMicsFirstAudio() async {
+        let m = machine()
+
+        m.keyDown()
+        await pass(.milliseconds(300))
+        XCTAssertEqual(lamp, [.state(.recording, fastDismiss: false)])
+
+        mic.hear()
+        XCTAssertEqual(lamp, [
+            .state(.recording, fastDismiss: false),
+            .hearing,
+        ])
+        XCTAssertEqual(m.state, .recording)
+    }
+
     // MARK: - the chime
 
     /// the key brings no sound of its own: the chime is the mic's first
@@ -156,6 +175,18 @@ final class UtteranceMachineHearingTests: XCTestCase {
                 return StateChange(state, fast: fast)
             }
             return nil
+        }
+    }
+
+    /// what the lamp was told: its state, and the moment the mic was heard.
+    private var lamp: [UtteranceEvent] {
+        events.filter {
+            switch $0 {
+            case .state, .hearing:
+                true
+            default:
+                false
+            }
         }
     }
 
