@@ -24,9 +24,9 @@ enum UpdateOffer {
         }
     }
 
-    /// what the click is for, not how it is done: `UpdateHandOff` decides
-    /// that. today a brew upgrade is copied for the user to paste; running
-    /// it in one click replaces the hand-off, not this.
+    /// what the click is for, not how it is done: `UpdateHandOff` does
+    /// that, running the brew upgrade itself and copying the command only
+    /// when it fails.
     enum Action: Equatable, Sendable {
         case brewUpgrade(String)
         case openReleasePage(URL)
