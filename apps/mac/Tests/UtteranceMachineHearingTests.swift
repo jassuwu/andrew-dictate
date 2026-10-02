@@ -181,6 +181,25 @@ final class UtteranceMachineHearingTests: XCTestCase {
         XCTAssertEqual(m.state, .recording)
     }
 
+    /// a lamp that says "locked" over a mic that sends nothing is a lie:
+    /// the lock goes with the take, and the tap meant to end it ends
+    /// nothing more.
+    func testALockedTakeWhoseMicSendsNothingLetsGoOfTheLock() async {
+        let m = machine()
+
+        m.doubleTapped()
+        await pass(.seconds(1))
+
+        XCTAssertEqual(lockFlags, [true, false])
+        XCTAssertEqual(pills.last, Pill("no sound from AirPods Pro", 2.4))
+        XCTAssertEqual(outcomes, [.noAudio])
+
+        m.keyUp()
+        await settle()
+        XCTAssertEqual(mic.stops, 0)
+        XCTAssertEqual(presses.count, 1)
+    }
+
     /// a mic that will not say what it is still gets a sentence.
     func testAnUnnamedMicIsTheMicrophone() async {
         let m = machine()
@@ -395,6 +414,15 @@ final class UtteranceMachineHearingTests: XCTestCase {
         events.compactMap {
             if case let .retryOffered(offered) = $0 {
                 return offered
+            }
+            return nil
+        }
+    }
+
+    private var lockFlags: [Bool] {
+        events.compactMap {
+            if case let .locked(locked) = $0 {
+                return locked
             }
             return nil
         }
