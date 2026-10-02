@@ -159,6 +159,8 @@ targets:
       - Sources/Insertion/PasteKeyCodeResolver.swift
       - Sources/Instrumentation/UtteranceTimeline.swift
       - Sources/Instrumentation/TimelineSummary.swift
+      # the protocol only; ParakeetEngine is the FluidAudio half.
+      - Sources/Transcription/TranscriptionEngine.swift
     settings:
       base:
         GENERATE_INFOPLIST_FILE: true
