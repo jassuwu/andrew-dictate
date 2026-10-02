@@ -46,8 +46,16 @@ struct CallWatcher {
         var quietSince: Duration?
     }
 
+    private struct Candidate {
+        let app: String
+        let since: Duration
+    }
+
     private var call: Call?
-    private var qualifyingSince: Duration?
+    /// Apps that look like a call right now and are being timed, oldest
+    /// first. Empty while a call is on: a second app is ignored until the
+    /// first call ends, and then it starts from nothing.
+    private var candidates: [Candidate] = []
     /// As of the last observation. The watcher has no other way to know.
     private var recording = false
 
@@ -73,31 +81,52 @@ struct CallWatcher {
         at now: Duration
     ) -> [Suggestion] {
         recording = isRecording
-        if var current = call {
-            if apps.contains(where: { $0.name == current.app && $0.keepsACallGoing }) {
-                current.quietSince = nil
-            } else {
-                let since = current.quietSince ?? now
-                current.quietSince = since
-                if now - since >= endAfter {
-                    call = nil
-                    return isRecording ? [.stop(current.app)] : []
-                }
-            }
+        var suggestions: [Suggestion] = []
+
+        if let ended = advanceTheCall(apps, at: now), isRecording {
+            suggestions.append(.stop(ended))
+        }
+        if call == nil, let began = lookForACall(apps, at: now), !isRecording {
+            suggestions.append(.record(began))
+        }
+        return suggestions
+    }
+
+    /// Carries the call that is on forward by one observation. Returns its
+    /// app if it ended just now.
+    private mutating func advanceTheCall(_ apps: [App], at now: Duration) -> String? {
+        guard var current = call else {
+            return nil
+        }
+        if apps.contains(where: { $0.name == current.app && $0.keepsACallGoing }) {
+            current.quietSince = nil
             call = current
-            return []
+            return nil
         }
-        guard let app = apps.first(where: \.looksLikeACall) else {
-            qualifyingSince = nil
-            return []
+        let quietSince = current.quietSince ?? now
+        guard now - quietSince >= endAfter else {
+            current.quietSince = quietSince
+            call = current
+            return nil
         }
-        let since = qualifyingSince ?? now
-        qualifyingSince = since
-        guard now - since >= startAfter else {
-            return []
+        call = nil
+        return current.app
+    }
+
+    /// Times every app that looks like a call, and begins the call of the one
+    /// that has looked like one longest, once that has lasted long enough.
+    /// Returns its app if a call began just now.
+    private mutating func lookForACall(_ apps: [App], at now: Duration) -> String? {
+        let looking = apps.filter(\.looksLikeACall).map(\.name)
+        candidates.removeAll { !looking.contains($0.app) }
+        for app in looking where !candidates.contains(where: { $0.app == app }) {
+            candidates.append(Candidate(app: app, since: now))
         }
-        call = Call(app: app.name, quietSince: nil)
-        qualifyingSince = nil
-        return isRecording ? [] : [.record(app.name)]
+        guard let first = candidates.first, now - first.since >= startAfter else {
+            return nil
+        }
+        call = Call(app: first.app, quietSince: nil)
+        candidates = []
+        return first.app
     }
 }

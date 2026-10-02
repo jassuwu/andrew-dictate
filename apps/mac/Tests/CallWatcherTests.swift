@@ -273,6 +273,24 @@ final class CallWatcherTests: XCTestCase {
         )
     }
 
+    // MARK: - two apps at once
+
+    /// Whichever has held the mic and the audio for the threshold first. Where
+    /// the list happens to put it says nothing.
+    func testTheFirstAppToQualifyIsTheCall() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+        let chrome = app("chrome")
+
+        XCTAssertEqual(watcher.observe([zoom], isRecording: false, at: .seconds(0)), [])
+        XCTAssertEqual(watcher.observe([chrome, zoom], isRecording: false, at: .seconds(2)), [])
+        XCTAssertEqual(
+            watcher.observe([chrome, zoom], isRecording: false, at: .seconds(3)),
+            [.record("zoom")]
+        )
+        XCTAssertEqual(watcher.currentCall, "zoom")
+    }
+
     // MARK: - stopping mid-call
 
     /// You pressed stop on purpose. Asking whether to record the same call
