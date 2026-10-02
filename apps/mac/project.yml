@@ -121,6 +121,7 @@ targets:
       - Sources/About/UpdateOffer.swift
       - Sources/About/DailyUpdateCheck.swift
       - Sources/About/UpdateHandOff.swift
+      - Sources/About/CommandRunner.swift
       - path: Sources/Meetings
         excludes:
           - LiveTranscriptView.swift

@@ -159,6 +159,11 @@ enum UpdateOffer {
         case available(Line)
         /// brew is running. a second click has nothing to add.
         case updating
+        /// the new version is in /Applications; this process is the old one.
+        case restartToFinish
+        /// brew failed, ran out of time, or upgraded nothing. the command
+        /// is on the clipboard, so the terminal can say what brew would not.
+        case failedCopied
 
         var title: String {
             switch self {
@@ -166,6 +171,10 @@ enum UpdateOffer {
                 line.title
             case .updating:
                 "updating…"
+            case .restartToFinish:
+                "restart to finish"
+            case .failedCopied:
+                "couldn't update — command copied"
             }
         }
 
@@ -208,5 +217,26 @@ enum UpdateOffer {
         case let .openReleasePage(page):
             return Click(state: state, effect: .open(page))
         }
+    }
+
+    /// brew's run, judged. exit 0 is not proof: brew is happy to upgrade
+    /// nothing. the bundle in /Applications reading newer than this process
+    /// is the proof.
+    static func finished(
+        _ state: LineState,
+        ending: CommandResult.Ending,
+        onDisk: String?,
+        running: String
+    ) -> LineState {
+        guard state == .updating else {
+            return state
+        }
+        guard ending == .exited(0),
+              let onDisk,
+              UpdateCheck.isNewer(tag: onDisk, than: running)
+        else {
+            return .failedCopied
+        }
+        return .restartToFinish
     }
 }

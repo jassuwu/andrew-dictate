@@ -540,6 +540,68 @@ final class UpdateCheckTests: XCTestCase {
         )
     }
 
+    /// brew exited clean and /Applications holds something newer than this
+    /// process: the only step left is a restart.
+    func testAnUpgradeThatLandedOffersTheRestart() {
+        let state = UpdateOffer.finished(
+            .updating,
+            ending: .exited(0),
+            onDisk: "0.9.5",
+            running: "0.9.4"
+        )
+
+        XCTAssertEqual(state, .restartToFinish)
+        XCTAssertEqual(state.title, "restart to finish")
+        XCTAssertTrue(state.isEnabled)
+    }
+
+    func testAFailedOrTimedOutUpgradeIsTheCopiedLine() {
+        for ending: CommandResult.Ending in [.exited(1), .timedOut, .couldNotStart] {
+            let state = UpdateOffer.finished(
+                .updating,
+                ending: ending,
+                onDisk: "0.9.5",
+                running: "0.9.4"
+            )
+
+            XCTAssertEqual(state, .failedCopied, "\(ending)")
+            XCTAssertEqual(state.title, "couldn't update — command copied")
+            XCTAssertTrue(state.isEnabled)
+        }
+    }
+
+    /// exit 0 is not proof: brew is happy to upgrade nothing. only the
+    /// bundle in /Applications reading newer than this process is.
+    func testACleanExitWithTheOldVersionOnDiskIsAFailure() {
+        for onDisk in ["0.9.4", "0.9.3", nil] {
+            XCTAssertEqual(
+                UpdateOffer.finished(
+                    .updating,
+                    ending: .exited(0),
+                    onDisk: onDisk,
+                    running: "0.9.4"
+                ),
+                .failedCopied,
+                onDisk ?? "nil"
+            )
+        }
+    }
+
+    /// a run's end only moves a line that is waiting on it.
+    func testOnlyAnUpdatingLineIsFinished() {
+        for state: UpdateOffer.LineState in [.available(brewLine), .restartToFinish, .failedCopied] {
+            XCTAssertEqual(
+                UpdateOffer.finished(
+                    state,
+                    ending: .exited(1),
+                    onDisk: nil,
+                    running: "0.9.4"
+                ),
+                state
+            )
+        }
+    }
+
     // MARK: - the hand-off: what the click does today
 
     /// the menu closes on the click, so the pill says what happened.
