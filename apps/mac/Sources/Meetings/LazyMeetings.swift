@@ -68,6 +68,11 @@ final class LazyMeetings {
         builtCoordinator?.isWritingOut ?? false
     }
 
+    /// what the menu, the badge and the lamp read.
+    var phase: MeetingPhase {
+        builtCoordinator?.phase ?? .idle
+    }
+
     var elapsed: Duration {
         builtCoordinator?.elapsed ?? .zero
     }

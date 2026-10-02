@@ -44,6 +44,7 @@ final class LazyMeetingsTests: XCTestCase {
         // a stray click can reach without a meeting running
         XCTAssertFalse(meetings.isRecording)
         XCTAssertFalse(meetings.isWritingOut)
+        XCTAssertEqual(meetings.phase, .idle)
         await meetings.untilWrittenOut()
         XCTAssertEqual(meetings.elapsed, .zero)
         XCTAssertNil(meetings.recovering)

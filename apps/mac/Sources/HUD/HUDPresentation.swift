@@ -15,8 +15,8 @@ enum HUDLampState: Equatable, Sendable {
 /// then the only sign a meeting is being recorded.
 enum HUDMeetingLight: Equatable, Sendable {
     case off
-    /// the dim ember a take wears before its mic is heard: the meeting has
-    /// not proved it can hear yet.
+    /// the dim ember a take wears before its mic is heard: the meeting is
+    /// getting ready, its model loading or its tap not yet heard.
     case ember
     /// recording: a low light that holds. it does not follow the voices in
     /// the room and it does not breathe, because it is on for two hours.
@@ -29,15 +29,14 @@ enum HUDMeetingLight: Equatable, Sendable {
     case coolingOut
 }
 
-/// the meeting's side of the lamp, as plain facts. the last two are set by
-/// nothing yet: their looks are built so whoever has a reason to set them
-/// need not touch the drawing.
+/// the meeting's side of the lamp, as plain facts, worked out from the
+/// meeting's phase (`HUDMeetingFacts(phase)`), which the menu and the
+/// badge read too.
 struct HUDMeetingFacts: Equatable, Sendable {
     /// from `record` until the meeting stops.
     var isRecording = false
-    /// its first moments: the tap has not heard the start sound yet.
-    var isProvingItCanHear = false
-    /// a meeting is getting ready to record.
+    /// its first moments: the model is not in yet, or the tap has not
+    /// heard the start sound.
     var isGettingReady = false
     /// something is wrong with the meeting that is on.
     var hasProblem = false
@@ -124,7 +123,7 @@ enum HUDPresentation {
         if facts.hasProblem {
             return .problem
         }
-        if facts.isGettingReady || facts.isProvingItCanHear {
+        if facts.isGettingReady {
             return .ember
         }
         return .steady

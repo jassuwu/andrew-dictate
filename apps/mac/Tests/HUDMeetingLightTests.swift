@@ -29,17 +29,6 @@ final class HUDMeetingLightTests: XCTestCase {
         XCTAssertEqual(stage(meetingLight: light), .meeting(.steady))
     }
 
-    /// until the tap has heard the start sound nothing is trusted, so the
-    /// lamp wears the ember a take wears before its mic is heard.
-    func testItsFirstMomentsWearTheEmber() {
-        let light = HUDPresentation.meetingLight(
-            HUDMeetingFacts(isRecording: true, isProvingItCanHear: true)
-        )
-
-        XCTAssertEqual(light, .ember)
-        XCTAssertEqual(stage(meetingLight: light), .meeting(.ember))
-    }
-
     /// a sentence or a question takes the stage as it always has, and the
     /// light is back the moment it leaves.
     func testAPillTakesTheStageAndTheLightComesBackAfter() {
@@ -77,7 +66,7 @@ final class HUDMeetingLightTests: XCTestCase {
         )
         XCTAssertEqual(
             HUDPresentation.meetingLight(
-                HUDMeetingFacts(isRecording: true, isProvingItCanHear: true),
+                HUDMeetingFacts(isRecording: true, isGettingReady: true),
                 after: .coolingOut
             ),
             .ember
@@ -129,32 +118,31 @@ final class HUDMeetingLightTests: XCTestCase {
         }
     }
 
-    /// getting ready to record (nothing says so yet: the input waits for
-    /// the ticket that has a reason to) wears the same ember as the first
-    /// moments, recording or not.
+    /// until the model is in and the tap has heard the start sound nothing
+    /// is being read, so the lamp wears the ember a take wears before its
+    /// mic is heard.
     func testGettingReadyWearsTheEmber() {
         XCTAssertEqual(
             HUDPresentation.meetingLight(HUDMeetingFacts(isGettingReady: true)),
             .ember
         )
-        XCTAssertEqual(
-            HUDPresentation.meetingLight(
-                HUDMeetingFacts(isRecording: true, isGettingReady: true)
-            ),
-            .ember
+        let light = HUDPresentation.meetingLight(
+            HUDMeetingFacts(isRecording: true, isGettingReady: true)
         )
+        XCTAssertEqual(light, .ember)
+        XCTAssertEqual(stage(meetingLight: light), .meeting(.ember))
     }
 
-    /// a problem (nothing says so yet either) is the attention colour,
-    /// steady, over every other look a meeting has: a meeting that is not
-    /// hearing must never wear the light of one that is. with no meeting
-    /// on it lights nothing, so a problem left set cannot hold the lamp on.
+    /// a problem is the attention colour, steady, over every other look a
+    /// meeting has: a meeting that is not hearing must never wear the light
+    /// of one that is. with no meeting on it lights nothing, so a problem
+    /// left set cannot hold the lamp on.
     func testAProblemWearsTheAttentionColourWhileTheMeetingIsOn() {
         for facts in [
             HUDMeetingFacts(isRecording: true, hasProblem: true),
             HUDMeetingFacts(
                 isRecording: true,
-                isProvingItCanHear: true,
+                isGettingReady: true,
                 hasProblem: true
             ),
             HUDMeetingFacts(isGettingReady: true, hasProblem: true),
@@ -173,6 +161,27 @@ final class HUDMeetingLightTests: XCTestCase {
             ),
             .coolingOut
         )
+    }
+
+    /// the lamp's facts are the meeting's phase, which the menu and the
+    /// badge read too: the ember while it gets ready, the steady light
+    /// while it records, the attention colour while a problem stands, and
+    /// the cool-out from the stop, whether the file is still being written
+    /// or not.
+    func testTheLampFollowsTheMeetingsPhase() {
+        func light(_ phase: MeetingPhase, after previous: HUDMeetingLight) -> HUDMeetingLight {
+            HUDPresentation.meetingLight(HUDMeetingFacts(phase), after: previous)
+        }
+
+        XCTAssertEqual(light(.idle, after: .off), .off)
+        XCTAssertEqual(light(.gettingReady, after: .off), .ember)
+        XCTAssertEqual(light(.recording, after: .ember), .steady)
+        XCTAssertEqual(light(.problem(.cannotHearYourMic(nil)), after: .steady), .problem)
+        XCTAssertEqual(light(.recording, after: .problem), .steady)
+        XCTAssertEqual(light(.writingOut(recovering: nil), after: .steady), .coolingOut)
+        XCTAssertEqual(light(.idle, after: .problem), .coolingOut)
+        // a recovery at launch is not a meeting being recorded: no light.
+        XCTAssertEqual(light(.writingOut(recovering: "zoom"), after: .off), .off)
     }
 }
 

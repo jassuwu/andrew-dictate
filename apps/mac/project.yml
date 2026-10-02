@@ -156,6 +156,7 @@ targets:
       - Sources/App/Capabilities.swift
       - Sources/App/CaptureInterruptionNotice.swift
       - Sources/App/EnginePreparationState.swift
+      - Sources/App/MeetingPhaseLooks.swift
       - Sources/App/RemovalPlan.swift
       - Sources/App/RemovalViewModel.swift
       - Sources/App/RetryBuffer.swift

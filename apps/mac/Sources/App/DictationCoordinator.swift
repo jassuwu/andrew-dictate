@@ -2508,12 +2508,13 @@ extension DictationCoordinator {
         built.onLine = { [weak self] line in
             self?.liveTranscript.upsert(line)
         }
-        // the lamp follows the meeting. read from the value handed over: a
-        // @Published sink runs before the new state is stored.
-        built.$state
+        // the lamp follows the meeting's phase, which the menu and the badge
+        // read too. from the value handed over: a @Published sink runs
+        // before the new phase is stored.
+        built.$phase
             .removeDuplicates()
-            .sink { [weak self] state in
-                self?.meetingStateChanged(state)
+            .sink { [weak self] phase in
+                self?.meetingPhaseChanged(phase)
             }
             .store(in: &meetingCancellables)
         built.recordHookRun = { [weak self] run in
@@ -2658,22 +2659,13 @@ extension DictationCoordinator {
         }
     }
 
-    /// the lamp reads the meeting's state: the ember while it proves it can
-    /// hear, the steady light while it records (a rebuild included: the
-    /// pill says the gap), out with the cool-out when it stops. `cannotHear`
-    /// is a meeting ending, not one recording, and the pill says why.
-    private func meetingStateChanged(_ state: MeetingSession.State) {
-        switch state {
-        case .provingItCanHear:
-            meetingFacts.isRecording = true
-            meetingFacts.isProvingItCanHear = true
-        case .recording, .rebuilding:
-            meetingFacts.isRecording = true
-            meetingFacts.isProvingItCanHear = false
-        case .idle, .cannotHear:
-            meetingFacts.isRecording = false
-            meetingFacts.isProvingItCanHear = false
-        }
+    /// the lamp reads the meeting's phase: the ember while it gets ready,
+    /// the steady light while it records (a rebuild included: the pill
+    /// says the gap), the attention colour while a problem stands, out
+    /// with the cool-out at the stop. read from the phase, not the events:
+    /// a mute that ends a mic problem says `micMuted`, not that it cleared.
+    private func meetingPhaseChanged(_ phase: MeetingPhase) {
+        meetingFacts = HUDMeetingFacts(phase)
         followTheMeeting()
     }
 
