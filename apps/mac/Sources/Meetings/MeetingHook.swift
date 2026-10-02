@@ -14,6 +14,10 @@ struct MeetingSavedEvent: Equatable, Sendable {
     /// `[began_s, ended_s]` pairs.
     let gaps: [[Double]]
     let recovered: Bool
+    /// The file was replaced because you had the meeting transcribed again
+    /// from its kept audio, not written for the first time. An agent that
+    /// copied the first one should copy this one over it.
+    var again = false
 
     var folder: URL { transcript.deletingLastPathComponent() }
 
@@ -28,6 +32,7 @@ struct MeetingSavedEvent: Equatable, Sendable {
             "complete": complete,
             "gaps": gaps,
             "recovered": recovered,
+            "again": again,
         ]
         return try JSONSerialization.data(
             withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
@@ -51,6 +56,9 @@ struct MeetingSavedEvent: Equatable, Sendable {
             "ANDREW_COMPLETE": String(complete),
             "ANDREW_GAPS": gapsJSON,
             "ANDREW_RECOVERED": String(recovered),
+            // `0` and `1`, not `false` and `true`: it is the one flag a
+            // one-line hook tests with `[ "$ANDREW_AGAIN" = 1 ]`.
+            "ANDREW_AGAIN": again ? "1" : "0",
         ]
     }
 

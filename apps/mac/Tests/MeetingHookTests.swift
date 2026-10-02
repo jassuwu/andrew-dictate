@@ -21,13 +21,14 @@ final class MeetingHookTests: XCTestCase {
         XCTAssertEqual(
             Set(object.keys),
             ["event", "transcript", "folder", "app", "started_at",
-             "duration_s", "complete", "gaps", "recovered"]
+             "duration_s", "complete", "gaps", "recovered", "again"]
         )
         XCTAssertEqual(object["event"] as? String, "meeting-saved")
         XCTAssertEqual(object["app"] as? String, "zoom")
         XCTAssertEqual(object["duration_s"] as? Int, 6120)
         XCTAssertEqual(object["complete"] as? Bool, false)
         XCTAssertEqual(object["recovered"] as? Bool, false)
+        XCTAssertEqual(object["again"] as? Bool, false, "a first save is not a rerun")
         XCTAssertEqual(object["gaps"] as? [[Double]], [[41.2, 63.0]])
         XCTAssertEqual(object["folder"] as? String, dir.path)
     }
@@ -42,7 +43,21 @@ final class MeetingHookTests: XCTestCase {
         XCTAssertEqual(env["ANDREW_COMPLETE"], "false")
         XCTAssertEqual(env["ANDREW_GAPS"], "[[41.2,63.0]]")
         XCTAssertEqual(env["ANDREW_RECOVERED"], "false")
+        XCTAssertEqual(env["ANDREW_AGAIN"], "0")
         XCTAssertNotNil(env["ANDREW_STARTED_AT"])
+    }
+
+    /// a transcript made again says so, and the rest of the payload is as it
+    /// is for a save: the same event, the same keys, the new file's facts.
+    func testATranscriptMadeAgainSaysSoInThePayloadAndTheEnvironment() throws {
+        let again = event(again: true)
+
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: again.payloadJSON()) as? [String: Any])
+        XCTAssertEqual(object["again"] as? Bool, true)
+        XCTAssertEqual(object["event"] as? String, "meeting-saved")
+        XCTAssertEqual(again.environment()["ANDREW_AGAIN"], "1")
+        XCTAssertEqual(again.environment()["ANDREW_EVENT"], "meeting-saved")
     }
 
     func testAScriptThatExitsZeroSucceedsAndItsOutputIsLogged() async throws {
@@ -98,7 +113,7 @@ final class MeetingHookTests: XCTestCase {
 
     // MARK: -
 
-    private func event() -> MeetingSavedEvent {
+    private func event(again: Bool = false) -> MeetingSavedEvent {
         MeetingSavedEvent(
             transcript: dir.appendingPathComponent("t.md"),
             app: "zoom",
@@ -106,7 +121,8 @@ final class MeetingHookTests: XCTestCase {
             durationS: 6120,
             complete: false,
             gaps: [[41.2, 63.0]],
-            recovered: false
+            recovered: false,
+            again: again
         )
     }
 
