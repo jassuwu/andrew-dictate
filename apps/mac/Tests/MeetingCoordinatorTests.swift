@@ -498,6 +498,26 @@ final class MeetingCoordinatorTests: XCTestCase {
         XCTAssertEqual(MeetingSpool(root: dir.appendingPathComponent("spool")).orphans().count, 0)
     }
 
+    /// The menu's stop and the banner's, or one click landing twice: the
+    /// first stop is the one, the menu says so at once, and the second
+    /// finds nothing left to stop.
+    func testTwoStopsWriteOneFile() async throws {
+        let c = coordinator()
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+
+        c.stop()
+        XCTAssertEqual(c.state, .idle)
+        c.stop()
+        await settle(for: 1.0)
+
+        XCTAssertEqual(
+            MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).count, 1)
+        XCTAssertEqual(events.filter { $0 == .writingItOut }.count, 1, "\(events)")
+    }
+
     // MARK: - helpers
 
     private func loud(at: Duration) -> MeetingAudioChunk {

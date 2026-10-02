@@ -119,12 +119,12 @@ final class MeetingCoordinator: ObservableObject {
 
     /// The meeting being recorded, from `start` until it stops.
     private var current: Meeting?
+    /// The last tap being closed, while it still is. One source, one tap:
+    /// the next meeting opens it after this, never during it.
+    private var tapClosing: Task<Void, Never>?
     private var session: MeetingSession
     private var health: TapHealthMonitor
-    private var captureTask: Task<Void, Never>?
-    private var linesTask: Task<Void, Never>?
     private var nudgePending = false
-    private var isRebuilding = false
     /// The tap hears this app too, so the start sound it plays to prove
     /// itself lands in the far channel a moment after every rebuild. Until
     /// this mark passes, audio is proof the tap works and nothing more —
@@ -141,7 +141,6 @@ final class MeetingCoordinator: ObservableObject {
     /// two are the wall the meeting is measured against when that happens.
     private var startedOn: ContinuousClock.Instant?
     private var lastChunkArrived: ContinuousClock.Instant?
-    private var watchdogTask: Task<Void, Never>?
     /// injected so a test can move the wall without waiting on it.
     private let now: @Sendable () -> ContinuousClock.Instant
     /// the date a meeting says it started on, in its file name and its front
@@ -207,10 +206,11 @@ final class MeetingCoordinator: ObservableObject {
         probeUntil = thresholds.probeTimeout
         appIsPlaying = nil
         lastLivenessCheck = nil
-        startWatchdog()
+        startWatchdog(for: meeting)
         publish()
 
-        captureTask = Task { [weak self] in
+        let lastTapClosed = tapClosing
+        meeting.capture = Task { [weak self] in
             guard let self else { return }
 
             // Ours to get right: the spool and the engine. A failure here is
@@ -225,12 +225,12 @@ final class MeetingCoordinator: ObservableObject {
                 transcriber = try await makeTranscriber(prefs.model)
             } catch {
                 logger.error("meeting could not start: \(error.localizedDescription, privacy: .public)")
+                abandonKeepingSpool(meeting)
                 onEvent?(.engineFailed(error.localizedDescription))
-                abandonKeepingSpool()
                 return
             }
             meeting.transcriber = transcriber
-            listenForLines(transcriber)
+            listenForLines(transcriber, for: meeting)
             // Loading whisper takes ten-odd seconds; the tap opens now and
             // the transcriber buffers what it is fed until ready.
             let loading = Task { try await transcriber.begin() }
@@ -239,10 +239,16 @@ final class MeetingCoordinator: ObservableObject {
                     try await loading.value
                 } catch {
                     guard let self else { return }
+                    abandonKeepingSpool(meeting)
                     onEvent?(.engineFailed(error.localizedDescription))
-                    abandonKeepingSpool()
                 }
             }
+
+            // The last meeting's tap may still be closing on the same
+            // source; this one opens after it, and not at all if it was
+            // stopped while it waited.
+            await lastTapClosed?.value
+            guard current === meeting else { return }
 
             // Theirs: the tap. This is the one that reads as "can't hear".
             let chunks: AsyncStream<MeetingAudioChunk>
@@ -251,6 +257,7 @@ final class MeetingCoordinator: ObservableObject {
             } catch {
                 logger.error("tap failed to open: \(error.localizedDescription, privacy: .public)")
                 loading.cancel()
+                guard current === meeting else { return }
                 session.neverHeardTheProbe()
                 publish()
                 onEvent?(.cannotHear(app: meeting.app))
@@ -258,7 +265,9 @@ final class MeetingCoordinator: ObservableObject {
                 return
             }
             for await chunk in chunks {
-                guard !Task.isCancelled else { break }
+                // a chunk that lands after its meeting stopped is dropped,
+                // never handed to the next one.
+                guard current === meeting else { break }
                 await ingest(chunk, into: meeting)
             }
         }
@@ -272,42 +281,17 @@ final class MeetingCoordinator: ObservableObject {
     /// hear" — a second line saying nothing was kept would be the same news
     /// twice.
     private func stop(announcingNothingKept: Bool) {
-        guard session.state != .idle, let meeting = current else { return }
-        captureTask?.cancel()
-        captureTask = nil
-        linesTask?.cancel()
-        linesTask = nil
-        watchdogTask?.cancel()
-        watchdogTask = nil
-
+        guard let meeting = current else { return }
+        // A tap that never came back leaves an open gap; closing it at the
+        // wall makes the file cover the whole call instead of stopping where
+        // the audio did.
+        let recording = letGo(of: meeting, at: max(elapsed, wallElapsed))
+        let tapClosed = closeTheTap(of: meeting)
         Task { [weak self] in
-            guard let self else { return }
-            await source.stop()
-            // A tap that never came back leaves an open gap; closing it at
-            // the wall makes the file cover the whole call instead of
-            // stopping where the audio did.
-            let recording = session.finish(at: max(elapsed, wallElapsed))
-            startedOn = nil
-            if current === meeting { current = nil }
-            publish()
-
-            // From here on the meeting is written out from what it holds
-            // itself: the next one can start in the meantime, with a spool,
-            // an engine and a start of its own.
-            guard let recording, let handle = meeting.handle else {
-                if let handle = meeting.handle { spool.discard(handle) }
-                if announcingNothingKept { onEvent?(.nothingToKeep) }
-                return
-            }
-
-            onEvent?(.writingItOut)
-            let turns = await meeting.transcriber?.finish() ?? []
-            meeting.transcriber = nil
-            meeting.audioFile = nil
-            await finish(
-                turns: turns, recording: recording, handle: handle,
-                app: meeting.app, started: meeting.started, model: preferences().model,
-                recovered: false)
+            await tapClosed.value
+            await self?.writeOut(
+                meeting, recording: recording,
+                announcingNothingKept: announcingNothingKept)
         }
     }
 
@@ -315,18 +299,47 @@ final class MeetingCoordinator: ObservableObject {
     /// stays on disk, and the next launch finds it and transcribes it as
     /// `recovered`. Nothing is written now, because a transcript with no
     /// words in it would read as a meeting where nobody spoke.
-    private func abandonKeepingSpool() {
-        captureTask?.cancel()
-        captureTask = nil
-        linesTask?.cancel()
-        linesTask = nil
-        watchdogTask?.cancel()
-        watchdogTask = nil
-        startedOn = nil
+    ///
+    /// Only the meeting being recorded is abandoned. One that has already
+    /// stopped is being written out with what it has, and the one recording
+    /// now is not its failure to end.
+    private func abandonKeepingSpool(_ meeting: Meeting) {
+        guard current === meeting else { return }
+        _ = letGo(of: meeting, at: elapsed)
+        _ = closeTheTap(of: meeting)
+    }
+
+    /// The meeting stops being the one recorded, before anything is
+    /// awaited: the menu reads idle at once, a second stop finds nothing to
+    /// stop, and the next meeting can start while this one is written out.
+    /// Returns what it captured, or nil if it never heard anything.
+    private func letGo(of meeting: Meeting, at end: Duration) -> MeetingSession.Recording? {
         current = nil
-        Task { [source] in await source.stop() }
-        _ = session.finish(at: elapsed)
+        meeting.capture?.cancel()
+        meeting.lines?.cancel()
+        meeting.watchdog?.cancel()
+        let recording = session.finish(at: end)
+        startedOn = nil
         publish()
+        return recording
+    }
+
+    /// The source's stop, once the meeting is done with it: an open or a
+    /// rebuild it still has in flight lands first, so the stop is the last
+    /// word on its tap. Chained behind the last one, and the next meeting
+    /// opens its tap behind this.
+    private func closeTheTap(of meeting: Meeting) -> Task<Void, Never> {
+        let lastTapClosed = tapClosing
+        let capture = meeting.capture
+        let rebuild = meeting.rebuild
+        let closing = Task { [source] in
+            await lastTapClosed?.value
+            await capture?.value
+            await rebuild?.value
+            await source.stop()
+        }
+        tapClosing = closing
+        return closing
     }
 
     // MARK: - the tap that stopped calling back
@@ -343,9 +356,8 @@ final class MeetingCoordinator: ObservableObject {
 
     /// The machine never slept; the IOProc died anyway (a driver panic, a
     /// device yanked). Nothing will wake us for that, so a timer asks.
-    private func startWatchdog() {
-        watchdogTask?.cancel()
-        watchdogTask = Task { [weak self] in
+    private func startWatchdog(for meeting: Meeting) {
+        meeting.watchdog = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: MeetingCoordinator.watchdogInterval)
                 guard let self, !Task.isCancelled else { return }
@@ -355,7 +367,8 @@ final class MeetingCoordinator: ObservableObject {
     }
 
     private func noteTheTapStoppedCallingBack(after limit: Duration) {
-        guard session.state == .recording, let lastChunkArrived else { return }
+        guard let meeting = current, session.state == .recording,
+              let lastChunkArrived else { return }
         guard now() - lastChunkArrived >= limit else { return }
 
         // The gap begins where the audio stopped, not where the wall is now
@@ -365,7 +378,7 @@ final class MeetingCoordinator: ObservableObject {
         elapsed = max(elapsed, wallElapsed)
         publish()
         onEvent?(.gapBegan)
-        rebuildTap()
+        rebuildTap(meeting)
     }
 
     /// How long the meeting has actually been going. Audio time is a frame
@@ -409,6 +422,9 @@ final class MeetingCoordinator: ObservableObject {
         if let audioFile = meeting.audioFile {
             try? await audioFile.append(chunk)
         }
+        // stopped while the chunk was being written: everything below is the
+        // meeting being recorded, and this one no longer is.
+        guard current === meeting else { return }
 
         // A HAL round trip, and chunks arrive ten times a second: once a
         // second is plenty to tell a quiet room from a dead tap.
@@ -454,13 +470,14 @@ final class MeetingCoordinator: ObservableObject {
                 session.tapWentSilent(at: elapsed)
                 publish()
                 onEvent?(.gapBegan)
-                rebuildTap()
+                rebuildTap(meeting)
             }
         }
 
         if session.state == .recording || session.state == .rebuilding {
             await meeting.transcriber?.feed(chunk)
         }
+        guard current === meeting else { return }
 
         if !nudgePending, session.shouldNudge(at: elapsed) {
             nudgePending = true
@@ -468,12 +485,13 @@ final class MeetingCoordinator: ObservableObject {
         }
     }
 
-    private func rebuildTap() {
-        guard !isRebuilding else { return }
-        isRebuilding = true
-        Task { [weak self] in
-            guard let self else { return }
-            defer { isRebuilding = false }
+    private func rebuildTap(_ meeting: Meeting) {
+        guard meeting.rebuild == nil else { return }
+        meeting.rebuild = Task { [weak self] in
+            defer { meeting.rebuild = nil }
+            // stopped before the rebuild began: there is no tap of its own
+            // left to rebuild.
+            guard let self, current === meeting else { return }
             do {
                 // Set before the rebuild, not after: the tone can be heard
                 // the instant the tap is back.
@@ -483,17 +501,18 @@ final class MeetingCoordinator: ObservableObject {
                 // again; a rebuild that produces silence is just a new gap.
             } catch {
                 logger.error("tap rebuild failed: \(error.localizedDescription, privacy: .public)")
+                guard current === meeting else { return }
                 session.rebuildFailed()
                 publish()
-                if let app { onEvent?(.cannotHear(app: MeetingApps.displayName(app))) }
+                onEvent?(.cannotHear(app: meeting.app))
                 // Most of a meeting is on the spool; write what there is.
                 stop(announcingNothingKept: false)
             }
         }
     }
 
-    private func listenForLines(_ transcriber: any MeetingTranscriber) {
-        linesTask = Task { [weak self] in
+    private func listenForLines(_ transcriber: any MeetingTranscriber, for meeting: Meeting) {
+        meeting.lines = Task { [weak self] in
             for await line in transcriber.lines {
                 guard let self, !Task.isCancelled else { break }
                 if let i = liveLines.firstIndex(where: { $0.id == line.id }) {
@@ -507,6 +526,30 @@ final class MeetingCoordinator: ObservableObject {
     }
 
     // MARK: - the end
+
+    /// A stopped meeting, once its tap is closed and nothing more can be fed
+    /// to it: its last decode, then its file. Everything here is its own,
+    /// so the next meeting can be recording all the while.
+    private func writeOut(
+        _ meeting: Meeting,
+        recording: MeetingSession.Recording?,
+        announcingNothingKept: Bool
+    ) async {
+        guard let recording, let handle = meeting.handle else {
+            if let handle = meeting.handle { spool.discard(handle) }
+            if announcingNothingKept { onEvent?(.nothingToKeep) }
+            return
+        }
+
+        onEvent?(.writingItOut)
+        let turns = await meeting.transcriber?.finish() ?? []
+        meeting.transcriber = nil
+        meeting.audioFile = nil
+        await finish(
+            turns: turns, recording: recording, handle: handle,
+            app: meeting.app, started: meeting.started, model: preferences().model,
+            recovered: false)
+    }
 
     private func finish(
         turns: [MeetingTurn],
@@ -667,6 +710,12 @@ extension MeetingCoordinator {
         var handle: MeetingSpool.Handle?
         var audioFile: SpoolAudioFile?
         var transcriber: (any MeetingTranscriber)?
+        /// Opens the tap, then reads it until the meeting stops.
+        var capture: Task<Void, Never>?
+        var lines: Task<Void, Never>?
+        var watchdog: Task<Void, Never>?
+        /// A rebuild of its tap, while one is in flight.
+        var rebuild: Task<Void, Never>?
 
         init(app: String, started: Date) {
             self.app = app
