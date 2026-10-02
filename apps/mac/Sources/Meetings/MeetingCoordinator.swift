@@ -108,6 +108,9 @@ final class MeetingCoordinator: ObservableObject {
     var onEvent: (@MainActor (MeetingEvent) -> Void)?
     var onLine: (@MainActor (LiveLine) -> Void)?
     var recordHookRun: (@MainActor (HookRun) -> Void)?
+    /// How each meeting ended, once, whatever the ending: the app keeps it
+    /// where evidence goes. Never any of the words.
+    var keepMeetingRecord: (@MainActor (MeetingRecord) -> Void)?
 
     let thresholds: MeetingThresholds
 
@@ -640,6 +643,9 @@ final class MeetingCoordinator: ObservableObject {
             return nil
         }
         try? spool.finish(handle)
+        keepMeetingRecord?(MeetingRecord(
+            outcome: .saved, app: app, model: model.rawValue,
+            startedAt: started, durationS: recording.duration.totalSeconds))
 
         let summary = (try? MeetingTranscriptFile.summary(of: url)) ?? MeetingSummary(
             fileURL: url, app: app, started: started, duration: recording.duration,
