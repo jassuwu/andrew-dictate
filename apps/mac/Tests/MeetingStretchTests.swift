@@ -20,8 +20,6 @@ final class MeetingStretchTests: XCTestCase {
     private var diarizer: RecordingDiarizer!
     private var events: [MeetingEvent] = []
 
-    private let zoom = RunningApp(name: "zoom.us", bundleID: "us.zoom.xos", pid: 42)
-
     override func setUp() async throws {
         dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("meeting-stretches-\(UUID().uuidString)")
@@ -40,7 +38,7 @@ final class MeetingStretchTests: XCTestCase {
 
     func testWhatYouSayIsYoursAndStampedWhereYouBeganToSayIt() async throws {
         let c = coordinator(stretches())
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
 
         await play([you("the deploy is blocked", from: 1.3, to: 2.5)], through: 3.5, on: c)
@@ -56,7 +54,7 @@ final class MeetingStretchTests: XCTestCase {
     /// was louder.
     func testTheFarSideIsThemAndTheTurnsComeInTheOrderTheyWereSaid() async throws {
         let c = coordinator(stretches())
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
 
         await play([
@@ -84,7 +82,7 @@ final class MeetingStretchTests: XCTestCase {
     /// folded into the other or lost under it.
     func testBothSidesAtOnceIsATurnEach() async throws {
         let c = coordinator(stretches())
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
 
         await play([
@@ -112,7 +110,7 @@ final class MeetingStretchTests: XCTestCase {
     /// and stops where "one" did instead.
     func testEachStretchReachesTheEngineOnceAndNoAudioTwice() async throws {
         let c = coordinator(stretches(hangover: .milliseconds(200)))
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
 
         await play([
@@ -140,7 +138,7 @@ final class MeetingStretchTests: XCTestCase {
     /// handed over for 5.4 s said, pre-roll included.
     func testSpeechLongerThanTheCeilingIsCutIntoStretchesWithNothingLostBetween() async throws {
         let c = coordinator(stretches(ceiling: .seconds(2)))
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
 
         await play([you("and another thing", from: 1.3, to: 6.4)], through: 7.5, on: c)
@@ -168,7 +166,7 @@ final class MeetingStretchTests: XCTestCase {
     /// and a marker in front of words is taken off them.
     func testMarkersForNoSpeechAndEmptyTextAreNotTurns() async throws {
         let c = coordinator(stretches())
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
 
         await play([
@@ -204,7 +202,7 @@ final class MeetingStretchTests: XCTestCase {
     func testAfterAGapTheTurnsAreOnTheMeetingsClockAndTheSplitHearsTheSpool() async throws {
         let clock = FakeClock()
         let c = coordinator(stretches(), clock: clock)
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
 
         await play([them("can you hear me", from: 1.3, to: 3.0)], through: 3.0, on: c)
@@ -233,7 +231,7 @@ final class MeetingStretchTests: XCTestCase {
     func testWhatIsSaidWhileTheModelLoadsIsTranscribedOnceItHas() async throws {
         engine.holdLoading()
         let c = coordinator(stretches())
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
 
         await play([
@@ -261,7 +259,7 @@ final class MeetingStretchTests: XCTestCase {
     func testStoppingBeforeTheModelHasLoadedStillSavesTheWords() async throws {
         engine.holdLoading()
         let c = coordinator(stretches())
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
 
         await play([you("hello", from: 0.3, to: 1.0)], through: 1.0, on: c)
@@ -300,7 +298,7 @@ final class MeetingStretchTests: XCTestCase {
     func testAStretchTheEngineFailsOnOnceIsTriedAgain() async throws {
         engine.failing("the deploy is blocked", times: 1)
         let c = coordinator(stretches())
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
 
         await play([
@@ -328,7 +326,7 @@ final class MeetingStretchTests: XCTestCase {
     func testAStretchTheEngineFailsOnTwiceIsSkippedAndTheRestIsSaved() async throws {
         engine.failing("the deploy is blocked", times: 2)
         let c = coordinator(stretches())
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
 
         await play([
@@ -401,7 +399,7 @@ final class MeetingStretchTests: XCTestCase {
         engine.failing("since when", times: 2)
         let transcriber = stretches(clock: wall)
         let c = coordinator(transcriber)
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
 
         await play([

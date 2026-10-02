@@ -13,8 +13,6 @@ final class MeetingCoordinatorTests: XCTestCase {
     private var meetingModel: MeetingModel = .whisperLargeV3Turbo
     private var hook: URL?
 
-    private let zoom = RunningApp(name: "zoom.us", bundleID: "us.zoom.xos", pid: 42)
-
     override func setUp() async throws {
         dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("meeting-coordinator-\(UUID().uuidString)")
@@ -65,7 +63,7 @@ final class MeetingCoordinatorTests: XCTestCase {
 
     func testHearingTheProbeStartsTheRecording() async throws {
         let c = coordinator()
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         XCTAssertEqual(c.state, .provingItCanHear)
 
@@ -73,13 +71,14 @@ final class MeetingCoordinatorTests: XCTestCase {
         await settle()
 
         XCTAssertEqual(c.state, .recording)
-        XCTAssertEqual(events, [.started(app: "zoom")])
+        XCTAssertEqual(events, [.started])
+        XCTAssertEqual(events.first?.hudText, "recording a meeting")
         XCTAssertEqual(c.dictationResponse, .refuseAndSayWhy)
     }
 
     func testSilenceThroughTheProbeMeansItCannotHear() async throws {
         let c = coordinator()
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
 
         source.send(quiet(at: .zero))
@@ -89,10 +88,10 @@ final class MeetingCoordinatorTests: XCTestCase {
         // "can't hear" is said once and the session ends — the menu must
         // never read "recording" over a tap that delivered nothing.
         XCTAssertEqual(c.state, .idle)
-        XCTAssertEqual(events, [.cannotHear(app: "zoom")])
+        XCTAssertEqual(events, [.cannotHear])
         // the pill ignores the mouse, so it points at setup rather than at a
         // switch the user would then have to go and find.
-        XCTAssertEqual(events.first?.hudText, "can't hear zoom — opening setup")
+        XCTAssertEqual(events.first?.hudText, "can't hear the mac — opening setup")
         XCTAssertEqual(c.dictationResponse, .allow)
         XCTAssertEqual(MeetingSpool(root: dir.appendingPathComponent("spool")).orphans().count, 0)
     }
@@ -104,7 +103,7 @@ final class MeetingCoordinatorTests: XCTestCase {
             .init(speaker: .them(nil), at: .seconds(2), text: "hi"),
         ]
         let c = coordinator()
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
         source.send(loud(at: .seconds(1)))
@@ -117,7 +116,7 @@ final class MeetingCoordinatorTests: XCTestCase {
         let all = MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs"))
         XCTAssertEqual(all.count, 1)
         let saved = try XCTUnwrap(all.first)
-        XCTAssertEqual(saved.app, "zoom")
+        XCTAssertEqual(saved.app, "meeting")
         XCTAssertTrue(saved.complete)
         let body = try String(contentsOf: saved.fileURL, encoding: .utf8)
         XCTAssertTrue(body.contains("[00:00:02] them 1: hi"), body)
@@ -133,7 +132,7 @@ final class MeetingCoordinatorTests: XCTestCase {
     func testAFailingHookIsAnnounced() async throws {
         hook = try script("#!/bin/sh\nexit 7\n")
         let c = coordinator()
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
         await settle()
@@ -146,7 +145,7 @@ final class MeetingCoordinatorTests: XCTestCase {
 
     func testStoppingBeforeAnythingWasHeardKeepsNothing() async throws {
         let c = coordinator()
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(quiet(at: .zero))
         await settle()
@@ -160,7 +159,7 @@ final class MeetingCoordinatorTests: XCTestCase {
 
     func testFaintAudioCountsAsActivity() async throws {
         let c = coordinator()
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
         // Quiet, but not long enough to be a dead tap: each chunk is a second
@@ -184,7 +183,7 @@ final class MeetingCoordinatorTests: XCTestCase {
         // the real source chirps on every rebuild and the tap hears this
         // app: a fake that stays mute cannot see the bug.
         source.toneOnRebuild = loud(at: .zero)
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
         await settle()
@@ -203,7 +202,7 @@ final class MeetingCoordinatorTests: XCTestCase {
     func testAnsweringTheNudgeBuysAnotherQuietSpan() async throws {
         let c = coordinator()
         source.toneOnRebuild = loud(at: .zero)
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
         await settle()
@@ -227,7 +226,7 @@ final class MeetingCoordinatorTests: XCTestCase {
     func testAMacThatSleptThroughAMeetingSaysSoInTheFile() async throws {
         let clock = FakeClock()
         let c = coordinator(clock: clock)
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
         source.send(loud(at: .seconds(1_082)))
@@ -269,7 +268,7 @@ final class MeetingCoordinatorTests: XCTestCase {
     func testATapStillCallingBackIsNotDeclaredDead() async throws {
         let clock = FakeClock()
         let c = coordinator(clock: clock)
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
         await settle()
@@ -285,7 +284,7 @@ final class MeetingCoordinatorTests: XCTestCase {
 
     func testLiveLinesAreUpsertedById() async throws {
         let c = coordinator()
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
         let id = UUID()
@@ -357,7 +356,7 @@ final class MeetingCoordinatorTests: XCTestCase {
     func testAQuietRoomIsNotRecordedAsDamage() async throws {
         let c = coordinator()
         source.playing = false
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
         await settle()
@@ -411,6 +410,31 @@ final class MeetingCoordinatorTests: XCTestCase {
             "zoom · 1h 42m · recovered · 2026-09-05-1402-zoom.md")
     }
 
+    // MARK: - what a meeting is called
+
+    /// Nothing picks an app any more (ADR 0049): a meeting nobody named is
+    /// a `meeting`, in its file's name, its front matter and what the hook
+    /// is told.
+    func testAMeetingStartedWithNoNameIsSavedAsAMeeting() async throws {
+        hook = try script("#!/bin/sh\ncat > \"$ANDREW_FOLDER/seen.json\"\nexit 0\n")
+        let c = coordinator()
+        c.start()
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+        c.stop()
+        await settle(for: 1.5)
+
+        let saved = try XCTUnwrap(
+            MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).first)
+        XCTAssertTrue(
+            saved.fileURL.lastPathComponent.hasSuffix("-meeting.md"),
+            saved.fileURL.lastPathComponent)
+        let body = try String(contentsOf: saved.fileURL, encoding: .utf8)
+        XCTAssertTrue(body.contains("\napp: meeting\n"), body)
+        XCTAssertEqual(try told(beside: saved)["app"] as? String, "meeting")
+    }
+
     // MARK: - one meeting, one file
 
     /// Stop, then start again while the first is still being written out:
@@ -429,7 +453,7 @@ final class MeetingCoordinatorTests: XCTestCase {
             Date(timeIntervalSince1970: 1_787_003_600),
         ])
 
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
         source.send(loud(at: .seconds(1)))
@@ -437,7 +461,7 @@ final class MeetingCoordinatorTests: XCTestCase {
         c.stop()
         await held(first)
 
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
         source.send(loud(at: .seconds(1)))
@@ -473,14 +497,14 @@ final class MeetingCoordinatorTests: XCTestCase {
             Date(timeIntervalSince1970: 1_787_003_600),
         ])
 
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
         await settle()
         c.stop()
         await held(first)
 
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         first.release()
         await settle()
@@ -507,7 +531,7 @@ final class MeetingCoordinatorTests: XCTestCase {
     /// finds nothing left to stop.
     func testTwoStopsWriteOneFile() async throws {
         let c = coordinator()
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
         await settle()
@@ -526,7 +550,7 @@ final class MeetingCoordinatorTests: XCTestCase {
     /// still closing opens its own once that is done, not on top of it.
     func testANewMeetingOpensTheTapOnlyOnceTheLastOneHasClosed() async throws {
         let c = coordinator()
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
         await settle()
@@ -536,7 +560,7 @@ final class MeetingCoordinatorTests: XCTestCase {
         for _ in 0..<200 where !source.isClosing {
             try await Task.sleep(for: .milliseconds(10))
         }
-        c.start(tapping: zoom)
+        c.start()
         await settle()
         source.releaseStop()
         await source.awaitStart()
@@ -552,7 +576,7 @@ final class MeetingCoordinatorTests: XCTestCase {
     /// it, and tells the hook it started with.
     func testSettingsChangedMidMeetingAreForTheNextOne() async throws {
         let c = coordinator()
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
         await settle()
@@ -589,7 +613,7 @@ final class MeetingCoordinatorTests: XCTestCase {
 
         c.recoverOrphans()
         await held(recovery)
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
         await settle()
@@ -601,7 +625,7 @@ final class MeetingCoordinatorTests: XCTestCase {
         await settle(for: 1.0)
 
         let all = MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs"))
-        XCTAssertEqual(all.map(\.app), ["zoom", "teams"])
+        XCTAssertEqual(all.map(\.app), ["meeting", "teams"])
         XCTAssertEqual(all.map(\.recovered), [false, true])
         let bodies = try all.map { try String(contentsOf: $0.fileURL, encoding: .utf8) }
         XCTAssertEqual(bodies.map { $0.contains("[00:00:01] you: live words") }, [true, false])
@@ -629,7 +653,7 @@ final class MeetingCoordinatorTests: XCTestCase {
 
         c.recoverOrphans()
         await held(teams)
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
         await settle()
@@ -648,7 +672,7 @@ final class MeetingCoordinatorTests: XCTestCase {
         XCTAssertEqual(recoveries(), [.recovering(app: "teams"), .recovering(app: "meet")])
         XCTAssertEqual(
             MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).map(\.app),
-            ["zoom", "meet", "teams"])
+            ["meeting", "meet", "teams"])
     }
 
     /// Recovery runs a few seconds after launch, and a meeting started in
@@ -660,14 +684,14 @@ final class MeetingCoordinatorTests: XCTestCase {
             .init(speaker: .you, at: .seconds(1), text: "live words")])
         transcribers.lineUp(live)
         let c = coordinator()
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
         await settle()
 
         c.recoverOrphans()
         await settle()
-        XCTAssertFalse(events.contains(.recovering(app: "zoom")), "\(events)")
+        XCTAssertFalse(events.contains(.recovering(app: "meeting")), "\(events)")
         XCTAssertEqual(try spoolFolders(), 1)
 
         source.send(loud(at: .seconds(1)))
@@ -689,7 +713,7 @@ final class MeetingCoordinatorTests: XCTestCase {
         live.holds = true
         transcribers.lineUp(live)
         let c = coordinator()
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
         await settle()
@@ -698,7 +722,7 @@ final class MeetingCoordinatorTests: XCTestCase {
 
         c.recoverOrphans()
         await settle()
-        XCTAssertFalse(events.contains(.recovering(app: "zoom")), "\(events)")
+        XCTAssertFalse(events.contains(.recovering(app: "meeting")), "\(events)")
 
         live.release()
         await settle(for: 1.0)
@@ -717,7 +741,7 @@ final class MeetingCoordinatorTests: XCTestCase {
         live.holds = true
         transcribers.lineUp(live)
         let c = coordinator()
-        c.start(tapping: zoom)
+        c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
         await settle()
@@ -794,6 +818,15 @@ final class MeetingCoordinatorTests: XCTestCase {
             source.send(quiet(at: .seconds(s)))
             await settle(for: 0.12)
         }
+    }
+
+    /// What the hook was handed on stdin, as a hook that saves it beside the
+    /// transcript left it.
+    private func told(beside saved: MeetingSummary) throws -> [String: Any] {
+        let url = saved.fileURL.deletingLastPathComponent()
+            .appendingPathComponent("seen.json")
+        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: url))
+        return try XCTUnwrap(object as? [String: Any])
     }
 
     private func script(_ text: String) throws -> URL {
@@ -1099,7 +1132,7 @@ extension MeetingCoordinatorTests {
             }
         )
         c.onEvent = { events.append($0) }
-        c.start(tapping: RunningApp(name: "zoom.us", bundleID: "us.zoom.xos", pid: 1))
+        c.start()
         try? await Task.sleep(for: .milliseconds(400))
 
         XCTAssertEqual(c.state, .idle)

@@ -243,12 +243,13 @@ final class DictationCoordinator: ObservableObject {
     /// built on first use: a mac that only dictates never pays for meetings.
     let meetings: LazyMeetings
     /// made by the first meeting, like the panel that shows it.
-    private lazy var liveTranscript = LiveTranscriptModel(app: "", elapsed: .zero)
+    private lazy var liveTranscript = LiveTranscriptModel(elapsed: .zero)
     @Published private(set) var meetingModelDownloads: [MeetingModel: Double] = [:]
     @Published private(set) var isLiveTranscriptShown = false
-    /// the app `record a meeting ▸ zoom` named, held while setup runs. the
-    /// click already happened; setup is the detour, not a new question.
-    private var pendingMeetingApp: RunningApp?
+    /// `record a meeting` was pressed before its model was on disk, and is
+    /// held while setup runs. the click already happened; setup is the
+    /// detour, not a new question.
+    private(set) var meetingWaitsOnSetup = false
     private var liveTranscriptPanel: LiveTranscriptPanel?
     private var meetingCancellables: Set<AnyCancellable> = []
     /// A quit is waiting on a meeting's transcript to be written.
@@ -769,35 +770,27 @@ final class DictationCoordinator: ObservableObject {
     /// made on an earlier day.
     ///
     /// Last press of a meetings-only run: finish the errand that opened this
-    /// window. ADR 0023 says nothing starts a recording but the user naming
-    /// an app — they did that before the download, and honouring it is not
-    /// the app deciding on its own.
+    /// window. ADR 0023 says nothing starts a recording but the user — they
+    /// pressed `record a meeting` before the download, and honouring it is
+    /// not the app deciding on its own.
     func finishOnboarding(dictationWanted: Bool? = nil) {
         if let dictationWanted {
             settings.dictationWanted = dictationWanted
         }
         // captured and cleared before the close, because closing the window
         // is also how the errand is cancelled.
-        let errand = pendingMeetingApp
-        pendingMeetingApp = nil
+        let errand = meetingWaitsOnSetup
+        meetingWaitsOnSetup = false
         dismissOnboarding()
 
-        guard let errand else {
+        guard errand else {
             return
         }
         guard installedMeetingModels.contains(settings.meetingModel) else {
             flashNotice("still downloading the meeting model", duration: 2)
             return
         }
-        guard MeetingApps.running().contains(where: { $0.pid == errand.pid })
-        else {
-            flashNotice(
-                "\(MeetingApps.displayName(errand)) isn't running any more",
-                duration: 2
-            )
-            return
-        }
-        startMeeting(errand)
+        startMeeting()
     }
 
     /// "skip for now" and "we're done" both close the window. what neither
@@ -849,7 +842,7 @@ final class DictationCoordinator: ObservableObject {
 
         // walking away cancels the errand: nothing starts later out of
         // nowhere.
-        pendingMeetingApp = nil
+        meetingWaitsOnSetup = false
         flushHeldFeedback()
     }
 
@@ -2077,22 +2070,13 @@ extension DictationCoordinator {
         MeetingEngines.installed()
     }
 
-    var meetingAppName: String {
-        meetings.app.map(MeetingApps.displayName) ?? ""
-    }
-
-    /// What setup's last button should promise, when an errand is waiting.
-    var pendingMeetingAppName: String? {
-        pendingMeetingApp.map(MeetingApps.displayName)
-    }
-
-    /// `record a meeting ▸ zoom`. the model is a download you may not have
-    /// asked for yet: then this is the route back to the one surface that
-    /// knows how to ask (SPEC §5).
-    func startMeeting(_ app: RunningApp) {
+    /// `record a meeting`. the model is a download you may not have asked
+    /// for yet: then this is the route back to the one surface that knows
+    /// how to ask (SPEC §5).
+    func startMeeting() {
         guard !meetings.isRecording else { return }
         guard installedMeetingModels.contains(settings.meetingModel) else {
-            pendingMeetingApp = app
+            meetingWaitsOnSetup = true
             runOnboardingAgain(scope: .meetingsOnly)
             return
         }
@@ -2101,12 +2085,11 @@ extension DictationCoordinator {
             return
         }
         liveTranscript.clear()
-        liveTranscript.app = MeetingApps.displayName(app)
         liveTranscript.elapsed = .zero
         Task { [notifier = meetings.notifier] in
             await notifier.requestPermissionIfNeeded()
         }
-        meetings.coordinator.start(tapping: app)
+        meetings.coordinator.start()
     }
 
     func stopMeeting() {
@@ -2264,7 +2247,6 @@ extension DictationCoordinator {
         case .nudge:
             // only a built coordinator says anything, so this builds nothing
             meetings.notifier.ask(
-                app: meetingAppName,
                 quietFor: meetings.coordinator.thresholds.quietNudgeAfter
             )
         case .saved(let summary):

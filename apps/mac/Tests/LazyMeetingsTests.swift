@@ -43,7 +43,6 @@ final class LazyMeetingsTests: XCTestCase {
         await meetings.untilWrittenOut()
         XCTAssertEqual(meetings.elapsed, .zero)
         XCTAssertNil(meetings.recovering)
-        XCTAssertNil(meetings.app)
         XCTAssertEqual(meetings.dictationResponse, .allow)
         meetings.probeTapIsAlive()
         meetings.keepGoing()

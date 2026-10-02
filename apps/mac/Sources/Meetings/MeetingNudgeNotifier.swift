@@ -61,10 +61,10 @@ final class MeetingNudgeNotifier: NSObject, UNUserNotificationCenterDelegate {
         _ = try? await center.requestAuthorization(options: [.alert, .sound])
     }
 
-    func ask(app: String, quietFor: Duration) {
+    func ask(quietFor: Duration) {
         guard let center else { return }
         let content = UNMutableNotificationContent()
-        content.title = "still recording \(app)?"
+        content.title = "still recording?"
         content.body = "nothing has been heard for \(quietFor.spoken). it keeps going unless you stop it."
         content.categoryIdentifier = Self.category
         content.interruptionLevel = .timeSensitive

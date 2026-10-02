@@ -118,14 +118,11 @@ struct AndrewDictateApp: App {
             // the state line, the stop, the live view. dictation's row goes,
             // because dictation is refused until you stop.
             if coordinator.meetings.isRecording {
-                Text(
-                    "recording \(coordinator.meetingAppName) · "
-                        + coordinator.meetings.elapsed.runningClock
-                )
-                .foregroundStyle(.secondary)
-                .disabled(true)
+                Text("recording · \(coordinator.meetings.elapsed.runningClock)")
+                    .foregroundStyle(.secondary)
+                    .disabled(true)
 
-                Button("stop recording \(coordinator.meetingAppName)") {
+                Button("stop recording") {
                     coordinator.stopMeeting()
                 }
                 .keyboardShortcut(".", modifiers: [.command, .shift])
@@ -186,27 +183,11 @@ struct AndrewDictateApp: App {
                     }
                 }
 
-                // nothing starts a recording but the user, and the user
-                // names the app (ADR 0023, 0040). meeting apps first.
-                Menu("record a meeting") {
-                    let ranked = MeetingApps.rank(MeetingApps.running())
-                    ForEach(ranked.meeting) { app in
-                        Button(MeetingApps.displayName(app)) {
-                            coordinator.startMeeting(app)
-                        }
-                    }
-                    if !ranked.meeting.isEmpty, !ranked.other.isEmpty {
-                        Divider()
-                    }
-                    ForEach(ranked.other) { app in
-                        Button(MeetingApps.displayName(app)) {
-                            coordinator.startMeeting(app)
-                        }
-                    }
-                    if ranked.meeting.isEmpty, ranked.other.isEmpty {
-                        Text("nothing is running that could be recorded")
-                            .disabled(true)
-                    }
+                // nothing starts a recording but the user (ADR 0023), and
+                // there is no app to name: a meeting hears the whole mac
+                // (ADR 0049), so whatever the call is in is already heard.
+                Button("record a meeting") {
+                    coordinator.startMeeting()
                 }
 
                 // one row, and only while it is needed: the tap would not

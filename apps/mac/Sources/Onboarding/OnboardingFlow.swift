@@ -117,10 +117,11 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
         case .permissions:
             switch verdict {
             case .ready:
-                // the errand this window was opened for, named — as long as
-                // it fits the button the flow tests keep short.
-                if let app = jobs.meetingApp, app.count <= 17 {
-                    return "record \(app)"
+                // the errand this window was opened for, named: the click
+                // that opened it was `record a meeting`, and this one
+                // finishes it.
+                if jobs.meetingErrand {
+                    return "record a meeting"
                 }
                 return jobs.dictation ? "start dictating" : "done"
             case .downloading:

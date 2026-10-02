@@ -210,15 +210,15 @@ final class OnboardingStateTests: XCTestCase {
     /// The errand only reaches the button once its model is on disk.
     func testTheErrandIsOnlyOfferedOnceTheMeetingModelIsReady() {
         var state = OnboardingState(scope: .meetingsOnly)
-        state.updateMeetingErrand(app: "zoom")
+        state.updateMeetingErrand(waiting: true)
 
-        XCTAssertNil(state.jobs.meetingApp)
+        XCTAssertFalse(state.jobs.meetingErrand)
 
         state.updateMeetingModelStatus(.ready)
-        XCTAssertEqual(state.jobs.meetingApp, "zoom")
+        XCTAssertTrue(state.jobs.meetingErrand)
 
-        state.updateMeetingErrand(app: nil)
-        XCTAssertNil(state.jobs.meetingApp)
+        state.updateMeetingErrand(waiting: false)
+        XCTAssertFalse(state.jobs.meetingErrand)
     }
 
     // MARK: - a lost grant is one screen

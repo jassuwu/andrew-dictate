@@ -28,8 +28,8 @@ struct MeetingPreferences: Sendable {
 /// The moments the rest of the app shows. The HUD says these in words; the
 /// notifier turns `.nudge` into a question with buttons.
 enum MeetingEvent: Equatable, Sendable {
-    case started(app: String)
-    case cannotHear(app: String)
+    case started
+    case cannotHear
     /// A spool the app died on is being written out, unasked, at launch. It
     /// loads a 2.9 gb model and can run for a quarter of an hour: the lamp
     /// stays quiet for successes, and this is not one.
@@ -51,10 +51,11 @@ enum MeetingEvent: Equatable, Sendable {
     /// The words on the lamp. `nil` means the HUD stays quiet.
     var hudText: String? {
         switch self {
-        case .started(let app): "recording \(app)"
+        case .started: "recording a meeting"
         // it names the fix and hands you to the one surface allowed to ask
         // for it, rather than naming a switch you then have to go and find.
-        case .cannotHear(let app): "can't hear \(app) — opening setup"
+        // the tap is the whole mac, so the mac is what it cannot hear.
+        case .cannotHear: "can't hear the mac — opening setup"
         case .gapBegan: "lost \(Self.themWord) — rebuilding"
         case .gapEnded: "hearing them again"
         case .nudge: nil
@@ -98,7 +99,6 @@ enum MeetingEvent: Equatable, Sendable {
 @MainActor
 final class MeetingCoordinator: ObservableObject {
     @Published private(set) var state: MeetingSession.State = .idle
-    @Published private(set) var app: RunningApp?
     @Published private(set) var elapsed: Duration = .zero
     @Published private(set) var liveLines: [LiveLine] = []
     /// The app of the spool being written out at launch, while it runs. The
@@ -214,16 +214,19 @@ final class MeetingCoordinator: ObservableObject {
 
     // MARK: - the user's two buttons
 
-    func start(tapping app: RunningApp) {
+    /// What a meeting is called in its file's name, its front matter and the
+    /// hook's payload. Nothing picks an app any more (ADR 0049).
+    static let unnamed = "meeting"
+
+    func start() {
         guard session.state == .idle else { return }
         let meeting = Meeting(
-            app: MeetingApps.displayName(app), started: date(),
+            app: Self.unnamed, started: date(),
             preferences: preferences())
         current = meeting
 
         session.start()
         health = Self.freshMonitor(thresholds)
-        self.app = app
         elapsed = .zero
         liveLines = []
         startedOn = now()
@@ -287,7 +290,7 @@ final class MeetingCoordinator: ObservableObject {
                 guard current === meeting else { return }
                 session.neverHeardTheProbe()
                 publish()
-                onEvent?(.cannotHear(app: meeting.app))
+                onEvent?(.cannotHear)
                 stop(announcingNothingKept: false)
                 return
             }
@@ -482,7 +485,7 @@ final class MeetingCoordinator: ObservableObject {
             if session.state == .provingItCanHear {
                 session.heardTheProbe()
                 publish()
-                onEvent?(.started(app: meeting.app))
+                onEvent?(.started)
             }
             session.tapRecovered(at: elapsed)
             if wasRebuilding { onEvent?(.gapEnded); publish() }
@@ -499,7 +502,7 @@ final class MeetingCoordinator: ObservableObject {
             if session.state == .provingItCanHear {
                 session.neverHeardTheProbe()
                 publish()
-                onEvent?(.cannotHear(app: meeting.app))
+                onEvent?(.cannotHear)
                 // Nothing was ever heard, so there is nothing to keep and no
                 // meeting to keep running: the menu must not say "recording".
                 stop(announcingNothingKept: false)
@@ -543,7 +546,7 @@ final class MeetingCoordinator: ObservableObject {
                 guard current === meeting else { return }
                 session.rebuildFailed()
                 publish()
-                onEvent?(.cannotHear(app: meeting.app))
+                onEvent?(.cannotHear)
                 // Most of a meeting is on the spool; write what there is.
                 stop(announcingNothingKept: false)
             }
@@ -780,7 +783,7 @@ extension MeetingCoordinator {
     /// own, so the two have nothing to reach into each other for.
     @MainActor
     private final class Meeting {
-        /// The app as shown to people: "zoom", "chrome".
+        /// What the meeting is called in its file and the hook: `meeting`.
         let app: String
         let started: Date
         /// Read once, at the start: the folder, the model and the hook this

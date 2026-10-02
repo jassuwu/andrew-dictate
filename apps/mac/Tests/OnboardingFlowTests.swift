@@ -297,9 +297,9 @@ final class OnboardingFlowTests: XCTestCase {
         )
     }
 
-    /// Pressed `record a meeting ▸ zoom` and sat through the download: the
-    /// last button names the errand rather than saying "done" and dropping
-    /// it. While the model is still coming down there is nothing to promise.
+    /// Pressed `record a meeting` and sat through the download: the last
+    /// button names the errand rather than saying "done" and dropping it.
+    /// While the model is still coming down there is nothing to promise.
     func testTheLastButtonNamesTheMeetingYouAskedFor() {
         var meetingsOnly = OnboardingJobs(
             scope: .meetingsOnly,
@@ -316,13 +316,13 @@ final class OnboardingFlowTests: XCTestCase {
             "no errand, no promise"
         )
 
-        meetingsOnly.meetingApp = "zoom"
+        meetingsOnly.meetingErrand = true
         XCTAssertEqual(
             OnboardingStep.permissions.actionTitle(
                 for: meetingsOnly,
                 verdict: .ready
             ),
-            "record zoom"
+            "record a meeting"
         )
         XCTAssertEqual(
             OnboardingStep.permissions.actionTitle(

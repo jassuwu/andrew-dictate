@@ -66,10 +66,6 @@ final class LazyMeetings {
         builtCoordinator?.recovering
     }
 
-    var app: RunningApp? {
-        builtCoordinator?.app
-    }
-
     var dictationResponse: MeetingSession.DictationResponse {
         builtCoordinator?.dictationResponse ?? .allow
     }
