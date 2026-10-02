@@ -438,15 +438,15 @@ final class MeetingStretchTests: XCTestCase {
         await source.awaitStart()
 
         await play([roomNoise(from: 1.3, to: 3.3)], through: 5.0, on: c)
-        await waitForStretches(transcriber, 2)
+        await waitForStretches(transcriber, 1)
 
         XCTAssertEqual(live(c), [])
         let tally = await transcriber.tally
-        // the other stretch is the hum on the first chunk, 0.1 s of it.
+        // the hum on the first chunk is the start sound, and reaches the
+        // engine silent: the one stretch is the room noise.
         XCTAssertEqual(tally, StretchTally(
-            decodedYou: 1, decodedThem: 1, quietDropped: 1,
-            speechYou: .milliseconds(2_300), speechThem: .milliseconds(100),
-            readYou: .milliseconds(2_300), readThem: .milliseconds(100)))
+            decodedYou: 1, quietDropped: 1,
+            speechYou: .milliseconds(2_300), readYou: .milliseconds(2_300)))
         c.stop()
         let lines = try await savedLines()
         XCTAssertEqual(lines, [])
