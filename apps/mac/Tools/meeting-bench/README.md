@@ -88,7 +88,8 @@ earliest a live run could have it.
 each step goes through the VAD, a finished stretch is queued, and one decoder
 takes them in order. nothing is simulated. with `--compare` it prints the real
 lag beside the simulation, fed the decode times of this run and of the offline
-run.
+run. `compare paced.json offline.json` prints that again from the two saved
+files.
 
 ## b. how long does the end take?
 
@@ -119,7 +120,8 @@ timed on its own and numbered as the plan numbers them:
 it prints resident memory now and the peak so far after each step. `time -l`
 gives the process's maximum resident set size, which includes the model load
 at the start; `--no-whisper` skips the model and step 3, to see steps 1 and 2
-alone.
+alone. `--strict` waits for ten quiet seconds before it starts and exits 3 if a
+build ran while it did, so a script can try again.
 
 ## timing
 
@@ -127,7 +129,8 @@ other builds on the same machine move every number here. each run waits until
 no `xcodebuild`, `swift-frontend` or `swiftc` is running (up to 20 minutes),
 prints the 1-minute load average when it starts, and samples both every 5
 seconds while it runs, saying at the end whether a build showed up. do not
-build while a timed run is going.
+build while a timed run is going. on a machine other people build on, a quiet
+stretch of two minutes may never come. run twice, and say what the load was.
 
 ## what the numbers do not say
 
