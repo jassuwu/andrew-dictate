@@ -143,6 +143,7 @@ targets:
       - Sources/App/AppIdentity.swift
       - Sources/App/AppRelaunch.swift
       - Sources/App/BadgeLook.swift
+      - Sources/App/BadgeMarks.swift
       - Sources/App/Capabilities.swift
       - Sources/App/CaptureInterruptionNotice.swift
       - Sources/App/EnginePreparationState.swift
