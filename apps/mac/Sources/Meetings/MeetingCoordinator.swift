@@ -1208,10 +1208,11 @@ final class MeetingCoordinator: ObservableObject {
         // the settings as they were at the start: a folder, model or hook
         // changed since is for the next meeting.
         let prefs = meeting.preferences
+        let clock = SpoolClock(nothingSpooledDuring: recording.gaps)
         let covered = await cover(
-            live, handle: handle, model: prefs.model, gaps: recording.gaps)
+            live, handle: handle, model: prefs.model, clock: clock)
         let saved = await save(
-            covered, recording: recording, handle: handle,
+            covered, recording: recording, clock: clock, handle: handle,
             app: meeting.app, started: meeting.started, model: prefs.model,
             folder: prefs.folder, keepAudio: prefs.keepAudio, recovered: false,
             notes: meeting.notes, speakers: meeting.speakers)
@@ -1257,14 +1258,14 @@ final class MeetingCoordinator: ObservableObject {
         _ live: Reading,
         handle: MeetingSpool.Handle,
         model: MeetingModel,
-        gaps: [MeetingSession.Gap]
+        clock: SpoolClock
     ) async -> Covered {
         let farSideLoud = await farSideLoud(in: handle)
         guard case .thin(let reason) = live.verdict(farSideLoud: farSideLoud) else {
             return Covered(reading: live, result: .pass, farSideLoud: farSideLoud)
         }
         onEvent?(.readingAgain)
-        guard let again = await readAgain(handle, model: model, gaps: gaps) else {
+        guard let again = await readAgain(handle, model: model, clock: clock) else {
             return Covered(reading: live, result: .thin, reason: reason, farSideLoud: farSideLoud)
         }
         switch again.verdict(farSideLoud: farSideLoud) {
@@ -1303,7 +1304,7 @@ final class MeetingCoordinator: ObservableObject {
     private func readAgain(
         _ handle: MeetingSpool.Handle,
         model: MeetingModel,
-        gaps: [MeetingSession.Gap]
+        clock: SpoolClock
     ) async -> Reading? {
         let url = handle.audioURL
         do {
@@ -1313,7 +1314,7 @@ final class MeetingCoordinator: ObservableObject {
             let transcriber = try await makeTranscriber(model)
             let turns = try await transcriber.transcribe(you: audio.you, them: audio.them)
             return Reading(
-                turns: SpoolClock.onTheMeetingsClock(turns, gaps: gaps),
+                turns: clock.onTheMeetingsClock(turns),
                 tally: await transcriber.decodeTally())
         } catch {
             logger.error("could not read a thin meeting again: \(error.localizedDescription, privacy: .public)")
@@ -1332,10 +1333,12 @@ final class MeetingCoordinator: ObservableObject {
     /// turns → diarize → write → let the spool go, or mark it to be kept.
     /// Returns what comes after the file, or nil when it could not be
     /// written. `speakers` is the split that heard the meeting as it went;
-    /// without one, the spool is heard now.
+    /// without one, the spool is heard now. `clock` is where the turns are
+    /// on the spool, for the split.
     private func save(
         _ covered: Covered,
         recording: MeetingSession.Recording,
+        clock: SpoolClock,
         handle: MeetingSpool.Handle,
         app: String,
         started: Date,
@@ -1349,7 +1352,7 @@ final class MeetingCoordinator: ObservableObject {
         let turns = covered.reading.turns
         let tally = covered.reading.tally
         let (split, speakersReport) = await splitSpeakers(
-            in: turns, heardBy: speakers, spool: handle.audioURL, gaps: recording.gaps)
+            in: turns, heardBy: speakers, spool: handle.audioURL, clock: clock)
 
         let thin = covered.result == .thin
         let transcript = MeetingTranscript(
@@ -1461,7 +1464,7 @@ final class MeetingCoordinator: ObservableObject {
         in turns: [MeetingTurn],
         heardBy speakers: SpeakerSplit?,
         spool url: URL,
-        gaps: [MeetingSession.Gap]
+        clock: SpoolClock
     ) async -> (turns: [MeetingTurn], report: SpeakerSplit.Report?) {
         let split: SpeakerSplit
         if let speakers {
@@ -1470,7 +1473,7 @@ final class MeetingCoordinator: ObservableObject {
             split = SpeakerSplit(diarizer.hearing(), now: now)
             await split.hear(spool: url)
         }
-        let (found, report) = await split.split(SpoolClock.onTheSpool(turns, gaps: gaps))
+        let (found, report) = await split.split(clock.onTheSpool(turns))
         return (SpoolClock.speakers(of: found, onto: turns), report)
     }
 
@@ -1540,6 +1543,7 @@ final class MeetingCoordinator: ObservableObject {
             let saved = await save(
                 covered,
                 recording: .init(duration: duration, gaps: []),
+                clock: SpoolClock(),
                 handle: handle,
                 app: manifest.app,
                 started: manifest.started,
@@ -1947,13 +1951,16 @@ extension MeetingCoordinator {
         }
         let transcriber = try await makeTranscriber(model)
         let turns = try await transcriber.transcribe(you: audio.you, them: audio.them)
+        // the file says where its gaps were on the meeting's clock and no
+        // more, so each is taken for a hole in the audio.
+        let clock = SpoolClock(nothingSpooledDuring: header.gaps)
         let reading = Reading(
-            turns: SpoolClock.onTheMeetingsClock(turns, gaps: header.gaps),
+            turns: clock.onTheMeetingsClock(turns),
             tally: await transcriber.decodeTally())
         // checked like any reading, and not read again: this was.
         let covered = Covered(checking: reading, farSideLoud: await farSideLoud(at: url))
         let (split, _) = await splitSpeakers(
-            in: reading.turns, heardBy: nil, spool: url, gaps: header.gaps)
+            in: reading.turns, heardBy: nil, spool: url, clock: clock)
         attempt.turns = split
         attempt.covered = covered
 
