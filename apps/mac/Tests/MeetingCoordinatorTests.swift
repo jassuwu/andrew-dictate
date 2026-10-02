@@ -378,9 +378,10 @@ final class MeetingCoordinatorTests: XCTestCase {
     }
 
     /// The other half: the mac says something is playing and the tap hears
-    /// none of it. That is the dead tap 002 §6 describes, and it gets a gap
-    /// and a rebuild.
-    func testSilenceWhileSomethingPlaysIsADeadTap() async throws {
+    /// none of it, so it is asked with a quiet tone of ours — and does not
+    /// hear that either. That is the dead tap 002 §6 describes, and it gets
+    /// a gap and a rebuild.
+    func testAQuietToneTheTapDoesNotHearIsADeadTap() async throws {
         let c = coordinator()
         source.anythingIsPlaying = true
         c.start()
@@ -390,13 +391,15 @@ final class MeetingCoordinatorTests: XCTestCase {
 
         await beQuiet(from: 5, through: 15)
 
+        XCTAssertEqual(source.quietProbes, 1)
         XCTAssertTrue(events.contains(.gapBegan), "\(events)")
         XCTAssertGreaterThan(source.rebuilds, 0)
     }
 
     /// The answer is read as it stands when each chunk lands, not once: a
     /// quiet stretch with nothing playing is left alone, and the same
-    /// silence once something starts playing is a dead tap.
+    /// silence once something starts playing is asked about — here by a
+    /// tap that cannot hear the answer.
     func testTheVerdictFollowsWhatIsPlayingNow() async throws {
         let c = coordinator()
         source.anythingIsPlaying = false
@@ -946,6 +949,16 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     /// far-side audio a moment later. A fake that stays mute cannot see what that
     /// does to the quiet clock.
     var toneOnRebuild: MeetingAudioChunk?
+    /// Times the coordinator asked for the quiet probe. This fake plays
+    /// nothing, so the tap never hears it.
+    var quietProbes: Int {
+        lock.withLock { _quietProbes }
+    }
+    private var _quietProbes = 0
+
+    func playQuietProbe() async throws {
+        lock.withLock { _quietProbes += 1 }
+    }
 
     private var continuation: AsyncStream<MeetingAudioChunk>.Continuation? {
         lock.withLock { _continuation }

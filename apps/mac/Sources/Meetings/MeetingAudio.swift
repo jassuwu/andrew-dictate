@@ -81,8 +81,8 @@ protocol MeetingAudioSource: Sendable {
     /// last asked, or `nil` when that cannot be told. Silence from a mac that
     /// is playing nothing is what a working tap should deliver — it is not
     /// evidence of a dead one. The other direction proves nothing (002 §6),
-    /// so this is only ever used to *withhold* a verdict, never to reach one
-    /// sooner.
+    /// so this only ever decides whether a silence is worth asking the tap
+    /// about (`playQuietProbe`); it is never a verdict on its own.
     ///
     /// An answer kept, not a question asked: the source asks the HAL on its
     /// own queue, so reading this from the main actor costs nothing.
@@ -91,6 +91,13 @@ protocol MeetingAudioSource: Sendable {
     /// moved to, a move that failed. One stream per `start()`, read once it
     /// has returned, and finished by `stop()`.
     var sourceEvents: AsyncStream<MeetingSourceEvent> { get }
+    /// A short, quiet tone played by this process, which the tap hears
+    /// because it hears us: how a far side gone quiet while something plays
+    /// is asked whether it is still there. Throws when the tone could not be
+    /// played at all — no output device, a player that would not start —
+    /// which says nothing about the tap, and must never be read as a tone
+    /// it did not hear.
+    func playQuietProbe() async throws
 }
 
 extension MeetingAudioSource {
@@ -98,6 +105,7 @@ extension MeetingAudioSource {
     var sourceEvents: AsyncStream<MeetingSourceEvent> {
         AsyncStream { $0.finish() }
     }
+    func playQuietProbe() async throws {}
 }
 
 /// The engine listening to a meeting. Lines arrive as whisper decides them,

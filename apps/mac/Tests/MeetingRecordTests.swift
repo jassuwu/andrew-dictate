@@ -451,7 +451,8 @@ final class MeetingRecordTests: XCTestCase {
     }
 
     /// the other way a tap is lost: it keeps calling back, with nothing but
-    /// zeros in it, while the mac says something is playing.
+    /// zeros in it, while the mac says something is playing — and does not
+    /// hear the quiet tone it is asked with.
     func testTheRecordKeepsATapThatKeptCallingBackWithSilence() async throws {
         source.anythingIsPlaying = true
         let c = coordinator()
@@ -461,10 +462,13 @@ final class MeetingRecordTests: XCTestCase {
         await settle()
         source.send(quiet(at: .seconds(1)))
         await settle()
-        // seven seconds in, and six since anything was heard.
+        // seven seconds in, and six since anything was heard: asked.
         source.send(quiet(at: .seconds(6)))
         await settle()
-        source.send(loud(at: .seconds(7)))
+        // ten seconds in, and three since it was asked: not heard.
+        source.send(quiet(at: .seconds(9)))
+        await settle()
+        source.send(loud(at: .seconds(10)))
         await settle()
 
         c.stop()
@@ -472,8 +476,8 @@ final class MeetingRecordTests: XCTestCase {
 
         XCTAssertEqual(records.count, 1)
         XCTAssertEqual(records.first?.events, [
-            .init(.gapBegan, atS: 7),
-            .init(.gapEnded, atS: 8),
+            .init(.gapBegan, atS: 10),
+            .init(.gapEnded, atS: 11),
         ])
     }
 

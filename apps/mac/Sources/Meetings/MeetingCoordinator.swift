@@ -1,20 +1,25 @@
 import Foundation
 import os
 
-/// The two knobs and the three timeouts a meeting runs on. Provisional
-/// (ADR 0023): all of them need a real meeting to tune against.
+/// Every number a meeting's health runs on, in one place. Each default is
+/// provisional (ADR 0023): all of them need real meetings to tune against.
 struct MeetingThresholds: Sendable {
-    let probeTimeout: Duration
-    let silenceTimeout: Duration
-    let silenceFloor: Float
-    let quietNudgeAfter: Duration
+    /// How long the start sound gets to come back through the tap — at the
+    /// start, and after every rebuild. Provisional.
+    var probeTimeout: Duration = .seconds(1.5)
+    /// How long the far side may be silent, while something plays, before
+    /// the tap is asked with the quiet probe. Silence alone is never damage.
+    /// Provisional.
+    var silenceTimeout: Duration = .seconds(120)
+    /// RMS at or below this is silence.
+    var silenceFloor: Float = 0.001
+    /// An hour of nobody speaking asks `still recording?`. Provisional.
+    var quietNudgeAfter: Duration = .seconds(3_600)
+    /// How long the quiet probe gets to come back through the tap.
+    /// Provisional.
+    var quietProbeWindow: Duration = .seconds(2)
 
-    static let provisional = MeetingThresholds(
-        probeTimeout: .seconds(1.5),
-        silenceTimeout: .seconds(120),
-        silenceFloor: 0.001,
-        quietNudgeAfter: .seconds(3_600)
-    )
+    static let provisional = MeetingThresholds()
 }
 
 /// What the app needs from settings to record a meeting, handed in as values
@@ -447,12 +452,9 @@ final class MeetingCoordinator: ObservableObject {
         // The gap begins where the audio stopped, not where the wall is now
         // — then the clock catches up, so the menu stops counting a meeting
         // in frames that no longer arrive.
-        session.tapWentSilent(at: elapsed)
-        meeting.notes.note(.gapBegan, at: elapsed)
+        let lost = elapsed
         elapsed = max(elapsed, wallElapsed)
-        publish()
-        onEvent?(.gapBegan)
-        rebuildTap(meeting)
+        loseTheTap(meeting, at: lost)
     }
 
     /// How long the meeting has actually been going. Audio time is a frame
@@ -557,7 +559,7 @@ final class MeetingCoordinator: ObservableObject {
             rms: chunk.themRMS, elapsed: elapsed,
             anythingIsPlaying: source.anythingIsPlaying)
         switch health.verdict {
-        case .waitingForProbeTone:
+        case .waitingForProbeTone, .waitingForQuietProbe:
             break
         case .capturing:
             let wasRebuilding = session.state == .rebuilding
@@ -590,13 +592,13 @@ final class MeetingCoordinator: ObservableObject {
                 // meeting to keep running: the menu must not say "recording".
                 stop(announcingNothingKept: false)
             }
-        case .wentSilent:
+        case .silentWhileSomethingPlays:
             if session.state == .recording {
-                session.tapWentSilent(at: elapsed)
-                meeting.notes.note(.gapBegan, at: elapsed)
-                publish()
-                onEvent?(.gapBegan)
-                rebuildTap(meeting)
+                askWithTheQuietProbe(meeting)
+            }
+        case .missedTheQuietProbe:
+            if session.state == .recording {
+                loseTheTap(meeting, at: elapsed)
             }
         }
 
@@ -609,6 +611,31 @@ final class MeetingCoordinator: ObservableObject {
             nudgePending = true
             onEvent?(.nudge)
         }
+    }
+
+    /// The far side has been silent past the timeout while something
+    /// plays. That is a question, not a verdict — you presenting to a muted
+    /// room sounds the same — so the tap is asked it the way it was asked at
+    /// the start: a tone of ours, quiet this time, which it hears if it
+    /// hears anything. Heard, nothing happens and nothing is said.
+    private func askWithTheQuietProbe(_ meeting: Meeting) {
+        health.askedWithTheQuietProbe(at: elapsed)
+        // the tone lands in the far channel like the start sound does:
+        // proof the tap works, not the room speaking, so it must not buy
+        // the quiet hour back.
+        probeUntil = max(probeUntil, elapsed + thresholds.quietProbeWindow)
+        Task { [source] in
+            try? await source.playQuietProbe()
+        }
+    }
+
+    /// The tap is dead: the gap begins at `lost`, and the tap is rebuilt.
+    private func loseTheTap(_ meeting: Meeting, at lost: Duration) {
+        session.tapWentSilent(at: lost)
+        meeting.notes.note(.gapBegan, at: lost)
+        publish()
+        onEvent?(.gapBegan)
+        rebuildTap(meeting)
     }
 
     private func rebuildTap(_ meeting: Meeting) {
@@ -1114,6 +1141,7 @@ final class MeetingCoordinator: ObservableObject {
         TapHealthMonitor(
             probeTimeout: t.probeTimeout,
             silenceTimeout: t.silenceTimeout,
+            quietProbeWindow: t.quietProbeWindow,
             silenceFloor: t.silenceFloor)
     }
 }
