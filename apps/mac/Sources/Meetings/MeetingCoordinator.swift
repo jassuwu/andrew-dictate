@@ -121,6 +121,10 @@ final class MeetingCoordinator: ObservableObject {
     private var current: Meeting? {
         didSet { wakeWhoeverIsWaiting() }
     }
+    /// Meetings that have stopped and are still being written out.
+    private var writingOut: [Meeting] = [] {
+        didSet { wakeWhoeverIsWaiting() }
+    }
     /// Whoever is waiting on the meetings to move on — recovery between
     /// spools. Each looks again at what it waits for when woken.
     private var waiting: [CheckedContinuation<Void, Never>] = []
@@ -293,6 +297,7 @@ final class MeetingCoordinator: ObservableObject {
         // wall makes the file cover the whole call instead of stopping where
         // the audio did.
         let recording = letGo(of: meeting, at: max(elapsed, wallElapsed))
+        writingOut.append(meeting)
         let tapClosed = closeTheTap(of: meeting)
         Task { [weak self] in
             await tapClosed.value
@@ -408,9 +413,10 @@ final class MeetingCoordinator: ObservableObject {
     /// quarter of an hour of the neural engine at login is not a silent
     /// success, it is a job nobody asked for.
     func recoverOrphans() {
-        // a meeting started in the seconds before this runs has a spool
-        // that looks just like one a crash left behind. it is not one.
-        let ours = [current?.handle].compactMap { $0 }
+        // a meeting started in the seconds before this runs, or one still
+        // being written out, has a spool that looks just like one a crash
+        // left behind. it is not one.
+        let ours = ([current] + writingOut).compactMap { $0?.handle }
         let orphans = spool.orphans().filter { !ours.contains($0.handle) }
         guard !orphans.isEmpty else { return }
         Task { [weak self] in
@@ -554,6 +560,7 @@ final class MeetingCoordinator: ObservableObject {
     ) async {
         guard let recording, let handle = meeting.handle else {
             if let handle = meeting.handle { spool.discard(handle) }
+            writingOut.removeAll { $0 === meeting }
             if announcingNothingKept { onEvent?(.nothingToKeep) }
             return
         }
@@ -565,13 +572,21 @@ final class MeetingCoordinator: ObservableObject {
         // the settings as they were at the start: a folder, model or hook
         // changed since is for the next meeting.
         let prefs = meeting.preferences
-        await finish(
+        let saved = await save(
             turns: turns, recording: recording, handle: handle,
             app: meeting.app, started: meeting.started, model: prefs.model,
-            folder: prefs.folder, hook: prefs.hook, recovered: false)
+            folder: prefs.folder, recovered: false)
+        // written out — or never will be, and the spool waits for the next
+        // launch. the hook is not part of it: it can take minutes.
+        writingOut.removeAll { $0 === meeting }
+        if let saved {
+            await runHook(prefs.hook, telling: saved)
+        }
     }
 
-    private func finish(
+    /// turns → diarize → write → delete spool. Returns what a hook is told
+    /// about the file, or nil when it could not be written.
+    private func save(
         turns: [MeetingTurn],
         recording: MeetingSession.Recording,
         handle: MeetingSpool.Handle,
@@ -579,9 +594,8 @@ final class MeetingCoordinator: ObservableObject {
         started: Date,
         model: MeetingModel,
         folder: URL,
-        hook: URL?,
         recovered: Bool
-    ) async {
+    ) async -> MeetingSavedEvent? {
         let them = (try? SpoolAudioFile.read(handle.audioURL))?.them ?? []
         let split = them.isEmpty
             ? turns
@@ -607,7 +621,7 @@ final class MeetingCoordinator: ObservableObject {
             // read as done (SPEC §4).
             logger.error("could not write the transcript: \(error.localizedDescription, privacy: .public)")
             onEvent?(.saveFailed(error.localizedDescription))
-            return
+            return nil
         }
         try? spool.finish(handle)
 
@@ -617,8 +631,7 @@ final class MeetingCoordinator: ObservableObject {
             recovered: recovered)
         onEvent?(.saved(summary))
 
-        guard let hook else { return }
-        let event = MeetingSavedEvent(
+        return MeetingSavedEvent(
             transcript: url,
             app: app,
             startedAt: started,
@@ -627,6 +640,10 @@ final class MeetingCoordinator: ObservableObject {
             gaps: recording.gaps.map { [$0.began.totalSeconds, $0.ended.totalSeconds] },
             recovered: recovered
         )
+    }
+
+    private func runHook(_ hook: URL?, telling event: MeetingSavedEvent) async {
+        guard let hook else { return }
         let run = await hookRunner.run(executable: hook, event: event)
         recordHookRun?(run)
         if run.outcome != .succeeded {
@@ -685,7 +702,7 @@ final class MeetingCoordinator: ObservableObject {
             // a spool from a past run has no settings of its own; it goes
             // where meetings go now.
             let prefs = preferences()
-            await finish(
+            let saved = await save(
                 turns: turns,
                 recording: .init(duration: duration, gaps: []),
                 handle: handle,
@@ -693,8 +710,10 @@ final class MeetingCoordinator: ObservableObject {
                 started: manifest.started,
                 model: manifest.model,
                 folder: prefs.folder,
-                hook: prefs.hook,
                 recovered: true)
+            if let saved {
+                await runHook(prefs.hook, telling: saved)
+            }
         } catch {
             // Only logging it meant the same quarter of an hour was spent on
             // the same failure at every launch, forever. Two tries, then the
@@ -714,8 +733,8 @@ final class MeetingCoordinator: ObservableObject {
         state = session.state
     }
 
-    /// Returns once `done` is true, looking again each time a meeting starts
-    /// or stops.
+    /// Returns once `done` is true, looking again each time a meeting starts,
+    /// stops or is written out.
     private func until(_ done: () -> Bool) async {
         while !done() {
             await withCheckedContinuation { waiting.append($0) }

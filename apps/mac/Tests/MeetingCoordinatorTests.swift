@@ -681,6 +681,31 @@ final class MeetingCoordinatorTests: XCTestCase {
         XCTAssertTrue(body.contains("[00:00:01] you: live words"), body)
     }
 
+    /// The same for a meeting that has stopped and is still being written
+    /// out: its spool is about to become its file, not a recovery.
+    func testAMeetingStillWritingOutIsNotAnOrphan() async throws {
+        let live = FakeTranscriber(finalTurns: [
+            .init(speaker: .you, at: .seconds(1), text: "live words")])
+        live.holds = true
+        transcribers.lineUp(live)
+        let c = coordinator()
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+        c.stop()
+        await held(live)
+
+        c.recoverOrphans()
+        await settle()
+        XCTAssertFalse(events.contains(.recovering(app: "zoom")), "\(events)")
+
+        live.release()
+        await settle(for: 1.0)
+        let all = MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs"))
+        XCTAssertEqual(all.map(\.recovered), [false])
+    }
+
     // MARK: - helpers
 
     private func spoolFolders() throws -> Int {
