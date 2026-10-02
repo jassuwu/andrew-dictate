@@ -3,8 +3,8 @@ import Foundation
 /// how one meeting ended, and what the capture and the engine did on the
 /// way there: the evidence a lost meeting or a hollow transcript leaves.
 ///
-/// never any of the words. not what was said, not a file name that took its
-/// name from it — counts and times are all a record knows about the talk,
+/// never any of the words. not what was said, not the path to the file it
+/// went into — counts and times are all a record knows about the talk,
 /// which is what makes it safe to send to jass.
 struct MeetingRecord: Equatable, Sendable, Codable {
     /// every way a meeting ends. a recovery is not one of them: it ends in
