@@ -14,8 +14,8 @@ enum RecordWith {
         isRecording: Bool
     ) -> [Choice] {
         guard !isRecording else { return [] }
-        return installed.subtracting([defaultModel]).map {
-            Choice(model: $0, title: "\($0.shortName) — \($0.trait)")
-        }
+        return MeetingModel.allCases
+            .filter { installed.contains($0) && $0 != defaultModel }
+            .map { Choice(model: $0, title: "\($0.shortName) — \($0.trait)") }
     }
 }
