@@ -140,6 +140,9 @@ final class DictationCoordinator: ObservableObject {
             return recorder
         }
     )
+    /// what moves underneath the capture: the default devices, the device
+    /// list, a wake, the displays.
+    private var deviceWatcher: AudioDeviceWatcher?
     private let feedbackSounds: FeedbackSounds
     private let hudViewModel: HUDViewModel
     private var hudPanelStorage: HUDPanel?
@@ -312,6 +315,9 @@ final class DictationCoordinator: ObservableObject {
         // built ahead of the first press, off the main thread, and with
         // pre-roll on, listening.
         captureSlot.prepare()
+        deviceWatcher = AudioDeviceWatcher { [weak self] change in
+            self?.audioDevicesChanged(change)
+        }
 
         settings.$preRollEnabled
             .dropFirst()
@@ -1175,12 +1181,12 @@ final class DictationCoordinator: ObservableObject {
                             reason: .systemPaused
                         )
                         // nothing listens through a sleep, pre-roll
-                        // included: the capture goes, and waking builds
-                        // the next one once the hardware has settled.
+                        // included: the capture goes, and waking (the
+                        // device watcher's) builds the next one once the
+                        // hardware has settled.
                         self?.captureSlot.suspend()
                     } else {
                         self?.handleSystemResume()
-                        self?.captureSlot.deviceChanged()
                     }
                 }
             }
@@ -1329,14 +1335,27 @@ final class DictationCoordinator: ObservableObject {
     /// underneath.
     private func wire(_ recorder: AudioRecorder) {
         recorder.onConfigurationChange = { [weak self] in
-            self?.captureSlot.deviceChanged()
-            self?.handleCaptureInterruption(reason: .deviceChanged)
+            self?.audioDevicesChanged(.engineReconfigured)
         }
         recorder.onCapReached = { [weak self] in
             self?.handleCaptureCapReached()
         }
         recorder.onCapApproaching = { [weak self] in
             self?.machine.capApproaching()
+        }
+    }
+
+    /// anything that decides which mic a press opens may have moved. the
+    /// capture is stale either way, and the next press gets a fresh one; a
+    /// change that may have taken the mic from under a live take ends that
+    /// take, keeping what it heard.
+    private func audioDevicesChanged(_ change: AudioDeviceChange) {
+        audioLogger.notice(
+            "audio devices moved: \(change.rawValue, privacy: .public)"
+        )
+        captureSlot.deviceChanged()
+        if change.endsLiveTake, machine.state == .recording {
+            handleCaptureInterruption(reason: .deviceChanged)
         }
     }
 
