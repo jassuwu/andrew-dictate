@@ -332,6 +332,51 @@ final class MeetingTranscriptTests: XCTestCase {
         XCTAssertFalse(summary.recovered)
     }
 
+    /// Meetings recorded before the layout changed are still in people's
+    /// folders: no `ended`, `speakers` or `words`, a line per fragment.
+    func testATranscriptWrittenBeforeTheNewLayoutIsStillRead() throws {
+        let month = parent.appendingPathComponent("meetings/2026-07", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: month, withIntermediateDirectories: true)
+        let old = month.appendingPathComponent("2026-07-02-0900-teams.md")
+        try """
+        ---
+        app: teams
+        started: 2026-07-02T09:00:05+05:30
+        duration_s: 1800
+        engine: whisper-large-v3
+        complete: false
+        gaps:
+        - [41.2, 63.0]
+        - [100.0, 104.5]
+        recovered: true
+        ---
+
+        > 2 gaps — audio was lost between 00:00:41 and 00:01:03, and between 00:01:40 and 00:01:44
+
+        [00:00:04] you: hi, can you
+
+        [00:00:06] you: hear me?
+
+        [00:00:09] them: yes.
+
+        """.write(to: old, atomically: true, encoding: .utf8)
+        let newer = try MeetingTranscriptFile.write(
+            meeting(turns: [.init(speaker: .you, at: .seconds(1), text: "hi")]),
+            in: parent, timeZone: tz)
+
+        let summary = try MeetingTranscriptFile.summary(of: old)
+        XCTAssertEqual(summary.app, "teams")
+        XCTAssertEqual(summary.started.timeIntervalSince1970, 1_782_963_005, accuracy: 0.5)
+        XCTAssertEqual(summary.duration, .seconds(1800))
+        XCTAssertFalse(summary.complete)
+        XCTAssertEqual(summary.gapCount, 2)
+        XCTAssertTrue(summary.recovered)
+
+        XCTAssertEqual(
+            MeetingTranscriptFile.listAll(in: parent).map(\.fileURL), [newer, old])
+    }
+
     func testSummaryOfAFileWithoutFrontMatterThrows() throws {
         let url = parent.appendingPathComponent("notes.md")
         try "just some notes".write(to: url, atomically: true, encoding: .utf8)
