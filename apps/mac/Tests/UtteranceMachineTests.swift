@@ -595,6 +595,49 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(chimes, [.end])
     }
 
+    /// esc while the mic is still opening throws the take away, and the
+    /// mic's late answer records nothing.
+    func testEscBeforeTheMicAnswersThrowsTheTakeAway() async {
+        let m = machine()
+        mic.holdsStart = true
+        m.keyDown()
+
+        XCTAssertTrue(m.escape())
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(states.last, .init(.idle, fast: true))
+        XCTAssertEqual(mic.cancels, 1)
+
+        mic.finishStart()
+        m.keyUp()
+        await pass(.milliseconds(200))
+
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(mic.stops, 0)
+        XCTAssertEqual(chimes, [])
+        XCTAssertEqual(engine.heard, [])
+        XCTAssertEqual(pills, [])
+        XCTAssertEqual(outcomes, [.cancelled])
+    }
+
+    /// a brush while the mic is still opening makes no sound, not even
+    /// once the mic has answered.
+    func testABrushBeforeTheMicAnswersMakesNoSound() async {
+        let m = machine()
+        mic.holdsStart = true
+        m.keyDown()
+        await pass(.milliseconds(50))
+
+        m.keyCancelled()
+        mic.finishStart()
+        await pass(.milliseconds(200))
+
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(mic.cancels, 1)
+        XCTAssertEqual(mic.stops, 0)
+        XCTAssertEqual(chimes, [])
+        XCTAssertEqual(outcomes, [.brushed])
+    }
+
     // MARK: - the mac underneath
 
     /// today's behaviour, which ticket 06 reverses: sleep or the lock ends
