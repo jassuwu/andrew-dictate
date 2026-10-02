@@ -309,7 +309,7 @@ struct AndrewDictateApp: App {
                     return coordinator.state != .idle
                         || coordinator.meetings.isRecording
                 }
-                updates.start(isDictating: isBusy)
+                updates.start(isBusy: isBusy)
                 updateHandOff.isBusy = isBusy
             }
         }

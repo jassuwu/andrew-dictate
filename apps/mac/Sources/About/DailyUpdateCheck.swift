@@ -18,14 +18,14 @@ final class DailyUpdateCheck: ObservableObject {
     private let onDiskVersion: () -> String?
     private let install: UpdateOffer.Install
     private let now: () -> Date
-    private var isDictating: () -> Bool
+    private var isBusy: () -> Bool
     private let ask: Ask
     private var isAsking = false
     private var ticker: Task<Void, Never>?
     private var menuObserver: (any NSObjectProtocol)?
     private var switchObserver: AnyCancellable?
 
-    /// `isDictating` defaults to yes, so nothing is asked until `start`
+    /// `isBusy` defaults to yes, so nothing is asked until `start`
     /// hands over the real answer.
     init(
         settings: AppSettings,
@@ -33,7 +33,7 @@ final class DailyUpdateCheck: ObservableObject {
         onDiskVersion: @escaping () -> String?,
         install: UpdateOffer.Install,
         now: @escaping () -> Date = Date.init,
-        isDictating: @escaping () -> Bool = { true },
+        isBusy: @escaping () -> Bool = { true },
         ask: @escaping Ask = DailyUpdateCheck.askTheSite
     ) {
         self.settings = settings
@@ -41,7 +41,7 @@ final class DailyUpdateCheck: ObservableObject {
         self.onDiskVersion = onDiskVersion
         self.install = install
         self.now = now
-        self.isDictating = isDictating
+        self.isBusy = isBusy
         self.ask = ask
 
         showLine(enabled: settings.checksForUpdates)
@@ -87,11 +87,11 @@ final class DailyUpdateCheck: ObservableObject {
     /// then every half hour; and the menu opening, which is any menu in
     /// this app starting to track — the status item's is the only one with
     /// no window behind it, and a day-old check is due whichever opened.
-    func start(isDictating: @escaping () -> Bool) {
+    func start(isBusy: @escaping () -> Bool) {
         guard ticker == nil else {
             return
         }
-        self.isDictating = isDictating
+        self.isBusy = isBusy
         ticker = Task { [weak self] in
             try? await Task.sleep(for: .seconds(90))
             while !Task.isCancelled, let check = self {
@@ -116,7 +116,7 @@ final class DailyUpdateCheck: ObservableObject {
                   now: now(),
                   lastChecked: settings.updateCheckedAt,
                   enabled: settings.checksForUpdates,
-                  dictating: isDictating()
+                  busy: isBusy()
               )
         else {
             return

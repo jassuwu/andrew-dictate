@@ -258,7 +258,7 @@ final class UpdateCheckTests: XCTestCase {
                 now: noon,
                 lastChecked: nil,
                 enabled: true,
-                dictating: false
+                busy: false
             )
         )
     }
@@ -270,7 +270,7 @@ final class UpdateCheckTests: XCTestCase {
                 now: noon,
                 lastChecked: noon.addingTimeInterval(-hours(23)),
                 enabled: true,
-                dictating: false
+                busy: false
             )
         )
         XCTAssertTrue(
@@ -278,7 +278,7 @@ final class UpdateCheckTests: XCTestCase {
                 now: noon,
                 lastChecked: noon.addingTimeInterval(-hours(24)),
                 enabled: true,
-                dictating: false
+                busy: false
             )
         )
     }
@@ -290,18 +290,18 @@ final class UpdateCheckTests: XCTestCase {
                 now: noon,
                 lastChecked: noon.addingTimeInterval(hours(48)),
                 enabled: true,
-                dictating: false
+                busy: false
             )
         )
     }
 
-    func testItNeverAsksWhileDictating() {
+    func testItNeverAsksWhileBusy() {
         XCTAssertFalse(
             UpdateOffer.shouldCheck(
                 now: noon,
                 lastChecked: nil,
                 enabled: true,
-                dictating: true
+                busy: true
             )
         )
     }
@@ -312,7 +312,7 @@ final class UpdateCheckTests: XCTestCase {
                 now: noon,
                 lastChecked: nil,
                 enabled: false,
-                dictating: false
+                busy: false
             )
         )
     }
@@ -444,13 +444,13 @@ final class UpdateCheckTests: XCTestCase {
     @MainActor
     func testItWaitsOutADictation() async {
         let world = CheckWorld(now: noon)
-        world.dictating = true
+        world.busy = true
 
         await world.check.tick()
         await world.check.menuOpened()
         XCTAssertTrue(world.asked.isEmpty)
 
-        world.dictating = false
+        world.busy = false
         await world.check.tick()
         XCTAssertEqual(world.asked.count, 1)
     }
@@ -1094,7 +1094,7 @@ final class UpdateCheckTests: XCTestCase {
 private final class CheckWorld {
     let settings: AppSettings
     var now: Date
-    var dictating = false
+    var busy = false
     var answer: UpdateOffer.Answer = .latest("0.9.4")
     private(set) var asked: [URLRequest] = []
     private(set) lazy var check: DailyUpdateCheck = makeCheck()
@@ -1118,7 +1118,7 @@ private final class CheckWorld {
             onDiskVersion: { nil },
             install: .dmg,
             now: { [unowned self] in now },
-            isDictating: { [unowned self] in dictating },
+            isBusy: { [unowned self] in busy },
             ask: { [unowned self] request in
                 asked.append(request)
                 return answer

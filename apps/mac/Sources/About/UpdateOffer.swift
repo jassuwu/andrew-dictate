@@ -115,16 +115,17 @@ enum UpdateOffer {
 
     static let checkInterval: TimeInterval = 24 * 60 * 60
 
-    /// once a day, and never while a dictation or a meeting is running:
-    /// the check waits for the next idle moment instead. a last check dated
-    /// in the future means the clock moved back, so it does not count.
+    /// once a day, and never while the app is busy — a take, a model
+    /// load, a meeting: the check waits for the next idle moment instead.
+    /// a last check dated in the future means the clock moved back, so it
+    /// does not count.
     static func shouldCheck(
         now: Date,
         lastChecked: Date?,
         enabled: Bool,
-        dictating: Bool
+        busy: Bool
     ) -> Bool {
-        guard enabled, !dictating else {
+        guard enabled, !busy else {
             return false
         }
         guard let lastChecked, lastChecked <= now else {
