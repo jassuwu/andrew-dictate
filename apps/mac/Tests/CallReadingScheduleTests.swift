@@ -69,27 +69,28 @@ final class CallReadingScheduleTests: XCTestCase {
         )
     }
 
-    /// Nobody holds the mic and a call is still being followed: nothing to
-    /// read, so the watcher is told nobody is there, at once and then every
-    /// ten seconds, until the call is over. Then nothing.
-    func testTheMicLetGoDuringACallWindsDownUntilTheCallEnds() {
+    /// Nobody holds the mic and a call is still being followed: a muted
+    /// call whose app closed the mic is still a call while its audio plays,
+    /// so it is read every two seconds, as it was, until the watcher says it
+    /// is over. Then nothing.
+    func testACallBeingFollowedIsReadWithTheMicFreeUntilItEnds() {
         var schedule = CallReadingSchedule()
         _ = plan(&schedule, at: 0, mic: true, call: true)
 
         XCTAssertEqual(
             plan(&schedule, at: 1, call: true),
-            CallReadingSchedule.Plan(step: .observeNothing, next: at(11))
+            CallReadingSchedule.Plan(step: nil, next: at(2))
         )
         XCTAssertEqual(
-            plan(&schedule, at: 5, call: true),
-            CallReadingSchedule.Plan(step: nil, next: at(11))
+            plan(&schedule, at: 2, call: true),
+            CallReadingSchedule.Plan(step: .read, next: at(4))
         )
         XCTAssertEqual(
-            plan(&schedule, at: 11, call: true),
-            CallReadingSchedule.Plan(step: .observeNothing, next: at(21))
+            plan(&schedule, at: 600, call: true),
+            CallReadingSchedule.Plan(step: .read, next: at(602))
         )
         XCTAssertEqual(
-            plan(&schedule, at: 31, call: false),
+            plan(&schedule, at: 632, call: false),
             CallReadingSchedule.Plan(step: nil, next: nil)
         )
     }
@@ -137,18 +138,6 @@ final class CallReadingScheduleTests: XCTestCase {
         XCTAssertEqual(
             plan(&schedule, at: 2, mic: true, call: true, others: false),
             CallReadingSchedule.Plan(step: .read, next: at(4))
-        )
-    }
-
-    /// Winding down, the mic is taken again: read now, not in ten seconds.
-    func testTheMicTakenAgainWhileWindingDownReadsAtOnce() {
-        var schedule = CallReadingSchedule()
-        _ = plan(&schedule, at: 0, mic: true, call: true)
-        _ = plan(&schedule, at: 1, call: true)
-
-        XCTAssertEqual(
-            plan(&schedule, at: 3, mic: true, call: true),
-            CallReadingSchedule.Plan(step: .read, next: at(5))
         )
     }
 

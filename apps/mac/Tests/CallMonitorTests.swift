@@ -133,10 +133,11 @@ final class CallMonitorTests: XCTestCase {
         monitor.stop()
     }
 
-    /// Nothing recording, and the call app let go of the mic: there is
-    /// nothing to read, so nothing is. The call ends thirty seconds on and
+    /// Nothing recording, and the call app let go of the mic and the
+    /// speakers: it is still read, because only a read can tell a call that
+    /// ended from one on mute. Thirty seconds of neither and it is over, and
     /// the monitor stops.
-    func testAnUnrecordedCallWindsDownWithoutReadingAndThenStops() async {
+    func testAnUnrecordedCallThatEndsIsReadUntilItIsOverAndThenStops() async {
         processes = [
             AudioProcess(pid: 900, bundleID: "us.zoom.xos", isRunningInput: true, isRunningOutput: true)
         ]
@@ -145,19 +146,61 @@ final class CallMonitorTests: XCTestCase {
         mic.say(true)
         await run(until: { monitor.currentCall == "zoom" })
 
+        processes = []
         mic.say(false)
-        // the change lands on the main actor a turn later; a read already
-        // under way when it does is the last one.
-        for _ in 0..<10 { await Task.yield() }
-        let readsWhenFreed = reads
+        let left = clock.now
+        let readsWhenLeft = reads
         await run(until: { monitor.currentCall == nil })
         XCTAssertNil(monitor.unrecordedCall)
-        XCTAssertEqual(reads, readsWhenFreed)
+        XCTAssertEqual(clock.now - left, .seconds(32), accuracy: .seconds(2))
+        XCTAssertGreaterThan(reads, readsWhenLeft + 10)
 
         // and once it is over, nothing ticks: simulated time stands still.
         let stoppedAt = clock.now
         for _ in 0..<200 { await Task.yield() }
         XCTAssertEqual(clock.now, stoppedAt)
+        monitor.stop()
+    }
+
+    /// Muted, and the call app closed the mic: nobody holds it, but the app
+    /// still plays everyone else, so the call goes on and is not offered a
+    /// second time. It ends once the app has done neither for thirty
+    /// seconds.
+    func testACallWhoseAppLetsGoOfTheMicButKeepsPlayingGoesOn() async {
+        processes = [
+            AudioProcess(pid: 900, bundleID: "us.zoom.xos", isRunningInput: true, isRunningOutput: true)
+        ]
+        let monitor = monitor()
+        monitor.start()
+        mic.say(true)
+        await run(until: { monitor.currentCall == "zoom" })
+        XCTAssertEqual(suggestions, [.record("zoom")])
+
+        // muted: the mic is free, the call's audio still plays.
+        processes = [
+            AudioProcess(pid: 900, bundleID: "us.zoom.xos", isRunningInput: false, isRunningOutput: true)
+        ]
+        mic.say(false)
+        await run(until: { false }, for: .seconds(600))
+        XCTAssertEqual(monitor.currentCall, "zoom")
+        XCTAssertEqual(monitor.unrecordedCall, "zoom")
+
+        // unmuted: the same call, so no second question.
+        processes = [
+            AudioProcess(pid: 900, bundleID: "us.zoom.xos", isRunningInput: true, isRunningOutput: true)
+        ]
+        mic.say(true)
+        await run(until: { false }, for: .seconds(60))
+        XCTAssertEqual(suggestions, [.record("zoom")])
+
+        // left the call: neither, for thirty seconds, and it is over.
+        processes = []
+        mic.say(false)
+        let left = clock.now
+        await run(until: { monitor.currentCall == nil })
+        XCTAssertNil(monitor.currentCall)
+        XCTAssertEqual(clock.now - left, .seconds(32), accuracy: .seconds(2))
+        XCTAssertEqual(suggestions, [.record("zoom")])
         monitor.stop()
     }
 }

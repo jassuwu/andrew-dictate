@@ -142,8 +142,6 @@ final class CallMonitor {
                     }
                     observe(MeetingApps.apps(in: processes, leavingOut: ownPID))
                 }
-            case .observeNothing?:
-                observe([])
             case nil:
                 break
             }
