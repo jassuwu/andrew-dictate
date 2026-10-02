@@ -18,6 +18,9 @@ struct MeetingThresholds: Sendable {
     /// How long the quiet probe gets to come back through the tap.
     /// Provisional.
     var quietProbeWindow: Duration = .seconds(2)
+    /// How long a dead tap is left before it is rebuilt, so a rebuild at
+    /// wake does not race the hardware coming back. Provisional.
+    var settleBeforeRebuild: Duration = .seconds(1.5)
 
     static let provisional = MeetingThresholds()
 }
@@ -396,6 +399,9 @@ final class MeetingCoordinator: ObservableObject {
         meeting.capture?.cancel()
         meeting.lines?.cancel()
         meeting.watchdog?.cancel()
+        // a rebuild still waiting its turn is cut short; one already
+        // talking to the HAL is let finish, and the tap's close waits on it.
+        meeting.rebuild?.cancel()
         let recording = session.finish(at: end)
         startedOn = nil
         publish()
@@ -647,9 +653,14 @@ final class MeetingCoordinator: ObservableObject {
         guard meeting.rebuild == nil else { return }
         meeting.rebuild = Task { [weak self] in
             defer { meeting.rebuild = nil }
-            // stopped before the rebuild began: there is no tap of its own
-            // left to rebuild.
-            guard let self, current === meeting else { return }
+            guard let self else { return }
+            // The hardware gets a moment first: a rebuild that races a
+            // waking device comes back as dead as the tap it replaced.
+            // Stopped meanwhile, or heard again, and there is nothing of
+            // its own left to rebuild.
+            guard await pause(thresholds.settleBeforeRebuild),
+                  isRebuilding(meeting)
+            else { return }
             do {
                 // Set before the rebuild, not after: the tone can be heard
                 // the instant the tap is back.
@@ -667,6 +678,22 @@ final class MeetingCoordinator: ObservableObject {
                 // Most of a meeting is on the spool; write what there is.
                 stop(announcingNothingKept: false)
             }
+        }
+    }
+
+    /// The meeting is still the one recorded, and its tap is still lost.
+    private func isRebuilding(_ meeting: Meeting) -> Bool {
+        current === meeting && session.state == .rebuilding
+    }
+
+    /// A wait on the real clock — the injected wall only ever moves when a
+    /// test moves it. False when the meeting stopped and cut it short.
+    private func pause(_ duration: Duration) async -> Bool {
+        do {
+            try await Task.sleep(for: duration)
+            return true
+        } catch {
+            return false
         }
     }
 

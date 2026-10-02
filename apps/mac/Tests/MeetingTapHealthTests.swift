@@ -27,12 +27,13 @@ final class MeetingTapHealthTests: XCTestCase {
     }
 
     /// The test's own numbers: a five-second timeout and a two-second
-    /// window, in meeting time.
+    /// window, in meeting time; waits on the real clock kept short.
     private func coordinator(
         thresholds: MeetingThresholds = .init(
             probeTimeout: .seconds(1), silenceTimeout: .seconds(5),
             silenceFloor: 0.001, quietNudgeAfter: .seconds(3_600),
-            quietProbeWindow: .seconds(2)),
+            quietProbeWindow: .seconds(2),
+            settleBeforeRebuild: .milliseconds(50)),
         clock: FakeClock = FakeClock()
     ) -> MeetingCoordinator {
         let docs = dir.appendingPathComponent("docs")
@@ -213,6 +214,50 @@ final class MeetingTapHealthTests: XCTestCase {
         XCTAssertEqual(events, [.started, .nudge])
     }
 
+    // MARK: - a tap that stops calling back
+
+    /// The mac wakes and the tap has not called back since it slept: a gap
+    /// at once, and a rebuild only once the hardware has had a moment to
+    /// settle, so the rebuild does not race the device coming back.
+    func testATapThatStopsCallingBackIsRebuiltOnceTheHardwareHasSettled() async throws {
+        let clock = FakeClock()
+        let c = coordinator(
+            thresholds: .init(
+                probeTimeout: .seconds(1), silenceTimeout: .seconds(5),
+                silenceFloor: 0.001, quietNudgeAfter: .seconds(3_600),
+                quietProbeWindow: .seconds(2),
+                settleBeforeRebuild: .milliseconds(500)),
+            clock: clock)
+        c.start()
+        await source.awaitStart()
+        await play(loud(at: .zero), loud(at: .seconds(1)))
+
+        // asleep for a minute.
+        clock.advance(by: .seconds(60))
+        source.skip(to: .seconds(60))
+        let woke = ContinuousClock.now
+        c.probeTapIsAlive()
+
+        XCTAssertEqual(c.state, .rebuilding)
+        XCTAssertEqual(events, [.started, .gapBegan])
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(source.rebuilds, 0, "the hardware is still settling")
+
+        await until { events.contains(.gapEnded) }
+        XCTAssertEqual(source.rebuilds, 1)
+        let waited = try XCTUnwrap(source.rebuiltAt.first) - woke
+        XCTAssertGreaterThanOrEqual(waited, .milliseconds(500))
+        XCTAssertEqual(events, [.started, .gapBegan, .gapEnded])
+        XCTAssertEqual(c.state, .recording)
+
+        c.stop()
+        await c.untilWrittenOut()
+        XCTAssertEqual(records.first?.events, [
+            .init(.gapBegan, atS: 2),
+            .init(.gapEnded, atS: 60.3),
+        ])
+    }
+
     // MARK: - helpers
 
     private func savedFile() throws -> MeetingSummary {
@@ -308,11 +353,22 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
         return stream
     }
 
+    /// When each rebuild was asked for, by the real clock.
+    var rebuiltAt: [ContinuousClock.Instant] { lock.withLock { _rebuiltAt } }
+    private var _rebuiltAt: [ContinuousClock.Instant] = []
+
+    /// The real source stamps the first chunk after an outage past it, so
+    /// the meeting stays on one clock: the next chunk this sends is.
+    func skip(to at: Duration) {
+        lock.withLock { nextAt = max(nextAt, at) }
+    }
+
     /// A rebuilt tap plays the start sound, and hears it come back a moment
     /// later as far-side audio, the way the real one does.
     func rebuild() async throws {
         let at = lock.withLock { () -> Duration in
             _rebuilds += 1
+            _rebuiltAt.append(ContinuousClock.now)
             return nextAt
         }
         let n = 4_800

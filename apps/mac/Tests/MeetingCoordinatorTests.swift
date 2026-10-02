@@ -36,7 +36,8 @@ final class MeetingCoordinatorTests: XCTestCase {
     private func coordinator(
         thresholds: MeetingThresholds = .init(
             probeTimeout: .seconds(1), silenceTimeout: .seconds(5),
-            silenceFloor: 0.001, quietNudgeAfter: .seconds(30)),
+            silenceFloor: 0.001, quietNudgeAfter: .seconds(30),
+            settleBeforeRebuild: .milliseconds(20)),
         clock: FakeClock = FakeClock(),
         starting dates: [Date] = []
     ) -> MeetingCoordinator {
