@@ -265,6 +265,75 @@ final class HotkeyLogicTests: XCTestCase {
             "needs ⌃, ⌥ or ⌘ held with it")
     }
 
+    /// ⌘W pressed to close settings would close nothing ever again: it
+    /// would start a meeting, everywhere. and the app's own ⌘V, pressed
+    /// for every paste, would start or stop one after every dictation.
+    /// command alone or with shift, on the keys every mac app answers, is
+    /// refused; with control or option as well it is the user's to have.
+    func testTheChordsEveryMacAppAnswersAreRefused() {
+        let letters: [(UInt16, String)] = [
+            (0, "A"), (8, "C"), (3, "F"), (4, "H"), (46, "M"), (45, "N"), (31, "O"),
+            (35, "P"), (12, "Q"), (1, "S"), (17, "T"), (9, "V"), (13, "W"), (7, "X"),
+            (6, "Z"),
+        ]
+        let keys: [(UInt16, String)] = [(48, "⇥"), (49, "space"), (36, "↩"), (51, "⌫")]
+        for (keyCode, name) in letters + keys {
+            for modifiers: MeetingShortcut.Modifiers in [[.command], [.command, .shift]] {
+                let chord = MeetingShortcut(keyCode: keyCode, modifiers: modifiers, keyName: name)
+                XCTAssertEqual(
+                    chord.refusal(againstDictationKey: .fn), .everyAppUsesIt,
+                    chord.displayName)
+            }
+        }
+        XCTAssertEqual(
+            MeetingShortcut(keyCode: 13, modifiers: [.command], keyName: "W")
+                .refusal(againstDictationKey: .fn)?.message,
+            "every app already uses that one")
+
+        XCTAssertNil(
+            MeetingShortcut(keyCode: 13, modifiers: [.control, .command], keyName: "W")
+                .refusal(againstDictationKey: .fn))
+        XCTAssertNil(
+            MeetingShortcut(keyCode: 37, modifiers: [.command, .shift], keyName: "L")
+                .refusal(againstDictationKey: .fn))
+    }
+
+    /// a menu matches the character the key typed; the paste and the
+    /// system match where the key sits. a layout that moves the letters
+    /// is refused either way.
+    func testAChordIsRefusedByItsCharacterAndByItsKey() {
+        // azerty: the key where a us keyboard has Q types A.
+        XCTAssertEqual(
+            MeetingShortcut(keyCode: 12, modifiers: [.command], keyName: "A")
+                .refusal(againstDictationKey: .fn),
+            .everyAppUsesIt)
+        // dvorak: the key where a us keyboard has . types V.
+        XCTAssertEqual(
+            MeetingShortcut(keyCode: 47, modifiers: [.command], keyName: "V")
+                .refusal(againstDictationKey: .fn),
+            .everyAppUsesIt)
+    }
+
+    /// ⌘⇧3, 4 and 5 are the mac's screenshots. ⌘3 alone is an app's to
+    /// give, and is not refused for it.
+    func testTheScreenshotKeysAreRefused() {
+        for keyCode: UInt16 in [20, 21, 23] {
+            let chord = MeetingShortcut(
+                keyCode: keyCode, modifiers: [.command, .shift], keyName: "#")
+            XCTAssertEqual(chord.refusal(againstDictationKey: .fn), .takesAScreenshot)
+        }
+        XCTAssertEqual(
+            MeetingShortcut(keyCode: 20, modifiers: [.command, .shift], keyName: "#")
+                .refusal(againstDictationKey: .fn)?.message,
+            "that's the mac's screenshot key")
+        XCTAssertNil(
+            MeetingShortcut(keyCode: 20, modifiers: [.command], keyName: "3")
+                .refusal(againstDictationKey: .fn))
+        XCTAssertNil(
+            MeetingShortcut(keyCode: 22, modifiers: [.command, .shift], keyName: "^")
+                .refusal(againstDictationKey: .fn))
+    }
+
     /// esc is the dictation key's own cancel, heard everywhere: a shortcut
     /// on it would end a take every time it started or stopped a meeting.
     func testAShortcutCannotBeOnEscape() {

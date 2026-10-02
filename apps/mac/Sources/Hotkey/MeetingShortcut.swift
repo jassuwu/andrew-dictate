@@ -55,6 +55,10 @@ struct MeetingShortcut: Codable, Hashable, Sendable {
     enum Refusal: Equatable, Sendable {
         case needsAModifier
         case isEscape
+        /// ⌘ or ⌘⇧ on a key every mac app answers.
+        case everyAppUsesIt
+        /// ⌘⇧3, 4 or 5.
+        case takesAScreenshot
         case includesTheDictationKey(HotkeyBinding)
 
         var message: String {
@@ -63,6 +67,10 @@ struct MeetingShortcut: Codable, Hashable, Sendable {
                 "needs ⌃, ⌥ or ⌘ held with it"
             case .isEscape:
                 "esc cancels a dictation"
+            case .everyAppUsesIt:
+                "every app already uses that one"
+            case .takesAScreenshot:
+                "that's the mac's screenshot key"
             case .includesTheDictationKey(let key):
                 "includes your dictation key, \(key.displayName)"
             }
@@ -76,11 +84,39 @@ struct MeetingShortcut: Codable, Hashable, Sendable {
         guard keyCode != Self.escapeKeyCode else {
             return .isEscape
         }
+        if modifiers.subtracting(.shift) == .command {
+            if modifiers.contains(.shift), Self.screenshotKeyCodes.contains(keyCode) {
+                return .takesAScreenshot
+            }
+            if Self.everyAppsKeyCodes.contains(keyCode)
+                || Self.everyAppsLetters.contains(keyName) {
+                return .everyAppUsesIt
+            }
+        }
         if let held = Self.modifier(of: key), modifiers.contains(held) {
             return .includesTheDictationKey(key)
         }
         return nil
     }
+
+    /// With ⌘, or ⌘⇧, what every mac app answers: select all, copy, find,
+    /// hide, minimise, new, open, print, quit, save, a new tab, paste,
+    /// close, cut, undo; and switching apps, spotlight, a default button,
+    /// moving a file to the bin. ⌘V is also what the app presses itself
+    /// for every paste. A menu matches the character the key typed, which
+    /// is the key's name; the paste and the system match where the key
+    /// sits, which is its code on a us keyboard. Either refuses it, so a
+    /// layout that moves the letters is covered both ways.
+    private static let everyAppsLetters: Set<String> = [
+        "A", "C", "F", "H", "M", "N", "O", "P", "Q", "S", "T", "V", "W", "X", "Z",
+    ]
+    private static let everyAppsKeyCodes: Set<UInt16> = [
+        0, 8, 3, 4, 46, 45, 31, 35, 12, 1, 17, 9, 13, 7, 6,
+        48, 49, 36, 51,
+    ]
+    /// 3, 4 and 5, which ⌘⇧ makes the screenshot keys. By code, as the
+    /// system matches them: with shift held they type no digit.
+    private static let screenshotKeyCodes: Set<UInt16> = [20, 21, 23]
 
     /// The modifier a dictation key is, for a shortcut that holds it. Left
     /// and right are one modifier here. fn is none: a shortcut cannot hold
