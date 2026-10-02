@@ -54,6 +54,10 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var lastTranscript: String?
     /// drives the menu's one time-sensitive row after a failed transcription
     @Published private(set) var canRetryLastFailure = false
+    /// the entry the app just learned from your fixes, for the menu's
+    /// one-click undo. two minutes, then it is a row in your dictionary like
+    /// any other — still removable there.
+    @Published private(set) var undoableLearning: DictionaryEntry?
     /// the engine's own words, before any transform ran. this is what "fix a
     /// word" opens on: an entry's `wrong` side has to be what parakeet
     /// produced, or it never fires.
@@ -119,6 +123,19 @@ final class DictationCoordinator: ObservableObject {
     private let transcriptionEngine: ParakeetEngine
     /// key-down to outcome. this object wires it and wears what it says.
     private let machine: UtteranceMachine
+    /// a minute of watching each delivered dictation for a word you fix
+    /// (ADR 0046). built on the first delivery.
+    private lazy var fixLearning: FixLearning = {
+        let learning = FixLearning(
+            store: dictionaryStore,
+            fullCleanup: { [settings] in settings.cleanupEnabled }
+        )
+        learning.onLearned = { [weak self] entry in
+            self?.announceLearned(entry)
+        }
+        return learning
+    }()
+    private var undoableLearningExpiry: Task<Void, Never>?
     /// the capture each press records with. a device change, a mic that
     /// wedged or the mac going to sleep is answered with a fresh one, never
     /// by rebuilding this one in place.
@@ -595,6 +612,33 @@ final class DictationCoordinator: ObservableObject {
         )
         wordFixerWindowController = controller
         controller.present()
+    }
+
+    /// the menu's `undo learned:` row. the entry goes, and so does the
+    /// chance of learning that pair again.
+    func undoLearning() {
+        guard let entry = undoableLearning else {
+            return
+        }
+        dictionaryStore.remove(id: entry.id)
+        undoableLearning = nil
+        undoableLearningExpiry?.cancel()
+    }
+
+    /// said once, in the pill, as you wrote it — and undoable from the menu
+    /// for two minutes.
+    private func announceLearned(_ entry: DictionaryEntry) {
+        sayWhenIdle("learned: \(entry.right)")
+        undoableLearning = entry
+        undoableLearningExpiry?.cancel()
+        undoableLearningExpiry = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(120))
+            guard !Task.isCancelled,
+                  self?.undoableLearning?.id == entry.id else {
+                return
+            }
+            self?.undoableLearning = nil
+        }
     }
 
     /// The dashboard's numbers, straight from the same store the copied
@@ -1574,6 +1618,9 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func beginRecording(locked: Bool) {
+        // the last dictation's watch ends with this press, whatever the
+        // press does next: only that dictation's span, only until the next.
+        fixLearning.stopWatching()
         // ADR 0023: refused during a meeting, and it says why. you started
         // the recording, so a dead hotkey is not a mystery — but a silent
         // one would still be spec §4's forbidden shape.
@@ -1906,8 +1953,8 @@ extension DictationCoordinator {
         case let .transcribed(heard, inserted):
             lastTranscript = inserted
             lastHeard = heard
-        case .delivered:
-            break
+        case let .delivered(heard, inserted):
+            fixLearning.delivered(heard: heard, inserted: inserted)
         case let .retryOffered(offered):
             canRetryLastFailure = offered
         case .microphoneDropped:
