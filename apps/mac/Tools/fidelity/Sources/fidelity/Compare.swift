@@ -49,6 +49,19 @@ enum Compare {
                 for line in WordDiff.render(edits) {
                     print("    \(line)")
                 }
+                // not the verdict: only whether it is the words that differ
+                // or just the commas and capitals around them.
+                let loose = WordDiff.summary(
+                    of: WordDiff.edits(
+                        from: WordDiff.lettersOnly(batchWords),
+                        to: WordDiff.lettersOnly(streamedWords)
+                    )
+                )
+                print(
+                    loose.isEqual
+                        ? "  ignoring case and punctuation: same words"
+                        : "  ignoring case and punctuation: \(loose.removed) only in batch, \(loose.added) only in streaming"
+                )
             }
         }
 

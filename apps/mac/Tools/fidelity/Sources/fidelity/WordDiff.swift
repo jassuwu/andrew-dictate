@@ -19,6 +19,15 @@ enum WordDiff {
         text.split(whereSeparator: \.isWhitespace).map(String.init)
     }
 
+    /// the same words with case and punctuation taken off, and words that were
+    /// only punctuation dropped. never the verdict, only a second reading of it:
+    /// it tells a stray comma from a missing word.
+    static func lettersOnly(_ words: [String]) -> [String] {
+        words
+            .map { $0.lowercased().filter { $0.isLetter || $0.isNumber } }
+            .filter { !$0.isEmpty }
+    }
+
     /// longest common subsequence over words. the transcripts are a few
     /// hundred words, so the full table is cheap.
     static func edits(from batch: [String], to streaming: [String]) -> [Edit] {
