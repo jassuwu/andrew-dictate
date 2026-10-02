@@ -4,9 +4,10 @@ import Foundation
 /// The meeting half of setup, behind three closures.
 ///
 /// The meeting rows are things the app *does*, not things it asks: system
-/// audio is proved by tapping our own process while the start sound plays —
-/// 0021's probe, run one screen earlier, which is what fires the real TCC
-/// prompt (ADR 0040) — and the meeting model is a download like any other.
+/// audio is proved by a tap that hears our own process while the start
+/// sound plays — 0021's probe, run one screen earlier, which is what fires
+/// the real TCC prompt (ADR 0040) — and the meeting model is a download
+/// like any other.
 /// Each arrives as an injectable closure with a stub that behaves the way the
 /// real one will. The view is written against the seam, so the day the
 /// capture stack lands, nothing in the view changes. The third closure makes
