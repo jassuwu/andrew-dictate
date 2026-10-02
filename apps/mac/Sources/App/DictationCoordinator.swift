@@ -499,6 +499,15 @@ final class DictationCoordinator: ObservableObject {
         controller.present()
     }
 
+    /// one sentence in the pill from outside dictation (the update line's
+    /// "copied"). idle only: it must never land on a take or a meeting.
+    func sayWhenIdle(_ message: String) {
+        guard state == .idle, !meetings.isRecording else {
+            return
+        }
+        flashNotice(message, duration: 2)
+    }
+
     /// Development only (`Capabilities.hasLampLab`): walk the real HUD
     /// through a dictation without a mic or a key — warm, record, cool,
     /// one line of feedback — so the lamp can be seen over a real desktop.
