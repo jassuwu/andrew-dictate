@@ -476,6 +476,58 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(events, [])
     }
 
+    // MARK: - the mac underneath
+
+    /// today's behaviour, which ticket 06 reverses: sleep or the lock ends
+    /// the take and throws it away, saying nothing — the pill would be gone
+    /// before the screen came back.
+    func testSleepOrTheLockMidRecordingDiscardsItSilently() async {
+        let m = machine()
+        m.keyDown()
+        await pass(.seconds(1))
+
+        m.captureInterrupted(.systemPaused)
+        await settle()
+
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(states.last, .init(.idle, fast: true))
+        XCTAssertEqual(mic.cancels, 1)
+        XCTAssertEqual(pills, [])
+        XCTAssertEqual(engine.heard, [])
+        XCTAssertEqual(completions, [])
+    }
+
+    /// a microphone that vanished mid-sentence is a loss, and losses speak.
+    func testAMicThatChangesMidRecordingSaysSayThatAgain() async {
+        let m = machine()
+        m.doubleTapped()
+        await settle { !self.pills.isEmpty }
+
+        m.captureInterrupted(.deviceChanged)
+        await settle { self.pills.count == 2 }
+
+        XCTAssertEqual(pills.last, Pill("the microphone changed — say that again", 2))
+        XCTAssertEqual(lockFlags, [true, false])
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(engine.heard, [])
+    }
+
+    /// once the words are with the engine, the mic going away costs nothing.
+    func testAnInterruptionWhileTranscribingChangesNothing() async {
+        let m = machine()
+        engine.holds = true
+        engine.reply = .success("still here")
+        await hold(m, for: .seconds(1))
+        await settle { self.engine.isWaiting }
+
+        m.captureInterrupted(.systemPaused)
+        XCTAssertEqual(m.state, .transcribing)
+
+        engine.release()
+        await settle { self.inserter.inserted.count == 1 }
+        XCTAssertEqual(inserter.inserted, ["Still here."])
+    }
+
     // MARK: - helpers
 
     private var pills: [Pill] {
