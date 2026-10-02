@@ -233,6 +233,43 @@ final class MeetingProblemsTests: XCTestCase {
         ])
     }
 
+    // MARK: - several at once
+
+    /// The disk nearly full from the start, and the mic gone silent while
+    /// the call talks: both stand, the mic first, and each clears on its
+    /// own, with the other still said until it does.
+    func testTwoProblemsStandAtOnceAndClearOnTheirOwn() async throws {
+        source.micName = "AirPods Pro"
+        let disk = FakeDisk(free: 500_000_000)
+        let c = coordinator(disk: disk)
+        c.start()
+        await source.awaitStart()
+        await play(both(at: .zero))
+        await until { !c.problems.isEmpty }
+        for s in 1...10 {
+            await play(theyTalk(at: .seconds(s)))
+        }
+        XCTAssertEqual(c.problems, [.cannotHearYourMic("AirPods Pro"), .diskNearlyFull])
+        XCTAssertEqual(c.problem, .cannotHearYourMic("AirPods Pro"))
+
+        await play(both(at: .seconds(11)))
+        XCTAssertEqual(c.problems, [.diskNearlyFull])
+
+        disk.free = 5_000_000_000
+        for s in 12...60 {
+            await play(both(at: .seconds(s)))
+        }
+        await until { c.problems.isEmpty }
+        XCTAssertEqual(c.problems, [])
+        XCTAssertEqual(events, [
+            .started,
+            .problemBegan(.diskNearlyFull),
+            .problemBegan(.cannotHearYourMic("AirPods Pro")),
+            .problemCleared(.cannotHearYourMic("AirPods Pro")),
+            .problemCleared(.diskNearlyFull),
+        ])
+    }
+
     // MARK: - helpers
 
     /// A second of both sides talking.
