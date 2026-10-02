@@ -68,6 +68,7 @@ final class MeetingTranscriptTests: XCTestCase {
         ended: 2026-08-29T15:44:11+05:30
         duration_s: 6120
         engine: whisper-large-v3-turbo
+        speakers: [you, them 1, them]
         complete: true
         gaps: []
         recovered: false
@@ -100,6 +101,7 @@ final class MeetingTranscriptTests: XCTestCase {
         ended: 2026-08-29T14:03:51+05:30
         duration_s: 100
         engine: whisper-large-v3-turbo
+        speakers: [you]
         complete: false
         gaps:
         - [41.2, 63.0]
@@ -209,6 +211,27 @@ final class MeetingTranscriptTests: XCTestCase {
         XCTAssertEqual(front["started"], "2026-08-29T14:02:11+05:30")
         XCTAssertEqual(front["duration_s"], "100")
         XCTAssertEqual(front["ended"], "2026-08-29T14:03:51+05:30")
+    }
+
+    func testTheFrontMatterListsTheSpeakersInOrderOfFirstAppearance() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(turns: [
+                .init(speaker: .them(1), at: .seconds(2), text: "morning."),
+                .init(speaker: .you, at: .seconds(5), text: "hi."),
+                .init(speaker: .them(2), at: .seconds(8), text: "hello."),
+                .init(speaker: .them(1), at: .seconds(12), text: "shall we?"),
+                .init(speaker: .you, at: .seconds(15), text: "yes."),
+            ]),
+            in: parent, timeZone: tz)
+
+        XCTAssertEqual(try frontMatter(of: url)["speakers"], "[them 1, you, them 2]")
+    }
+
+    func testAMeetingNobodySpokeInHasNoSpeakers() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(turns: []), in: parent, timeZone: tz)
+
+        XCTAssertEqual(try frontMatter(of: url)["speakers"], "[]")
     }
 
     // MARK: - round trip

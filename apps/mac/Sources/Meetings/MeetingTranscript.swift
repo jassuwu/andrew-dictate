@@ -107,6 +107,7 @@ enum MeetingTranscriptFile {
             "ended: \(iso8601(timeZone).string(from: ended(transcript)))",
             "duration_s: \(seconds(transcript.duration))",
             "engine: \(transcript.engine)",
+            "speakers: [\(speakers(of: transcript).joined(separator: ", "))]",
             "complete: \(transcript.complete)",
         ]
         if transcript.gaps.isEmpty {
@@ -272,6 +273,15 @@ enum MeetingTranscriptFile {
     }
 
     // MARK: - formatting
+
+    /// The labels the body uses, each once, in the order they first speak.
+    private static func speakers(of transcript: MeetingTranscript) -> [String] {
+        var labels: [String] = []
+        for turn in transcript.turns where !labels.contains(turn.speaker.label) {
+            labels.append(turn.speaker.label)
+        }
+        return labels
+    }
 
     /// What one speaker said in a row, stamped with the first line's time —
     /// the live pass hands over fragments, and a person reads turns. A
