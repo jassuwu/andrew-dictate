@@ -199,8 +199,6 @@ final class UtteranceMachine {
     /// takes in a row the engine never answered. one is worth a check; a
     /// second, with nothing answered in between, is an engine that stopped.
     private var unansweredTakes = 0
-    /// the mac is asleep or locked; stands in for ticket 06's flag until the merge.
-    var isAway = false
     /// the start chime, held back 120 ms so a discarded capture can cancel it
     private var startCueTask: Task<Void, Never>?
     private var retryBuffer = RetryBuffer()
@@ -216,8 +214,14 @@ final class UtteranceMachine {
     /// heard is copied when it is written out, never pasted.
     private var copiesInsteadOfPasting = false
     /// asleep or locked: nobody is there to read a pill, so the last one
-    /// said waits for `systemResumed`.
+    /// said waits for `systemResumed`, and no deadline runs out meanwhile.
     private var isSystemPaused = false
+    /// the deadlines' view of it. settable so a test can send the mac away
+    /// without a lock screen.
+    var isAway: Bool {
+        get { isSystemPaused }
+        set { isSystemPaused = newValue }
+    }
     private var heldPill: (message: String, duration: TimeInterval)?
     private var timelineSequence: UInt64 = 0
     private var activeTimeline: UtteranceTimelineBuilder?

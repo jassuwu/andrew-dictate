@@ -156,6 +156,27 @@ final class UtteranceMachineTimeoutTests: XCTestCase {
         XCTAssertEqual(outcomes, [.couldNotTranscribe])
     }
 
+    /// the real way the mac goes away: the lock comes down while the take is
+    /// being written out. the deadline waits through it, and the take is
+    /// still the lock's to copy when the engine answers after the unlock.
+    func testALockMidTranscriptionHoldsTheDeadline() async {
+        let m = machine()
+        engine.holds = true
+        await hold(m, for: .seconds(1))
+        await settle { self.engine.isWaiting }
+
+        m.captureInterrupted(.systemPaused)
+        await pass(TranscriptionDeadline.floor)
+        await pass(TranscriptionDeadline.floor)
+        XCTAssertEqual(m.state, .transcribing)
+        XCTAssertEqual(pills, [])
+
+        m.systemResumed()
+        await pass(.milliseconds(3_900))
+        XCTAssertEqual(m.state, .transcribing)
+        XCTAssertEqual(pills, [])
+    }
+
     /// pressing again over a take three seconds stuck drops it, as it always
     /// has. that is the same evidence as a timeout, so the engine is checked.
     func testAPressThatDropsAHungTakeAsksForTheEngineToBeChecked() async {
