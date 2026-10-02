@@ -60,6 +60,8 @@ enum MeetingTranscriptFile {
     enum Failure: Error, Equatable {
         case noFrontMatter(URL)
         case malformed(String)
+        /// A file to be replaced that is not there any more.
+        case gone(URL)
     }
 
     static let folderName = "meetings"
@@ -281,6 +283,32 @@ enum MeetingTranscriptFile {
                     [.posixPermissions: 0o700], ofItemAtPath: url.path)
             }
         }
+    }
+
+    // MARK: - writing it again
+
+    /// The one time a file changes after it is written: you asked for the
+    /// meeting to be transcribed again. The new reading takes the file's
+    /// place at the same path, whole or not at all — written beside it and
+    /// moved over it, so a failure anywhere leaves the old file as it was.
+    ///
+    /// A file that is no longer there is not made: you threw it away while
+    /// it was being redone, and it stays thrown away.
+    static func replace(
+        at url: URL,
+        with transcript: MeetingTranscript,
+        fileManager: FileManager = .default,
+        timeZone: TimeZone = .current
+    ) throws {
+        guard fileManager.fileExists(atPath: url.path) else {
+            throw Failure.gone(url)
+        }
+        try markdown(transcript, timeZone: timeZone)
+            .write(to: url, atomically: true, encoding: .utf8)
+        // `try?` for the reason `write` gives: the new file is already in
+        // its place.
+        try? fileManager.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
     // MARK: - reading back

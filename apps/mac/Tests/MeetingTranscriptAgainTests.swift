@@ -73,6 +73,86 @@ final class MeetingTranscriptAgainTests: XCTestCase {
         XCTAssertThrowsError(try MeetingTranscriptFile.header(of: url))
     }
 
+    // MARK: - replacing it
+
+    /// the body and the engine are the new reading's; the file is where it
+    /// was, with nothing left beside it.
+    func testReplacingAFileRewritesItAtTheSamePath() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(gaps: [], recovered: false), in: parent, timeZone: kolkata)
+        let folder = url.deletingLastPathComponent()
+        let before = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+
+        try MeetingTranscriptFile.replace(
+            at: url,
+            with: meeting(
+                gaps: [], recovered: false, engine: "whisperLargeV3",
+                turns: [.init(speaker: .them(1), at: .seconds(3), text: "namaste")]),
+            timeZone: kolkata)
+
+        let text = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(text.contains("engine: whisperLargeV3\n"), text)
+        XCTAssertTrue(text.contains("speakers: [them 1]\n"), text)
+        XCTAssertTrue(text.contains("words: 1\n"), text)
+        XCTAssertTrue(text.contains("[00:00:03] them 1: namaste\n"), text)
+        XCTAssertFalse(text.contains("hello"), text)
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(atPath: folder.path).sorted(),
+            before.sorted())
+    }
+
+    /// the meeting's own lines are the file's to keep: read them, write them
+    /// in the offset they were written in, and they come back the same —
+    /// whatever zone the mac is in now.
+    func testWhatTheMeetingWasIsWrittenBackExactlyAsItWas() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(
+                gaps: [.init(began: .seconds(41.96), ended: .seconds(63))],
+                recovered: true),
+            in: parent, timeZone: kolkata)
+        let before = try frontMatter(of: url)
+        let header = try MeetingTranscriptFile.header(of: url)
+
+        try MeetingTranscriptFile.replace(
+            at: url,
+            with: MeetingTranscript(
+                app: header.app, started: header.started, duration: header.duration,
+                engine: "whisperLargeV3", gaps: header.gaps, recovered: header.recovered,
+                turns: [.init(speaker: .you, at: .seconds(1), text: "again")]),
+            timeZone: header.timeZone)
+
+        let after = try frontMatter(of: url)
+        for key in ["app", "started", "ended", "duration_s", "recovered"] {
+            XCTAssertEqual(after[key], before[key], key)
+        }
+        XCTAssertEqual(after["gaps"], before["gaps"])
+        XCTAssertEqual(after["engine"], "whisperLargeV3")
+    }
+
+    func testTheReplacementIsNotReadableByOtherUsers() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(gaps: [], recovered: false), in: parent, timeZone: kolkata)
+
+        try MeetingTranscriptFile.replace(
+            at: url, with: meeting(gaps: [], recovered: false, engine: "whisperLargeV3"),
+            timeZone: kolkata)
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+    }
+
+    /// a file you threw away while it was being made again is not a file to
+    /// bring back: there is nothing there to replace, and nothing is made.
+    func testReplacingAFileThatIsGoneThrowsAndMakesNothing() throws {
+        let url = parent.appendingPathComponent("meetings/2026-08/gone.md")
+
+        XCTAssertThrowsError(try MeetingTranscriptFile.replace(
+            at: url, with: meeting(gaps: [], recovered: false), timeZone: kolkata))
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.deletingLastPathComponent().path))
+    }
+
     // MARK: -
 
     private func meeting(
