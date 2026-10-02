@@ -131,13 +131,17 @@ struct Remover {
 
     /// files that go with an item without being its url: the meeting
     /// hook's log; the press log, which is evidence about your dictations
-    /// and has no reason to outlive them; and the never-learn list, the
+    /// and has no reason to outlive them, and the meeting records beside it,
+    /// which say when you were on a call; and the never-learn list, the
     /// learned rows you turned down, which belongs to the dictionary they
     /// were turned down from.
     private func companions(of item: RemovalPlan.Item) -> [URL] {
         switch item {
         case .dictations:
-            [supportDirectory.appendingPathComponent(PressLogStore.fileName)]
+            [
+                supportDirectory.appendingPathComponent(PressLogStore.fileName),
+                supportDirectory.appendingPathComponent(MeetingRecordStore.fileName),
+            ]
         case .dictionary:
             [supportDirectory.appendingPathComponent(DictionaryStore.neverLearnFileName)]
         case .meetingLeftovers:
