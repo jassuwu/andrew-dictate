@@ -158,7 +158,7 @@ final class LazyMeetingsTests: XCTestCase {
 private struct NoModel: Error {}
 
 private struct SilentSource: MeetingAudioSource {
-    func start(tapping app: RunningApp) async throws -> AsyncStream<MeetingAudioChunk> {
+    func start() async throws -> AsyncStream<MeetingAudioChunk> {
         AsyncStream { $0.finish() }
     }
 

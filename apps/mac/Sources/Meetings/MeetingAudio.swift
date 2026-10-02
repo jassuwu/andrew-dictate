@@ -27,17 +27,18 @@ struct MeetingAudioChunk: Sendable {
 /// The capture layer. Starting it plays the start sound — that is the probe
 /// (ADR 0021) — and the stream keeps flowing through silence because the mic
 /// is the clock (002). It ends only when `stop()` is called or the tap dies
-/// in a way that cannot be rebuilt.
+/// in a way that cannot be rebuilt. There is no app to name: the far side is
+/// everything the mac plays (ADR 0049).
 protocol MeetingAudioSource: Sendable {
-    func start(tapping app: RunningApp) async throws -> AsyncStream<MeetingAudioChunk>
+    func start() async throws -> AsyncStream<MeetingAudioChunk>
     /// 002 §6's response to a tap that went all-zero: tear down, rebuild.
     func rebuild() async throws
     func stop() async
-    /// Whether the tapped app is putting audio out at this moment, or `nil`
-    /// when that cannot be told. Silence from an app that is playing nothing
-    /// is what a working tap should deliver — it is not evidence of a dead
-    /// one. The other direction proves nothing (002 §6), so this is only
-    /// ever used to *withhold* a verdict, never to reach one sooner.
+    /// Whether anything but this app is putting audio out at this moment, or
+    /// `nil` when that cannot be told. Silence from a mac that is playing
+    /// nothing is what a working tap should deliver — it is not evidence of
+    /// a dead one. The other direction proves nothing (002 §6), so this is
+    /// only ever used to *withhold* a verdict, never to reach one sooner.
     func tappedAppIsPlaying() -> Bool?
 }
 

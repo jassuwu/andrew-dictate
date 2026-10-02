@@ -280,7 +280,7 @@ final class MeetingCoordinator: ObservableObject {
             // Theirs: the tap. This is the one that reads as "can't hear".
             let chunks: AsyncStream<MeetingAudioChunk>
             do {
-                chunks = try await source.start(tapping: app)
+                chunks = try await source.start()
             } catch {
                 logger.error("tap failed to open: \(error.localizedDescription, privacy: .public)")
                 loading.cancel()

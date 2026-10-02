@@ -850,8 +850,8 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     private var nextAt: Duration = .zero
     var rebuilds = 0
     /// The real source plays the start sound again on every rebuild, and the
-    /// tap is scoped to this app as well — so the tone comes back as far-side
-    /// audio a moment later. A fake that stays mute cannot see what that
+    /// tap hears this app like any other — so the tone comes back as
+    /// far-side audio a moment later. A fake that stays mute cannot see what that
     /// does to the quiet clock.
     var toneOnRebuild: MeetingAudioChunk?
 
@@ -874,7 +874,7 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
         lock.withLock { _openedWhileClosing }
     }
 
-    func start(tapping app: RunningApp) async throws -> AsyncStream<MeetingAudioChunk> {
+    func start() async throws -> AsyncStream<MeetingAudioChunk> {
         let (stream, continuation) = AsyncStream<MeetingAudioChunk>.makeStream()
         lock.withLock {
             if stopsInFlight > 0 { _openedWhileClosing = true }

@@ -587,7 +587,7 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: AsyncStream<MeetingAudioChunk>.Continuation?
 
-    func start(tapping app: RunningApp) async throws -> AsyncStream<MeetingAudioChunk> {
+    func start() async throws -> AsyncStream<MeetingAudioChunk> {
         let (stream, continuation) = AsyncStream<MeetingAudioChunk>.makeStream()
         lock.withLock { self.continuation = continuation }
         return stream

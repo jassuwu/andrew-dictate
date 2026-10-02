@@ -4,11 +4,12 @@ import Foundation
 import os
 
 /// The capture layer, as ticket 002 laid it out and the spike proved on this
-/// machine: a Core Audio process tap on the meeting app's processes, fed into
+/// machine: a Core Audio tap on everything the mac plays (ADR 0049), fed into
 /// a private aggregate device whose only real sub-device — and therefore
 /// clock — is the microphone. One `AudioBufferList` per cycle carries both,
-/// so alignment is the HAL's job. The tap is created by bundle id with
-/// process restore on, so a helper that relaunches keeps being heard.
+/// so alignment is the HAL's job. The tap excludes no process: whichever app
+/// the call is in, and whichever helper of it does the playing, is heard
+/// without anyone having to name it.
 ///
 /// Everything arrives here at the device rate (48 kHz on this mac) and leaves
 /// as 16 kHz mono pairs, in ~100 ms chunks, on the IO queue.
@@ -37,7 +38,6 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
     // All guarded by `lock`, touched from the caller and the IO queue.
     private var rig: Rig?
-    private var targets: [String] = []
     private var continuation: AsyncStream<MeetingAudioChunk>.Continuation?
     private var assembler: ChunkAssembler?
     private var framesDelivered: Int64 = 0
@@ -48,20 +48,10 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
     // MARK: - MeetingAudioSource
 
-    func start(tapping app: RunningApp) async throws -> AsyncStream<MeetingAudioChunk> {
-        // The app's processes, and ours: the probe tone (ADR 0021) is played
-        // by *this* process, and a tap scoped to zoom alone would only ever
-        // hear it if zoom happened to be talking in the same second. The
-        // cost is a third of a second of our own start sound at the head of
-        // every recording, which whisper ignores.
-        var targets = MeetingApps.tapBundleIDs(for: app)
-        if let me = Bundle.main.bundleIdentifier, !targets.contains(me) {
-            targets.append(me)
-        }
+    func start() async throws -> AsyncStream<MeetingAudioChunk> {
         let (stream, continuation) = AsyncStream<MeetingAudioChunk>.makeStream(
             bufferingPolicy: .unbounded)
         lock.withLock {
-            self.targets = targets
             self.continuation = continuation
             self.framesDelivered = 0
             self.lastDelivery = ContinuousClock.now
@@ -96,25 +86,14 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         }
     }
 
-    /// Ask the HAL whether any of the tapped processes is putting audio out.
-    /// Our own bundle is deliberately left out of the question: this app is
-    /// in `targets` only so the tap can hear its own probe tone.
+    /// Ask the HAL whether any process but this one is putting audio out.
+    /// Ours is left out of the question: the tap hears it, but all it plays
+    /// is the probe tone.
     ///
-    /// `nil` when nothing translates — a helper process (WebKit.GPU, a
-    /// chrome helper) does the playing for some apps, and an answer we
-    /// cannot get must not be read as "no".
+    /// `nil` when the HAL will not list its processes — an answer we cannot
+    /// get must not be read as "no".
     func tappedAppIsPlaying() -> Bool? {
-        let mine = Bundle.main.bundleIdentifier
-        let others = lock.withLock { targets }.filter { $0 != mine }
-        var asked = false
-        for bundleID in others {
-            guard let process = CoreAudioProperties.processObject(for: bundleID),
-                  let playing = CoreAudioProperties.isRunningOutput(process)
-            else { continue }
-            asked = true
-            if playing { return true }
-        }
-        return asked ? false : nil
+        CoreAudioProperties.anotherProcessIsRunningOutput()
     }
 
     func stop() async {
@@ -128,19 +107,16 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
     // MARK: - the onboarding proof
 
-    /// ADR 0021's probe, run one screen earlier: tap *ourselves*, play the
-    /// start sound, and report whether the tap heard it. This is what fires
-    /// the real "record your system audio" prompt. Note the spike's caveat:
-    /// on a first run the tap delivers audio before macOS has even asked, so
-    /// a pass here is not proof of a grant — every real capture proves it
-    /// again, which is the doctrine anyway.
+    /// ADR 0021's probe, run one screen earlier: open the tap — which hears
+    /// this process like any other — play the start sound, and report
+    /// whether the tap heard it. This is what fires the real "record your
+    /// system audio" prompt. Note the spike's caveat: on a first run the tap
+    /// delivers audio before macOS has even asked, so a pass here is not
+    /// proof of a grant — every real capture proves it again, which is the
+    /// doctrine anyway.
     static func proveSystemAudio(within window: Duration = .seconds(1.5)) async -> Bool {
         let source = CoreAudioMeetingSource()
-        let me = RunningApp(
-            name: "andrew dictate",
-            bundleID: Bundle.main.bundleIdentifier ?? AppIdentity.bundleID,
-            pid: ProcessInfo.processInfo.processIdentifier)
-        guard let stream = try? await source.start(tapping: me) else { return false }
+        guard let stream = try? await source.start() else { return false }
         // The deadline is a task of its own: a tap that never yields a
         // chunk would otherwise leave the row "proving…" forever, which is
         // a failure wearing a spinner (SPEC §4).
@@ -166,11 +142,11 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     // MARK: - building the rig
 
     private func build() throws {
-        let targets = lock.withLock { self.targets }
-
-        let description = CATapDescription(stereoMixdownOfProcesses: [])
-        description.bundleIDs = targets
-        description.isProcessRestoreEnabled = true
+        // Everything, ours included: the probe tone (ADR 0021) is played by
+        // *this* process, and a tap that left us out could never hear it.
+        // The cost is a third of a second of our own start sound at the
+        // head of every recording, which whisper ignores.
+        let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
         description.isPrivate = true
         description.muteBehavior = .unmuted
         description.name = "andrew dictate meeting tap"
@@ -233,7 +209,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             teardown()
             throw error
         }
-        logger.info("tap up: \(targets.joined(separator: ","), privacy: .public) at \(rate, privacy: .public) Hz")
+        logger.info("tap up: the whole mac, at \(rate, privacy: .public) Hz")
     }
 
     private func teardown() {
@@ -426,35 +402,42 @@ private enum CoreAudioProperties {
         return status == noErr ? rate : 0
     }
 
-    /// The HAL's object for a running process, by bundle id. Nothing is
-    /// running under that id → no object. there is no bundle-id lookup in
-    /// the HAL: walk its process list and read each object's bundle id.
-    static func processObject(for bundleID: String) -> AudioObjectID? {
+    /// Whether any process but this one has output running. The HAL lists
+    /// every process that has opened audio IO; ours is told apart by pid,
+    /// which every process object carries, where a bundle id is missing for
+    /// helpers and daemons. `nil` when the list cannot be read at all.
+    static func anotherProcessIsRunningOutput() -> Bool? {
+        guard let processes = processObjects() else { return nil }
+        let mine = ProcessInfo.processInfo.processIdentifier
+        return processes.contains { process in
+            pid(of: process) != mine && isRunningOutput(process) == true
+        }
+    }
+
+    private static func processObjects() -> [AudioObjectID]? {
         var address = address(kAudioHardwarePropertyProcessObjectList)
         var size: UInt32 = 0
         guard AudioObjectGetPropertyDataSize(
             AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size
-        ) == noErr, size > 0 else { return nil }
+        ) == noErr else { return nil }
+        guard size > 0 else { return [] }
         var objects = [AudioObjectID](
             repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
         guard AudioObjectGetPropertyData(
             AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &objects
         ) == noErr else { return nil }
-        return objects.first { processBundleID($0) == bundleID }
+        return objects
     }
 
-    private static func processBundleID(_ process: AudioObjectID) -> String? {
-        var address = address(kAudioProcessPropertyBundleID)
-        var value: CFString? = nil
-        var size = UInt32(MemoryLayout<CFString?>.size)
-        let status = withUnsafeMutablePointer(to: &value) {
-            AudioObjectGetPropertyData(process, &address, 0, nil, &size, $0)
-        }
-        guard status == noErr, let value else { return nil }
-        return value as String
+    private static func pid(of process: AudioObjectID) -> pid_t? {
+        var address = address(kAudioProcessPropertyPID)
+        var pid = pid_t(0)
+        var size = UInt32(MemoryLayout<pid_t>.size)
+        let status = AudioObjectGetPropertyData(process, &address, 0, nil, &size, &pid)
+        return status == noErr ? pid : nil
     }
 
-    static func isRunningOutput(_ process: AudioObjectID) -> Bool? {
+    private static func isRunningOutput(_ process: AudioObjectID) -> Bool? {
         var address = address(kAudioProcessPropertyIsRunningOutput)
         var value = UInt32(0)
         var size = UInt32(MemoryLayout<UInt32>.size)
