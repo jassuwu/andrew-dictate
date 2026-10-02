@@ -162,6 +162,11 @@ final class UtteranceMachine {
     /// the least a take must hand back to be one: a tenth of a second at
     /// 16 kHz.
     static let usableSamples = 1_600
+    /// how long the engine stays awake after it last ran. the neural engine
+    /// answers a take in ~27 ms just after a run, ~49 ms after 20 s idle and
+    /// ~65 ms after minutes; a press inside this finds it warm and is not
+    /// worth a wake of its own.
+    static let engineStaysAwake = Duration.seconds(10)
     /// a key let go inside this asked no question: the pipeline's own
     /// threshold for an empty transcript that ends in silence.
     private static let brushLimit = Duration.milliseconds(300)
@@ -199,6 +204,8 @@ final class UtteranceMachine {
     /// takes in a row the engine never answered. one is worth a check; a
     /// second, with nothing answered in between, is an engine that stopped.
     private var unansweredTakes = 0
+    /// when the engine was last asked anything, a take or a wake.
+    private var engineLastAsked: ContinuousClock.Instant?
     /// the start chime, held back 120 ms so a discarded capture can cancel it
     private var startCueTask: Task<Void, Never>?
     private var retryBuffer = RetryBuffer()
@@ -351,6 +358,24 @@ final class UtteranceMachine {
         // look dead.
         setState(.recording)
         startMicrophone(microphone, id: captureID, timelineID: timelineID)
+        wakeEngineIfIdle()
+    }
+
+    /// the engine wakes while you talk, so the take finds it ready. after
+    /// the mic, which is the press's first errand, and never awaited: the
+    /// wake is the engine's to answer in its own time, and the take waits
+    /// on it only if it is somehow still running at key-up.
+    private func wakeEngineIfIdle() {
+        let now = clock.now
+        if let last = engineLastAsked,
+           last.duration(to: now) < Self.engineStaysAwake {
+            return
+        }
+        engineLastAsked = now
+        let engine = engine
+        Task.detached(priority: .userInitiated) {
+            await engine.wake()
+        }
     }
 
     private func startMicrophone(
@@ -1061,6 +1086,7 @@ final class UtteranceMachine {
         pipelineGeneration += 1
         let generation = pipelineGeneration
         armTranscriptionDeadline(for: samples, generation: generation)
+        engineLastAsked = clock.now
 
         pipelineTask = Task { [weak self] in
             await self?.transcribeAndInsert(
@@ -1124,6 +1150,8 @@ final class UtteranceMachine {
     }
 
     private func engineAnswered(generation: Int) {
+        // late or not, it ran: it is awake now.
+        engineLastAsked = clock.now
         guard generation == pipelineGeneration else {
             return
         }
