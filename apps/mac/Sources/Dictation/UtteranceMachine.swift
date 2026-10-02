@@ -187,7 +187,11 @@ final class UtteranceMachine {
         // here: this press means "that one", not "a new one". keyUp's state
         // guard makes the eventual key release a no-op.
         if isPillShowing?() == true, canRetryLastFailure {
-            retryLastFailure()
+            if !retryLastFailure() {
+                // the pill still offered it, but the samples had lapsed
+                // under it: the press is spent and nothing answers it.
+                refuse(.retryLapsed)
+            }
             return
         }
         if state == .transcribing {
@@ -445,10 +449,12 @@ final class UtteranceMachine {
 
     /// re-runs the samples that were thrown on, delivered wherever the
     /// cursor is *now* — the failure may have sent them to another window.
-    func retryLastFailure() {
+    /// false when there was nothing left to re-run.
+    @discardableResult
+    func retryLastFailure() -> Bool {
         guard let samples = retryBuffer.take(at: Date()) else {
             clearRetry()
-            return
+            return false
         }
         clearRetry()
 
@@ -463,8 +469,14 @@ final class UtteranceMachine {
         timeline.micFirstBuffer = now
         timeline.keyUp = now
         activeTimeline = timeline
+        // its own press in the log, heard through no mic: no first buffer
+        // and no key-up, only the samples it replays.
+        press = PressRecord.Draft(keyDown: now, startedAt: Date(), retry: true)
+        press?.samplesReady = now
+        press?.samples = samples
         setState(.transcribing)
         startPipeline(samples, focusAnchor: inserter.captureAnchor())
+        return true
     }
 
     /// the failed dictation is still recoverable until the next one, and the
@@ -869,6 +881,19 @@ final class UtteranceMachine {
         duration: TimeInterval = 2.4
     ) {
         emit(.pill(message, duration: duration))
+    }
+
+    /// a press answered with a pill before anything was recorded. its own
+    /// record, apart from any press still in flight.
+    private func refuse(_ why: PressRecord.Refusal) {
+        let now = clock.now
+        emit(.pressEnded(
+            PressRecord.Draft(keyDown: now, startedAt: Date()).finished(
+                .refused(why),
+                at: now,
+                engine: engineVersion?() ?? ""
+            )
+        ))
     }
 
     /// the one way a press ends: its record leaves once, and a second

@@ -248,6 +248,7 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(states.last, .init(.idle, fast: true))
         XCTAssertEqual(retryOffers, [true])
         XCTAssertEqual(completions, [])
+        XCTAssertEqual(outcomes, [.couldNotTranscribe])
 
         engine.reply = .success("the build failed")
         m.keyDown()
@@ -259,9 +260,15 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(inserter.inserted, ["The build failed."])
         XCTAssertEqual(completions, [.delivered])
         XCTAssertEqual(retryOffers, [true, false])
+        // the replay is its own press, heard through no mic at all.
+        XCTAssertEqual(outcomes, [.couldNotTranscribe, .delivered])
+        XCTAssertEqual(presses.map(\.retry), [false, true])
+        XCTAssertEqual(presses.last?.samples, 1_600)
+        XCTAssertNil(presses.last?.mic)
         // the key's eventual release ends nothing: there is no recording.
         m.keyUp()
         XCTAssertEqual(mic.stops, 1)
+        XCTAssertEqual(presses.count, 2)
     }
 
     /// once the pill has gone, a press is a new sentence, and the lost one
@@ -307,6 +314,8 @@ final class UtteranceMachineTests: XCTestCase {
 
         XCTAssertEqual(engine.heard, [mic.samples, mic.samples])
         XCTAssertEqual(retryOffers, [true, false])
+        XCTAssertEqual(outcomes, [.couldNotTranscribe, .delivered])
+        XCTAssertEqual(presses.map(\.retry), [false, true])
     }
 
     // MARK: - esc
