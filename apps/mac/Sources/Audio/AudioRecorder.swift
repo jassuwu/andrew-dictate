@@ -117,7 +117,7 @@ final class AudioRecorder: DisposableMicCapture {
     ) async throws {
         takeSequence &+= 1
         let take = takeSequence
-        try await capture.perform { try $0.start(onFirstBuffer: onFirstBuffer) }
+        try await ask { try $0.start(onFirstBuffer: onFirstBuffer) }
         if take == takeSequence {
             isRecording = true
         }
@@ -125,7 +125,7 @@ final class AudioRecorder: DisposableMicCapture {
 
     func stop() async throws -> [Float] {
         endTake()
-        return try await capture.perform { try $0.stop() }
+        return try await ask { try $0.stop() }
     }
 
     func cancel() {
@@ -146,6 +146,19 @@ final class AudioRecorder: DisposableMicCapture {
     private func endTake() {
         takeSequence &+= 1
         isRecording = false
+    }
+
+    /// `work` on the capture's queue, and its answer. the continuation is
+    /// made here, on the main actor, so the work is queued before this
+    /// first suspends: a cancel asked after a start always lands after it.
+    /// (a nonisolated async helper would hop off the main actor first, and
+    /// an esc in that gap left the mic open.)
+    private func ask<Answer: Sendable>(
+        _ work: @escaping @Sendable (CaptureEngine) throws -> Answer
+    ) async throws -> Answer {
+        try await withCheckedThrowingContinuation { continuation in
+            capture.submit(work) { continuation.resume(with: $0) }
+        }
     }
 
     private func handleCapApproaching() {
@@ -237,23 +250,19 @@ private final class CaptureEngine: @unchecked Sendable {
 
     // MARK: - asked from the main actor
 
-    /// runs `work` on the queue and hands back its answer. a capture that
-    /// has been thrown away does nothing more and says so.
-    func perform<Answer: Sendable>(
-        _ work: @escaping @Sendable (CaptureEngine) throws -> Answer
-    ) async throws -> Answer {
-        try await withCheckedThrowingContinuation { continuation in
-            queue.async { [self] in
-                guard !isDiscarded else {
-                    continuation.resume(throwing: AudioRecorderError.discarded)
-                    return
-                }
-                do {
-                    continuation.resume(returning: try work(self))
-                } catch {
-                    continuation.resume(throwing: error)
-                }
+    /// runs `work` on the queue and hands its answer back. queued before
+    /// this returns. a capture that has been thrown away does nothing more
+    /// and says so.
+    func submit<Answer: Sendable>(
+        _ work: @escaping @Sendable (CaptureEngine) throws -> Answer,
+        answer: @escaping @Sendable (Result<Answer, any Error>) -> Void
+    ) {
+        queue.async { [self] in
+            guard !isDiscarded else {
+                answer(.failure(AudioRecorderError.discarded))
+                return
             }
+            answer(Result { try work(self) })
         }
     }
 
