@@ -269,6 +269,58 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(retryOffers, [true, false])
     }
 
+    // MARK: - esc
+
+    /// only you throw an utterance away: the mic closes, nothing reaches
+    /// the engine, and the timeline says cancelled.
+    func testEscWhileRecordingThrowsTheUtteranceAway() async {
+        let m = machine()
+        m.keyDown()
+        await pass(.seconds(1))
+
+        XCTAssertTrue(m.escape())
+
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(states.last, .init(.idle, fast: true))
+        XCTAssertEqual(mic.cancels, 1)
+        XCTAssertEqual(completions, [.cancelled])
+        m.keyUp()
+        await settle()
+        XCTAssertEqual(mic.stops, 0)
+        XCTAssertEqual(engine.heard, [])
+        XCTAssertEqual(pills, [])
+    }
+
+    /// the sentence on its way to the page is dropped, and the engine's
+    /// late answer goes nowhere.
+    func testEscWhileTranscribingDropsTheSentence() async {
+        let m = machine()
+        engine.holds = true
+        engine.reply = .success("never mind")
+        await hold(m, for: .seconds(1))
+        await settle { self.engine.isWaiting }
+
+        XCTAssertTrue(m.escape())
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(states.last, .init(.idle, fast: true))
+        XCTAssertEqual(completions, [.cancelled])
+
+        engine.release()
+        await settle()
+        XCTAssertEqual(inserter.inserted, [])
+        XCTAssertEqual(pills, [])
+        XCTAssertEqual(m.state, .idle)
+    }
+
+    /// with nothing to throw away, esc belongs to whatever app is in front.
+    func testEscWithNothingInFlightIsNotOurs() {
+        let m = machine()
+        XCTAssertFalse(m.escape())
+        m.enginePreparing()
+        XCTAssertFalse(m.escape())
+        XCTAssertEqual(events, [.state(.prewarming, fastDismiss: false)])
+    }
+
     // MARK: - helpers
 
     private var pills: [Pill] {
