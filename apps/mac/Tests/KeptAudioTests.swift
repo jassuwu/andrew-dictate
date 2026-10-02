@@ -39,13 +39,13 @@ final class KeptAudioTests: XCTestCase {
     private var audioFolder: URL { dir.appendingPathComponent("meeting-audio") }
     private var kept: KeptAudio { KeptAudio(root: audioFolder, now: { [wall] in wall!.now }) }
 
-    private func coordinator(kept: KeptAudio? = nil) -> MeetingCoordinator {
+    private func coordinator(kept: KeptAudio? = nil, spool: MeetingSpool? = nil) -> MeetingCoordinator {
         let started = started
         let c = MeetingCoordinator(
             source: source,
             makeTranscriber: { [transcribers] _ in transcribers!.next() },
             diarizer: FakeDiarizer(),
-            spool: MeetingSpool(root: dir.appendingPathComponent("spool")),
+            spool: spool ?? MeetingSpool(root: dir.appendingPathComponent("spool")),
             hookRunner: HookRunner(logURL: dir.appendingPathComponent("hooks.log")),
             keptAudio: kept ?? self.kept,
             thresholds: .init(
@@ -167,6 +167,32 @@ final class KeptAudioTests: XCTestCase {
         XCTAssertEqual(try keptFiles(), [])
         XCTAssertEqual(try spoolFolders(), 0)
         XCTAssertEqual(records.first?.audioKept, false)
+    }
+
+    /// Delete at once, and the disk would not let the spool go. The file
+    /// is written; the next launch finishes the delete. It does not write
+    /// the meeting out a second time, run the hook for it again, or keep
+    /// audio the setting said not to.
+    func testADeleteAtOnceThatFailedIsFinishedAtTheNextLaunchNotWrittenTwice() async throws {
+        keepAudio = .deleteAtOnce
+        transcribers.lineUp(healthy())
+        let refusing = MeetingSpool(
+            root: dir.appendingPathComponent("spool"),
+            remove: { _ in throw CocoaError(.fileWriteNoPermission) })
+
+        try await meeting(seconds: 2, on: coordinator(spool: refusing))
+        XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).count, 1)
+        XCTAssertEqual(try spoolFolders(), 1, "the disk would not let it go")
+
+        let c = coordinator()
+        c.recoverOrphans()
+        await waitFor { (try? spoolFolders()) == 0 && !records.isEmpty }
+        await waitFor(0.5) { records.count > 1 }
+
+        XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).count, 1, "not written again")
+        XCTAssertEqual(try spoolFolders(), 0)
+        XCTAssertEqual(try keptFiles(), [])
+        XCTAssertEqual(records.map(\.outcome), [.saved])
     }
 
     /// …but a thin one keeps its audio whatever the setting says.

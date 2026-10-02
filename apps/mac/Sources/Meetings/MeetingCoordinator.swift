@@ -762,13 +762,18 @@ final class MeetingCoordinator: ObservableObject {
         let ours = ([current] + writingOut).compactMap { $0?.handle }
         // a meeting already on disk whose audio was still being kept when
         // the app stopped: its audio is kept now, and it is not written
-        // out a second time.
+        // out a second time. one whose audio was to go, and did not, goes.
         let left = spool.writtenOut().filter { !ours.contains($0.handle) }
         if !left.isEmpty {
             let keptAudio = keptAudio
+            let spool = spool
             Task.detached(priority: .utility) {
                 for (handle, manifest) in left {
-                    keptAudio.adopt(handle, manifest: manifest)
+                    if manifest.deleteAudio == true {
+                        spool.letGo(handle)
+                    } else {
+                        keptAudio.adopt(handle, manifest: manifest)
+                    }
                 }
             }
         }
@@ -1485,8 +1490,10 @@ final class MeetingCoordinator: ObservableObject {
             if !spool.keep(handle, writtenTo: url) {
                 logger.error("could not mark a written-out spool as kept")
             }
-        } else {
-            try? spool.finish(handle)
+        } else if !spool.finish(handle, writtenTo: url) {
+            // marked first: the next launch finishes the delete, and does
+            // not write this meeting out a second time.
+            logger.error("a written-out spool could not be deleted yet; the next launch does it")
         }
         keepMeetingRecord?(record(
             thin ? .savedThin : .saved, toDisk: notes.stopped.map { now() - $0 },

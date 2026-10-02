@@ -45,9 +45,28 @@ final class MeetingSpoolTests: XCTestCase {
     func testFinishRemovesTheWholeFolder() throws {
         let handle = try spool.begin(manifest())
         try Data([0]).write(to: handle.audioURL)
-        try spool.finish(handle)
+        XCTAssertTrue(spool.finish(handle, writtenTo: transcript))
         XCTAssertFalse(FileManager.default.fileExists(atPath: handle.folder.path))
         XCTAssertEqual(spool.orphans().count, 0)
+    }
+
+    /// The disk let the audio go and not the folder: what is left says its
+    /// meeting is written out, and is swept, so no launch keeps building
+    /// the meetings to look at it.
+    func testWhatAFinishLeftOfAWrittenOutSpoolIsSwept() throws {
+        let handle = try spool.begin(manifest())
+        try Data([0]).write(to: handle.audioURL)
+        let halfway = MeetingSpool(root: root, remove: { url in
+            guard url.lastPathComponent == "audio.caf" else {
+                throw CocoaError(.fileWriteNoPermission)
+            }
+            try FileManager.default.removeItem(at: url)
+        })
+        XCTAssertFalse(halfway.finish(handle, writtenTo: transcript))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: handle.manifestURL.path))
+
+        XCTAssertEqual(spool.orphans().count, 0)
+        XCTAssertFalse(spool.mayHoldOrphans())
     }
 
     /// Neither audio nor a manifest that reads: there is nothing in it to
@@ -112,7 +131,7 @@ final class MeetingSpoolTests: XCTestCase {
         let handle = try spool.begin(manifest())
         XCTAssertTrue(spool.mayHoldOrphans())
 
-        try spool.finish(handle)
+        spool.finish(handle, writtenTo: transcript)
         XCTAssertFalse(spool.mayHoldOrphans())
     }
 
@@ -317,6 +336,11 @@ final class MeetingSpoolTests: XCTestCase {
     // MARK: -
 
     /// Where a set-aside spool's folder ends up.
+    /// Where a meeting was written out to: the spool only keeps the path.
+    private var transcript: URL {
+        URL(fileURLWithPath: "/tmp/meetings/2026-10/2026-10-02-1222-meeting.md")
+    }
+
     private func setAsideFolder(of handle: MeetingSpool.Handle) -> URL {
         spool.unreadableFolder.appendingPathComponent(handle.folder.lastPathComponent)
     }

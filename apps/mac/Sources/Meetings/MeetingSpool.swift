@@ -18,11 +18,16 @@ struct MeetingSpool: Sendable {
         /// to a property's default, and a manifest written before the ledger
         /// existed must still read — sweeping it would be losing a meeting.
         var attempts: Int?
-        /// The transcript this audio was written out into, once it has been
-        /// and the audio is to be kept. A spool with one is not an orphan —
-        /// its meeting is on disk, and writing it out again would be a
-        /// second file for one meeting — but audio on its way to being kept.
+        /// The transcript this audio was written out into, once it has been.
+        /// A spool with one is not an orphan — its meeting is on disk, and
+        /// writing it out again would be a second file for one meeting — but
+        /// audio on its way to being kept, or to being deleted.
         var transcript: URL?
+        /// Set with `transcript` when the audio was not to be kept: its
+        /// delete failed, or the app stopped in the middle of it, and the
+        /// next launch finishes it. Absent is kept, as every written-out
+        /// spool was before there was a way to say otherwise.
+        var deleteAudio: Bool?
         /// The meeting's gaps, noted as each began and ended, with where
         /// the spool's clock was at each: a recovery's file keeps them, and
         /// its turns land where the meeting had them. Optional, like
@@ -66,11 +71,18 @@ struct MeetingSpool: Sendable {
     }
 
     let root: URL
+    /// How a spool's files are deleted once its meeting is written out.
+    /// Injected so a test can have the disk refuse.
+    private let remove: @Sendable (URL) throws -> Void
 
     private static let logger = Logger(subsystem: AppIdentity.loggingSubsystem, category: "meeting-spool")
 
-    init(root: URL = Self.defaultRoot) {
+    init(
+        root: URL = Self.defaultRoot,
+        remove: @escaping @Sendable (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) }
+    ) {
         self.root = root
+        self.remove = remove
     }
 
     static var defaultRoot: URL {
@@ -96,10 +108,39 @@ struct MeetingSpool: Sendable {
         return handle
     }
 
-    /// The transcript is written and the audio is not to be kept: it has
-    /// done its job.
-    func finish(_ handle: Handle) throws {
-        try FileManager.default.removeItem(at: handle.folder)
+    /// The transcript is written into `transcript` and the audio is not to
+    /// be kept: it has done its job. The manifest says so before anything
+    /// is deleted, so a delete the disk refuses — or an app that stops in
+    /// the middle of one — leaves a spool the next launch deletes, and
+    /// never one it writes out a second time. Then the audio, so no part of
+    /// a delete leaves audio without the manifest that says whose it is;
+    /// then the rest. False when it is not all gone.
+    @discardableResult
+    func finish(_ handle: Handle, writtenTo transcript: URL) -> Bool {
+        let marked = update(handle) {
+            $0.transcript = transcript
+            $0.deleteAudio = true
+        }
+        if !marked {
+            Self.logger.error("a written-out spool could not be marked before it was deleted")
+        }
+        return letGo(handle)
+    }
+
+    /// A spool whose meeting is written out and whose audio was to go with
+    /// it, gone: what `finish` could not do, done at a later launch.
+    @discardableResult
+    func letGo(_ handle: Handle) -> Bool {
+        do {
+            if FileManager.default.fileExists(atPath: handle.audioURL.path) {
+                try remove(handle.audioURL)
+            }
+            try remove(handle.folder)
+            return true
+        } catch {
+            Self.logger.error("a written-out spool could not be deleted: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
     }
 
     func discard(_ handle: Handle) {
@@ -142,21 +183,10 @@ struct MeetingSpool: Sendable {
     /// manifest could not be read or rewritten; the meeting records on.
     @discardableResult
     func note(_ handle: Handle, gaps: [Gap], duration: Duration) -> Bool {
-        guard let data = try? Data(contentsOf: handle.manifestURL),
-              var manifest = try? Self.decoder.decode(Manifest.self, from: data)
-        else {
-            return false
+        update(handle) {
+            $0.gaps = gaps
+            $0.duration = duration
         }
-        manifest.gaps = gaps
-        manifest.duration = duration
-        guard let updated = try? Self.encoder.encode(manifest),
-              (try? updated.write(to: handle.manifestURL, options: .atomic)) != nil
-        else {
-            return false
-        }
-        try? FileManager.default.setAttributes(
-            [.posixPermissions: 0o600], ofItemAtPath: handle.manifestURL.path)
-        return true
     }
 
     /// Its meeting is written out, into `transcript`, and the audio is to be
@@ -165,12 +195,18 @@ struct MeetingSpool: Sendable {
     /// launch would write it out again.
     @discardableResult
     func keep(_ handle: Handle, writtenTo transcript: URL) -> Bool {
+        update(handle) { $0.transcript = transcript }
+    }
+
+    /// The manifest as it reads, changed, and written back whole in its
+    /// place. False when it could not be read or rewritten.
+    private func update(_ handle: Handle, _ change: (inout Manifest) -> Void) -> Bool {
         guard let data = try? Data(contentsOf: handle.manifestURL),
               var manifest = try? Self.decoder.decode(Manifest.self, from: data)
         else {
             return false
         }
-        manifest.transcript = transcript
+        change(&manifest)
         guard let updated = try? Self.encoder.encode(manifest),
               (try? updated.write(to: handle.manifestURL, options: .atomic)) != nil
         else {
@@ -292,9 +328,10 @@ struct MeetingSpool: Sendable {
     /// whose manifest cannot be read is set aside, audio and all: the
     /// manifest is only what app and when, and the audio is the meeting. A
     /// folder with neither is junk and is swept; a manifest without audio is
-    /// a meeting that has just begun and is left alone; one set aside is
-    /// never offered again, and nor is one whose meeting is already written
-    /// out.
+    /// a meeting that has just begun and is left alone, unless its meeting
+    /// is written out, when it is what a delete left and is swept; one set
+    /// aside is never offered again, and nor is one whose meeting is
+    /// already written out.
     func orphans() -> [(handle: Handle, manifest: Manifest)] {
         let fm = FileManager.default
         // Names, not URLs: `contentsOfDirectory(at:)` hands back resolved
@@ -320,9 +357,15 @@ struct MeetingSpool: Sendable {
                 }
                 continue
             }
-            guard fm.fileExists(atPath: handle.audioURL.path),
-                  manifest.transcript == nil
-            else {
+            guard fm.fileExists(atPath: handle.audioURL.path) else {
+                // its meeting written out and its audio gone where it was
+                // going: only the folder was left, and nothing needs it.
+                if manifest.transcript != nil {
+                    try? fm.removeItem(at: folder)
+                }
+                continue
+            }
+            guard manifest.transcript == nil else {
                 continue
             }
             found.append((handle, manifest))
