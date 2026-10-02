@@ -798,9 +798,11 @@ final class UtteranceMachineTests: XCTestCase {
         for record in presses {
             let json = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
             let fields = String(reflecting: record)
+            let line = record.line()
             for said in ["zanzibar", "marmalade"] {
                 XCTAssertFalse(json.localizedCaseInsensitiveContains(said), json)
                 XCTAssertFalse(fields.localizedCaseInsensitiveContains(said), fields)
+                XCTAssertFalse(line.localizedCaseInsensitiveContains(said), line)
             }
         }
     }
