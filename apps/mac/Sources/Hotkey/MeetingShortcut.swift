@@ -24,6 +24,24 @@ struct MeetingShortcut: Codable, Hashable, Sendable {
 
     static let escapeKeyCode: UInt16 = 53
 
+    /// What to call a key that was just pressed: its character, upper-cased,
+    /// or its own word or glyph for the keys that have no character worth
+    /// showing.
+    static func keyName(forKeyCode keyCode: UInt16, characters: String) -> String {
+        specialKeyNames[keyCode] ?? characters.uppercased()
+    }
+
+    /// virtual key codes, which do not change with the layout.
+    private static let specialKeyNames: [UInt16: String] = [
+        36: "↩", 48: "⇥", 49: "space", 51: "⌫", 53: "esc", 76: "⌤", 117: "⌦",
+        115: "↖", 119: "↘", 116: "⇞", 121: "⇟",
+        123: "←", 124: "→", 125: "↓", 126: "↑",
+        122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6", 98: "F7",
+        100: "F8", 101: "F9", 109: "F10", 103: "F11", 111: "F12",
+        105: "F13", 107: "F14", 113: "F15", 106: "F16", 64: "F17", 79: "F18",
+        80: "F19", 90: "F20",
+    ]
+
     /// the chip in settings: modifiers in the order the mac writes them,
     /// then the key.
     var displayName: String {

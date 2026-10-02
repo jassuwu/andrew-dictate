@@ -302,6 +302,19 @@ final class HotkeyLogicTests: XCTestCase {
             "⌃⌥space")
     }
 
+    /// a letter reads as its capital; the keys with no character worth
+    /// showing — space, the arrows, the function row — read as what they are.
+    func testAKeyIsNamedByItsCharacterOrByWhatItIs() {
+        XCTAssertEqual(MeetingShortcut.keyName(forKeyCode: 46, characters: "m"), "M")
+        XCTAssertEqual(MeetingShortcut.keyName(forKeyCode: 47, characters: "."), ".")
+        XCTAssertEqual(MeetingShortcut.keyName(forKeyCode: 49, characters: " "), "space")
+        XCTAssertEqual(MeetingShortcut.keyName(forKeyCode: 36, characters: "\r"), "↩")
+        XCTAssertEqual(MeetingShortcut.keyName(forKeyCode: 123, characters: "\u{F702}"), "←")
+        XCTAssertEqual(MeetingShortcut.keyName(forKeyCode: 126, characters: "\u{F700}"), "↑")
+        XCTAssertEqual(MeetingShortcut.keyName(forKeyCode: 96, characters: "\u{F708}"), "F5")
+        XCTAssertEqual(MeetingShortcut.keyName(forKeyCode: 53, characters: "\u{1B}"), "esc")
+    }
+
     private func lockedDetector() -> TapLockDetector {
         var detector = TapLockDetector()
         _ = detector.modifierPressed(at: 1.0)
