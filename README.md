@@ -42,6 +42,8 @@ brew upgrade --cask jassuwu/tap/andrew-dictate
 
 that's it — you don't run the `xattr` line again. every release is signed with the same key, so homebrew carries your approval to the new version and your microphone and accessibility grants survive.
 
+you don't have to remember to look. when there's a new version, the menu says `update to 0.9.5`, and clicking it copies that brew line for you. if you installed from the dmg, it opens the releases page instead.
+
 brew swaps the app on disk, it can't restart it for you: quit andrew from the menu bar and open it again to be running the new one. the about window notices, and offers you the restart.
 
 ## where your words go
@@ -64,7 +66,7 @@ it's about 22k lines of swift. read it.
 - dictation is english by default. a multilingual model is one click away in settings.
 - meetings only write english. if you read hindi and want hindi, that's not here yet.
 - one dictation stops at five minutes. it keeps what it heard and pastes it — it just stops listening.
-- unsigned builds mean no auto-update. `check for updates` in the about window tells you when there's one; `brew upgrade` installs it, no `xattr` line needed.
+- unsigned builds mean no auto-update. the menu tells you when there's a new version; `brew upgrade` installs it, no `xattr` line needed.
 
 ## next
 
