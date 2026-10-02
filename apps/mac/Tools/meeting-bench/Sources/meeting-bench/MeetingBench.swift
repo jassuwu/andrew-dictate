@@ -22,6 +22,12 @@ struct MeetingBench {
                 try Simulate.run(arguments)
             case "live":
                 try await Live.run(arguments)
+            case "spool":
+                try Spool.build(arguments)
+            case "tail":
+                try Spool.tail(arguments)
+            case "ending":
+                try await Ending.run(arguments)
             case "help", "--help", "-h":
                 print(usage)
             default:
@@ -46,5 +52,14 @@ struct MeetingBench {
           the shared queue, from the decode times a run measured.
       live --engine E --you f.wav --them f.wav --seconds N --out run.json [--compare offline.json]
           the same, with the audio fed at wall-clock speed.
+
+    measurement B, how long does the end of a meeting take?
+      spool --you f.wav --them f.wav --hours H --out spool.caf
+          a two-channel spool in the app's format, the two files looped to H hours.
+      tail --from f.wav [--start S] [--seconds 20] --out tail.wav
+          20 seconds of a file, from S or ending at its last audible sample, for the stop-time decode.
+      ending --spool spool.caf --tail tail.wav [--no-whisper]
+          the end of a meeting, step by step. wrap in /usr/bin/time -l for peak memory.
+          --no-whisper skips the model and the tail decode (steps 1 and 2 only).
     """
 }
