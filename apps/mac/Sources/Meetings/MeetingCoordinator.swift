@@ -28,6 +28,14 @@ struct MeetingThresholds: Sendable {
     /// tried once every this long until it is back. Provisional.
     var retryWhileTheProblemStands: Duration = .seconds(30)
 
+    /// How long the mic may hand over nothing but silence, while the far
+    /// side talks, before the meeting says it cannot hear you. Provisional.
+    var micSilentFor: Duration = .seconds(10)
+    /// RMS under this, on the mic, is silence: far below any real room,
+    /// whose hiss alone is louder, so only a mic that is not delivering
+    /// reads as it.
+    var micSilenceFloor: Float = 0.0001
+
     /// Tries in a row before the meeting stops waiting on the tap.
     var rebuildAttempts: Int { rebuildSpacing.count + 1 }
 
@@ -245,6 +253,8 @@ final class MeetingCoordinator: ObservableObject {
     private var recovery: Task<Void, Never>?
     private var session: MeetingSession
     private var health: TapHealthMonitor
+    /// Whether the mic is heard, for the meeting being recorded.
+    private var micWatch: MicWatch
     private var nudgePending = false
     /// The tap hears this app too, so the tones it plays to prove itself —
     /// the start sound after every rebuild, the quiet probe when the far
@@ -311,6 +321,7 @@ final class MeetingCoordinator: ObservableObject {
         self.preferences = preferences
         session = MeetingSession(quietNudgeAfter: thresholds.quietNudgeAfter)
         health = Self.freshMonitor(thresholds)
+        micWatch = Self.freshMicWatch(thresholds)
     }
 
     var isRecording: Bool {
@@ -359,6 +370,7 @@ final class MeetingCoordinator: ObservableObject {
 
         session.start()
         health = Self.freshMonitor(thresholds)
+        micWatch = Self.freshMicWatch(thresholds)
         elapsed = .zero
         liveLines = []
         startedOn = now()
@@ -739,6 +751,8 @@ final class MeetingCoordinator: ObservableObject {
             }
         }
 
+        watchTheMic(chunk, in: meeting)
+
         if session.state == .recording || session.state == .rebuilding {
             await meeting.transcriber?.feed(withoutOurTones(chunk))
         }
@@ -748,6 +762,47 @@ final class MeetingCoordinator: ObservableObject {
             nudgePending = true
             onEvent?(.nudge)
         }
+    }
+
+    /// Whether you are heard, while there is a meeting to hear you in: a
+    /// mic silent while the call talks is a problem naming it, and over the
+    /// moment the mic is heard.
+    private func watchTheMic(_ chunk: MeetingAudioChunk, in meeting: Meeting) {
+        guard session.state == .recording || session.state == .rebuilding else { return }
+        // our own tones land in the far side too, and are not the call.
+        let theyTalked = chunk.themRMS > thresholds.silenceFloor && chunk.at >= probeUntil
+        micWatch.observe(
+            you: chunk.youRMS, theyTalked: theyTalked, from: chunk.at, to: elapsed)
+        if !micWatch.unheard {
+            clear(.cannotHearYourMic, noting: .micSilentCleared, in: meeting)
+        } else if session.problem(.cannotHearYourMic) == nil {
+            begin(.cannotHearYourMic(source.micName), noting: .micSilent, in: meeting)
+        }
+    }
+
+    /// A problem begins: said on the lamp, and noted in the record. One of
+    /// its kind already standing gives way to it and is said again in its
+    /// new words, but noted once.
+    private func begin(
+        _ problem: MeetingSession.Problem, noting label: MeetingRecord.Label, in meeting: Meeting
+    ) {
+        let stood = session.problem(problem.kind) != nil
+        guard session.problemBegan(problem) else { return }
+        if !stood {
+            meeting.notes.note(label, at: elapsed)
+        }
+        publish()
+        onEvent?(.problemBegan(problem))
+    }
+
+    /// The problem of this kind is over, if one stood.
+    private func clear(
+        _ kind: MeetingSession.Problem.Kind, noting label: MeetingRecord.Label, in meeting: Meeting
+    ) {
+        guard let problem = session.problemCleared(kind) else { return }
+        meeting.notes.note(label, at: elapsed)
+        publish()
+        onEvent?(.problemCleared(problem))
     }
 
     /// The chunk as the transcriber gets it: while a probe window is open
@@ -1384,6 +1439,10 @@ final class MeetingCoordinator: ObservableObject {
         for continuation in woken {
             continuation.resume()
         }
+    }
+
+    private static func freshMicWatch(_ t: MeetingThresholds) -> MicWatch {
+        MicWatch(after: t.micSilentFor, floor: t.micSilenceFloor)
     }
 
     private static func freshMonitor(_ t: MeetingThresholds) -> TapHealthMonitor {

@@ -190,6 +190,11 @@ extension MeetingRecord {
         static let problemBegan = Label(rawValue: "problem-began")
         /// and it was over.
         static let problemCleared = Label(rawValue: "problem-cleared")
+        /// the mic handed over nothing but silence while the far side
+        /// talked: a problem, named on the lamp.
+        static let micSilent = Label(rawValue: "mic-silent")
+        /// and it was over: the mic was heard, or muted.
+        static let micSilentCleared = Label(rawValue: "mic-silent-cleared")
         /// a far side silent while something played was asked with the
         /// quiet probe, and the tap heard it: nothing was wrong.
         static let probeHeard = Label(rawValue: "probe-heard")

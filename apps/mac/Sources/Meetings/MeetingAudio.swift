@@ -18,9 +18,18 @@ struct MeetingAudioChunk: Sendable {
 
     /// Loudness of the far side, the only number `TapHealthMonitor` needs.
     var themRMS: Float {
-        guard !them.isEmpty else { return 0 }
-        let sum = them.reduce(Float(0)) { $0 + $1 * $1 }
-        return (sum / Float(them.count)).squareRoot()
+        Self.rms(them)
+    }
+
+    /// Loudness of your side, for whoever watches that the mic is heard.
+    var youRMS: Float {
+        Self.rms(you)
+    }
+
+    private static func rms(_ samples: [Float]) -> Float {
+        guard !samples.isEmpty else { return 0 }
+        let sum = samples.reduce(Float(0)) { $0 + $1 * $1 }
+        return (sum / Float(samples.count)).squareRoot()
     }
 }
 
@@ -103,10 +112,15 @@ protocol MeetingAudioSource: Sendable {
     /// player that would not start: the tap was given nothing to hear, so
     /// its silence is no verdict on it. `nil` when the source cannot say.
     var startSoundPlayed: Bool? { get }
+    /// The mic your side is being recorded from, as the mac names it, so a
+    /// problem with it can say which. `nil` when there is none, or the
+    /// source cannot say. Kept, like `anythingIsPlaying`: cheap to read.
+    var micName: String? { get }
 }
 
 extension MeetingAudioSource {
     var anythingIsPlaying: Bool? { nil }
+    var micName: String? { nil }
     var sourceEvents: AsyncStream<MeetingSourceEvent> {
         AsyncStream { $0.finish() }
     }

@@ -248,6 +248,11 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         lock.withLock { playing }
     }
 
+    /// The live rig's: after a move to another mic, the one moved to.
+    var micName: String? {
+        lock.withLock { live?.mic.name }
+    }
+
     /// Once a second while the tap is open, ask the HAL whether any process
     /// but this one is putting audio out, and keep the answer for whoever
     /// reads `anythingIsPlaying`. Ours is left out of the question: the tap
