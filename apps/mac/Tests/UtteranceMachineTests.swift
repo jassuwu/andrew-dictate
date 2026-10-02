@@ -324,6 +324,52 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(outcomes, [.delivered])
     }
 
+    /// the key detector can be reset underneath a recording — a rebind in
+    /// settings, accessibility granted again. that is the app, not you, so
+    /// a locked recording, or a hold past a second, ends and is kept.
+    func testAKeyLostUnderALockedRecordingKeepsIt() async {
+        let m = machine()
+        engine.reply = .success("still talking")
+
+        m.doubleTapped()
+        await pass(.milliseconds(500))
+        m.keyLost()
+        await settle { self.inserter.inserted.count == 1 }
+
+        XCTAssertEqual(mic.cancels, 0)
+        XCTAssertEqual(inserter.inserted, ["Still talking."])
+        XCTAssertEqual(outcomes, [.delivered])
+    }
+
+    func testAKeyLostLateInAHoldKeepsIt() async {
+        let m = machine()
+        engine.reply = .success("held a while")
+
+        m.keyDown()
+        await pass(.seconds(1))
+        m.keyLost()
+        await settle { self.inserter.inserted.count == 1 }
+
+        XCTAssertEqual(mic.cancels, 0)
+        XCTAssertEqual(inserter.inserted, ["Held a while."])
+    }
+
+    /// inside the first second there is nothing worth keeping yet: it ends
+    /// like a brush, silently.
+    func testAKeyLostEarlyInAHoldEndsLikeABrush() async {
+        let m = machine()
+
+        m.keyDown()
+        await pass(.milliseconds(50))
+        m.keyLost()
+        await pass(.milliseconds(200))
+
+        XCTAssertEqual(mic.cancels, 1)
+        XCTAssertEqual(engine.heard, [])
+        XCTAssertEqual(pills, [])
+        XCTAssertEqual(outcomes, [.brushed])
+    }
+
     // MARK: - couldn't transcribe
 
     /// the samples are kept, and a press while the pill still says so means

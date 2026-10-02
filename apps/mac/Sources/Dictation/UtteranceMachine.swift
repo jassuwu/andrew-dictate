@@ -894,6 +894,25 @@ final class UtteranceMachine {
         endPressEarly(.chordCancelled)
     }
 
+    /// the key detector was reset underneath a recording — a rebind, the
+    /// monitors reinstalled after a grant. that is the app, not you: a
+    /// locked recording or a hold past a second ends and is kept, the way
+    /// a late chord is. anything younger had nothing in it yet and goes
+    /// like a brush.
+    func keyLost() {
+        guard state == .recording,
+              let micTurn,
+              !micTurn.isEnding else {
+            return
+        }
+        let held = press.map { $0.keyDown.duration(to: clock.now) } ?? .zero
+        if isRecordingLocked || held >= Self.chordKeepsAfter {
+            keyUp()
+            return
+        }
+        keyCancelled()
+    }
+
     /// whether `esc` was ours to take: only while there is something to
     /// throw away.
     func escape() -> Bool {
