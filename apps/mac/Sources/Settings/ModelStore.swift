@@ -54,7 +54,9 @@ final class ModelStore {
     /// one answer to "is it already here": the settings list asks it per
     /// version, and prewarm asks it once, before any bytes move, so setup can
     /// say whether the download it is about to start actually happened.
-    static func isOnDisk(
+    /// meetings ask it too, off the main actor: parakeet for meetings is
+    /// installed exactly when dictation's v3 is.
+    nonisolated static func isOnDisk(
         _ version: EngineVersion,
         fileManager: FileManager = .default
     ) -> Bool {
@@ -126,11 +128,11 @@ final class ModelStore {
         return decision
     }
 
-    private static func modelDirectory(for version: EngineVersion) -> URL {
+    private nonisolated static func modelDirectory(for version: EngineVersion) -> URL {
         AsrModels.defaultCacheDirectory(for: version.asrModelVersion)
     }
 
-    private static func isNonemptyDirectory(
+    private nonisolated static func isNonemptyDirectory(
         _ directory: URL,
         fileManager: FileManager
     ) -> Bool {

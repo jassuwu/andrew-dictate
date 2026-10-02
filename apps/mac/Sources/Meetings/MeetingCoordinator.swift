@@ -108,6 +108,9 @@ final class MeetingCoordinator: ObservableObject {
     var onEvent: (@MainActor (MeetingEvent) -> Void)?
     var onLine: (@MainActor (LiveLine) -> Void)?
     var recordHookRun: (@MainActor (HookRun) -> Void)?
+    /// How each meeting ended, once, whatever the ending: the app keeps it
+    /// where evidence goes. Never any of the words.
+    var keepMeetingRecord: (@MainActor (MeetingRecord) -> Void)?
 
     let thresholds: MeetingThresholds
 
@@ -313,7 +316,10 @@ final class MeetingCoordinator: ObservableObject {
         // A tap that never came back leaves an open gap; closing it at the
         // wall makes the file cover the whole call instead of stopping where
         // the audio did.
-        let recording = letGo(of: meeting, at: max(elapsed, wallElapsed))
+        let end = max(elapsed, wallElapsed)
+        meeting.notes.stopped = now()
+        meeting.notes.ran = end
+        let recording = letGo(of: meeting, at: end)
         writingOut.append(meeting)
         let tapClosed = closeTheTap(of: meeting)
         Task { [weak self] in
@@ -334,8 +340,12 @@ final class MeetingCoordinator: ObservableObject {
     /// now is not its failure to end.
     private func abandonKeepingSpool(_ meeting: Meeting) {
         guard current === meeting else { return }
-        _ = letGo(of: meeting, at: elapsed)
+        let recording = letGo(of: meeting, at: elapsed)
         _ = closeTheTap(of: meeting)
+        keepMeetingRecord?(MeetingRecord(
+            .modelFailed, app: meeting.app, model: meeting.preferences.model,
+            startedAt: meeting.started, duration: elapsed,
+            gaps: recording?.gaps ?? [], events: meeting.notes.events))
     }
 
     /// The meeting stops being the one recorded, before anything is
@@ -404,6 +414,7 @@ final class MeetingCoordinator: ObservableObject {
         // — then the clock catches up, so the menu stops counting a meeting
         // in frames that no longer arrive.
         session.tapWentSilent(at: elapsed)
+        meeting.notes.note(.gapBegan, at: elapsed)
         elapsed = max(elapsed, wallElapsed)
         publish()
         onEvent?(.gapBegan)
@@ -483,7 +494,11 @@ final class MeetingCoordinator: ObservableObject {
                 onEvent?(.started)
             }
             session.tapRecovered(at: elapsed)
-            if wasRebuilding { onEvent?(.gapEnded); publish() }
+            if wasRebuilding {
+                meeting.notes.note(.gapEnded, at: elapsed)
+                onEvent?(.gapEnded)
+                publish()
+            }
             // A working tap is not the same thing as a room with people
             // talking in it: the verdict stays `.capturing` through every
             // pause. Only a chunk with sound in it, and only past the probe
@@ -505,6 +520,7 @@ final class MeetingCoordinator: ObservableObject {
         case .wentSilent:
             if session.state == .recording {
                 session.tapWentSilent(at: elapsed)
+                meeting.notes.note(.gapBegan, at: elapsed)
                 publish()
                 onEvent?(.gapBegan)
                 rebuildTap(meeting)
@@ -540,6 +556,7 @@ final class MeetingCoordinator: ObservableObject {
                 logger.error("tap rebuild failed: \(error.localizedDescription, privacy: .public)")
                 guard current === meeting else { return }
                 session.rebuildFailed()
+                meeting.notes.note(.rebuildFailed, at: elapsed)
                 publish()
                 onEvent?(.cannotHear)
                 // Most of a meeting is on the spool; write what there is.
@@ -574,6 +591,11 @@ final class MeetingCoordinator: ObservableObject {
     ) async {
         guard let recording, let handle = meeting.handle else {
             if let handle = meeting.handle { spool.discard(handle) }
+            keepMeetingRecord?(MeetingRecord(
+                .nothingKept(announcingNothingKept ? .stoppedBeforeCapture : .tapNeverHeard),
+                app: meeting.app, model: meeting.preferences.model,
+                startedAt: meeting.started, duration: meeting.notes.ran,
+                events: meeting.notes.events))
             writingOut.removeAll { $0 === meeting }
             if announcingNothingKept { onEvent?(.nothingToKeep) }
             return
@@ -581,6 +603,7 @@ final class MeetingCoordinator: ObservableObject {
 
         onEvent?(.writingItOut)
         let turns = await meeting.transcriber?.finish() ?? []
+        let tally = await meeting.transcriber?.decodeTally()
         meeting.transcriber = nil
         meeting.audioFile = nil
         // the settings as they were at the start: a folder, model or hook
@@ -589,7 +612,8 @@ final class MeetingCoordinator: ObservableObject {
         let saved = await save(
             turns: turns, recording: recording, handle: handle,
             app: meeting.app, started: meeting.started, model: prefs.model,
-            folder: prefs.folder, recovered: false)
+            folder: prefs.folder, recovered: false, notes: meeting.notes,
+            tally: tally)
         // written out — or never will be, and the spool waits for the next
         // launch. the hook is not part of it: it can take minutes.
         writingOut.removeAll { $0 === meeting }
@@ -608,7 +632,9 @@ final class MeetingCoordinator: ObservableObject {
         started: Date,
         model: MeetingModel,
         folder: URL,
-        recovered: Bool
+        recovered: Bool,
+        notes: MeetingRecord.Notes = .init(),
+        tally: StretchTally? = nil
     ) async -> MeetingSavedEvent? {
         let them = (try? SpoolAudioFile.read(handle.audioURL))?.them ?? []
         let split = them.isEmpty
@@ -624,6 +650,13 @@ final class MeetingCoordinator: ObservableObject {
             recovered: recovered,
             turns: split
         )
+        func record(_ outcome: MeetingRecord.Outcome, toDisk: Duration? = nil) -> MeetingRecord {
+            MeetingRecord(
+                outcome, app: app, model: model, startedAt: started,
+                duration: recording.duration, gaps: recording.gaps, turns: split,
+                toDisk: toDisk, recovered: recovered, events: notes.events,
+                tally: tally)
+        }
 
         let url: URL
         do {
@@ -634,10 +667,12 @@ final class MeetingCoordinator: ObservableObject {
             // the last thing the lamp showed, and silence after it would
             // read as done (SPEC §4).
             logger.error("could not write the transcript: \(error.localizedDescription, privacy: .public)")
+            keepMeetingRecord?(record(.couldNotWrite))
             onEvent?(.saveFailed(error.localizedDescription))
             return nil
         }
         try? spool.finish(handle)
+        keepMeetingRecord?(record(.saved, toDisk: notes.stopped.map { now() - $0 }))
 
         let summary = (try? MeetingTranscriptFile.summary(of: url)) ?? MeetingSummary(
             fileURL: url, app: app, started: started, duration: recording.duration,
@@ -706,6 +741,9 @@ final class MeetingCoordinator: ObservableObject {
               !audio.them.isEmpty || !audio.you.isEmpty
         else {
             spool.discard(handle)
+            keepMeetingRecord?(MeetingRecord(
+                .spoolUnreadable, app: manifest.app, model: manifest.model,
+                startedAt: manifest.started, duration: .zero, recovered: true))
             return
         }
         let duration = Duration.seconds(
@@ -713,6 +751,7 @@ final class MeetingCoordinator: ObservableObject {
         do {
             let transcriber = try await makeTranscriber(manifest.model)
             let turns = try await transcriber.transcribe(you: audio.you, them: audio.them)
+            let tally = await transcriber.decodeTally()
             // a spool from a past run has no settings of its own; it goes
             // where meetings go now.
             let prefs = preferences()
@@ -724,7 +763,8 @@ final class MeetingCoordinator: ObservableObject {
                 started: manifest.started,
                 model: manifest.model,
                 folder: prefs.folder,
-                recovered: true)
+                recovered: true,
+                tally: tally)
             if let saved {
                 await runHook(prefs.hook, telling: saved)
             }
@@ -735,9 +775,14 @@ final class MeetingCoordinator: ObservableObject {
             // settings › history.
             logger.error("could not recover a spool: \(error.localizedDescription, privacy: .public)")
             let noted = spool.noteAttempt(handle, manifest: manifest)
-            if (noted.attempts ?? 0) >= MeetingSpool.attemptsBeforeSettingAside {
+            let setAside = (noted.attempts ?? 0) >= MeetingSpool.attemptsBeforeSettingAside
+            if setAside {
                 spool.setAside(handle)
             }
+            keepMeetingRecord?(MeetingRecord(
+                setAside ? .setAside : .couldNotRecover, app: manifest.app,
+                model: manifest.model, startedAt: manifest.started,
+                duration: duration, recovered: true))
         }
     }
 
@@ -795,6 +840,8 @@ extension MeetingCoordinator {
         var watchdog: Task<Void, Never>?
         /// A rebuild of its tap, while one is in flight.
         var rebuild: Task<Void, Never>?
+        /// What its record will say besides what the file does.
+        var notes = MeetingRecord.Notes()
 
         init(app: String, started: Date, preferences: MeetingPreferences) {
             self.app = app

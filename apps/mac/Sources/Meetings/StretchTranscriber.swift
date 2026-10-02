@@ -31,6 +31,18 @@ struct StretchTally: Equatable, Sendable {
 /// confirmed live line; nothing is decoded twice, and nothing is shown that
 /// might change.
 actor StretchTranscriber: MeetingTranscriber {
+    enum Failure: Error, LocalizedError {
+        /// A spool had speech in it and the engine threw on every stretch.
+        case nothingDecoded(stretches: Int)
+
+        var errorDescription: String? {
+            switch self {
+            case .nothingDecoded(let stretches):
+                "none of the \(stretches) stretches of speech would decode"
+            }
+        }
+    }
+
     nonisolated let lines: AsyncStream<LiveLine>
 
     private let emit: AsyncStream<LiveLine>.Continuation
@@ -127,9 +139,17 @@ actor StretchTranscriber: MeetingTranscriber {
     /// stretch is decoded as soon as it is cut, so the speech is not copied
     /// out whole beside a recording that is already all in memory. A spool
     /// has no gaps in it, so its clock is its sample count.
+    ///
+    /// It throws when there was speech and not one stretch of it decoded:
+    /// written out, that would read as a meeting where nobody spoke, and the
+    /// spool — the only copy of what was said — would go with it. Thrown, it
+    /// stays for the next launch. A spool nobody spoke in has nothing to
+    /// fail on, and comes back with no turns.
     func transcribe(you: [Float], them: [Float]) async throws -> [MeetingTurn] {
         try await load()
         var turns: [MeetingTurn] = []
+        var cut = 0
+        let failedBefore = tally.failed
         for (side, samples) in [(Stretch.Side.you, you), (.them, them)] {
             let detector = makeDetector()
             var cutter = StretchCutter(side: side, ceiling: ceiling)
@@ -139,12 +159,23 @@ actor StretchTranscriber: MeetingTranscriber {
                 let chunk = Array(samples[start..<end])
                 let edges = await detector.hear(chunk)
                 let at = StretchCutter.duration(of: start)
-                turns += await decodeAlone(cutter.take(chunk, at: at, edges: edges))
+                let stretches = cutter.take(chunk, at: at, edges: edges)
+                cut += stretches.count
+                turns += await decodeAlone(stretches)
                 start = end
             }
-            turns += await decodeAlone(cutter.flush())
+            let last = cutter.flush()
+            cut += last.count
+            turns += await decodeAlone(last)
+        }
+        if cut > 0, tally.failed - failedBefore == cut {
+            throw Failure.nothingDecoded(stretches: cut)
         }
         return Self.inOrder(turns)
+    }
+
+    func decodeTally() async -> StretchTally? {
+        tally
     }
 
     // MARK: - hearing

@@ -48,6 +48,10 @@ struct StretchCutter {
     /// rounding at most; the capture layer only moves the clock on for an
     /// outage of a second or more.
     static let gapTolerance = Duration.milliseconds(10)
+    /// Talk cut at the ceiling is cut in the quietest of these, looking back
+    /// this far from it.
+    static let quietFrame = samples(in: .milliseconds(50))
+    static let quietLookBack = samples(in: .seconds(4))
 
     init(side: Stretch.Side, ceiling: Duration) {
         precondition(ceiling > .zero, "a stretch must be allowed some length")
@@ -118,15 +122,55 @@ struct StretchCutter {
 
     // MARK: -
 
-    /// Talk that runs past the ceiling is cut there, and carries on in a new
-    /// stretch from the very next sample: no pre-roll, nothing between.
+    /// Talk that runs past the ceiling is cut at a quiet moment shortly
+    /// before it, and carries on in a new stretch from the very next sample:
+    /// no pre-roll, nothing between.
     private mutating func cutAtTheCeiling(before limit: Int) -> [Stretch] {
         var done: [Stretch] = []
         while let from = openFrom, from + ceiling <= limit {
-            done.append(cut(from, from + ceiling))
-            openFrom = from + ceiling
+            let end = quietestCut(from: from)
+            done.append(cut(from, end))
+            openFrom = end
         }
         return done
+    }
+
+    /// Where to cut talk that began at `from` and has reached the ceiling.
+    /// Cut at the ceiling itself, a word is split between two stretches and
+    /// neither half decodes; a breath or the gap between two words a little
+    /// earlier splits nothing. So: the middle of the quietest 50 ms in the
+    /// last four seconds, the later one on a tie, as long as it has under
+    /// half the energy of the 50 ms at the ceiling. Talk as loud all the way
+    /// is cut at the ceiling, where it always was.
+    ///
+    /// The look back stops at half the ceiling, so a short ceiling never
+    /// finds its quiet in the pre-roll at the start of the stretch.
+    private func quietestCut(from: Int) -> Int {
+        let ceilingAt = from + ceiling
+        let frame = Self.quietFrame
+        let earliest = max(from, ceilingAt - min(Self.quietLookBack, ceiling / 2))
+        guard ceilingAt - frame >= earliest else { return ceilingAt }
+
+        let atCeiling = energy(ceilingAt - frame, ceilingAt)
+        var quietest = (energy: atCeiling, cut: ceilingAt)
+        var start = ceilingAt - 2 * frame
+        while start >= earliest {
+            let energy = energy(start, start + frame)
+            if energy < quietest.energy {
+                quietest = (energy, start + frame / 2)
+            }
+            start -= frame
+        }
+        return quietest.energy < atCeiling / 2 ? quietest.cut : ceilingAt
+    }
+
+    /// Sum of squares of the held samples from `from` up to `end`.
+    private func energy(_ from: Int, _ end: Int) -> Float {
+        var sum: Float = 0
+        for sample in held[(from - heldFrom)..<(end - heldFrom)] {
+            sum += sample * sample
+        }
+        return sum
     }
 
     private mutating func cut(_ from: Int, _ end: Int) -> Stretch {

@@ -674,6 +674,14 @@ struct OnboardingView: View {
         }
     }
 
+    private var meetingModelReadyCaption: String {
+        switch coordinator.settings.meetingModel {
+        case .whisperLargeV3: "got it. it hears every language and writes english."
+        case .whisperLargeV3Turbo: "got it. it hears every language and writes it as spoken."
+        case .parakeetV3: "got it. it hears english and european languages, as spoken."
+        }
+    }
+
     /// The same idiom as the dictation model, one job over: it starts on the
     /// click, it says what it costs, and a failure offers the retry rather
     /// than leaving a dead row.
@@ -696,14 +704,12 @@ struct OnboardingView: View {
         case .ready:
             // one decode for the whole room, so the language is the model's
             // choice: turbo cannot translate, and saying it writes english
-            // would be a promise it does not keep.
-            Text(
-                coordinator.settings.meetingModel.translatesToEnglish
-                    ? "got it. it hears every language and writes english."
-                    : "got it. it hears every language and writes it as spoken."
-            )
-            .font(.caption)
-            .foregroundStyle(BrandUI.gold)
+            // would be a promise it does not keep. nor does parakeet hear
+            // every language — setup only gets here with it if it was
+            // picked in settings first.
+            Text(meetingModelReadyCaption)
+                .font(.caption)
+                .foregroundStyle(BrandUI.gold)
         case .actionRequired:
             VStack(spacing: 7) {
                 Text("that download didn't finish.")

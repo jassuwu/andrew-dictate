@@ -161,6 +161,50 @@ final class MeetingStretchTests: XCTestCase {
         ])
     }
 
+    /// Talk past the ceiling with a breath in it a second before: the cut
+    /// is made in the breath, not at the ceiling in the middle of a word.
+    /// Said from 1.3 s with 0.1 s of quiet at 10.0, it is cut 1.0 to 10.075
+    /// — the middle of the later 50 ms of the quiet, the one nearer the
+    /// ceiling — and goes on from the very next sample to 14.0: 13 s handed
+    /// over for 13 s said. Cut at the ceiling, at 11.0, the first stretch
+    /// would hold both phrases and be heard as the louder one.
+    func testTalkPastTheCeilingIsCutInAQuietMomentBeforeIt() async throws {
+        let c = coordinator(stretches(ceiling: .seconds(10)))
+        c.start()
+        await source.awaitStart()
+
+        await play([
+            you("i think the deploy", from: 1.3, to: 10.0),
+            you("is blocked", from: 10.1, to: 14.0),
+        ], through: 15.0, on: c)
+        await waitFor { c.liveLines.count == 2 }
+
+        XCTAssertEqual(handed(), ["i think the deploy 145200", "is blocked 62800"])
+        XCTAssertEqual(live(c), ["you 1.0 i think the deploy", "you 10.1 is blocked"])
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, ["[00:00:01] you: i think the deploy is blocked"])
+    }
+
+    /// No moment in the four seconds before the ceiling is quieter than the
+    /// ceiling itself, so that is where it is cut: 1.0 to 11.0, then on from
+    /// the next sample to 14.0. A tone is never exactly as loud from one
+    /// 50 ms to the next; being a little quieter is not a breath.
+    func testTalkWithNoQuietMomentBeforeTheCeilingIsCutAtIt() async throws {
+        let c = coordinator(stretches(ceiling: .seconds(10)))
+        c.start()
+        await source.awaitStart()
+
+        await play([you("and another thing", from: 1.3, to: 14.0)], through: 15.0, on: c)
+        await waitFor { c.liveLines.count == 2 }
+
+        XCTAssertEqual(handed(), ["and another thing 160000", "and another thing 48000"])
+        XCTAssertEqual(live(c), ["you 1.0 and another thing", "you 11.0 and another thing"])
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, ["[00:00:01] you: and another thing and another thing"])
+    }
+
     /// Whisper names a stretch with no words in it rather than leaving it
     /// blank. A name is not a turn: the file and the panel only get words,
     /// and a marker in front of words is taken off them.
@@ -383,6 +427,48 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(handed().count, 3)
     }
 
+    /// Every stretch of the spool failed to decode, twice. Writing that out
+    /// would save a meeting where nobody spoke and delete the only copy of
+    /// what they did say: the spool stays for the next launch instead, with
+    /// the try counted against it.
+    func testASpoolWhoseEveryStretchFailsIsKeptForTheNextLaunch() async throws {
+        let spool = try await spoolLeftBehind([
+            you("are you recording this", from: 1.3, to: 2.5),
+            them("i am now", from: 2.3, to: 3.0),
+        ])
+        engine.failing("are you recording this", times: 2)
+        engine.failing("i am now", times: 2)
+
+        let c = coordinator(stretches())
+        c.recoverOrphans()
+        await waitFor { spool.orphans().first?.manifest.attempts == 1 }
+
+        XCTAssertEqual(spool.orphans().map(\.manifest.attempts), [1])
+        XCTAssertEqual(handed(), [
+            "are you recording this 24000",
+            "are you recording this 24000",
+            "i am now 16000",
+            "i am now 16000",
+        ])
+        XCTAssertEqual(
+            MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).count, 0)
+    }
+
+    /// Nobody spoke: nothing was cut, so nothing failed. That is a meeting
+    /// with no turns in it, written out like any other, not a spool kept
+    /// back to be tried again at every launch.
+    func testASpoolNobodySpokeInIsWrittenOutWithNoTurns() async throws {
+        let spool = try await spoolLeftBehind([])
+
+        let c = coordinator(stretches())
+        c.recoverOrphans()
+
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, [])
+        XCTAssertEqual(handed(), [])
+        XCTAssertEqual(spool.orphans().count, 0)
+    }
+
     // MARK: - the numbers
 
     /// What the meeting's record will be told: stretches decoded per side,
@@ -456,6 +542,21 @@ final class MeetingStretchTests: XCTestCase {
         )
         c.onEvent = { [weak self] in self?.events.append($0) }
         return c
+    }
+
+    /// The spool of a meeting the app died in: six seconds of it, in the
+    /// chunks the tap would have handed over, waiting in the spool folder
+    /// for the next launch.
+    private func spoolLeftBehind(_ said: [Said]) async throws -> MeetingSpool {
+        let spool = MeetingSpool(root: dir.appendingPathComponent("spool"))
+        let handle = try spool.begin(.init(
+            app: "teams", started: Date(timeIntervalSince1970: 1_787_000_000),
+            engine: "whisper-large-v3-turbo", model: .whisperLargeV3Turbo))
+        let file = try SpoolAudioFile(url: handle.audioURL)
+        for k in 0..<60 {
+            try await file.append(chunk(k, said))
+        }
+        return spool
     }
 
     private struct Said {

@@ -38,6 +38,11 @@ final class DictationCoordinator: ObservableObject {
         subsystem: AppIdentity.loggingSubsystem,
         category: "press"
     )
+    /// the same for meetings: one line each, at notice, every field public.
+    private let meetingRecordLogger = Logger(
+        subsystem: AppIdentity.loggingSubsystem,
+        category: "meeting-record"
+    )
     /// the machine owns the state; the menu, the HUD and the menu-bar icon
     /// still say `DictationCoordinator.State`.
     typealias State = UtteranceMachine.State
@@ -235,6 +240,10 @@ final class DictationCoordinator: ObservableObject {
         label: "\(AppIdentity.bundleID).press-log",
         qos: .utility
     )
+    /// the meeting records' file, beside it and on the same queue: one
+    /// disk, one order, so "copy diagnostics" reads both after whatever
+    /// was kept a moment ago.
+    private let meetingRecords = MeetingRecordStore()
     /// watches the main thread while a press is in flight. lazy, because
     /// its stalls are noted on the machine's press.
     private lazy var watchdog = MainThreadWatchdog { [weak self] milliseconds in
@@ -714,9 +723,10 @@ final class DictationCoordinator: ObservableObject {
     }
 
     /// "copy diagnostics": who is running what, then the last fifty
-    /// presses. read through the press log's own queue, so a press that
-    /// ended a moment ago is already in it — and so is the default mic,
-    /// since asking the audio server is never done on the main thread.
+    /// presses and the last twenty meetings. read through the press log's
+    /// own queue, so a press that ended a moment ago is already in it — and
+    /// so is the default mic, since asking the audio server is never done
+    /// on the main thread.
     func copyDiagnostics() {
         let info = Bundle.main.infoDictionary ?? [:]
         let system = ProcessInfo.processInfo.operatingSystemVersion
@@ -724,6 +734,7 @@ final class DictationCoordinator: ObservableObject {
         let build = info["CFBundleVersion"] as? String ?? "?"
         let engine = activeEngineVersion.rawValue
         let store = pressLog
+        let meetingStore = meetingRecords
         pressLogQueue.async {
             let setup = PressDiagnostics.Setup(
                 appVersion: appVersion,
@@ -735,7 +746,8 @@ final class DictationCoordinator: ObservableObject {
             )
             let text = PressDiagnostics.text(
                 setup: setup,
-                presses: try? store.recent(PressDiagnostics.pressCount)
+                presses: try? store.recent(PressDiagnostics.pressCount),
+                meetings: try? meetingStore.recent(PressDiagnostics.meetingCount)
             )
             // silent, like any copy: the pill is for what needs saying.
             // through the paster, so it can't land inside a dictation's
@@ -2231,6 +2243,9 @@ extension DictationCoordinator {
             self?.settings.meetingHookLastRunAt = run.finishedAt
             self?.settings.meetingHookLastRunLabel = run.outcome.label
         }
+        built.keepMeetingRecord = { [weak self] record in
+            self?.keep(record)
+        }
         built.$elapsed
             .sink { [weak self] elapsed in
                 self?.liveTranscript.elapsed = elapsed
@@ -2265,6 +2280,24 @@ extension DictationCoordinator {
             .removeDuplicates()
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &meetingCancellables)
+    }
+
+    /// how a meeting ended, the way a press's is kept: the line to the
+    /// unified log now, the file on the press log's queue, in order. one
+    /// per meeting, whatever the ending, and none of what was said.
+    private func keep(_ record: MeetingRecord) {
+        meetingRecordLogger.notice("\(record.line(), privacy: .public)")
+        let store = meetingRecords
+        let logger = meetingRecordLogger
+        pressLogQueue.async {
+            do {
+                try store.append(record)
+            } catch {
+                logger.error(
+                    "couldn't keep a meeting record: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
     }
 
     private func handle(_ event: MeetingEvent) {

@@ -249,6 +249,42 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertNil(AppSettings(userDefaults: userDefaults).meetingHook)
     }
 
+    /// a meeting model is stored by name in two places: settings, and the
+    /// manifest of every spool a crash leaves behind. both names from
+    /// before parakeet could listen to meetings still read back as what
+    /// they were.
+    func testMeetingModelsStoredBeforeParakeetStillLoad() throws {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let key = "AndrewDictate.meetingModel"
+
+        userDefaults.set("whisperLargeV3", forKey: key)
+        XCTAssertEqual(AppSettings(userDefaults: userDefaults).meetingModel, .whisperLargeV3)
+        userDefaults.set("whisperLargeV3Turbo", forKey: key)
+        XCTAssertEqual(AppSettings(userDefaults: userDefaults).meetingModel, .whisperLargeV3Turbo)
+
+        let manifest = Data(#"["whisperLargeV3","whisperLargeV3Turbo"]"#.utf8)
+        XCTAssertEqual(
+            try JSONDecoder().decode([MeetingModel].self, from: manifest),
+            [.whisperLargeV3, .whisperLargeV3Turbo])
+    }
+
+    /// parakeet is a choice like the other two, and kept like them; the
+    /// default stays whisper large, the one that writes english.
+    func testParakeetForMeetingsSurvivesARelaunchAndIsNotTheDefault() throws {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppSettings(userDefaults: userDefaults)
+        XCTAssertEqual(settings.meetingModel, .whisperLargeV3)
+        settings.meetingModel = .parakeetV3
+
+        XCTAssertEqual(AppSettings(userDefaults: userDefaults).meetingModel, .parakeetV3)
+        let manifest = try JSONEncoder().encode(MeetingModel.parakeetV3)
+        XCTAssertEqual(try JSONDecoder().decode(MeetingModel.self, from: manifest), .parakeetV3)
+        XCTAssertEqual(MeetingModel.default, .whisperLargeV3)
+    }
+
     func testUnknownMeetingModelFallsBackToWhisperLarge() {
         let (userDefaults, suiteName) = makeUserDefaults()
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
