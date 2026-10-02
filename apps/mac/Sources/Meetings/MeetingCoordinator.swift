@@ -162,7 +162,7 @@ final class MeetingCoordinator: ObservableObject {
         hookRunner: HookRunner = HookRunner(logURL: HookRunner.defaultLogURL),
         thresholds: MeetingThresholds = .provisional,
         now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now },
-        date: @escaping @Sendable () -> Date = Date.init,
+        date: @escaping @Sendable () -> Date = { Date() },
         preferences: @escaping @MainActor () -> MeetingPreferences
     ) {
         self.source = source
