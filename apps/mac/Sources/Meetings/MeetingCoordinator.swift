@@ -473,7 +473,10 @@ final class MeetingCoordinator: ObservableObject {
     /// Spools that outlived the app. Each becomes a transcript flagged
     /// `recovered`, in the background, in order — announced, because a
     /// quarter of an hour of the neural engine at login is not a silent
-    /// success, it is a job nobody asked for.
+    /// success, it is a job nobody asked for. A crash costs time and never
+    /// the meeting: audio that will not read is set aside, never deleted; a
+    /// model that is gone is replaced by another that is installed; and with
+    /// none installed the spool waits for a launch that has one.
     func recoverOrphans() {
         // a meeting started in the seconds before this runs, or one still
         // being written out, has a spool that looks just like one a crash
@@ -1044,9 +1047,10 @@ final class MeetingCoordinator: ObservableObject {
         } catch {
             // Only logging it meant the same quarter of an hour was spent on
             // the same failure at every launch, forever. Two tries, then the
-            // spool is set aside — kept, never retried, and said out loud in
-            // settings › history. one somebody asked to be tried again has
-            // had the one try it was asked for.
+            // spool is set aside — kept, out of the retry loop, and said out
+            // loud in settings › history, which can try it again. one
+            // somebody asked to be tried again has had the one try it was
+            // asked for.
             logger.error("could not recover a spool: \(error.localizedDescription, privacy: .public)")
             let noted = spool.noteAttempt(handle, manifest: manifest)
             let setAside = tryingAgain

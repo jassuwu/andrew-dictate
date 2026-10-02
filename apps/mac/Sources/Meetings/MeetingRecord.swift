@@ -27,8 +27,9 @@ struct MeetingRecord: Equatable, Sendable, Codable {
         /// a recovery tried to write a spool out and the model failed it.
         /// the attempt is counted, and the next launch tries again.
         case couldNotRecover
-        /// the second failure of a recovery: the spool is kept, out of the
-        /// retry loop, and settings says it is there.
+        /// the second failure of a recovery, or the failure of one tried
+        /// again from settings: the spool is kept, out of the retry loop,
+        /// and settings says it is there.
         case setAside
         /// an earlier build's: a recovery found audio it could not read at
         /// all, and let it go. nothing writes it now — that audio is set

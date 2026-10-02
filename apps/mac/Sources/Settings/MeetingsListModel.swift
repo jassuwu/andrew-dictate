@@ -19,8 +19,9 @@ final class MeetingsListModel: ObservableObject {
     @Published var query = ""
     /// nil while everything is fine. otherwise a sentence to show verbatim.
     @Published private(set) var failure: String?
-    /// recordings the app tried twice to write out and could not. it keeps
-    /// them rather than deleting them, so something has to say they exist.
+    /// recordings the app tried twice to write out and could not, or could
+    /// not read at all. it keeps them rather than deleting them, so
+    /// something has to say they exist — and offer another try.
     @Published private(set) var setAsideCount = 0
     /// the audio kept for each meeting that still has some, by the path of
     /// its transcript.
