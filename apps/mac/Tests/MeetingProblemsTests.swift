@@ -274,6 +274,30 @@ final class MeetingProblemsTests: XCTestCase {
         XCTAssertEqual(records.first?.outcome.why, "mic-failed")
     }
 
+    /// The tap would not open: the fix is the system-audio switch, so the
+    /// lamp says the mac cannot be heard and setup opens at it — and so it
+    /// does for an error that does not say which part it was.
+    func testATapThatWouldNotOpenCannotHearTheMacAndOpensSetup() async throws {
+        source.startFails = CaptureFailed(fault: .tap)
+        let c = coordinator()
+        c.start()
+        await source.awaitStart()
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(c.state, .idle)
+        XCTAssertEqual(events, [.cannotHear])
+        XCTAssertEqual(events.first?.hudText, "can't hear the mac — opening setup")
+        XCTAssertEqual(events.first?.opensSetup, true)
+        XCTAssertEqual(records.first?.outcome, .nothingKept(.tapNeverHeard))
+        XCTAssertEqual(records.first?.outcome.why, "tap-never-heard")
+
+        source.startFails = CocoaError(.featureUnsupported)
+        c.start()
+        await source.awaitStart()
+        await c.untilWrittenOut()
+        XCTAssertEqual(events, [.cannotHear, .cannotHear])
+    }
+
     // MARK: - several at once
 
     /// The disk nearly full from the start, and the mic gone silent while
