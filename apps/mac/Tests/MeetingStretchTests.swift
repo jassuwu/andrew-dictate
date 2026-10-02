@@ -354,6 +354,42 @@ final class MeetingStretchTests: XCTestCase {
         ])
     }
 
+    // MARK: - the numbers
+
+    /// What the meeting's record will be told: stretches decoded per side,
+    /// stretches let go, and how far behind the meeting the decoding ran —
+    /// from a stretch joining the queue to its decode finishing.
+    ///
+    /// Both of the first two join the queue at 0 s and wait out a ten-second
+    /// load. The first is done at 11 s; the second fails at 12 and again at
+    /// 13. The third joins at 13 and is done at 14.
+    func testTheNumbersCountEachSideWhatFailedAndHowFarBehindTheDecodingRan() async throws {
+        let wall = FakeClock()
+        engine.holdLoading()
+        engine.eachDecodeTakes(.seconds(1), on: wall)
+        engine.failing("since when", times: 2)
+        let transcriber = stretches(clock: wall)
+        let c = coordinator(transcriber)
+        c.start(tapping: zoom)
+        await source.awaitStart()
+
+        await play([
+            you("the deploy is blocked", from: 1.3, to: 2.5),
+            them("since when", from: 3.3, to: 4.0),
+        ], through: 5.0, on: c)
+        wall.advance(by: .seconds(10))
+        engine.letLoad()
+        await waitFor { handed().count == 3 }
+
+        await play([you("since this morning", from: 5.3, to: 6.0)], from: 5.0, through: 7.0, on: c)
+        await waitFor { c.liveLines.count == 2 }
+
+        let tally = await transcriber.tally
+        XCTAssertEqual(tally, StretchTally(
+            decodedYou: 2, decodedThem: 0, failed: 1,
+            mostBehind: .seconds(13), lastBehind: .seconds(1)))
+    }
+
     // MARK: - building a meeting
 
     private func stretches(
@@ -565,11 +601,21 @@ private final class PhraseEngine: StretchEngine, @unchecked Sendable {
     private var failures: [String: Int] = [:]
     private var isHeld = false
     private var refuses = false
+    private var wall: FakeClock?
+    private var eachDecode: Duration = .zero
 
     func loudness(of phrase: String) -> Float {
         lock.withLock {
             if !phrases.contains(phrase) { phrases.append(phrase) }
             return 0.1 * Float(phrases.firstIndex(of: phrase)! + 1)
+        }
+    }
+
+    /// Every decode, failed or not, moves `wall` on by `duration`.
+    func eachDecodeTakes(_ duration: Duration, on wall: FakeClock) {
+        lock.withLock {
+            self.wall = wall
+            eachDecode = duration
         }
     }
 
@@ -610,6 +656,7 @@ private final class PhraseEngine: StretchEngine, @unchecked Sendable {
             let index = Int((peak * 10).rounded()) - 1
             let phrase = peak < 0.05 ? "" : phrases.indices.contains(index) ? phrases[index] : "?"
             decoded.append((phrase, samples.count))
+            wall?.advance(by: eachDecode)
             if let left = failures[phrase], left > 0 {
                 failures[phrase] = left - 1
                 throw Garbled()

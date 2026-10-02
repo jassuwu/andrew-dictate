@@ -9,6 +9,20 @@ protocol StretchEngine: Sendable {
     func text(of samples: [Float]) async throws -> String
 }
 
+/// What a meeting's decoding came to, for its record: counts and times,
+/// never a word of what was said.
+struct StretchTally: Equatable, Sendable {
+    var decodedYou = 0
+    var decodedThem = 0
+    /// Stretches the engine threw on twice. Their words are not in the file.
+    var failed = 0
+    /// How far behind the meeting the decoding ran: from a stretch joining
+    /// the queue to its decode finishing, the worst of the meeting and the
+    /// latest.
+    var mostBehind: Duration = .zero
+    var lastBehind: Duration = .zero
+}
+
 /// A meeting heard a stretch at a time, each stretch decoded once.
 ///
 /// A detector finds where speech begins and ends, a cutter cuts the speech
@@ -41,10 +55,12 @@ actor StretchTranscriber: MeetingTranscriber {
     private var isReady = false
     private var isFinished = false
     /// Stretches that have ended and wait for the engine, in the order they
-    /// ended. Audio leaves memory when its stretch leaves this queue.
-    private var waiting: [Stretch] = []
+    /// ended, with when they joined. Audio leaves memory when its stretch
+    /// leaves this queue.
+    private var waiting: [(stretch: Stretch, queued: ContinuousClock.Instant)] = []
     private var worker: Task<Void, Never>?
     private var turns: [MeetingTurn] = []
+    private(set) var tally = StretchTally()
 
     /// `ceiling` is the longest stretch the engine is handed — about 25 s
     /// for whisper, 15 s for parakeet. `detector` makes one detector per
@@ -122,8 +138,8 @@ actor StretchTranscriber: MeetingTranscriber {
 
     private func queue(_ stretches: [Stretch]) {
         for stretch in stretches {
-            let index = waiting.firstIndex { $0.end > stretch.end } ?? waiting.endIndex
-            waiting.insert(stretch, at: index)
+            let index = waiting.firstIndex { $0.stretch.end > stretch.end } ?? waiting.endIndex
+            waiting.insert((stretch, now()), at: index)
         }
         startWorking()
     }
@@ -137,23 +153,35 @@ actor StretchTranscriber: MeetingTranscriber {
     /// next stretch to end starts it again.
     private func work() async {
         while !waiting.isEmpty {
-            let stretch = waiting.removeFirst()
-            guard let text = await decode(stretch) else { continue }
-            keep(text, from: stretch)
+            let (stretch, queued) = waiting.removeFirst()
+            let text = await decode(stretch)
+            let behind = now() - queued
+            tally.lastBehind = behind
+            tally.mostBehind = max(tally.mostBehind, behind)
+            if let text {
+                keep(text, from: stretch)
+            }
         }
         worker = nil
     }
 
     /// A stretch the engine throws on gets one more try: a decode that
-    /// failed once is often a hiccup, not the audio.
+    /// failed once is often a hiccup, not the audio. Twice, and it is let
+    /// go and counted.
     private func decode(_ stretch: Stretch) async -> String? {
         for attempt in 1...2 {
             do {
-                return try await engine.text(of: stretch.samples)
+                let text = try await engine.text(of: stretch.samples)
+                switch stretch.side {
+                case .you: tally.decodedYou += 1
+                case .them: tally.decodedThem += 1
+                }
+                return text
             } catch {
                 logger.error("a stretch failed to decode, try \(attempt): \(error.localizedDescription, privacy: .public)")
             }
         }
+        tally.failed += 1
         return nil
     }
 
