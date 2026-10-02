@@ -57,9 +57,12 @@ enum BadgeMarks {
     // MARK: - geometry, one enum per mark
 
     /// the dot a take and a setup gap have always worn: 6 pt, ringed in
-    /// the brand black, half a point in from the right edge. the ring is
-    /// stroked on the dot's edge, so the canvas clips its outer half where
-    /// the dot touches the top or bottom; that is how it has always shipped.
+    /// the brand black, half a point in from the right edge. gold and
+    /// bottom right for a take, red and top right for setup: gold means
+    /// the mic is live, so "needs you" differs from "listening" in both
+    /// hue and corner. the ring is stroked on the dot's edge, so the canvas
+    /// clips its outer half where the dot touches the top or bottom; that
+    /// is how it has always shipped.
     enum Dot {
         static let diameter: CGFloat = 6
         static let ring: CGFloat = 1

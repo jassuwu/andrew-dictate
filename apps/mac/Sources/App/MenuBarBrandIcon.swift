@@ -2,111 +2,78 @@ import AppKit
 
 @MainActor
 enum MenuBarBrandIcon {
-    private static let iconSize = NSSize(width: 18, height: 18)
-
     static func image(
         for state: DictationCoordinator.State,
         needsAttention: Bool = false,
         isRecordingMeeting: Bool = false
     ) -> NSImage {
-        // a setup gap outranks every other state: a missing grant or a
-        // speech model that never downloaded means the other states can
-        // never be reached anyway.
-        if needsAttention {
-            return attentionBadge()
-        }
-        // a meeting outranks dictation states because dictation is refused
-        // while one runs (ADR 0023); the dot is the persistent indicator
-        // the hud deliberately is not (ADR 0040). it is the same gold dot
-        // dictation draws: gold means the mic is live, and which mic it is
-        // belongs in the menu, not in a 6 pt disc.
-        if isRecordingMeeting {
-            let meeting = badge(recording: true)
-            meeting.accessibilityDescription = "Andrew Dictate recording a meeting"
-            return meeting
-        }
-
-        switch state {
-        case .recording:
-            return badge(recording: true)
-        // transcribing draws the quiet badge on purpose. the lamp's cool phase
-        // owns the wait and the menu already says "writing it out…" (ADR 0017);
-        // a narrower template glyph here only shoved the clock sideways and
-        // back, seventy times a day.
-        case .idle,
-             .prewarming,
-             .transcribing:
-            return badge(recording: false)
-        }
-    }
-
-    /// the badge wearing a warning dot. red and top-right — gold means the
-    /// mic is live (dictation or a meeting), so "needs you" differs from
-    /// "listening" in both hue and corner.
-    private static func attentionBadge() -> NSImage {
-        guard let base = NSImage(named: "MenuBarBadge") else {
-            let fallback = NSImage(
-                systemSymbolName: "exclamationmark.triangle.fill",
-                accessibilityDescription:
-                    "Andrew Dictate needs setup"
-            ) ?? NSImage()
-            fallback.isTemplate = true
-            return fallback
-        }
-
-        let composed = NSImage(size: iconSize, flipped: false) { rect in
-            base.draw(in: rect)
-            let dot = NSRect(
-                x: rect.maxX - 6.5,
-                y: rect.maxY - 6,
-                width: 6,
-                height: 6
+        // today's inputs, as the badge's looks. the coordinator tells a
+        // meeting from a take, so a recording meeting wears the gold rim
+        // where it used to borrow dictation's dot; the badge is the
+        // persistent indicator the hud deliberately is not (ADR 0040). a
+        // call nobody records, a meeting getting ready and a meeting's
+        // problem are drawn but not asked for yet: they arrive with the
+        // meeting's own states.
+        //
+        // transcribing is not dictating on purpose. the lamp's cool phase
+        // owns the wait and the menu already says "writing it out…" (ADR
+        // 0017); a narrower template glyph here only shoved the clock
+        // sideways and back, seventy times a day.
+        image(
+            for: BadgeLook(
+                needsSetup: needsAttention,
+                isDictating: state == .recording,
+                meeting: isRecordingMeeting ? .recording : .none
             )
-            BrandUI.nsColor(BrandUI.attentionRGB).setFill()
-            NSBezierPath(ovalIn: dot).fill()
-            BrandUI.nsColor(BrandUI.blackRGB).setStroke()
-            let ring = NSBezierPath(ovalIn: dot)
-            ring.lineWidth = 1
-            ring.stroke()
-            return true
-        }
-        composed.isTemplate = false
-        composed.accessibilityDescription =
-            "Andrew Dictate needs setup"
-        return composed
+        )
     }
 
-    /// the actual brand badge, full color. non-template by design: the logo
-    /// is the logo, everywhere (user directive).
-    private static func badge(recording: Bool) -> NSImage {
+    /// the actual brand badge, full color, wearing `look`'s mark.
+    /// non-template by design: the logo is the logo, everywhere (user
+    /// directive).
+    static func image(for look: BadgeLook) -> NSImage {
         guard let base = NSImage(named: "MenuBarBadge") else {
-            let fallback = NSImage(
-                systemSymbolName: "mic.fill",
-                accessibilityDescription: "Andrew Dictate"
-            ) ?? NSImage()
-            fallback.isTemplate = true
-            return fallback
+            return fallback(for: look)
         }
+        base.size = BadgeMarks.size
+        base.isTemplate = false
 
-        guard recording else {
-            base.size = iconSize
-            base.isTemplate = false
-            return base
+        let image = BadgeMarks.image(for: look, on: base)
+        if let description = accessibilityDescription(for: look) {
+            image.accessibilityDescription = description
         }
+        return image
+    }
 
-        let composed = NSImage(size: iconSize, flipped: false) { rect in
-            base.draw(in: rect)
-            let dot = NSRect(x: rect.maxX - 6.5, y: rect.minY, width: 6, height: 6)
-            BrandUI.nsColor(BrandUI.goldRGB).setFill()
-            NSBezierPath(ovalIn: dot).fill()
-            BrandUI.nsColor(BrandUI.blackRGB).setStroke()
-            let ring = NSBezierPath(ovalIn: dot)
-            ring.lineWidth = 1
-            ring.stroke()
-            return true
+    /// what VoiceOver hears for the image itself; the menu bar item's
+    /// label says the state in words on top of this. the bare badge keeps
+    /// the asset's own.
+    private static func accessibilityDescription(
+        for look: BadgeLook
+    ) -> String? {
+        switch look {
+        case .idle: nil
+        case .dictating: "Andrew Dictate recording"
+        case .callNotRecorded: "Andrew Dictate, a call is on"
+        case .gettingReady: "Andrew Dictate getting ready to record a meeting"
+        case .recordingMeeting: "Andrew Dictate recording a meeting"
+        case .meetingProblem: "Andrew Dictate has a problem with the meeting"
+        case .needsSetup: "Andrew Dictate needs setup"
         }
-        composed.isTemplate = false
-        composed.accessibilityDescription = "Andrew Dictate recording"
-        return composed
+    }
+
+    /// only a build with a broken asset catalog lands here: a system glyph,
+    /// so the item is never blank.
+    private static func fallback(for look: BadgeLook) -> NSImage {
+        let warns = look == .needsSetup || look == .meetingProblem
+        let fallback = NSImage(
+            systemSymbolName: warns
+                ? "exclamationmark.triangle.fill"
+                : "mic.fill",
+            accessibilityDescription: accessibilityDescription(for: look)
+                ?? "Andrew Dictate"
+        ) ?? NSImage()
+        fallback.isTemplate = true
+        return fallback
     }
 }
