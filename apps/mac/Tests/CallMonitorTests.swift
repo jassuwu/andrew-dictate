@@ -46,10 +46,16 @@ final class CallMonitorTests: XCTestCase {
     }
 
     /// Lets the monitor run in simulated time until `done` or a ceiling.
+    /// Time only moves while the monitor waits, so a monitor that has
+    /// stopped leaves it standing: then this gives up too.
     private func run(until done: () -> Bool, for limit: Duration = .seconds(600)) async {
         let start = clock.now
-        while !done(), clock.now - start < limit {
+        var last = clock.now
+        var still = 0
+        while !done(), clock.now - start < limit, still < 1_000 {
             await Task.yield()
+            still = clock.now == last ? still + 1 : 0
+            last = clock.now
         }
     }
 
