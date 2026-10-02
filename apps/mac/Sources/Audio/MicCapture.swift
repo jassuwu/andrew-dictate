@@ -23,6 +23,12 @@ protocol MicCapture: AnyObject {
     var deviceDescription: MicDescription? { get }
 }
 
+/// why a mic would not start, where the reason changes what the press says.
+enum MicCaptureError: Error {
+    /// the mac has no input device at all to open.
+    case noInputDevice
+}
+
 /// a capture the app can throw away whole. a device change, a wedge or the
 /// mac going to sleep is answered with a new one, never by rebuilding this
 /// one in place.

@@ -939,6 +939,21 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(presses.first?.mic, MicDescription(name: "AirPods Pro", transport: .bluetooth))
     }
 
+    /// no input device at all is not a mic that refused: the press says
+    /// so, and the next one looks for a mic again.
+    func testNoMicrophoneAtAllSaysSo() async {
+        let m = machine()
+        mic.hasNoDevice = true
+
+        m.keyDown()
+        await settle { !self.pills.isEmpty }
+
+        XCTAssertEqual(pills, [Pill("no microphone available", 1.6)])
+        XCTAssertTrue(events.contains(.microphoneDropped))
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(outcomes, [.refused(.noMicrophone)])
+    }
+
     /// they spoke and there is nothing to show for it, so it says so, and
     /// the next press opens a fresh mic.
     func testARecordingThatWillNotStopSaysItWasLost() async {
@@ -1263,6 +1278,8 @@ private final class FakeMic: MicCapture {
         transport: .bluetooth
     )
     var failsToStart = false
+    /// the mac has no input device at all to open.
+    var hasNoDevice = false
     var failsToStop = false
     /// while set, start waits for `finishStart()`: a device slow to open,
     /// or, never finished, one that never does.
@@ -1299,6 +1316,9 @@ private final class FakeMic: MicCapture {
         starts += 1
         if holdsStart {
             await withCheckedContinuation { heldStart = $0 }
+        }
+        if hasNoDevice {
+            throw MicCaptureError.noInputDevice
         }
         if failsToStart {
             throw MicFailure()

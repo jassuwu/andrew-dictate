@@ -438,6 +438,13 @@ final class UtteranceMachine {
         emit(.microphoneDropped)
         // the lamp was already up, so a failure takes it down fast.
         setState(.idle, fastHUDDismiss: true)
+        if case MicCaptureError.noInputDevice? = error as? MicCaptureError {
+            // no mic at all is not one that refused. the next press looks
+            // again: the headset may be back on by then.
+            flashNotice("no microphone available")
+            endPress(.refused(.noMicrophone))
+            return
+        }
         flashNotice("couldn't start recording")
         endPress(.couldNotStartRecording)
     }
