@@ -1810,18 +1810,23 @@ extension DictationCoordinator {
         meetingNotifier.onShowFile = { url in
             NSWorkspace.shared.activateFileViewerSelecting([url])
         }
-        // transcripts written before the app started locking them down are
-        // still 0644 — other people's words, readable by every account on
-        // the machine. repaired once, off the main thread.
-        let folder = settings.meetingsFolder
-        Task.detached(priority: .utility) {
-            MeetingTranscriptFile.lockDown(in: folder)
-        }
         // recovery loads the meeting model and can run for a quarter of an
         // hour. five seconds of head start keeps it off the dictation
         // model's prewarm, so the first fn press is not slower for it. the
         // number is a guess, like the rest of MeetingThresholds.
-        meetings.recoverOrphansAtLaunch(in: MeetingSpool(), after: .seconds(5))
+        meetings.launch(
+            setUp: hasMeetingsSetUp,
+            transcripts: settings.meetingsFolder,
+            spool: MeetingSpool(),
+            recoveryDelay: .seconds(5)
+        )
+    }
+
+    /// a meeting model on disk, or a folder somebody chose. both are a
+    /// stat, so a mac that only dictates learns it has nothing to repair
+    /// without walking the transcripts folder.
+    private var hasMeetingsSetUp: Bool {
+        !installedMeetingModels.isEmpty || settings.meetingsFolderWasChosen
     }
 
     /// the coordinator's half of the wiring, run once, the moment it is

@@ -68,19 +68,32 @@ final class LazyMeetings {
 
     // MARK: - launch
 
-    /// a spool a crash left behind is written out at every launch — but
-    /// only a spool folder with something in it builds the coordinator to
-    /// do it. the returned task is the recovery, or nil when there is none.
+    /// what launch does about meetings, and all it does. `setUp` is a
+    /// meeting model on disk or a folder somebody chose: without either
+    /// there are no transcripts to repair. a spool a crash left behind is
+    /// written out at every launch, but only a spool folder with something
+    /// in it builds the coordinator to do it. the returned task is that
+    /// recovery, or nil when there is none.
     @discardableResult
-    func recoverOrphansAtLaunch(
-        in spool: MeetingSpool,
-        after delay: Duration
+    func launch(
+        setUp: Bool,
+        transcripts: URL,
+        spool: MeetingSpool,
+        recoveryDelay: Duration
     ) -> Task<Void, Never>? {
+        if setUp {
+            // transcripts written before the app started locking them down
+            // are still 0644 — other people's words, readable by every
+            // account on the machine. repaired once, off the main thread.
+            Task.detached(priority: .utility) {
+                MeetingTranscriptFile.lockDown(in: transcripts)
+            }
+        }
         guard spool.mayHoldOrphans() else {
             return nil
         }
         return Task { [weak self] in
-            try? await Task.sleep(for: delay)
+            try? await Task.sleep(for: recoveryDelay)
             self?.coordinator.recoverOrphans()
         }
     }
