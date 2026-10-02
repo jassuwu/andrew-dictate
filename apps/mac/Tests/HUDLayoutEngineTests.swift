@@ -121,6 +121,7 @@ extension HUDLayoutEngineTests {
             "copied — secure field · ⌘V to paste",
             "copied — focus changed · ⌘V to paste",
             "copied — couldn't paste it · ⌘V to paste",
+            "copied — what you said before the lock · ⌘V to paste",
             "the clipboard is busy — nothing was copied",
         ] {
             let layout = HUDLayoutEngine.layout(
