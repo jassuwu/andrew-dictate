@@ -198,6 +198,72 @@ final class MeetingRecordTests: XCTestCase {
         XCTAssertEqual(records.first?.durationS, 1)
     }
 
+    // MARK: - one meeting, one record
+
+    /// back to back, the way a calendar runs: the first is still being
+    /// written out while the second records, and each leaves the record of
+    /// its own app, model, start, length, talk, wait and decoding.
+    func testAMeetingWrittenOutWhileTheNextOneRecordsHasItsOwnRecord() async throws {
+        let first = FakeTranscriber(finalTurns: [
+            .init(speaker: .you, at: .seconds(1), text: "the first meeting")])
+        let second = FakeTranscriber(finalTurns: [
+            .init(speaker: .you, at: .seconds(1), text: "second one here today"),
+            .init(speaker: .them(nil), at: .seconds(2), text: "ok"),
+        ])
+        second.tally = StretchTally(decodedYou: 5, decodedThem: 6)
+        first.holds = true
+        transcribers.lineUp(first, second)
+        let secondStarted = Date(timeIntervalSince1970: 1_787_003_600)
+        let clock = FakeClock()
+        let c = coordinator(clock: clock, starting: [started, secondStarted])
+
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        source.send(loud(at: .seconds(1)))
+        await settle()
+        c.stop()
+        await held(first)
+
+        // half a minute on, and the setting has moved: the second meeting
+        // is another app, with another model.
+        clock.advance(by: .seconds(30))
+        meetingModel = .whisperLargeV3
+        c.start(tapping: RunningApp(name: "Teams", bundleID: nil, pid: 7))
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        source.send(loud(at: .seconds(1)))
+        source.send(loud(at: .seconds(2)))
+        await settle()
+        first.release()
+        await awaitRecords(1)
+        c.stop()
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(records.count, 2)
+        let one = try XCTUnwrap(records.first)
+        XCTAssertEqual(one.outcome, .saved)
+        XCTAssertEqual(one.app, "zoom")
+        XCTAssertEqual(one.model, "whisperLargeV3Turbo")
+        XCTAssertEqual(one.startedAt, started)
+        XCTAssertEqual(one.durationS, 2)
+        XCTAssertEqual(one.you, .init(turns: 1, words: 3))
+        XCTAssertEqual(one.them, .init(turns: 0, words: 0))
+        XCTAssertEqual(one.toDiskS, 30)
+        XCTAssertNil(one.decoding)
+
+        let two = try XCTUnwrap(records.last)
+        XCTAssertEqual(two.outcome, .saved)
+        XCTAssertEqual(two.app, "teams")
+        XCTAssertEqual(two.model, "whisperLargeV3")
+        XCTAssertEqual(two.startedAt, secondStarted)
+        XCTAssertEqual(two.durationS, 3)
+        XCTAssertEqual(two.you, .init(turns: 1, words: 4))
+        XCTAssertEqual(two.them, .init(turns: 1, words: 1))
+        XCTAssertEqual(two.toDiskS, 0)
+        XCTAssertEqual(two.decoding?.decodedThem, 6)
+    }
+
     // MARK: - the decoding
 
     /// the engine's own count of its work: how many stretches it read per
