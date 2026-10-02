@@ -183,13 +183,13 @@ final class UtteranceMachine {
     /// told to stop or cancel. every ending goes through here — stopped,
     /// cancelled or given up on — so the display's keep-awake follows it
     /// and no ending can forget to let the display sleep.
-    private var capture: Capture? {
+    private var micTurn: MicTurn? {
         didSet {
-            keepDisplayAwake(capture.map { !$0.isEnding } ?? false)
+            keepDisplayAwake(micTurn.map { !$0.isEnding } ?? false)
         }
     }
     private var isKeepingDisplayAwake = false
-    private var captureSequence: UInt64 = 0
+    private var micTurnSequence: UInt64 = 0
     /// the start still out, whichever press asked for it, and the deadline
     /// it has to meet.
     private var pendingStart: UInt64?
@@ -283,7 +283,7 @@ final class UtteranceMachine {
         // one whose mic is still being stopped is the last sentence on its
         // way to the page, and the key says why it is deaf.
         if state == .recording {
-            if capture?.isEnding == true {
+            if micTurn?.isEnding == true {
                 flashNotice("still finishing the last one", duration: 1.4)
                 refuse(.stillFinishing)
             }
@@ -354,14 +354,14 @@ final class UtteranceMachine {
         // key-up; this is what stands in if AX hands back nothing then, or
         // if by then the frontmost window is one of ours.
         activeFocusAnchor = inserter.captureAnchor()
-        captureSequence &+= 1
-        let captureID = captureSequence
-        capture = Capture(id: captureID, microphone: microphone)
+        micTurnSequence &+= 1
+        let turnID = micTurnSequence
+        micTurn = MicTurn(id: turnID, microphone: microphone)
         // the lamp before the mic: a device slow to open, or one still
         // settling after a monitor or the lid, must never make the press
         // look dead.
         setState(.recording)
-        startMicrophone(microphone, id: captureID, timelineID: timelineID)
+        startMicrophone(microphone, id: turnID, timelineID: timelineID)
         wakeEngineIfIdle()
     }
 
@@ -421,19 +421,19 @@ final class UtteranceMachine {
         }
         // a press that ended while its mic was opening asked for the
         // cancel after the start, so the cancel lands after it too.
-        guard var capture, capture.id == id else {
+        guard var micTurn, micTurn.id == id else {
             return
         }
 
-        capture.phase = .live
-        self.capture = capture
-        press?.mic = capture.microphone.deviceDescription
-        guard !capture.stopRequested else {
+        micTurn.phase = .live
+        self.micTurn = micTurn
+        press?.mic = micTurn.microphone.deviceDescription
+        guard !micTurn.stopRequested else {
             // let go before the mic answered: the take still counts.
             stopMicrophone()
             return
         }
-        if !capture.isHearing {
+        if !micTurn.isHearing {
             awaitFirstAudio(id)
         }
     }
@@ -444,7 +444,7 @@ final class UtteranceMachine {
     private func awaitFirstAudio(_ id: UInt64) {
         firstAudioWait?.cancel()
         let deadline = Self.firstAudioDeadline(
-            for: capture?.microphone.deviceDescription?.transport
+            for: micTurn?.microphone.deviceDescription?.transport
         )
         firstAudioWait = Task { @MainActor [weak self, clock] in
             try? await clock.sleep(for: deadline)
@@ -458,15 +458,15 @@ final class UtteranceMachine {
     /// its deadline since it answered, and not a sound.
     private func microphoneStayedSilent(_ id: UInt64) {
         firstAudioWait = nil
-        guard let capture,
-              capture.id == id,
-              capture.phase == .live,
-              !capture.isHearing else {
+        guard let micTurn,
+              micTurn.id == id,
+              micTurn.phase == .live,
+              !micTurn.isHearing else {
             return
         }
 
         audioLogger.error("the microphone sent nothing for a second; dropping it")
-        cancelCapture()
+        cancelMicTurn()
         endWithNoSound(from: press?.mic)
     }
 
@@ -511,16 +511,16 @@ final class UtteranceMachine {
         timelineID: UInt64
     ) {
         recordFirstBuffer(at: instant, timelineID: timelineID)
-        guard var capture,
-              capture.id == id,
-              !capture.isHearing else {
+        guard var micTurn,
+              micTurn.id == id,
+              !micTurn.isHearing else {
             return
         }
-        capture.isHearing = true
-        self.capture = capture
+        micTurn.isHearing = true
+        self.micTurn = micTurn
         firstAudioWait?.cancel()
         firstAudioWait = nil
-        guard !capture.isEnding else {
+        guard !micTurn.isEnding else {
             // let go before it was heard: lighting the lamp, or a start
             // chime, after the release would be noise.
             return
@@ -574,7 +574,7 @@ final class UtteranceMachine {
         }
         pendingStart = nil
         startDeadline = nil
-        guard let capture, capture.id == id else {
+        guard let micTurn, micTurn.id == id else {
             dropOrphanedMicrophone()
             return
         }
@@ -583,9 +583,9 @@ final class UtteranceMachine {
         setRecordingLocked(false)
         activeFocusAnchor = nil
         activeTimeline = nil
-        press?.mic = capture.microphone.deviceDescription
+        press?.mic = micTurn.microphone.deviceDescription
         // not cancelled: a mic that never answered is asked nothing more.
-        self.capture = nil
+        self.micTurn = nil
         emit(.microphoneDropped)
         setState(.idle, fastHUDDismiss: true)
         flashNotice("microphone isn't responding", duration: 2)
@@ -597,7 +597,7 @@ final class UtteranceMachine {
     /// but the next one must not queue behind a wedged mic. a press already
     /// holding a mic of its own keeps it: that one answers for itself.
     private func dropOrphanedMicrophone() {
-        guard capture == nil else {
+        guard micTurn == nil else {
             return
         }
         audioLogger.error("a thrown-away take's microphone never started; dropping it")
@@ -608,7 +608,7 @@ final class UtteranceMachine {
         guard startAnswered(id) else {
             return
         }
-        guard let capture, capture.id == id else {
+        guard let micTurn, micTurn.id == id else {
             dropOrphanedMicrophone()
             return
         }
@@ -623,10 +623,10 @@ final class UtteranceMachine {
         activeFocusAnchor = nil
         activeTimeline = nil
         // read before it is dropped: which mic refused is the evidence.
-        press?.mic = capture.microphone.deviceDescription
+        press?.mic = micTurn.microphone.deviceDescription
         // the device may have been yanked between the check and the tap.
         // drop it so the next press rebuilds instead of retrying a corpse.
-        cancelCapture()
+        cancelMicTurn()
         emit(.microphoneDropped)
         // the lamp was already up, so a failure takes it down fast.
         setState(.idle, fastHUDDismiss: true)
@@ -675,8 +675,8 @@ final class UtteranceMachine {
         micChanged: Bool = false
     ) {
         guard state == .recording,
-              var capture,
-              !capture.isEnding else {
+              var micTurn,
+              !micTurn.isEnding else {
             return
         }
 
@@ -694,28 +694,28 @@ final class UtteranceMachine {
         press?.capped = capForcedEnd
         press?.micChanged = micChanged
 
-        guard capture.phase == .live else {
+        guard micTurn.phase == .live else {
             // the mic has not answered yet: stop it the moment it does.
-            capture.stopRequested = true
-            self.capture = capture
+            micTurn.stopRequested = true
+            self.micTurn = micTurn
             return
         }
         stopMicrophone()
     }
 
     private func stopMicrophone() {
-        guard var capture, capture.phase == .live else {
+        guard var micTurn, micTurn.phase == .live else {
             return
         }
 
-        capture.phase = .stopping
-        self.capture = capture
+        micTurn.phase = .stopping
+        self.micTurn = micTurn
         // the take is over: whether it was heard is judged on what the
         // stop hands back.
         firstAudioWait?.cancel()
         firstAudioWait = nil
-        let id = capture.id
-        let microphone = capture.microphone
+        let id = micTurn.id
+        let microphone = micTurn.microphone
         armStopDeadline(id)
         Task.immediate { @MainActor [weak self] in
             do {
@@ -800,20 +800,20 @@ final class UtteranceMachine {
     /// the stop answered. false when the take was thrown away while it
     /// stopped, or the deadline got there first: what it heard goes nowhere.
     private func stopAnswered(_ id: UInt64) -> Bool {
-        guard let capture,
-              capture.id == id,
-              capture.phase == .stopping else {
+        guard let micTurn,
+              micTurn.id == id,
+              micTurn.phase == .stopping else {
             return false
         }
-        self.capture = nil
+        self.micTurn = nil
         stopDeadline?.cancel()
         stopDeadline = nil
         return true
     }
 
     private func microphoneStopTimedOut(_ id: UInt64) {
-        if isSystemPaused, let capture, capture.id == id,
-           capture.phase == .stopping {
+        if isSystemPaused, let micTurn, micTurn.id == id,
+           micTurn.phase == .stopping {
             // the mac slept with the stop still out: the time asleep
             // counted against the mic, and its answer can only come once
             // the mac is back. the take is the user's, so it waits for
@@ -846,12 +846,12 @@ final class UtteranceMachine {
         // a discarded capture must not leave a chime in flight behind it
         startCueTask?.cancel()
         guard state == .recording,
-              let capture,
-              !capture.isEnding else {
+              let micTurn,
+              !micTurn.isEnding else {
             return
         }
 
-        cancelCapture()
+        cancelMicTurn()
         setRecordingLocked(false)
         activeFocusAnchor = nil
         activeTimeline = nil
@@ -921,10 +921,10 @@ final class UtteranceMachine {
             return
         }
         isSystemPaused = false
-        if let capture, capture.phase == .stopping, stopDeadline == nil {
+        if let micTurn, micTurn.phase == .stopping, stopDeadline == nil {
             // a stop the sleep outlasted gets the deadline any stop gets,
             // counted from now.
-            armStopDeadline(capture.id)
+            armStopDeadline(micTurn.id)
         }
         if let heldPill {
             self.heldPill = nil
@@ -951,7 +951,7 @@ final class UtteranceMachine {
     @discardableResult
     func capReached() -> Bool {
         guard state == .recording,
-              capture?.isEnding == false else {
+              micTurn?.isEnding == false else {
             return false
         }
 
@@ -982,7 +982,7 @@ final class UtteranceMachine {
             return
         }
 
-        cancelCapture()
+        cancelMicTurn()
         setRecordingLocked(false)
         activeFocusAnchor = nil
         activeTimeline = nil
@@ -995,7 +995,7 @@ final class UtteranceMachine {
     func abandon() {
         invalidatePipeline()
         if state == .recording {
-            cancelCapture()
+            cancelMicTurn()
             setRecordingLocked(false)
             activeFocusAnchor = nil
             activeTimeline = nil
@@ -1527,7 +1527,7 @@ final class UtteranceMachine {
         let cancelRequested = clock.now
 
         if state == .recording {
-            cancelCapture()
+            cancelMicTurn()
             setRecordingLocked(false)
             activeFocusAnchor = nil
         }
@@ -1551,9 +1551,9 @@ final class UtteranceMachine {
     // MARK: - the mic of the press in flight
 
     /// the press is done with its mic and keeps nothing it heard.
-    private func cancelCapture() {
-        capture?.microphone.cancel()
-        capture = nil
+    private func cancelMicTurn() {
+        micTurn?.microphone.cancel()
+        micTurn = nil
         stopDeadline?.cancel()
         stopDeadline = nil
         firstAudioWait?.cancel()
@@ -1665,10 +1665,11 @@ final class UtteranceMachine {
 }
 
 extension UtteranceMachine {
-    /// one press's mic. its start and stop are awaited and can take a
-    /// moment, and the keys keep arriving meanwhile: the phase is what they
-    /// are answered against.
-    private struct Capture {
+    /// one press's turn on the mic — not the capture it is handed, which
+    /// serves press after press (`CaptureSlot`). its start and stop are
+    /// awaited and can take a moment, and the keys keep arriving meanwhile:
+    /// the phase is what they are answered against.
+    private struct MicTurn {
         enum Phase {
             /// asked to start; the lamp is up, the mic has not answered.
             case starting
