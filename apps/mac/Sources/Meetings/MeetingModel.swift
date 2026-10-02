@@ -38,7 +38,7 @@ enum MeetingModel: String, CaseIterable, Codable, Sendable {
         switch self {
         case .whisperLargeV3: "every language, in english"
         case .whisperLargeV3Turbo: "every language, as spoken · faster"
-        case .parakeetV3: "fastest · english and european languages only — hindi or anything else comes out as nonsense"
+        case .parakeetV3: "fastest · english and european languages only · anything else comes out as nonsense"
         }
     }
 
