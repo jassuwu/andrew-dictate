@@ -146,6 +146,9 @@ final class MeetingCoordinator: ObservableObject {
     private var watchdogTask: Task<Void, Never>?
     /// injected so a test can move the wall without waiting on it.
     private let now: @Sendable () -> ContinuousClock.Instant
+    /// the date a meeting says it started on, in its file name and its front
+    /// matter. injected so two meetings in one test can start on two.
+    private let date: @Sendable () -> Date
 
     /// A system event has already proven something happened, so this may be
     /// short: five seconds of a tap that has not called back is a dead tap.
@@ -162,6 +165,7 @@ final class MeetingCoordinator: ObservableObject {
         hookRunner: HookRunner = HookRunner(logURL: HookRunner.defaultLogURL),
         thresholds: MeetingThresholds = .provisional,
         now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now },
+        date: @escaping @Sendable () -> Date = Date.init,
         preferences: @escaping @MainActor () -> MeetingPreferences
     ) {
         self.source = source
@@ -171,6 +175,7 @@ final class MeetingCoordinator: ObservableObject {
         self.hookRunner = hookRunner
         self.thresholds = thresholds
         self.now = now
+        self.date = date
         self.preferences = preferences
         session = MeetingSession(quietNudgeAfter: thresholds.quietNudgeAfter)
         health = Self.freshMonitor(thresholds)
@@ -196,7 +201,7 @@ final class MeetingCoordinator: ObservableObject {
         self.app = app
         elapsed = .zero
         liveLines = []
-        startedAt = Date()
+        startedAt = date()
         startedOn = now()
         lastChunkArrived = now()
         nudgePending = false
