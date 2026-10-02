@@ -22,12 +22,14 @@ struct SpeakerPieces: Equatable, Sendable {
         case never
     }
 
-    /// Five minutes. The diarizer hears that in about a second on an M4
-    /// (ticket 23's bench), so a stop has at most about two seconds of it
-    /// left: the piece being heard and the tail. A whole number of the
+    /// A minute. On the M4 the diarizer hears one in about 0.6 s in the
+    /// background and 0.4 s at a stop (ticket 23's bench), and a piece held
+    /// in memory is under 4 mb, so the stop has well under a second left to
+    /// hear. Longer pieces only made the stop wait longer: five minutes was
+    /// two seconds of tail for the same work. A whole number of the
     /// diarizer's own ten-second windows, so the pieces are cut where a
     /// one-pass split would have cut its windows, and hear the same thing.
-    static let length = 30 * 160_000
+    static let length = 6 * 160_000
 
     let length: Int
     /// Far side handed over so far, and how much of it is in pieces.
