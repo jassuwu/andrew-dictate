@@ -179,6 +179,48 @@ final class DictionaryStoreTests: XCTestCase {
         XCTAssertEqual(store.entries.first?.right, "")
     }
 
+    // MARK: - learned entries
+
+    /// every dictionary.json written before the app could learn has no
+    /// word on it: those rows are yours, and they still load.
+    func testAFileFromBeforeLearningLoadsAsYourOwnRows() throws {
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let old = """
+            [{"id":"6B1C1F4E-3F43-4E43-9E0B-7E2A1C9B3D10","wrong":"jason","right":"JSON"}]
+            """
+        try Data(old.utf8).write(to: fileURL)
+
+        let store = DictionaryStore(fileURL: fileURL)
+
+        XCTAssertEqual(store.entries.map(\.wrong), ["jason"])
+        XCTAssertEqual(store.entries.first?.learned, false)
+        XCTAssertNil(store.lastFailure)
+    }
+
+    func testALearnedEntryIsStillLearnedAfterARelaunch() {
+        let store = DictionaryStore(fileURL: fileURL)
+        store.add(DictionaryEntry(wrong: "jaz dot dev", right: "jass.dev", learned: true))
+        store.add(DictionaryEntry(wrong: "darsh", right: "Darsh"))
+
+        let relaunched = DictionaryStore(fileURL: fileURL)
+
+        XCTAssertEqual(relaunched.entries.map(\.learned), [true, false])
+    }
+
+    /// a row you typed is written exactly as before, so an exported file
+    /// still reads in an older copy of the app and in anyone's editor.
+    func testARowYouTypedIsWrittenWithoutTheLearnedMark() throws {
+        let store = DictionaryStore(fileURL: fileURL)
+        store.add(DictionaryEntry(wrong: "darsh", right: "Darsh"))
+
+        let written = try String(contentsOf: fileURL, encoding: .utf8)
+
+        XCTAssertFalse(written.contains("learned"))
+    }
+
     // MARK: - helpers
 
     private func writeDictionary(_ entries: [DictionaryEntry]) throws {
