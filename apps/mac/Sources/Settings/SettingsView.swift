@@ -554,7 +554,12 @@ struct SettingsView: View {
                     pendingArchiveWipe = true
                 }
                 // an archive the app could not read is not one it may erase.
-                .disabled(browser.items.isEmpty || browser.failure != nil)
+                // with history off the list is empty but the press log is
+                // not, and this is the only button that wipes it.
+                .disabled(
+                    (browser.items.isEmpty && !archive.hasAnythingToDelete)
+                        || browser.failure != nil
+                )
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 12)
