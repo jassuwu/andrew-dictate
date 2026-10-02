@@ -54,6 +54,10 @@ final class LazyMeetings {
         builtCoordinator?.isRecording ?? false
     }
 
+    var isWritingOut: Bool {
+        builtCoordinator?.isWritingOut ?? false
+    }
+
     var elapsed: Duration {
         builtCoordinator?.elapsed ?? .zero
     }
@@ -82,6 +86,12 @@ final class LazyMeetings {
 
     func stop() {
         builtCoordinator?.stop()
+    }
+
+    /// nothing recording and nothing to write out, until there is a
+    /// coordinator to have either.
+    func untilWrittenOut() async {
+        await builtCoordinator?.untilWrittenOut()
     }
 
     /// a notifier that was never built never asked.

@@ -39,6 +39,8 @@ final class LazyMeetingsTests: XCTestCase {
         // everything the menu, the badge and the key read, and everything
         // a stray click can reach without a meeting running
         XCTAssertFalse(meetings.isRecording)
+        XCTAssertFalse(meetings.isWritingOut)
+        await meetings.untilWrittenOut()
         XCTAssertEqual(meetings.elapsed, .zero)
         XCTAssertNil(meetings.recovering)
         XCTAssertNil(meetings.app)

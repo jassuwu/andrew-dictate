@@ -2118,14 +2118,22 @@ extension DictationCoordinator {
     /// to go so it can replace the bundle under it (the cask's
     /// `uninstall quit:`). A meeting recording is one of the two durable
     /// nouns, so a quit that lands mid-meeting stops it first and waits for
-    /// the markdown — `finishQuitting()` answers when the transcript is
-    /// written, and the ceiling answers if whisper is still flushing.
+    /// the markdown — and so does one that lands while a meeting already
+    /// stopped is still being written out, or two are. `finishQuitting()`
+    /// answers once every transcript is written, and the ceiling answers if
+    /// whisper is still flushing.
     func prepareToQuit() -> NSApplication.TerminateReply {
-        guard meetings.isRecording else {
+        guard meetings.isRecording || meetings.isWritingOut else {
             return .terminateNow
         }
         quitWaitingOnMeeting = true
-        stopMeeting()
+        if meetings.isRecording {
+            stopMeeting()
+        }
+        Task { @MainActor [weak self, meetings = meetings] in
+            await meetings.untilWrittenOut()
+            self?.finishQuitting()
+        }
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(20))
             self?.finishQuitting()
@@ -2266,19 +2274,13 @@ extension DictationCoordinator {
             lastMeeting = summary
             lastMeetingSavedAt = Date()
             meetings.notifier.saved(summary)
-            // the transcript has landed, so a quit that was waiting on it
-            // can go through. the hook runs after this and may not finish;
-            // the file it was told about is already written.
-            finishQuitting()
+            // a quit waiting on the transcript is answered by
+            // `untilWrittenOut`, not here: this file may be one of two.
         case .saveFailed:
             liveTranscriptPanel?.dismissKeepingPreference()
             meetings.notifier.saveFailed()
-            // nothing more will be written, so a quit waiting on the file
-            // goes through here too.
-            finishQuitting()
         case .nothingToKeep, .engineFailed:
             liveTranscriptPanel?.dismissKeepingPreference()
-            finishQuitting()
         case .cannotHear:
             // the pill cannot be clicked, so naming the switch was a dead
             // end. this reopens the one surface allowed to ask for it, and
