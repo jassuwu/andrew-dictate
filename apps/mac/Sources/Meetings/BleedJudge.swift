@@ -96,7 +96,10 @@ enum BleedJudge {
 
     // These numbers are provisional: worked out from how speech and rooms
     // behave, and tried on synthetic speech. They want a real call or two on
-    // the mac's own speakers before anyone trusts them.
+    // the mac's own speakers before anyone trusts them. The one to watch is a
+    // short stretch said over far-side talk that never stops: with so few
+    // frames, one in a few is taken for a copy by chance at half a second of
+    // speech, and one in twenty or so at a second.
 
     /// A stretch shorter than this is not judged. It is a handful of frames,
     /// and a handful of frames agree by chance as easily as by being a copy.
