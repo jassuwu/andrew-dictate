@@ -847,6 +847,18 @@ struct SettingsView: View {
                     .foregroundStyle(BrandUI.textSecondary)
             }
 
+            // the one request the app makes on its own (ADR 0043), so the
+            // row says exactly what goes out.
+            SettingsToggleRow(
+                "check for updates",
+                explanation: """
+                    once a day, sends the version you're running to \
+                    dictate.jass.gg and nothing else. a newer one shows up \
+                    as a line in the menu.
+                    """,
+                isOn: $settings.checksForUpdates
+            )
+
             rowDivider
 
             numbersDashboard
