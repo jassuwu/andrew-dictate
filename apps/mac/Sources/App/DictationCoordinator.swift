@@ -317,6 +317,8 @@ final class DictationCoordinator: ObservableObject {
             )
         }, notifier: {
             MeetingNudgeNotifier()
+        }, callMonitor: {
+            CallMonitor()
         })
 
         let viewModel = HUDViewModel(
@@ -2204,6 +2206,7 @@ extension DictationCoordinator {
         // number is a guess, like the rest of MeetingThresholds.
         meetings.launch(
             setUp: hasMeetingsSetUp,
+            watchesForCalls: !installedMeetingModels.isEmpty,
             transcripts: settings.meetingsFolder,
             spool: MeetingSpool(),
             recoveryDelay: .seconds(5),
