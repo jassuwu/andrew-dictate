@@ -1,0 +1,29 @@
+// the dev build with its packages optimized, the app left debuggable.
+//
+// xcode builds a package's targets in the configuration it is asked for, so
+// Debug compiles FluidAudio at -Onone, and the engine's own swift — the mel
+// features, the decoder loop, the chunking of a long take — runs several
+// times slower than it ships. the speech model is the same; the code feeding
+// it is not. project.yml can't reach package targets: a configuration file
+// handed to xcodebuild with -xcconfig applies to every target in the build,
+// packages included. this one gives everything -O, except the targets named
+// below, which stay -Onone and debuggable.
+//
+// the lookup is nested: a named target finds YES and the debug value, any
+// other target finds nothing and the optimized one.
+
+DEV_UNOPTIMIZED_AndrewDictate = YES
+DEV_UNOPTIMIZED_AndrewDictateTests = YES
+DEV_UNOPTIMIZED = $(DEV_UNOPTIMIZED_$(TARGET_NAME))
+
+DEV_SWIFT_OPTIMIZATION_YES = -Onone
+DEV_SWIFT_OPTIMIZATION_ = -O
+SWIFT_OPTIMIZATION_LEVEL = $(DEV_SWIFT_OPTIMIZATION_$(DEV_UNOPTIMIZED))
+
+DEV_SWIFT_COMPILATION_MODE_YES = singlefile
+DEV_SWIFT_COMPILATION_MODE_ = wholemodule
+SWIFT_COMPILATION_MODE = $(DEV_SWIFT_COMPILATION_MODE_$(DEV_UNOPTIMIZED))
+
+DEV_GCC_OPTIMIZATION_YES = 0
+DEV_GCC_OPTIMIZATION_ = s
+GCC_OPTIMIZATION_LEVEL = $(DEV_GCC_OPTIMIZATION_$(DEV_UNOPTIMIZED))

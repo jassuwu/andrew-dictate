@@ -1589,35 +1589,34 @@ final class DictationCoordinator: ObservableObject {
                   generation == self?.engineGeneration else {
                 return
             }
-            do {
+            // the model is on disk, so this is seconds. a load still going
+            // after a minute has wedged: `.failed`, and the next press
+            // retries out loud rather than hearing "loading…" for good.
+            let outcome = await EngineRestart.run {
                 try await engine.prewarm(progressHandler: nil)
-                try Task.checkCancellation()
-                guard let self,
-                      generation == self.engineGeneration else {
-                    return
-                }
-                self.enginePrewarmTask = nil
-                self.isPrewarmed = true
-                self.enginePreparationState = .ready
-                self.engineLogger.notice("the speech model restarted")
-            } catch is CancellationError {
+            }
+            guard !Task.isCancelled,
+                  let self,
+                  generation == self.engineGeneration else {
                 return
-            } catch {
-                guard let self,
-                      generation == self.engineGeneration else {
-                    return
-                }
-                self.enginePrewarmTask = nil
-                self.enginePreparationState = .failed
+            }
+            self.enginePrewarmTask = nil
+            self.isPrewarmed = outcome == .restarted
+            self.enginePreparationState = outcome.preparationState
+            switch outcome {
+            case .restarted:
+                self.engineLogger.notice("the speech model restarted")
+            case let .failed(why):
                 self.engineLogger.error(
-                    """
-                    the speech model didn't restart: \
-                    \(error.localizedDescription, privacy: .public)
-                    """
+                    "the speech model didn't restart: \(why, privacy: .public)"
+                )
+            case .timedOut:
+                self.engineLogger.error(
+                    "the speech model didn't restart within a minute; the next press tries again"
                 )
             }
             // a press during the restart lit the ember; it settles now.
-            if let self, self.state == .prewarming {
+            if self.state == .prewarming {
                 self.machine.engineSettled()
             }
         }

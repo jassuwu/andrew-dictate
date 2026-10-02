@@ -1,6 +1,6 @@
 import Foundation
 
-/// the three subcommands, and nothing else. each one is a plain function in
+/// the subcommands, and nothing else. each one is a plain function in
 /// its own file; this file only reads the command line and reports failure.
 @main
 struct Fidelity {
@@ -21,6 +21,12 @@ struct Fidelity {
             case "compare":
                 let allEqual = try await Compare.run(arguments)
                 exit(allEqual ? 0 : 1)
+            case "bench":
+                try await Bench.run(arguments)
+            case "presses":
+                try Presses.run(arguments)
+            case "mic":
+                try await MicStart.run(arguments)
             case "help", "--help", "-h":
                 print(usage)
             default:
@@ -41,6 +47,12 @@ struct Fidelity {
           show prompt n, record the mic until Enter, save passage-NN.wav.
       compare [--files a.wav b.wav ...] [--chunk S] [--left S] [--right S] [--buffer-ms MS]
           batch against streaming on each recording. exits 1 if any differ.
+      bench [--make] [--idle S] [--gap S] [--repeats N] [--warm-only] [--decay]
+          ASR time by word count: cold, warm, and woken at key-down.
+      mic [--trials N]
+          key-down → first audio on the real mic: cold vs prepared, sink vs tap.
+      presses < lines
+          key-up → ⌘V and key-down → first audio, p50/p90, from press-log lines.
 
     recordings live in \(Folders.recordings.path)
     """

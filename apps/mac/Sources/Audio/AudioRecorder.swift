@@ -1,6 +1,7 @@
 import Accelerate
 import AVFoundation
 import os
+import Synchronization
 
 /// file scope because the tap, the storage and the engine all run off the
 /// main actor, where there is no `self` to log through.
@@ -222,6 +223,10 @@ private final class CaptureEngine: @unchecked Sendable {
     /// device it was told to open.
     private var requestedDevice: AudioObjectID?
     private var engine: AVAudioEngine?
+    /// says when the mic first delivers, an I/O cycle (~10 ms) after it
+    /// starts. the tap hands audio over a tenth of a second at a time, so
+    /// its first buffer is that late; the take itself is still the tap's.
+    private var firstAudioSink: AVAudioSinkNode?
     private var inputFormat: AVAudioFormat?
     private var captureStorage: AudioCaptureStorage?
     private var isRecording = false
@@ -301,13 +306,16 @@ private final class CaptureEngine: @unchecked Sendable {
         }
 
         let (engine, storage) = try built()
-        firstBufferNotifier.arm(onFirstBuffer)
+        // armed once the storage is taking the take: with pre-roll on the
+        // engine is already running, and the first audio it reports must
+        // be audio the take keeps.
         storage.begin()
         levelStorage.reset()
+        firstBufferNotifier.arm(onFirstBuffer)
 
         do {
             if !engine.isRunning {
-                try engine.start()
+                try start(engine)
             }
             isRecording = true
             isListening = true
@@ -362,16 +370,23 @@ private final class CaptureEngine: @unchecked Sendable {
         levelStorage.reset()
     }
 
-    /// built ahead of a press, and with pre-roll on, listening.
+    /// built ahead of a press, and with pre-roll on, listening. built
+    /// means the engine made, the default mic bound and the graph prepared
+    /// — the audio unit initialized, no I/O started — so with pre-roll off
+    /// the mic is not live and its indicator stays dark. a mic not yet
+    /// granted is left alone entirely: onboarding is the only place that
+    /// asks, and the grant prepares it.
     func prepare() {
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
+            return
+        }
         do {
             let (engine, _) = try built()
             guard preRollEnabled,
-                  !engine.isRunning,
-                  AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
+                  !engine.isRunning else {
                 return
             }
-            try engine.start()
+            try start(engine)
             isListening = true
             noteBoundDevice()
         } catch {
@@ -411,6 +426,7 @@ private final class CaptureEngine: @unchecked Sendable {
             capApproachingNotifier: capApproachingNotifier
         )
         installCaptureTap(on: inputNode, storage: storage, format: format)
+        attachFirstAudioSink(to: engine, format: format)
         engine.prepare()
 
         configurationObserver = NotificationCenter.default.addObserver(
@@ -480,6 +496,48 @@ private final class CaptureEngine: @unchecked Sendable {
                     firstBufferNotifier.notify(at: ContinuousClock.now)
                 }
             }
+        }
+    }
+
+    /// called on the audio thread every I/O cycle while the engine runs,
+    /// so it does nothing but check a flag until a take is waiting to be
+    /// heard: no lock, no allocation, nothing that can make the audio
+    /// thread wait.
+    private func attachFirstAudioSink(
+        to engine: AVAudioEngine,
+        format: AVAudioFormat
+    ) {
+        let sink = AVAudioSinkNode { [firstBufferNotifier] _, frameCount, _ in
+            if frameCount > 0 {
+                firstBufferNotifier.notify(at: ContinuousClock.now)
+            }
+            return noErr
+        }
+        engine.attach(sink)
+        engine.connect(engine.inputNode, to: sink, format: format)
+        firstAudioSink = sink
+    }
+
+    /// a device that won't start with the sink in the graph still starts
+    /// without it: its first audio is then the tap's, a tenth of a second
+    /// later, as it always was.
+    private func start(_ engine: AVAudioEngine) throws {
+        do {
+            try engine.start()
+        } catch {
+            guard let sink = firstAudioSink else {
+                throw error
+            }
+            recorderLogger.error(
+                """
+                the input wouldn't start with the first-audio sink, starting \
+                without it: \(error.localizedDescription, privacy: .public)
+                """
+            )
+            engine.detach(sink)
+            firstAudioSink = nil
+            engine.prepare()
+            try engine.start()
         }
     }
 
@@ -561,6 +619,7 @@ private final class CaptureEngine: @unchecked Sendable {
         }
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
+        firstAudioSink = nil
         self.engine = nil
         captureStorage = nil
         inputFormat = nil
@@ -683,6 +742,10 @@ private final class CaptureEngine: @unchecked Sendable {
     }
 }
 
+/// one answer per take: the sink's or the tap's, whichever lands first.
+/// `notify` is called from the audio thread every I/O cycle, so until a
+/// take is armed it reads one atomic and returns; only the call that wins
+/// takes the lock, once.
 private final class AudioFirstBufferNotifier: @unchecked Sendable {
     typealias Callback = @MainActor @Sendable (
         ContinuousClock.Instant
@@ -690,20 +753,31 @@ private final class AudioFirstBufferNotifier: @unchecked Sendable {
 
     private let lock = NSLock()
     private var callback: Callback?
+    private let armed = Atomic<Bool>(false)
 
     func arm(_ callback: @escaping Callback) {
         lock.lock()
         self.callback = callback
         lock.unlock()
+        armed.store(true, ordering: .releasing)
     }
 
     func disarm() {
+        armed.store(false, ordering: .releasing)
         lock.lock()
         callback = nil
         lock.unlock()
     }
 
     func notify(at instant: ContinuousClock.Instant) {
+        guard armed.load(ordering: .relaxed),
+              armed.compareExchange(
+                  expected: true,
+                  desired: false,
+                  ordering: .acquiringAndReleasing
+              ).exchanged else {
+            return
+        }
         lock.lock()
         let callback = callback
         self.callback = nil

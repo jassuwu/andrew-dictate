@@ -13,4 +13,13 @@ protocol TranscriptionEngine: Sendable {
         progressHandler: (@Sendable (TranscriptionPreparationUpdate) -> Void)?
     ) async throws
     func transcribe(_ samples: [Float]) async throws -> String
+    /// a short pass over nothing, so the next take finds the engine awake:
+    /// the neural engine idles down between dictations and a take handed to
+    /// it cold waits on it. asked at key-down, answered in its own time.
+    func wake() async
+}
+
+extension TranscriptionEngine {
+    /// an engine with nothing to wake.
+    func wake() async {}
 }
