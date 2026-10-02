@@ -85,9 +85,13 @@ enum MeetingEvent: Equatable, Sendable {
     private static let themWord = "the other side"
 }
 
-/// One meeting, start to file. Holds the state machine (`MeetingSession`),
-/// the tap watchdog (`TapHealthMonitor`), the spool, the live lines, and the
-/// finish sequence: turns → diarize → write → delete spool → hook.
+/// Meetings, start to file. Holds the state machine (`MeetingSession`), the
+/// tap watchdog (`TapHealthMonitor`) and the live lines of the one being
+/// recorded, and the finish sequence: turns → diarize → write → delete
+/// spool → hook. A stopped meeting is written out while the next one
+/// records; each has its own spool, engine, start and settings (`Meeting`),
+/// and the two share nothing but the tap, which is closed for one before it
+/// is opened for the other.
 ///
 /// Everything with a system in it — Core Audio, whisper, notifications — is
 /// injected, so this can be driven to the end in a test with fakes.
