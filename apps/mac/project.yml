@@ -179,6 +179,7 @@ targets:
       - Sources/Instrumentation/TimelineSummary.swift
       - Sources/Instrumentation/PressLogStore.swift
       - Sources/Instrumentation/PressDiagnostics.swift
+      - Sources/Instrumentation/LogLine.swift
       - Sources/Instrumentation/MainThreadWatchdog.swift
       # the protocol only; ParakeetEngine is the FluidAudio half.
       - Sources/Transcription/TranscriptionEngine.swift

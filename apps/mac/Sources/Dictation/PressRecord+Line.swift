@@ -7,14 +7,14 @@ extension PressRecord {
     /// when true, so a refusal reads short and a delivery reads whole.
     func line(in timeZone: TimeZone = .current) -> String {
         var fields = [
-            "at=\(Self.timestamp(startedAt, in: timeZone))",
+            "at=\(LogLine.timestamp(startedAt, in: timeZone))",
             "outcome=\(outcome.name)",
         ]
         if let why = outcome.why {
             fields.append("why=\(why)")
         }
         if let mic {
-            fields.append("mic=\(Self.quoted(mic.name))")
+            fields.append("mic=\(LogLine.quoted(mic.name))")
             fields.append("transport=\(mic.transport.rawValue)")
         }
 
@@ -59,23 +59,5 @@ extension PressRecord {
             fields.append("main_stall_ms=\(mainStallMs)")
         }
         return fields.joined(separator: " ")
-    }
-
-    /// local time with its offset: a friend says "it broke at three", and
-    /// the line has to be findable from that.
-    private static func timestamp(_ date: Date, in timeZone: TimeZone) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        formatter.timeZone = timeZone
-        return formatter.string(from: date)
-    }
-
-    /// a device names itself, so its name can hold anything a line can.
-    private static func quoted(_ value: String) -> String {
-        let escaped = value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: " ")
-        return "\"\(escaped)\""
     }
 }
