@@ -76,6 +76,29 @@ final class MicHandoffTests: XCTestCase {
         XCTAssertEqual(handoff.look(at: at(3_000), mics: mics), [.bringUp(airPods, .second)])
     }
 
+    /// building or tearing down a rig moves the device list, and so do
+    /// headphones: the inputs are as they were, so nothing starts settling.
+    /// a burst begun by them would have its three seconds counted from
+    /// them, and cut short the settling of a real change that came after.
+    func testANotificationThatLeavesTheMicsAsTheyWereIsNotAChange() {
+        let before = MicHandoff.Mics(
+            defaultInput: builtIn, builtIn: builtIn, present: [builtIn.uid])
+        let after = MicHandoff.Mics(
+            defaultInput: airPods, builtIn: builtIn,
+            present: [builtIn.uid, airPods.uid])
+        var handoff = MicHandoff()
+        handoff.began(on: builtIn, slot: .first, seeing: before)
+
+        handoff.changed(at: at(0), mics: before)
+        XCTAssertNil(handoff.nextLook)
+
+        handoff.changed(at: at(2_000), mics: after)
+        XCTAssertEqual(handoff.nextLook, at(3_500))
+        handoff.changed(at: at(2_500), mics: after)
+        XCTAssertEqual(handoff.nextLook, at(3_500))
+        XCTAssertEqual(handoff.look(at: at(3_500), mics: after), [.bringUp(airPods, .second)])
+    }
+
     /// a monitor plugged in, or the rig's own device coming and going:
     /// the list moved, the mic did not. nothing is built.
     func testNothingMovesWhenTheMicIsStillTheDefaultAndStillThere() {

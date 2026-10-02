@@ -308,7 +308,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     private func follow(_ rig: Rig, epoch: Int) {
         following.async { [self] in
             handoff = MicHandoff()
-            handoff.began(on: rig.mic, slot: rig.slot)
+            handoff.began(on: rig.mic, slot: rig.slot, seeing: CoreAudioProperties.mics())
             handoffEpoch = epoch
             listen()
             scheduleLook()
@@ -364,9 +364,12 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
     private func somethingMoved(_ what: String) {
         guard isFollowing else { return }
-        logger.info("mic: \(what, privacy: .public) changed")
-        handoff.changed(at: ContinuousClock.now)
-        scheduleLook()
+        if handoff.changed(at: ContinuousClock.now, mics: CoreAudioProperties.mics()) {
+            logger.info("mic: \(what, privacy: .public) changed")
+            scheduleLook()
+        } else {
+            logger.debug("mic: \(what, privacy: .public) moved, and no input did")
+        }
     }
 
     /// One timer, set for whenever the handoff next has something to decide.
@@ -973,12 +976,16 @@ private enum CoreAudioProperties {
 
     /// What the mac says about its inputs right now: the default, the
     /// built-in mic, and every one there is. A default that is not among
-    /// them, or has no input, is none a meeting can use.
+    /// them, or has no input, is none a meeting can use. Our own rigs are
+    /// left out: they are not mics, and their coming and going is not an
+    /// input changing.
     static func mics() -> MicHandoff.Mics {
         var present: Set<String> = []
         var builtIn: MicHandoff.Mic?
         for device in devices() where inputChannels(device).reduce(0, +) > 0 && isAlive(device) {
-            guard let uid = deviceUID(device) else { continue }
+            guard let uid = deviceUID(device),
+                  !uid.hasPrefix(CoreAudioMeetingSource.meetingDeviceUID)
+            else { continue }
             present.insert(uid)
             if builtIn == nil, transportType(device) == kAudioDeviceTransportTypeBuiltIn {
                 builtIn = MicHandoff.Mic(uid: uid, name: name(device) ?? uid)

@@ -83,6 +83,8 @@ struct MicHandoff: Equatable, Sendable {
     private var rig: Rig?
     private var burst: Burst?
     private var standby: Standby?
+    /// The mics as the last change left them.
+    private var seen: Mics?
 
     /// The mic the meeting is on.
     var mic: Mic? {
@@ -90,11 +92,13 @@ struct MicHandoff: Equatable, Sendable {
     }
 
     /// A rig is up on `mic` under `slot`'s uid, and nothing is pending: the
-    /// meeting started, or the tap was rebuilt.
-    mutating func began(on mic: Mic, slot: Slot) {
+    /// meeting started, or the tap was rebuilt. `mics` is what the mac said
+    /// about its inputs then, if it was asked.
+    mutating func began(on mic: Mic, slot: Slot, seeing mics: Mics? = nil) {
         rig = Rig(mic: mic, slot: slot)
         burst = nil
         standby = nil
+        seen = mics
     }
 
     /// Something moved: the default input, or the list of devices.
@@ -104,6 +108,18 @@ struct MicHandoff: Equatable, Sendable {
         } else {
             burst?.last = instant
         }
+    }
+
+    /// Something moved, and this is what the mac says about its inputs
+    /// now. If they are as they were, it was not an input that moved —
+    /// headphones, or a rig of ours coming or going — and it is not a
+    /// change. Says whether it was.
+    @discardableResult
+    mutating func changed(at instant: Instant, mics: Mics) -> Bool {
+        guard mics != seen else { return false }
+        seen = mics
+        changed(at: instant)
+        return true
     }
 
     /// When `look` next has something to decide, if anything is waiting.
