@@ -325,6 +325,12 @@ final class MeetingCoordinator: ObservableObject {
     /// The bytes free on the disk holding a folder, or nil when that cannot
     /// be told. Injected so a test can fill the disk.
     private let freeSpace: @Sendable (URL) -> Int64?
+    /// A whole spool, or kept audio, read into memory: for a recovery, a
+    /// reading again and a transcribing again. Never on the main actor —
+    /// three hours of it is gigabytes and seconds of reading, and the menu
+    /// and the lamp would stand still for it. Injected so a test can see
+    /// where it runs.
+    private let readSpool: @Sendable (URL) throws -> (you: [Float], them: [Float])
     /// When the disk is next looked at, from the meeting's start: nil
     /// before it has started.
     private var nextDiskLook: Duration?
@@ -359,6 +365,9 @@ final class MeetingCoordinator: ObservableObject {
             try SpoolAudioFile(url: $0)
         },
         freeSpace: @escaping @Sendable (URL) -> Int64? = { MeetingCoordinator.freeSpace(at: $0) },
+        readSpool: @escaping @Sendable (URL) throws -> (you: [Float], them: [Float]) = {
+            try SpoolAudioFile.read($0)
+        },
         preferences: @escaping @MainActor () -> MeetingPreferences
     ) {
         self.source = source
@@ -377,6 +386,7 @@ final class MeetingCoordinator: ObservableObject {
         self.keepAwake = keepAwake
         self.openAudioFile = openAudioFile
         self.freeSpace = freeSpace
+        self.readSpool = readSpool
         self.preferences = preferences
         session = MeetingSession(quietNudgeAfter: thresholds.quietNudgeAfter)
         health = Self.freshMonitor(thresholds)
@@ -1323,6 +1333,14 @@ final class MeetingCoordinator: ObservableObject {
         return (try? await loud.value) ?? .zero
     }
 
+    /// A whole spool, or kept audio, off the main actor.
+    private func read(_ url: URL) async throws -> (you: [Float], them: [Float]) {
+        let readSpool = readSpool
+        return try await Task.detached(priority: .utility) {
+            try readSpool(url)
+        }.value
+    }
+
     /// The whole spool, through a transcriber of its own, or nil when that
     /// could not be done: the model would not come, or it threw.
     private func readAgain(
@@ -1330,11 +1348,8 @@ final class MeetingCoordinator: ObservableObject {
         model: MeetingModel,
         clock: SpoolClock
     ) async -> Reading? {
-        let url = handle.audioURL
         do {
-            let audio = try await Task.detached(priority: .utility) {
-                try SpoolAudioFile.read(url)
-            }.value
+            let audio = try await read(handle.audioURL)
             let transcriber = try await makeTranscriber(model)
             let turns = try await transcriber.transcribe(you: audio.you, them: audio.them)
             return Reading(
@@ -1508,7 +1523,7 @@ final class MeetingCoordinator: ObservableObject {
     ) async {
         let audio: (you: [Float], them: [Float])
         do {
-            audio = try SpoolAudioFile.read(handle.audioURL)
+            audio = try await read(handle.audioURL)
         } catch {
             // audio the app cannot read is still the only copy of the
             // meeting, and the next build or a person with another tool may
@@ -2003,9 +2018,7 @@ extension MeetingCoordinator {
         }
         attempt.entry = entry
         let url = entry.audio
-        let audio = try await Task.detached(priority: .utility) {
-            try SpoolAudioFile.read(url)
-        }.value
+        let audio = try await read(url)
         guard !audio.you.isEmpty || !audio.them.isEmpty else {
             throw AgainFailure.emptyAudio
         }

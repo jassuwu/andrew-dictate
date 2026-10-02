@@ -40,13 +40,18 @@ final class MeetingRecoveryTests: XCTestCase {
     private var docs: URL { dir.appendingPathComponent("docs") }
     private var spool: MeetingSpool { MeetingSpool(root: dir.appendingPathComponent("spool")) }
 
-    private func coordinator() -> MeetingCoordinator {
+    private func coordinator(
+        readSpool: @escaping @Sendable (URL) throws -> (you: [Float], them: [Float]) = {
+            try SpoolAudioFile.read($0)
+        }
+    ) -> MeetingCoordinator {
         let c = MeetingCoordinator(
             source: FakeSource(),
             makeTranscriber: { [transcribers] model in try transcribers!.next(for: model) },
             diarizer: FakeDiarizer(),
             spool: spool,
             hookRunner: HookRunner(logURL: dir.appendingPathComponent("hooks.log")),
+            readSpool: readSpool,
             preferences: { [unowned self] in
                 MeetingPreferences(
                     folder: docs, hook: nil, model: .whisperLargeV3Turbo,
@@ -341,6 +346,26 @@ final class MeetingRecoveryTests: XCTestCase {
         XCTAssertEqual(records.map(\.outcome), [.saved, .saved])
     }
 
+    // MARK: - the main actor
+
+    /// Three hours of spool is gigabytes and seconds of reading, five
+    /// seconds after launch: none of it on the main actor, where the menu
+    /// and the lamp would stand still for it.
+    func testRecoveryReadsTheSpoolOffTheMainActor() async throws {
+        try await orphan("teams", started: started)
+        let reads = Reads()
+        let c = coordinator(readSpool: { url in
+            reads.note(onTheMainThread: Thread.isMainThread)
+            return try SpoolAudioFile.read(url)
+        })
+
+        c.recoverOrphans()
+        await awaitRecords(1)
+
+        XCTAssertEqual(records.map(\.outcome), [.saved])
+        XCTAssertEqual(reads.onTheMainThread, [false])
+    }
+
     // MARK: - a meeting with a gap in it
 
     /// The lid shut ten seconds in and opened ten minutes later, and the
@@ -592,6 +617,20 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
 }
 
 private struct Unreadable: Error {}
+
+/// Where each read of a spool ran.
+private final class Reads: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _onTheMainThread: [Bool] = []
+
+    var onTheMainThread: [Bool] {
+        lock.withLock { _onTheMainThread }
+    }
+
+    func note(onTheMainThread: Bool) {
+        lock.withLock { _onTheMainThread.append(onTheMainThread) }
+    }
+}
 
 /// One per reading, the way the app builds them, for the models that are on
 /// this mac: asking for one that is not throws what the app's own does.
