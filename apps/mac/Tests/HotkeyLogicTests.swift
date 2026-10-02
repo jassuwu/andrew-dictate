@@ -265,6 +265,31 @@ final class HotkeyLogicTests: XCTestCase {
             "needs ⌃, ⌥ or ⌘ held with it")
     }
 
+    /// esc is the dictation key's own cancel, heard everywhere: a shortcut
+    /// on it would end a take every time it started or stopped a meeting.
+    func testAShortcutCannotBeOnEscape() {
+        let controlEscape = MeetingShortcut(
+            keyCode: 53, modifiers: [.control], keyName: "esc")
+
+        XCTAssertEqual(controlEscape.refusal(againstDictationKey: .fn), .isEscape)
+        XCTAssertEqual(
+            controlEscape.refusal(againstDictationKey: .fn)?.message,
+            "esc cancels a dictation")
+    }
+
+    /// what is allowed stays allowed: fn is not a modifier a shortcut can
+    /// hold, and another family's modifier is no clash.
+    func testAShortcutThatDoesNotHoldTheDictationKeyIsAccepted() {
+        let controlOptionM = MeetingShortcut(
+            keyCode: 46, modifiers: [.control, .option], keyName: "M")
+        let controlCommandM = MeetingShortcut(
+            keyCode: 46, modifiers: [.control, .command], keyName: "M")
+
+        XCTAssertNil(controlOptionM.refusal(againstDictationKey: .fn))
+        XCTAssertNil(controlCommandM.refusal(againstDictationKey: .rightOption))
+        XCTAssertNil(controlOptionM.refusal(againstDictationKey: .leftCommand))
+    }
+
     private func lockedDetector() -> TapLockDetector {
         var detector = TapLockDetector()
         _ = detector.modifierPressed(at: 1.0)
