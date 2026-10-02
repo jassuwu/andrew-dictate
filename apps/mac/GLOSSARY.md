@@ -35,6 +35,8 @@ the domain model. one term, one meaning. if a word isn't here, it doesn't get us
 | **spool** | the 0600 audio file a meeting writes to while it runs. deleted the moment the transcript is saved; a spool orphaned by a crash is transcribed at next launch and saved `recovered`. |
 | **live transcript** | the floating glass panel during a meeting: confirmed lines in ink, the tentative tail dimmed. the live pass *is* the transcript. |
 | **transcript file** | the markdown file a meeting produces: front matter, then `you` / `them` lines with timestamps. english when the model translates (whisper large, the default); as spoken when it cannot (turbo). |
+| **hollow transcript** | a transcript file that says `complete` and does not cover what was said: empty, thin, or cut short, with the audio already gone. the meeting bar is zero of them, and zero lost meetings. |
+| **meeting record** | how one meeting ended — saved, recovered, hollow, nothing kept and why — with speech seconds and word counts per side, gaps, mic and tap events and the coverage result. never a word of what was said. exactly one per meeting: it is the evidence a lost meeting or a hollow transcript leaves. |
 | **hook** | one executable, run detached after a transcript is saved, with the path as `$1` and the details as json on stdin. the only event is `meeting-saved`. |
 | **nudge** | after an hour of silence in a meeting, a notification asks `still recording?`. it asks; it never acts. |
 | **update check** | the one request the app makes on its own. once a day it sends the running version to dictate.jass.gg and nothing else. never while dictating or recording a meeting. on unless switched off in settings (ADR 0043). |
