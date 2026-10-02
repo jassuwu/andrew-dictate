@@ -3,12 +3,12 @@ import AppKit
 
 /// a minute of watching one delivered dictation's words, and only those.
 ///
-/// the adapter between AX and `SpanWatch`: it hears the field change, asks
-/// the watch to read, and hands over what our words read as once you have
+/// the adapter between AX and `SpanFollower`: it hears the field change, asks
+/// the follower to read, and hands over what our words read as once you have
 /// paused. it ends after a minute, when focus leaves the field, when our
 /// words are gone, or when the next dictation starts — whichever is first.
 @MainActor
-final class SpanWatcher {
+final class AXSpanWatcher {
     /// "~60 s" in the rule: long enough to read back what landed and fix a
     /// word, short enough that it's still about this dictation.
     static let lifetime: Duration = .seconds(60)
@@ -22,13 +22,13 @@ final class SpanWatcher {
     static let landingDeadline: Duration = .seconds(3)
 
     private let reader: AXSpanReader
-    private var watch: SpanWatch
+    private var follower: SpanFollower
     private let onSettled: (String) -> Void
     private let onEnded: () -> Void
 
     private var observer: AXObserver?
     private var application: AXUIElement?
-    private var retainedByObserver: Unmanaged<SpanWatcher>?
+    private var retainedByObserver: Unmanaged<AXSpanWatcher>?
     private var activation: NSObjectProtocol?
     private var timers: [Task<Void, Never>] = []
     private var quietTimer: Task<Void, Never>?
@@ -47,7 +47,7 @@ final class SpanWatcher {
         onEnded: @escaping () -> Void
     ) {
         self.reader = reader
-        watch = SpanWatch(inserted: inserted)
+        follower = SpanFollower(inserted: inserted)
         self.onSettled = onSettled
         self.onEnded = onEnded
     }
@@ -92,7 +92,7 @@ final class SpanWatcher {
         var created: AXObserver?
         guard AXObserverCreate(
             reader.processIdentifier,
-            spanWatcherCallback,
+            axSpanWatcherCallback,
             &created
         ) == .success, let observer = created else {
             poll()
@@ -177,7 +177,7 @@ final class SpanWatcher {
         guard !ended else {
             return
         }
-        switch watch.read(reader) {
+        switch follower.read(reader) {
         case .notLanded:
             return
         case let .reads(text):
@@ -266,7 +266,7 @@ final class SpanWatcher {
 
     private func after(
         _ delay: Duration,
-        _ action: @escaping @MainActor (SpanWatcher) -> Void
+        _ action: @escaping @MainActor (AXSpanWatcher) -> Void
     ) {
         timers.append(Task { @MainActor [weak self] in
             try? await Task.sleep(for: delay)
@@ -279,7 +279,7 @@ final class SpanWatcher {
 }
 
 /// AX calls back on the run loop the source was added to — the main one.
-private func spanWatcherCallback(
+private func axSpanWatcherCallback(
     _ observer: AXObserver,
     _ element: AXUIElement,
     _ notification: CFString,
@@ -288,7 +288,7 @@ private func spanWatcherCallback(
     guard let refcon else {
         return
     }
-    let watcher = Unmanaged<SpanWatcher>.fromOpaque(refcon)
+    let watcher = Unmanaged<AXSpanWatcher>.fromOpaque(refcon)
         .takeUnretainedValue()
     let name = notification as String
     MainActor.assumeIsolated {

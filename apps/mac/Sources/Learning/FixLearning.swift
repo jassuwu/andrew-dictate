@@ -13,7 +13,7 @@ final class FixLearning {
     /// the app started.
     private let fullCleanup: @MainActor () -> Bool
     private var learner = CorrectionLearner()
-    private var watcher: SpanWatcher?
+    private var watcher: AXSpanWatcher?
 
     init(
         store: DictionaryStore,
@@ -32,7 +32,7 @@ final class FixLearning {
             return
         }
         learner.watch(heard: heard, inserted: inserted)
-        let watcher = SpanWatcher(
+        let watcher = AXSpanWatcher(
             reader: reader,
             inserted: inserted,
             onSettled: { [weak self] edited in

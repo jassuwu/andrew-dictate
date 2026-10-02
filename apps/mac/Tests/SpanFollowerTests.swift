@@ -1,10 +1,10 @@
 import XCTest
 
 /// the watcher's half that can be tested with strings: finding our words
-/// again in a bounded read around where we put them, and never asking for
-/// more of the field than that.
+/// again in a bounded read around where we put them, following them from
+/// read to read, and never asking for more of the field than that.
 @MainActor
-final class SpanWatchTests: XCTestCase {
+final class SpanFollowerTests: XCTestCase {
     // MARK: - finding our words again
 
     private func locate(
@@ -100,26 +100,26 @@ final class SpanWatchTests: XCTestCase {
         )
     }
 
-    // MARK: - the watch reads only our span, and a margin
+    // MARK: - the follower reads only our span, and a margin
 
-    func testTheWatchWaitsForThePasteToLand() {
+    func testTheFollowerWaitsForThePasteToLand() {
         let field = FakeField("hi. ")
-        var watch = SpanWatch(inserted: "Send it to jaz.dev")
+        var follower = SpanFollower(inserted: "Send it to jaz.dev")
 
-        XCTAssertEqual(watch.read(field), .notLanded)
+        XCTAssertEqual(follower.read(field), .notLanded)
 
         field.type("Send it to jaz.dev")
-        XCTAssertEqual(watch.read(field), .reads("Send it to jaz.dev"))
+        XCTAssertEqual(follower.read(field), .reads("Send it to jaz.dev"))
     }
 
     func testAFixReadsBack() {
         let field = FakeField("hi. Send it to jaz.dev")
-        var watch = SpanWatch(inserted: "Send it to jaz.dev")
-        _ = watch.read(field)
+        var follower = SpanFollower(inserted: "Send it to jaz.dev")
+        _ = follower.read(field)
 
         field.text = "hi. Send it to jass.dev"
 
-        XCTAssertEqual(watch.read(field), .reads("Send it to jass.dev"))
+        XCTAssertEqual(follower.read(field), .reads("Send it to jass.dev"))
     }
 
     /// the whole point of the rule: a long document around our words is
@@ -128,45 +128,45 @@ final class SpanWatchTests: XCTestCase {
         let before = String(repeating: "private words. ", count: 20)
         let after = String(repeating: " more private.", count: 20)
         let field = FakeField(before + "Send it to jaz.dev")
-        var watch = SpanWatch(inserted: "Send it to jaz.dev")
-        _ = watch.read(field)
+        var follower = SpanFollower(inserted: "Send it to jaz.dev")
+        _ = follower.read(field)
         field.text = before + "Send it to jass.dev" + after
         field.caret = (before as NSString).length
 
-        XCTAssertEqual(watch.read(field), .reads("Send it to jass.dev"))
+        XCTAssertEqual(follower.read(field), .reads("Send it to jass.dev"))
 
         let start = (before as NSString).length
         let end = start + ("Send it to jaz.dev" as NSString).length
         XCTAssertFalse(field.asked.isEmpty)
         for range in field.asked {
-            XCTAssertGreaterThanOrEqual(range.location, start - SpanWatch.margin)
-            XCTAssertLessThanOrEqual(NSMaxRange(range), end + SpanWatch.margin)
+            XCTAssertGreaterThanOrEqual(range.location, start - SpanFollower.margin)
+            XCTAssertLessThanOrEqual(NSMaxRange(range), end + SpanFollower.margin)
         }
     }
 
-    /// sent, cleared, or deleted: the watch is over.
+    /// sent, cleared, or deleted: our words are gone.
     func testAClearedFieldIsGone() {
         let field = FakeField("Send it to jaz.dev")
-        var watch = SpanWatch(inserted: "Send it to jaz.dev")
-        _ = watch.read(field)
+        var follower = SpanFollower(inserted: "Send it to jaz.dev")
+        _ = follower.read(field)
 
         field.text = ""
 
-        XCTAssertEqual(watch.read(field), .gone)
+        XCTAssertEqual(follower.read(field), .gone)
     }
 
-    /// typing ahead of our words moves them, and the watch moves with them:
+    /// typing ahead of our words moves them, and the follower moves with them:
     /// two pushes of thirty are more than one margin, but never at once.
-    func testTheWatchFollowsWordsPushedAlongByTyping() {
+    func testTheFollowerFollowsWordsPushedAlongByTyping() {
         let field = FakeField("Send it to jaz.dev")
-        var watch = SpanWatch(inserted: "Send it to jaz.dev")
-        _ = watch.read(field)
+        var follower = SpanFollower(inserted: "Send it to jaz.dev")
+        _ = follower.read(field)
         let thirty = String(repeating: "a", count: 29) + " "
 
         field.text = thirty + field.text
-        XCTAssertEqual(watch.read(field), .reads("Send it to jaz.dev"))
+        XCTAssertEqual(follower.read(field), .reads("Send it to jaz.dev"))
         field.text = thirty + field.text
-        XCTAssertEqual(watch.read(field), .reads("Send it to jaz.dev"))
+        XCTAssertEqual(follower.read(field), .reads("Send it to jaz.dev"))
     }
 }
 

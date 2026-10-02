@@ -1,6 +1,6 @@
 import Foundation
 
-/// what the watcher may ask of the field it watches, and nothing wider:
+/// what the follower may ask of the field it follows, and nothing wider:
 /// no "the whole value", only a range at a time.
 @MainActor
 protocol SpanReader: AnyObject {
@@ -12,13 +12,15 @@ protocol SpanReader: AnyObject {
     func text(in range: NSRange) -> String?
 }
 
-/// one delivered dictation, watched: has our text landed, and what does it
-/// read as now.
+/// our words in one field, followed from read to read: has the paste
+/// landed, where are they now, and what do they read as. pure — the reads
+/// come from whatever `SpanReader` it is handed; `AXSpanWatcher` decides
+/// when to ask.
 ///
 /// every read is our span and a margin either side, and is dropped once
 /// our words are found in it (`SpanLocator`). nothing outside them is kept
 /// from one read to the next — only where they start.
-struct SpanWatch {
+struct SpanFollower {
     /// enough to find our words again after a fix or a few words typed in
     /// front of them; too little to read the document around them.
     static let margin = 40
