@@ -260,6 +260,76 @@ final class MeetingRecoveryTests: XCTestCase {
         XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).count, 0)
     }
 
+    /// Only the recordings that were set aside are tried: a spool that
+    /// failed once at this launch has the one try it has left for the next,
+    /// and asking for the others again is not a way to spend it.
+    func testTryingAgainLeavesOtherOrphansAlone() async throws {
+        let waiting = try await orphan("meet", started: started)
+        spool.noteAttempt(waiting, manifest: .init(
+            app: "meet", started: started, engine: "whisperLargeV3Turbo",
+            model: .whisperLargeV3Turbo))
+        let aside = try await orphan("teams", started: started.addingTimeInterval(60))
+        spool.setAside(aside)
+        let c = coordinator()
+
+        await c.tryAgainSetAside()
+
+        XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).map(\.app), ["teams"])
+        XCTAssertEqual(transcribers.made.count, 1)
+        XCTAssertEqual(spool.orphans().map(\.handle), [waiting])
+        XCTAssertEqual(spool.orphans().first?.manifest.attempts, 1)
+    }
+
+    /// A folder whose manifest was lost gets a minimal one when it is
+    /// brought back, and is written out as the unnamed meeting it can be
+    /// said to be: the audio's own date, the model the app would pick now.
+    func testARecordingWithNoManifestIsTriedAsAMeetingStartedWhenItsAudioWasMade() async throws {
+        let handle = try await orphan("teams", started: started)
+        let madeAt = Date(timeIntervalSince1970: 1_787_100_000)
+        try FileManager.default.setAttributes(
+            [.creationDate: madeAt], ofItemAtPath: handle.audioURL.path)
+        try FileManager.default.removeItem(at: handle.manifestURL)
+        XCTAssertEqual(spool.orphans().count, 0)
+        XCTAssertEqual(spool.unreadableCount(), 1)
+        let c = coordinator()
+
+        await c.tryAgainSetAside()
+
+        let file = try XCTUnwrap(MeetingTranscriptFile.listAll(in: docs).first)
+        XCTAssertEqual(file.app, "meeting")
+        XCTAssertEqual(file.started, madeAt)
+        XCTAssertTrue(file.recovered)
+        XCTAssertTrue(
+            try String(contentsOf: file.fileURL, encoding: .utf8)
+                .contains("engine: whisperLargeV3\n"))
+        XCTAssertEqual(spool.unreadableCount(), 0)
+    }
+
+    /// One meeting model at a time, whoever asked: a try again while launch
+    /// recovery is still reading waits for it, and neither is lost.
+    func testTryingAgainWhileRecoveryIsRunningWaitsForItsTurn() async throws {
+        try await orphan("teams", started: started)
+        let aside = try await orphan("meet", started: started.addingTimeInterval(60))
+        spool.setAside(aside)
+        transcribers.transcriber.holds = true
+        let c = coordinator()
+
+        c.recoverOrphans()
+        await held(transcribers.transcriber)
+        let again = Task { await c.tryAgainSetAside() }
+        try? await Task.sleep(for: .milliseconds(300))
+
+        XCTAssertEqual(transcribers.made.count, 1, "the second round has no model loaded yet")
+        XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).count, 0)
+
+        transcribers.transcriber.release()
+        await again.value
+        await awaitRecords(2)
+
+        XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).map(\.app).sorted(), ["meet", "teams"])
+        XCTAssertEqual(records.map(\.outcome), [.saved, .saved])
+    }
+
     // MARK: - helpers
 
     /// A spool a crash left behind, with a second of audio on it.
@@ -282,6 +352,14 @@ final class MeetingRecoveryTests: XCTestCase {
         let n = 16_000
         return .init(you: Array(repeating: 0.05, count: n),
                      them: (0..<n).map { sin(Float($0) * 0.05) * 0.3 }, at: at)
+    }
+
+    /// Until the transcriber is parked in its hold, or two seconds, so a
+    /// test against code that never gets there fails instead of hanging.
+    private func held(_ transcriber: FakeTranscriber) async {
+        for _ in 0..<200 where !transcriber.isWaiting {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     /// Until `count` records have arrived, or two seconds, so an ending that
