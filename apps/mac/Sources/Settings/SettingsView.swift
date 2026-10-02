@@ -1038,11 +1038,22 @@ private struct DictionaryEditor: View {
                 }
 
                 TableColumn("right") { entry in
-                    DictionaryCellEditor(
-                        value: entry.right,
-                        prompt: "right"
-                    ) {
-                        store.updateRight(id: entry.id, right: $0)
+                    HStack(spacing: 6) {
+                        DictionaryCellEditor(
+                            value: entry.right,
+                            prompt: "right"
+                        ) {
+                            store.updateRight(id: entry.id, right: $0)
+                        }
+                        // a row the app added is still yours: the mark only
+                        // says where it came from. an edit makes it plainly
+                        // yours and the mark goes.
+                        if entry.learned {
+                            Text("learned")
+                                .font(.caption)
+                                .foregroundStyle(BrandUI.textSecondary)
+                                .help("andrew added this after you fixed the same word twice. remove it and it won’t come back.")
+                        }
                     }
                 }
             }
