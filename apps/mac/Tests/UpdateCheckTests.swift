@@ -658,6 +658,34 @@ final class UpdateCheckTests: XCTestCase {
         )
     }
 
+    /// /opt/homebrew first, /usr/local after it, and a file that is there
+    /// but cannot be run is not brew.
+    func testBrewIsFoundAtTheFirstPrefixThatHasIt() throws {
+        let opt = root.appendingPathComponent("opt/bin/brew")
+        let local = root.appendingPathComponent("local/bin/brew")
+        let candidates = [opt, local]
+        XCTAssertNil(BrewUpgrade.locate(candidates: candidates))
+
+        try makeFile(at: local, executable: true)
+        XCTAssertEqual(BrewUpgrade.locate(candidates: candidates), local)
+
+        try makeFile(at: opt, executable: false)
+        XCTAssertEqual(BrewUpgrade.locate(candidates: candidates), local)
+
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: opt.path
+        )
+        XCTAssertEqual(BrewUpgrade.locate(candidates: candidates), opt)
+    }
+
+    func testTheShippedPrefixesAreAppleSiliconsThenIntels() {
+        XCTAssertEqual(
+            BrewUpgrade.candidates.map(\.path),
+            ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]
+        )
+    }
+
     /// a run's end only moves a line that is waiting on it.
     func testOnlyAnUpdatingLineIsFinished() {
         for state: UpdateOffer.LineState in [.available(brewLine), .restartToFinish, .failedCopied] {
@@ -721,6 +749,18 @@ final class UpdateCheckTests: XCTestCase {
         XCTAssertEqual(opened, [page])
         XCTAssertNil(pasteboard.string(forType: .string))
         XCTAssertTrue(said.isEmpty)
+    }
+
+    private func makeFile(at url: URL, executable: Bool) throws {
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("#!/bin/sh\n".utf8).write(to: url)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: executable ? 0o755 : 0o644],
+            ofItemAtPath: url.path
+        )
     }
 
     /// a throwaway `Andrew Dictate.app`, with or without a readable plist.

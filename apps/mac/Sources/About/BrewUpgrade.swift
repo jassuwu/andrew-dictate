@@ -9,6 +9,25 @@ enum BrewUpgrade {
     /// site just announced is one brew can see.
     static let arguments = ["upgrade", "--cask", "jassuwu/tap/andrew-dictate"]
 
+    /// absolute, never a PATH lookup: launchd's PATH has no brew on it.
+    /// apple silicon's prefix first; /usr/local is a rosetta brew, which
+    /// is where brew lives if it lives there.
+    static let candidates = [
+        URL(fileURLWithPath: "/opt/homebrew/bin/brew"),
+        URL(fileURLWithPath: "/usr/local/bin/brew"),
+    ]
+
+    /// the first brew that can be run, or nil — and nil makes a brew
+    /// install behave like a dmg one.
+    static func locate(
+        candidates: [URL] = candidates,
+        fileManager: FileManager = .default
+    ) -> URL? {
+        candidates.first {
+            fileManager.isExecutableFile(atPath: $0.path(percentEncoded: false))
+        }
+    }
+
     /// generous: the dmg is a few hundred mb, and brew may update its taps
     /// first. a brew that is still going after this is stuck.
     static let timeout: TimeInterval = 10 * 60
