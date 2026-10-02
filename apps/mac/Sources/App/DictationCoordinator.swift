@@ -282,14 +282,8 @@ final class DictationCoordinator: ObservableObject {
         monitor.onEscape = { [weak self] in
             self?.machine.escape() ?? false
         }
-        recorder?.onInterruption = { [weak self] reason in
-            self?.handleCaptureInterruption(reason: reason)
-        }
-        recorder?.onCapReached = { [weak self] in
-            self?.handleCaptureCapReached()
-        }
-        recorder?.onCapApproaching = { [weak self] in
-            self?.machine.capApproaching()
+        if let recorder {
+            wire(recorder)
         }
 
         settings.$preRollEnabled
@@ -1285,15 +1279,7 @@ final class DictationCoordinator: ObservableObject {
             let recorder = try AudioRecorder(
                 preRollEnabled: settings.preRollEnabled
             )
-            recorder.onInterruption = { [weak self] reason in
-                self?.handleCaptureInterruption(reason: reason)
-            }
-            recorder.onCapReached = { [weak self] in
-                self?.handleCaptureCapReached()
-            }
-            recorder.onCapApproaching = { [weak self] in
-                self?.machine.capApproaching()
-            }
+            wire(recorder)
             audioRecorder = recorder
             hudViewModel.useRecorder(recorder)
             audioLogger.notice("audio recorder rebuilt on demand")
@@ -1306,6 +1292,20 @@ final class DictationCoordinator: ObservableObject {
                 """
             )
             return nil
+        }
+    }
+
+    /// the launch recorder and one rebuilt on demand answer to the same
+    /// three things from underneath.
+    private func wire(_ recorder: AudioRecorder) {
+        recorder.onInterruption = { [weak self] reason in
+            self?.handleCaptureInterruption(reason: reason)
+        }
+        recorder.onCapReached = { [weak self] in
+            self?.handleCaptureCapReached()
+        }
+        recorder.onCapApproaching = { [weak self] in
+            self?.machine.capApproaching()
         }
     }
 
