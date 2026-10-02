@@ -63,14 +63,17 @@ struct MeetingShortcutRow: View {
         return settings.meetingShortcut?.displayName ?? "not set"
     }
 
-    /// a refusal, or another app holding what was chosen: the row says it
-    /// in a few words and the shortcut stays what it was.
+    /// a refusal, or the system not giving what was chosen: the row says it
+    /// in a few words and the shortcut stays what it was. read when the row
+    /// draws, which it does when the setting changes or listening stops —
+    /// the two moments the hot key is registered again.
     private var note: String? {
         if let refusal {
             return refusal
         }
-        if settings.meetingShortcut != nil, coordinator.meetingShortcutIsTaken {
-            return "another app already uses that."
+        if settings.meetingShortcut != nil, !isListening,
+           let failure = MeetingHotkey.lastFailure {
+            return failure.message
         }
         return nil
     }

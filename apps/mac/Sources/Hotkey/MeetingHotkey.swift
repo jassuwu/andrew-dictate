@@ -26,9 +26,40 @@ final class MeetingHotkey {
         didSet { apply() }
     }
 
-    /// Another app holds the combination, so the system would not give it.
-    /// The setting stays; the row says so.
-    private(set) var isTaken = false
+    /// Why the system would not register a shortcut, in the row's words.
+    enum Failure: Equatable, Sendable {
+        /// Another app holds the combination.
+        case alreadyRegistered
+        /// Anything else the system says no with.
+        case refused
+
+        init(status: OSStatus) {
+            self = status == OSStatus(eventHotKeyExistsErr) ? .alreadyRegistered : .refused
+        }
+
+        var message: String {
+            switch self {
+            case .alreadyRegistered: "another app already uses that."
+            case .refused: "can't use that one."
+            }
+        }
+    }
+
+    /// The system would not give the combination. The setting stays; the
+    /// row says so.
+    var isTaken: Bool { failure != nil }
+
+    /// Why, from the last registration.
+    private(set) var failure: Failure? {
+        didSet { Self.lastFailure = failure }
+    }
+
+    /// The same answer, where the settings row reads it. The coordinator
+    /// owns the hot key and passes on only whether it failed, and only when
+    /// the setting changes; this is current after every registration,
+    /// including the one when the row stops listening. There is one meeting
+    /// hot key in the app, so its last answer is the answer.
+    private(set) static var lastFailure: Failure?
 
     private var hotKey: EventHotKeyRef?
     private var handler: EventHandlerRef?
@@ -43,7 +74,7 @@ final class MeetingHotkey {
             UnregisterEventHotKey(hotKey)
             self.hotKey = nil
         }
-        isTaken = false
+        failure = nil
         guard let shortcut, !isHeld else { return }
 
         installHandlerOnce()
@@ -56,8 +87,7 @@ final class MeetingHotkey {
             0,
             &registered)
         guard status == noErr, let registered else {
-            // -9878 is another app already holding it.
-            isTaken = true
+            failure = Failure(status: status)
             Self.logger.error(
                 "the meeting shortcut \(shortcut.displayName, privacy: .public) could not be registered: \(status)")
             return

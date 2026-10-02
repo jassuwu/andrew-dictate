@@ -369,6 +369,19 @@ final class HotkeyLogicTests: XCTestCase {
             MeetingShortcut(keyCode: 9, modifiers: [.command], keyName: "V").closesOrQuits)
     }
 
+    /// another app holding the combination is the one failure worth naming;
+    /// whatever else the system says, the row says it can't use it.
+    func testARegistrationFailureSaysAnotherAppOnlyWhenOneHoldsIt() {
+        let taken = MeetingHotkey.Failure(status: -9_878)
+        let refused = MeetingHotkey.Failure(status: -9_868)
+
+        XCTAssertEqual(taken, .alreadyRegistered)
+        XCTAssertEqual(taken.message, "another app already uses that.")
+        XCTAssertEqual(refused, .refused)
+        XCTAssertEqual(refused.message, "can't use that one.")
+        XCTAssertEqual(MeetingHotkey.Failure(status: -50), .refused)
+    }
+
     /// esc is the dictation key's own cancel, heard everywhere: a shortcut
     /// on it would end a take every time it started or stopped a meeting.
     func testAShortcutCannotBeOnEscape() {
