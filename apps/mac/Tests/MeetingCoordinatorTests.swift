@@ -706,6 +706,41 @@ final class MeetingCoordinatorTests: XCTestCase {
         XCTAssertEqual(all.map(\.recovered), [false])
     }
 
+    // MARK: - a quit that waits for the file
+
+    /// A quit right after stop must not take the file down with it: a
+    /// stopped meeting is still being written out until its file is there,
+    /// and whoever waits on that is let go only then.
+    func testAStoppedMeetingIsWritingOutUntilItsFileIsThere() async throws {
+        let live = FakeTranscriber(finalTurns: [
+            .init(speaker: .you, at: .seconds(1), text: "live words")])
+        live.holds = true
+        transcribers.lineUp(live)
+        let c = coordinator()
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+        XCTAssertFalse(c.isWritingOut)
+
+        c.stop()
+        XCTAssertTrue(c.isWritingOut)
+        await held(live)
+        XCTAssertTrue(c.isWritingOut)
+
+        let docs = dir.appendingPathComponent("docs")
+        let waited = Task {
+            await c.untilWrittenOut()
+            return MeetingTranscriptFile.listAll(in: docs).count
+        }
+        await settle()
+        live.release()
+
+        let filesWhenTheWaitEnded = await waited.value
+        XCTAssertEqual(filesWhenTheWaitEnded, 1)
+        XCTAssertFalse(c.isWritingOut)
+    }
+
     // MARK: - helpers
 
     private func spoolFolders() throws -> Int {

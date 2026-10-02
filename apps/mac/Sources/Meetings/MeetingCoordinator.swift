@@ -126,7 +126,7 @@ final class MeetingCoordinator: ObservableObject {
         didSet { wakeWhoeverIsWaiting() }
     }
     /// Whoever is waiting on the meetings to move on — recovery between
-    /// spools. Each looks again at what it waits for when woken.
+    /// spools, a quit. Each looks again at what it waits for when woken.
     private var waiting: [CheckedContinuation<Void, Never>] = []
     /// The last tap being closed, while it still is. One source, one tap:
     /// the next meeting opens it after this, never during it.
@@ -189,6 +189,18 @@ final class MeetingCoordinator: ObservableObject {
 
     var isRecording: Bool {
         state != .idle
+    }
+
+    /// A meeting has stopped and its file is not on disk yet.
+    var isWritingOut: Bool {
+        !writingOut.isEmpty
+    }
+
+    /// Returns once nothing is being recorded and every meeting that stopped
+    /// is on disk, or never will be. A quit waits on this. The hooks run
+    /// after and are not waited for: a summariser can take minutes.
+    func untilWrittenOut() async {
+        await until { current == nil && writingOut.isEmpty }
     }
 
     /// ADR 0023: refused while recording or rebuilding, and it says why.
