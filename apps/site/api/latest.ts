@@ -16,22 +16,94 @@ const NOT_CACHED = "no-store";
 export type Sources = {
   /** the newest release's tag, e.g. "v0.9.5"; null or a throw when unknown. */
   latestTag: () => Promise<string | null>;
+  /**
+   * adds one to today's count for `field`: a version, or "invalid". absent
+   * when counting is off. it may throw, and the answer goes out regardless.
+   */
+  count?: (field: string) => Promise<void>;
 };
 
-/** the whole endpoint, with github passed in so it can be tested offline. */
+/**
+ * the whole endpoint, with github and the counter passed in so it can be
+ * tested offline. the only part of the request it reads is `version`.
+ */
 export async function answer(url: URL, sources: Sources): Promise<Response> {
-  let tag: string | null;
-  try {
-    tag = await sources.latestTag();
-  } catch {
-    tag = null;
-  }
+  const [tag] = await Promise.all([
+    settled(sources.latestTag, null),
+    settled(async () => sources.count?.(versionField(url.searchParams.get("version"))), undefined),
+  ]);
 
   const version = tag?.replace(/^v/i, "");
-  if (!version || !/^\d+(\.\d+)*$/.test(version)) {
+  if (!version || !VERSION.test(version)) {
     return json({ error: "no release found" }, 502);
   }
   return json({ latest: version }, 200);
+}
+
+/** a failed side of the request is no reason to fail the other. */
+async function settled<T>(work: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await work();
+  } catch {
+    return fallback;
+  }
+}
+
+const VERSION = /^\d+(\.\d+)*$/;
+const MAX_VERSION_LENGTH = 20;
+
+/** where a check that sent no version, or a strange one, is counted. */
+export const INVALID = "invalid";
+
+/**
+ * the field a check is counted under: the version it sent when that is
+ * digits and dots and short, otherwise "invalid". the text it sent is never
+ * stored, so no one can put words of their choosing into the hash. invalid
+ * is counted rather than dropped because the total is then every request,
+ * and a bug that makes the app send nonsense shows up as a number.
+ */
+export function versionField(sent: string | null): string {
+  if (sent === null || sent.length > MAX_VERSION_LENGTH || !VERSION.test(sent)) {
+    return INVALID;
+  }
+  return sent;
+}
+
+/** one redis command: its name, then its arguments. */
+export type Command = Array<string | number>;
+
+/** runs the commands together, in order; throws when any of them fails. */
+export type Store = (commands: Command[]) => Promise<void>;
+
+// a day's hash expires about 400 days after its last check. the key for a
+// day stops changing when the day ends, so that is 400 days of history.
+export const RETENTION_SECONDS = 400 * 24 * 60 * 60;
+
+export function utcDay(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+/** a hash per day, `checkins:2026-10-02`, with a field per version. */
+export function checkinKey(day: string): string {
+  return `checkins:${day}`;
+}
+
+/**
+ * the counter: each call is one HINCRBY on today's hash, and an EXPIRE on
+ * the same key. those two commands are everything this function stores. the
+ * day comes from the clock, never from the request.
+ */
+export function checkInCounter(
+  store: Store,
+  now: () => number,
+): (field: string) => Promise<void> {
+  return (field) => {
+    const key = checkinKey(utcDay(now()));
+    return store([
+      ["HINCRBY", key, field, 1],
+      ["EXPIRE", key, RETENTION_SECONDS],
+    ]);
+  };
 }
 
 /**

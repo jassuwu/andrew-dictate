@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { answer, cachedTag, createHandler, tagFromGitHub } from "../api/latest";
+import {
+  answer,
+  cachedTag,
+  checkInCounter,
+  createHandler,
+  tagFromGitHub,
+  type Command,
+  type Store,
+} from "../api/latest";
 
 const url = new URL("https://dictate.jass.gg/api/latest?version=0.9.4");
 
@@ -62,6 +70,146 @@ describe("answer", () => {
       expect(response.status).toBe(502);
       expect(response.headers.get("cache-control")).toBe("no-store");
     }
+  });
+});
+
+/** a store that remembers every command batch it was given. */
+function fakeStore(failure?: Error) {
+  const writes: Command[][] = [];
+  const store: Store = async (commands) => {
+    if (failure) throw failure;
+    writes.push(commands);
+  };
+  return { store, writes };
+}
+
+const newest = async () => "v0.9.5";
+const noon = Date.UTC(2026, 9, 2, 12, 0);
+
+describe("counting a check", () => {
+  test("one check adds one to one (day, version) field, and writes nothing else", async () => {
+    const { store, writes } = fakeStore();
+
+    await answer(url, { latestTag: newest, count: checkInCounter(store, () => noon) });
+
+    expect(writes).toEqual([
+      [
+        ["HINCRBY", "checkins:2026-10-02", "0.9.4", 1],
+        ["EXPIRE", "checkins:2026-10-02", 400 * 24 * 60 * 60],
+      ],
+    ]);
+  });
+
+  test("the day is the UTC date, whatever the server's clock says", async () => {
+    const { store, writes } = fakeStore();
+    const justBeforeMidnight = Date.UTC(2026, 9, 2, 23, 59, 59);
+    const justAfter = Date.UTC(2026, 9, 3, 0, 0, 1);
+
+    await answer(url, { latestTag: newest, count: checkInCounter(store, () => justBeforeMidnight) });
+    await answer(url, { latestTag: newest, count: checkInCounter(store, () => justAfter) });
+
+    expect(writes.map(([increment]) => increment[1])).toEqual([
+      "checkins:2026-10-02",
+      "checkins:2026-10-03",
+    ]);
+  });
+
+  // the request carries more than the app sends; only `version` is ever read.
+  test("nothing but the version is stored, whatever else the request carries", async () => {
+    const { store, writes } = fakeStore();
+    const crowded = new URL(
+      "https://dictate.jass.gg/api/latest?version=0.9.4&id=4F2A-9C&device=macbook&email=a@b.co",
+    );
+
+    await answer(crowded, { latestTag: newest, count: checkInCounter(store, () => noon) });
+
+    expect(writes).toHaveLength(1);
+    const stored = JSON.stringify(writes);
+    for (const stray of ["4F2A", "macbook", "a@b.co", "id", "device", "email"]) {
+      expect(stored).not.toContain(stray);
+    }
+  });
+
+  // anything but a version is one fixed field. the text never reaches the
+  // store, so a stranger can't fill the hash with fields of their choosing
+  // out of junk, only out of well-formed version numbers.
+  test("a version that is not digits and dots is counted as invalid, never stored as sent", async () => {
+    const junk = [
+      "",
+      "latest",
+      "0.9.4-beta",
+      "0.9.4 ",
+      "1..2",
+      "1.",
+      ".1",
+      "0.9.4,0.9.5",
+      "<script>alert(1)</script>",
+      "0.9.4\n0.9.5",
+      "1".repeat(21),
+    ];
+    for (const sent of junk) {
+      const { store, writes } = fakeStore();
+      const asked = new URL("https://dictate.jass.gg/api/latest");
+      asked.searchParams.set("version", sent);
+
+      await answer(asked, { latestTag: newest, count: checkInCounter(store, () => noon) });
+
+      expect(writes).toEqual([
+        [
+          ["HINCRBY", "checkins:2026-10-02", "invalid", 1],
+          ["EXPIRE", "checkins:2026-10-02", 400 * 24 * 60 * 60],
+        ],
+      ]);
+    }
+  });
+
+  test("no version at all is invalid too, and a version of twenty characters is not", async () => {
+    const missing = fakeStore();
+    await answer(new URL("https://dictate.jass.gg/api/latest"), {
+      latestTag: newest,
+      count: checkInCounter(missing.store, () => noon),
+    });
+    expect(missing.writes[0][0]).toEqual(["HINCRBY", "checkins:2026-10-02", "invalid", 1]);
+
+    const longest = fakeStore();
+    const exactly = "1".repeat(20);
+    await answer(new URL(`https://dictate.jass.gg/api/latest?version=${exactly}`), {
+      latestTag: newest,
+      count: checkInCounter(longest.store, () => noon),
+    });
+    expect(longest.writes[0][0]).toEqual(["HINCRBY", "checkins:2026-10-02", exactly, 1]);
+  });
+
+  test("the check is counted when github has nothing to say", async () => {
+    const { store, writes } = fakeStore();
+
+    const response = await answer(url, {
+      latestTag: async () => {
+        throw new Error("offline");
+      },
+      count: checkInCounter(store, () => noon),
+    });
+
+    expect(response.status).toBe(502);
+    expect(writes).toHaveLength(1);
+  });
+
+  // the count is a side note. it never costs anyone their answer.
+  test("a store that fails still lets the answer through", async () => {
+    const { store, writes } = fakeStore(new Error("upstash is down"));
+
+    const response = await answer(url, { latestTag: newest, count: checkInCounter(store, () => noon) });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ latest: "0.9.5" });
+    expect(writes).toHaveLength(0);
+  });
+
+  test("no counter configured is no counting, and the same answer", async () => {
+    const response = await answer(url, { latestTag: newest });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ latest: "0.9.5" });
   });
 });
 
