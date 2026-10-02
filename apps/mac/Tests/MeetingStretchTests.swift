@@ -429,6 +429,33 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(handed().count, 3)
     }
 
+    /// Every stretch of the spool failed to decode, twice. Writing that out
+    /// would save a meeting where nobody spoke and delete the only copy of
+    /// what they did say: the spool stays for the next launch instead, with
+    /// the try counted against it.
+    func testASpoolWhoseEveryStretchFailsIsKeptForTheNextLaunch() async throws {
+        let spool = try await spoolLeftBehind([
+            you("are you recording this", from: 1.3, to: 2.5),
+            them("i am now", from: 2.3, to: 3.0),
+        ])
+        engine.failing("are you recording this", times: 2)
+        engine.failing("i am now", times: 2)
+
+        let c = coordinator(stretches())
+        c.recoverOrphans()
+        await waitFor { spool.orphans().first?.manifest.attempts == 1 }
+
+        XCTAssertEqual(spool.orphans().map(\.manifest.attempts), [1])
+        XCTAssertEqual(handed(), [
+            "are you recording this 24000",
+            "are you recording this 24000",
+            "i am now 16000",
+            "i am now 16000",
+        ])
+        XCTAssertEqual(
+            MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).count, 0)
+    }
+
     // MARK: - the numbers
 
     /// What the meeting's record will be told: stretches decoded per side,
@@ -502,6 +529,21 @@ final class MeetingStretchTests: XCTestCase {
         )
         c.onEvent = { [weak self] in self?.events.append($0) }
         return c
+    }
+
+    /// The spool of a meeting the app died in: six seconds of it, in the
+    /// chunks the tap would have handed over, waiting in the spool folder
+    /// for the next launch.
+    private func spoolLeftBehind(_ said: [Said]) async throws -> MeetingSpool {
+        let spool = MeetingSpool(root: dir.appendingPathComponent("spool"))
+        let handle = try spool.begin(.init(
+            app: "teams", started: Date(timeIntervalSince1970: 1_787_000_000),
+            engine: "whisper-large-v3-turbo", model: .whisperLargeV3Turbo))
+        let file = try SpoolAudioFile(url: handle.audioURL)
+        for k in 0..<60 {
+            try await file.append(chunk(k, said))
+        }
+        return spool
     }
 
     private struct Said {
