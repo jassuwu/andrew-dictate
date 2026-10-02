@@ -28,10 +28,12 @@ final class UtteranceMachineSpeedTests: XCTestCase {
         mic.release()
     }
 
-    private func machine() -> UtteranceMachine {
+    private func machine(
+        inserter custom: (any Inserter)? = nil
+    ) -> UtteranceMachine {
         let machine = UtteranceMachine(
             engine: engine,
-            inserter: inserter,
+            inserter: custom ?? inserter,
             clock: clock,
             dictionary: { [] },
             ownBundleIdentifier: "gg.jass.dictate.dev",
@@ -118,7 +120,101 @@ final class UtteranceMachineSpeedTests: XCTestCase {
         await settle { self.inserter.inserted == ["Still here."] }
     }
 
+    // MARK: - key-up: the engine first
+
+    /// at key-up the engine starts on your words before the chime plays or
+    /// the lamp changes: neither is worth a millisecond of its time. the
+    /// handler holds the main thread, so the engine can only have been
+    /// asked if it was asked before the chime was.
+    func testTheEngineIsAskedBeforeTheEndChimeAndTheLamp() async {
+        let m = machine()
+        engine.reply = .success("first")
+        let engine = engine!
+        var askedByChime: Bool?
+        var askedByLamp: Bool?
+        m.onEvent = { event in
+            switch event {
+            case .chime(.end):
+                askedByChime = Self.waitHoldingMain { engine.isAsked }
+            case .state(.transcribing, _):
+                askedByLamp = Self.waitHoldingMain { engine.isAsked }
+            default:
+                break
+            }
+        }
+
+        m.keyDown()
+        await pass(.seconds(1))
+        m.keyUp()
+        await settle { !self.inserter.inserted.isEmpty }
+
+        XCTAssertEqual(askedByChime, true)
+        XCTAssertEqual(askedByLamp, true)
+        XCTAssertEqual(inserter.inserted, ["First."])
+    }
+
+    /// where the words go and what the clipboard holds are read while the
+    /// engine works, not after it: by the time the transcript lands, only
+    /// the paste is left.
+    func testTheTargetAndTheClipboardAreReadWhileTheEngineWorks() async {
+        let reading = TargetReadingInserter(clock: clock)
+        reading.anchor = FakeAnchor(
+            targetBundleIdentifier: "com.apple.TextEdit",
+            before: "it failed because"
+        )
+        let m = machine(inserter: reading)
+        engine.holds = true
+        engine.reply = .success("the cache was cold")
+
+        m.keyDown()
+        await pass(.seconds(1))
+        m.keyUp()
+        await settle { self.engine.isAsked }
+        await settle()
+
+        XCTAssertEqual(reading.targetReads, 1)
+        XCTAssertEqual(reading.pasteboardReadsAhead, 1)
+        XCTAssertEqual(reading.inserted, [])
+
+        engine.release()
+        await settle { !reading.inserted.isEmpty }
+        // the caret read during the wait still decides the join.
+        XCTAssertEqual(reading.inserted, [" the cache was cold."])
+    }
+
+    /// a take the lock ends is copied, never pasted, so there is no
+    /// clipboard to put back and nothing to read ahead.
+    func testATakeTheLockCopiesReadsNoClipboardAhead() async {
+        let reading = TargetReadingInserter(clock: clock)
+        let m = machine(inserter: reading)
+        engine.reply = .success("kept for later")
+
+        m.keyDown()
+        await pass(.seconds(1))
+        m.captureInterrupted(.systemPaused)
+        await settle { !reading.copied.isEmpty }
+
+        XCTAssertEqual(reading.pasteboardReadsAhead, 0)
+        XCTAssertEqual(reading.copied, ["Kept for later."])
+    }
+
     // MARK: - helpers
+
+    /// waits on another thread's answer without letting the main thread
+    /// go: whatever the machine does next has to wait too.
+    private static func waitHoldingMain(
+        upTo seconds: TimeInterval = 2,
+        until isDone: () -> Bool
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if isDone() {
+                return true
+            }
+            usleep(1_000)
+        }
+        return isDone()
+    }
 
     private func deliver(_ m: UtteranceMachine) async {
         engine.reply = .success("done")
@@ -236,5 +332,121 @@ final class WakeCountingEngine: TranscriptionEngine, @unchecked Sendable {
         for continuation in released {
             continuation.resume()
         }
+    }
+}
+
+/// `FakeInserter`, and it says when it was asked where the words go and
+/// to read the clipboard ahead.
+@MainActor
+final class TargetReadingInserter: Inserter {
+    var anchor: FakeAnchor? = FakeAnchor(
+        targetBundleIdentifier: "com.apple.TextEdit"
+    )
+    private(set) var inserted: [String] = []
+    private(set) var copied: [String] = []
+    private(set) var targetReads = 0
+    private(set) var pasteboardReadsAhead = 0
+    private let clock: FakeUtteranceClock
+
+    init(clock: FakeUtteranceClock) {
+        self.clock = clock
+    }
+
+    func captureAnchor() -> (any InsertionAnchor)? {
+        anchor
+    }
+
+    func captureAnchorUnlessOurs() -> (any InsertionAnchor)? {
+        anchor
+    }
+
+    func readTarget(
+        standby: (any InsertionAnchor)?
+    ) async -> InsertionTarget {
+        targetReads += 1
+        let target: (any InsertionAnchor)? = anchor ?? standby
+        return InsertionTarget(
+            anchor: target,
+            textBeforeCursor: target?.textBeforeCursor()
+        )
+    }
+
+    func readPasteboardAhead() {
+        pasteboardReadsAhead += 1
+    }
+
+    func insert(
+        _ text: String,
+        at anchor: (any InsertionAnchor)?
+    ) async -> PasteOutcome {
+        inserted.append(text)
+        return PasteOutcome(result: .pasted, insertedAt: clock.now)
+    }
+
+    func copy(
+        _ text: String,
+        because reason: LeftOnPasteboardReason
+    ) async -> PasteOutcome {
+        copied.append(text)
+        return PasteOutcome(
+            result: .leftOnPasteboard(reason),
+            insertedAt: clock.now
+        )
+    }
+}
+
+/// the clipboard you had is read while the engine works, and read again
+/// at the paste if anything was copied over it meanwhile: what comes back
+/// after the paste is what was there just before it. asserted on a
+/// private pasteboard; nothing here posts a keystroke.
+@MainActor
+final class PasteboardReadAheadTests: XCTestCase {
+    func testAClipboardUntouchedSinceKeyUpKeepsTheEarlyRead() {
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setString("what you had", forType: .string)
+
+        let early = Paster.snapshot(of: pasteboard)
+        let restored = Paster.snapshotToRestore(early: early, on: pasteboard)
+
+        XCTAssertNotNil(early)
+        XCTAssertEqual(restored?.changeCount, early?.changeCount)
+        XCTAssertEqual(restored?.string, "what you had")
+    }
+
+    func testAClipboardCopiedOverDuringTheWaitIsReadAgain() {
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setString("what you had", forType: .string)
+        let early = Paster.snapshot(of: pasteboard)
+
+        // ⌘C while the engine was working.
+        pasteboard.clearContents()
+        pasteboard.setString("copied while waiting", forType: .string)
+        let restored = Paster.snapshotToRestore(early: early, on: pasteboard)
+
+        XCTAssertEqual(restored?.string, "copied while waiting")
+        XCTAssertEqual(restored?.changeCount, pasteboard.changeCount)
+    }
+
+    func testNoEarlyReadIsReadAtThePaste() {
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setString("what you had", forType: .string)
+
+        let restored = Paster.snapshotToRestore(early: nil, on: pasteboard)
+
+        XCTAssertEqual(restored?.string, "what you had")
+    }
+}
+
+private extension Paster.Snapshot {
+    var string: String? {
+        items.first?.representations
+            .first { $0.type == NSPasteboard.PasteboardType.string.rawValue }
+            .map { String(decoding: $0.data, as: UTF8.self) }
     }
 }

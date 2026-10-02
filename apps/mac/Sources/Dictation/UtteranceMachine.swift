@@ -764,19 +764,19 @@ final class UtteranceMachine {
             endWithNoSound(from: press?.mic)
             return
         }
-        // taken now rather than at key-down: the window worth protecting
-        // is key-up → paste, the ~600 ms when nobody is moving anything.
-        // key-down → paste spans the whole utterance, which is exactly
-        // when aiming at the field you actually want is normal.
-        let focusAnchor = inserter.captureAnchorUnlessOurs()
-            ?? activeFocusAnchor
+        // the engine first: the chime, the lamp and the reads below all
+        // happen while it works, and none is worth a millisecond of its
+        // time. the target is read now rather than at key-down: the window
+        // worth protecting is key-up → paste, when nobody is moving
+        // anything. key-down → paste spans the whole utterance, which is
+        // exactly when aiming at the field you actually want is normal.
+        let standby = activeFocusAnchor
         activeFocusAnchor = nil
+        startPipeline(samples) { [inserter] in
+            await inserter.readTarget(standby: standby)
+        }
         emit(.chime(.end))
         setState(.transcribing)
-        startPipeline(
-            samples,
-            focusAnchor: focusAnchor
-        )
     }
 
     private func microphoneFailedToStop(_ id: UInt64, error: any Error) {
@@ -1030,8 +1030,14 @@ final class UtteranceMachine {
         press = PressRecord.Draft(keyDown: now, startedAt: Date(), retry: true)
         press?.samplesReady = now
         press?.samples = samples
+        startPipeline(samples) { [inserter] in
+            let anchor = inserter.captureAnchor()
+            return InsertionTarget(
+                anchor: anchor,
+                textBeforeCursor: anchor?.textBeforeCursor()
+            )
+        }
         setState(.transcribing)
-        startPipeline(samples, focusAnchor: inserter.captureAnchor())
         return true
     }
 
@@ -1079,19 +1085,33 @@ final class UtteranceMachine {
         press?.firstBuffer = instant
     }
 
+    /// the engine is asked before this returns, off the main actor, and
+    /// the target and the clipboard are read beside it; the rest waits for
+    /// the words on the main actor, a turn later.
     private func startPipeline(
         _ samples: [Float],
-        focusAnchor: (any InsertionAnchor)?
+        readTarget: @escaping @MainActor () async -> InsertionTarget
     ) {
         pipelineGeneration += 1
         let generation = pipelineGeneration
         armTranscriptionDeadline(for: samples, generation: generation)
         engineLastAsked = clock.now
 
+        let engine = engine
+        let transcription = Task.detached(priority: .userInitiated) {
+            try await engine.transcribe(samples)
+        }
+        let target = Task.immediate {
+            await readTarget()
+        }
+        if !copiesInsteadOfPasting {
+            inserter.readPasteboardAhead()
+        }
         pipelineTask = Task { [weak self] in
             await self?.transcribeAndInsert(
                 samples,
-                focusAnchor: focusAnchor,
+                transcription: transcription,
+                target: target,
                 generation: generation
             )
         }
@@ -1140,13 +1160,19 @@ final class UtteranceMachine {
     /// stops the deadline; one that comes after it is about a press that
     /// has already ended.
     private func transcribeInTime(
-        _ samples: [Float],
+        _ transcription: Task<String, any Error>,
         generation: Int
     ) async throws -> String {
         defer {
             engineAnswered(generation: generation)
         }
-        return try await engine.transcribe(samples)
+        // the take thrown away takes the engine's call with it, as it did
+        // when the call ran inside the pipeline.
+        return try await withTaskCancellationHandler {
+            try await transcription.value
+        } onCancel: {
+            transcription.cancel()
+        }
     }
 
     private func engineAnswered(generation: Int) {
@@ -1200,7 +1226,8 @@ final class UtteranceMachine {
 
     private func transcribeAndInsert(
         _ samples: [Float],
-        focusAnchor: (any InsertionAnchor)?,
+        transcription: Task<String, any Error>,
+        target: Task<InsertionTarget, Never>,
         generation: Int
     ) async {
         defer {
@@ -1209,7 +1236,7 @@ final class UtteranceMachine {
 
         do {
             let transcript = try await transcribeInTime(
-                samples,
+                transcription,
                 generation: generation
             )
             try Task.checkCancellation()
@@ -1219,6 +1246,12 @@ final class UtteranceMachine {
             activeTimeline?.transcriptReady = clock.now
             press?.transcriptReady = clock.now
 
+            // read while the engine worked; long since back, as a rule.
+            let target = await target.value
+            guard generation == pipelineGeneration else {
+                return
+            }
+            let focusAnchor = target.anchor
             // one read of the text at the caret, two decisions: is the
             // sentence there still running (so no capital), and do the words
             // need a space to stand apart from it. read off the held element,
@@ -1227,7 +1260,7 @@ final class UtteranceMachine {
             // stand alone, wherever they are pasted later.
             let textAtCaret = copiesInsteadOfPasting
                 ? nil
-                : focusAnchor?.textBeforeCursor()
+                : target.textBeforeCursor
             let continuingASentence = continuesSentence(after: textAtCaret)
 
             // a dictation aimed at our own window is a correction, not a
