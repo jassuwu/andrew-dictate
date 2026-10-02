@@ -51,7 +51,7 @@ struct Sides: Sendable {
 
     /// only the first `seconds` of each, for a shorter run.
     func prefix(seconds: Double) -> Sides {
-        let n = min(you.count, them.count, Int(seconds * Double(sampleRate)))
+        let n = min(you.count, them.count, seconds.isFinite ? Int(seconds * Double(sampleRate)) : Int.max)
         return Sides(you: Array(you[..<n]), them: Array(them[..<n]))
     }
 
