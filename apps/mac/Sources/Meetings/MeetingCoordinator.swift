@@ -69,6 +69,10 @@ enum MeetingEvent: Equatable, Sendable {
     /// The app may not use the microphone: asked before anything was
     /// built, and the meeting does not start.
     case micNotAllowed
+    /// There was no mic, or the one there would not start: the meeting does
+    /// not start. Named, when known. Nothing in setup starts a mic, so no
+    /// window opens.
+    case micFailed(String?)
     /// A spool the app died on is being written out, unasked, at launch. It
     /// loads a 2.9 gb model and can run for a quarter of an hour: the lamp
     /// stays quiet for successes, and this is not one.
@@ -122,6 +126,8 @@ enum MeetingEvent: Equatable, Sendable {
         // the tap is the whole mac, so the mac is what it cannot hear.
         case .cannotHear: "can't hear the mac — opening setup"
         case .micNotAllowed: "the mic isn't allowed — opening setup"
+        case .micFailed(let mic?): "can't start your mic — \(mic.lowercased())"
+        case .micFailed(nil): "no mic to record you with"
         case .gapBegan: "lost \(Self.themWord) — rebuilding"
         case .gapEnded: "hearing them again"
         case .problemBegan(let problem): Self.began(problem)
@@ -481,18 +487,26 @@ final class MeetingCoordinator: ObservableObject {
             await lastTapClosed?.value
             guard current === meeting else { return }
 
-            // Theirs: the tap. This is the one that reads as "can't hear".
+            // Theirs: the tap and the mic. The part that failed says which
+            // fix it has: the tap's is the system-audio switch, and reads as
+            // "can't hear"; a mic's has no switch, and opens nothing.
             let chunks: AsyncStream<MeetingAudioChunk>
             do {
                 chunks = try await source.start()
             } catch {
-                logger.error("tap failed to open: \(error.localizedDescription, privacy: .public)")
+                logger.error("capture failed to start: \(error.localizedDescription, privacy: .public)")
                 loading.cancel()
                 guard current === meeting else { return }
-                session.neverHeardTheProbe()
-                publish()
-                onEvent?(.cannotHear)
-                stop(nothingKept: .tapNeverHeard)
+                switch (error as? any CaptureFailure)?.fault ?? .tap {
+                case .mic(let mic):
+                    onEvent?(.micFailed(mic))
+                    stop(nothingKept: .micFailed)
+                case .tap:
+                    session.neverHeardTheProbe()
+                    publish()
+                    onEvent?(.cannotHear)
+                    stop(nothingKept: .tapNeverHeard)
+                }
                 return
             }
             // what the source does by itself, a mic it moved to, goes in the

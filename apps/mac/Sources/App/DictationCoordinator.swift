@@ -2587,11 +2587,12 @@ extension DictationCoordinator {
             meetings.notifier.saveFailed()
         case .nothingToKeep, .engineFailed:
             dismissLiveTranscriptUnlessRecording()
-        case .cannotHear, .micNotAllowed:
+        case .cannotHear, .micNotAllowed, .micFailed:
             // the pill cannot be clicked, so naming the switch was a dead
             // end. this reopens the one surface allowed to ask for it, and
             // leaves a way back in the menu for anyone who closes it. only
-            // ever at the start: a problem mid-call is the lamp's alone.
+            // ever at the start: a problem mid-call is the lamp's alone. a
+            // mic that would not start has no switch, and opens nothing.
             liveTranscriptPanel?.dismissKeepingPreference()
             if event.opensSetup {
                 meetingsNeedAttention = true
@@ -2607,7 +2608,7 @@ extension DictationCoordinator {
             let duration: TimeInterval
             switch event {
             case .hookFailed, .engineFailed, .saveFailed, .couldNotTranscribeAgain,
-                 .transcribedAgain: duration = 4
+                 .transcribedAgain, .micFailed: duration = 4
             // a recovered meeting arrives unprompted and is about yesterday:
             // two seconds is not long enough to read it.
             case .saved(let summary): duration = summary.recovered ? 4 : 2

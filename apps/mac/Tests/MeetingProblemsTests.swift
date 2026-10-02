@@ -255,6 +255,25 @@ final class MeetingProblemsTests: XCTestCase {
         XCTAssertEqual(records.first?.outcome.why, "mic-not-allowed")
     }
 
+    /// The tap opened and the mic did not: a usb mic that will not start,
+    /// or one gone in the moment it was asked for. The lamp names it, and
+    /// no window opens — there is no switch in setup that starts a mic.
+    func testAMicThatWouldNotStartIsNamedAndOpensNothing() async throws {
+        source.startFails = CaptureFailed(fault: .mic("Yeti"))
+        let c = coordinator()
+        c.start()
+        await source.awaitStart()
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(c.state, .idle)
+        XCTAssertEqual(events, [.micFailed("Yeti")])
+        XCTAssertEqual(events.first?.hudText, "can't start your mic — yeti")
+        XCTAssertEqual(events.first?.opensSetup, false)
+        XCTAssertEqual(MeetingEvent.micFailed(nil).hudText, "no mic to record you with")
+        XCTAssertEqual(records.first?.outcome, .nothingKept(.micFailed))
+        XCTAssertEqual(records.first?.outcome.why, "mic-failed")
+    }
+
     // MARK: - several at once
 
     /// The disk nearly full from the start, and the mic gone silent while
@@ -376,15 +395,26 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
         micAllowed
     }
 
+    /// What the next start throws, if anything: the tap or the mic that
+    /// would not come up.
+    var startFails: (any Error)? {
+        get { lock.withLock { _startFails } }
+        set { lock.withLock { _startFails = newValue } }
+    }
+    private var _startFails: (any Error)?
+
     func start() async throws -> AsyncStream<MeetingAudioChunk> {
         let (stream, chunks) = AsyncStream<MeetingAudioChunk>.makeStream()
         let (events, told) = AsyncStream<MeetingSourceEvent>.makeStream()
-        lock.withLock {
+        let fails = lock.withLock { () -> (any Error)? in
+            _starts += 1
+            if let fails = _startFails { return fails }
             self.chunks = chunks
             self.told = told
             self.events = events
-            _starts += 1
+            return nil
         }
+        if let fails { throw fails }
         return stream
     }
 
@@ -423,6 +453,11 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
             try? await Task.sleep(for: .milliseconds(10))
         }
     }
+}
+
+/// A start that failed, and the part it failed on.
+private struct CaptureFailed: CaptureFailure {
+    let fault: CaptureFault
 }
 
 /// Keeps what it is fed; says nothing.

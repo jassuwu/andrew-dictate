@@ -87,6 +87,24 @@ extension MeetingRecord.Label {
     static let micUnmuted = MeetingRecord.Label(rawValue: "mic-unmuted")
 }
 
+/// Which part of capture would not start, so the meeting can say which and
+/// point at the fix that part has, rather than sending every failure to the
+/// system-audio switch.
+enum CaptureFault: Equatable, Sendable {
+    /// No mic to record your side with, or the one there would not start
+    /// in time. Named, when known.
+    case mic(String?)
+    /// The tap would not open, or not in time.
+    case tap
+}
+
+/// An error from a source's `start()` that knows which part failed. Any
+/// other error is taken for the tap's, as every one was before there was a
+/// way to tell.
+protocol CaptureFailure: Error {
+    var fault: CaptureFault { get }
+}
+
 /// The capture layer. Starting it plays the start sound — that is the probe
 /// (ADR 0021) — and the stream keeps flowing through silence because the mic
 /// is the clock (002). It ends only when `stop()` is called or the tap dies

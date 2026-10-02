@@ -26,8 +26,9 @@ import os
 /// ids themselves are plain integers the HAL owns, and what the handoff
 /// keeps is only ever touched on `following`.
 final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
-    enum Failure: Error, LocalizedError {
-        case coreAudio(String, OSStatus)
+    enum Failure: Error, LocalizedError, CaptureFailure {
+        /// A native call that failed, and how far the build had got.
+        case coreAudio(String, OSStatus, Stage)
         case noMicrophone
         case noStartSound
         /// The mic a rig was to be built on is no longer there.
@@ -37,11 +38,24 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
         var errorDescription: String? {
             switch self {
-            case .coreAudio(let call, let status): "\(call) failed (\(status))"
+            case .coreAudio(let call, let status, _): "\(call) failed (\(status))"
             case .noMicrophone: "no microphone"
             case .noStartSound: "the start sound is missing from the app"
             case .micGone(let mic): "the mic (\(mic)) is not there any more"
             case .noAnswer(let stage): stage.description
+            }
+        }
+
+        /// The part that failed, by the stage the build had reached: the
+        /// mic's once it is being started, the tap's before that — and a mic
+        /// that was not there at all is the mic's wherever it was missed.
+        var fault: CaptureFault {
+            switch self {
+            case .noMicrophone: .mic(nil)
+            case .micGone(let mic): .mic(mic)
+            case .noAnswer(.startingTheMic(let mic)), .coreAudio(_, _, .startingTheMic(let mic)):
+                .mic(mic)
+            case .noAnswer, .coreAudio, .noStartSound: .tap
             }
         }
     }
@@ -651,7 +665,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         description.name = "andrew dictate meeting tap"
 
         var tapID = AudioObjectID(0)
-        try check(AudioHardwareCreateProcessTap(description, &tapID), "AudioHardwareCreateProcessTap")
+        try check(AudioHardwareCreateProcessTap(description, &tapID), "AudioHardwareCreateProcessTap", at: progress.stage)
         let tapUID = description.uuid.uuidString
 
         guard let mic = wanted ?? CoreAudioProperties.micToUse() else {
@@ -694,7 +708,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         do {
             try check(
                 AudioHardwareCreateAggregateDevice(aggregate as CFDictionary, &aggregateID),
-                "AudioHardwareCreateAggregateDevice")
+                "AudioHardwareCreateAggregateDevice", at: progress.stage)
         } catch {
             AudioHardwareDestroyProcessTap(tapID)
             throw error
@@ -717,14 +731,14 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         guard status == noErr, let procID else {
             AudioHardwareDestroyAggregateDevice(aggregateID)
             AudioHardwareDestroyProcessTap(tapID)
-            throw Failure.coreAudio("AudioDeviceCreateIOProcIDWithBlock", status)
+            throw Failure.coreAudio("AudioDeviceCreateIOProcIDWithBlock", status, progress.stage)
         }
 
         let rig = Rig(
             id: id, slot: slot, uid: uid, mic: mic, tapID: tapID,
             aggregateID: aggregateID, procID: procID, micChannels: micChannels, rate: rate)
         do {
-            try check(AudioDeviceStart(aggregateID, procID), "AudioDeviceStart")
+            try check(AudioDeviceStart(aggregateID, procID), "AudioDeviceStart", at: progress.stage)
         } catch {
             teardown(rig)
             throw error
@@ -863,8 +877,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         }
     }
 
-    private func check(_ status: OSStatus, _ call: String) throws {
-        guard status == noErr else { throw Failure.coreAudio(call, status) }
+    private func check(_ status: OSStatus, _ call: String, at stage: Stage) throws {
+        guard status == noErr else { throw Failure.coreAudio(call, status, stage) }
     }
 
     /// One build of the rig: the tap and the mic in their aggregate, the IO
