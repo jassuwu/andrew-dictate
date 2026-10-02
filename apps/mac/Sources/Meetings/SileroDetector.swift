@@ -49,7 +49,7 @@ final class SileroVoice: Sendable {
         FileManager.default.fileExists(atPath: modelURL.path)
     }
 
-    /// Fetches the model if it is not here yet: about 2 mb, for setup.
+    /// Fetches the model if it is not here yet: about 1 mb, for setup.
     static func fetch() async throws {
         guard !isOnDisk else { return }
         try await ModelHub.download(.vad, to: AppIdentity.sharedModelDirectory)
