@@ -254,6 +254,25 @@ final class CallWatcherTests: XCTestCase {
         XCTAssertNil(watcher.unrecordedCall)
     }
 
+    /// A call is a call once; the one after it is a new one, with its own
+    /// threshold to cross and its own suggestion.
+    func testTheNextCallStartsItsOwnThresholdAndSuggestsAgain() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(0))
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(3))
+        _ = watcher.observe([], isRecording: false, at: .seconds(100))
+        _ = watcher.observe([], isRecording: false, at: .seconds(130))
+        XCTAssertNil(watcher.currentCall)
+
+        XCTAssertEqual(watcher.observe([zoom], isRecording: false, at: .seconds(200)), [])
+        XCTAssertEqual(watcher.observe([zoom], isRecording: false, at: .seconds(202)), [])
+        XCTAssertEqual(
+            watcher.observe([zoom], isRecording: false, at: .seconds(203)),
+            [.record("zoom")]
+        )
+    }
+
     // MARK: - recordings the watcher did not ask for
 
     /// Dictating notes to yourself, or a lecture: you started it, there was

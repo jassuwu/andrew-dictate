@@ -89,6 +89,7 @@ struct CallWatcher {
             return []
         }
         call = Call(app: app.name, quietSince: nil)
+        qualifyingSince = nil
         return isRecording ? [] : [.record(app.name)]
     }
 }
