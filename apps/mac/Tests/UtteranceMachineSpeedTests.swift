@@ -443,6 +443,93 @@ final class PasteboardReadAheadTests: XCTestCase {
     }
 }
 
+/// a restart of a model already on disk takes seconds. one still going
+/// after a minute has wedged, and the speech model is `.failed`: the next
+/// press retries out loud instead of hearing "loading the speech model…"
+/// for good.
+@MainActor
+final class EngineRestartDeadlineTests: XCTestCase {
+    private var clock: FakeUtteranceClock!
+    private var held: CheckedContinuation<Void, Never>?
+    private var outcome: EngineRestart.Outcome?
+
+    override func setUp() async throws {
+        clock = FakeUtteranceClock()
+        held = nil
+        outcome = nil
+    }
+
+    override func tearDown() async throws {
+        held?.resume()
+        held = nil
+    }
+
+    func testARestartThatFinishesIsReady() async {
+        let outcome = await EngineRestart.run(clock: clock) {}
+
+        XCTAssertEqual(outcome, .restarted)
+        XCTAssertEqual(outcome.preparationState, .ready)
+    }
+
+    func testARestartThatThrowsHasFailed() async {
+        let outcome = await EngineRestart.run(clock: clock) {
+            throw RestartFailure()
+        }
+
+        XCTAssertEqual(outcome.preparationState, .failed)
+        XCTAssertEqual(
+            outcome.preparationState.earlyPress,
+            .retryPreparing
+        )
+    }
+
+    func testARestartStillGoingAfterAMinuteHasFailed() async {
+        let clock = clock!
+        let restart = Task { @MainActor in
+            self.outcome = await EngineRestart.run(clock: clock) { [weak self] in
+                await withCheckedContinuation { continuation in
+                    Task { @MainActor in self?.held = continuation }
+                }
+            }
+        }
+        await settle { self.held != nil }
+        // the deadline's sleep, queued before the clock moves.
+        try? await Task.sleep(for: .milliseconds(20))
+
+        clock.advance(by: EngineRestart.deadline - .milliseconds(100))
+        try? await Task.sleep(for: .milliseconds(20))
+        XCTAssertNil(outcome, "a slow restart is still a restart")
+
+        clock.advance(by: .milliseconds(100))
+        await restart.value
+
+        XCTAssertEqual(outcome, .timedOut)
+        XCTAssertEqual(outcome?.preparationState, .failed)
+        // and the next press says so and tries again.
+        XCTAssertEqual(
+            outcome?.preparationState.earlyPress,
+            .retryPreparing
+        )
+        XCTAssertEqual(EngineRestart.deadline, .seconds(60))
+    }
+
+    private func settle(
+        until isDone: @MainActor () -> Bool,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        for _ in 0..<200 {
+            if isDone() {
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        XCTFail("never settled", file: file, line: line)
+    }
+}
+
+private struct RestartFailure: Error {}
+
 private extension Paster.Snapshot {
     var string: String? {
         items.first?.representations
