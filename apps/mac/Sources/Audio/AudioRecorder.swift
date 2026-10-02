@@ -85,6 +85,11 @@ final class AudioRecorder: DisposableMicCapture {
         capture.boundDevice
     }
 
+    /// one atomic, set from the audio thread (`AudioSoundFlag`).
+    var hasHeardSound: Bool {
+        capture.soundFlag.hasHeardSound
+    }
+
     /// cheap: nothing is opened until the capture is started or prepared.
     init(preRollEnabled: Bool) {
         capture = CaptureEngine(preRollEnabled: preRollEnabled)
@@ -207,6 +212,7 @@ private final class CaptureEngine: @unchecked Sendable {
     private static let conversionBufferCapacity: AVAudioFrameCount = 16_384
 
     let levelStorage = AudioLevelStorage()
+    let soundFlag = AudioSoundFlag()
     let capNotifier = AudioEventNotifier()
     let capApproachingNotifier = AudioEventNotifier()
     let configurationChangeNotifier = AudioEventNotifier()
@@ -310,6 +316,9 @@ private final class CaptureEngine: @unchecked Sendable {
         // be audio the take keeps.
         storage.begin()
         levelStorage.reset()
+        soundFlag.listen(
+            judgingSamples: inputFormat?.commonFormat == .pcmFormatFloat32
+        )
         firstBufferNotifier.arm(onFirstBuffer)
 
         do {
@@ -320,6 +329,7 @@ private final class CaptureEngine: @unchecked Sendable {
             isListening = true
         } catch {
             firstBufferNotifier.disarm()
+            soundFlag.stopListening()
             storage.discard()
             levelStorage.reset()
             throw error
@@ -342,6 +352,7 @@ private final class CaptureEngine: @unchecked Sendable {
             isListening = false
         }
         firstBufferNotifier.disarm()
+        soundFlag.stopListening()
         isRecording = false
         levelStorage.reset()
 
@@ -364,6 +375,7 @@ private final class CaptureEngine: @unchecked Sendable {
             isListening = false
         }
         firstBufferNotifier.disarm()
+        soundFlag.stopListening()
         isRecording = false
         captureStorage?.discard()
         levelStorage.reset()
@@ -485,13 +497,15 @@ private final class CaptureEngine: @unchecked Sendable {
             onBus: 0,
             bufferSize: tapFrameCapacity,
             format: format
-        ) { [storage, levelStorage, firstBufferNotifier] buffer, _ in
+        ) { [storage, levelStorage, soundFlag, firstBufferNotifier] buffer, _ in
             if storage.appendCopy(of: buffer) {
                 levelStorage.update(from: buffer)
                 // frames, not loudness: a device that delivers is alive,
                 // even if its first frames are zeros. an empty buffer
                 // delivered nothing, and the chime must not promise it did.
+                // whether the frames were sound is the deadline's question.
                 if buffer.frameLength > 0 {
+                    soundFlag.hear(buffer.audioBufferList)
                     firstBufferNotifier.notify(at: ContinuousClock.now)
                 }
             }
@@ -499,16 +513,20 @@ private final class CaptureEngine: @unchecked Sendable {
     }
 
     /// called on the audio thread every I/O cycle while the engine runs,
-    /// so it reads one atomic until an utterance is waiting to be heard,
-    /// and the cycle that hears it wins a compare-exchange and pokes a
-    /// dispatch source built ahead (`AudioFirstBufferNotifier`): no lock,
-    /// no allocation, nothing that can make the audio thread wait.
+    /// so it reads atomics until an utterance is waiting to be heard. the
+    /// cycle that hears it wins a compare-exchange and pokes a dispatch
+    /// source built ahead (`AudioFirstBufferNotifier`), and until one
+    /// sample of the utterance is not exactly zero each cycle's samples
+    /// get one vDSP pass (`AudioSoundFlag`): no lock, no allocation,
+    /// nothing that can make the audio thread wait.
     private func attachFirstAudioSink(
         to engine: AVAudioEngine,
         format: AVAudioFormat
     ) {
-        let sink = AVAudioSinkNode { [firstBufferNotifier] _, frameCount, _ in
+        let sink = AVAudioSinkNode {
+            [soundFlag, firstBufferNotifier] _, frameCount, buffers in
             if frameCount > 0 {
+                soundFlag.hear(buffers)
                 firstBufferNotifier.notify(at: ContinuousClock.now)
             }
             return noErr
@@ -607,6 +625,7 @@ private final class CaptureEngine: @unchecked Sendable {
 
     private func tearDown() {
         firstBufferNotifier.disarm()
+        soundFlag.stopListening()
         levelStorage.reset()
         isRecording = false
         isListening = false

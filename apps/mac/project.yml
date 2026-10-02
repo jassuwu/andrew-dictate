@@ -108,6 +108,7 @@ targets:
         excludes:
           - PipelinePlaygroundView.swift
           - WordFixerView.swift
+      - Sources/Audio/AudioSoundFlag.swift
       - Sources/Audio/CaptureCapWarning.swift
       - Sources/Audio/CaptureSlot.swift
       - Sources/Audio/CaptureStaleness.swift
