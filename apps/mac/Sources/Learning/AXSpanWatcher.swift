@@ -34,6 +34,9 @@ final class AXSpanWatcher {
     private var quietTimer: Task<Void, Never>?
     private var polling: Task<Void, Never>?
 
+    /// a focus question is out, off the main thread. one at a time: the
+    /// answer is the same for every ask while it is out.
+    private var askingFocus = false
     private var hearsChanges = false
     private var landed = false
     private var lastRead: String?
@@ -58,9 +61,15 @@ final class AXSpanWatcher {
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] notification in
+            // the app just activated, from the notification itself:
+            // frontmostApplication may not have caught up yet.
+            let activated = (
+                notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+                    as? NSRunningApplication
+            )?.processIdentifier
             MainActor.assumeIsolated {
-                self?.focusMayHaveMoved()
+                self?.focusMayHaveMoved(frontmost: activated)
             }
         }
 
@@ -103,7 +112,7 @@ final class AXSpanWatcher {
         let retained = Unmanaged.passRetained(self)
         retainedByObserver = retained
         let refcon = retained.toOpaque()
-        let application = AXUIElementCreateApplication(reader.processIdentifier)
+        let application = AXSpanReader.application(reader.processIdentifier)
         _ = AXObserverAddNotification(
             observer,
             reader.element,
@@ -164,11 +173,37 @@ final class AXSpanWatcher {
         }
     }
 
-    private func focusMayHaveMoved() {
-        guard !ended, !reader.isStillFocused() else {
+    /// another app in front ends the watch here. our field still focused
+    /// inside its app is a round trip to that app, asked off the main
+    /// thread: every second and a half while polling, and on every switch.
+    private func focusMayHaveMoved(
+        frontmost: pid_t? = NSWorkspace.shared.frontmostApplication?
+            .processIdentifier
+    ) {
+        guard !ended else {
             return
         }
-        end(flushing: true)
+        guard frontmost == reader.processIdentifier else {
+            end(flushing: true)
+            return
+        }
+        guard !askingFocus else {
+            return
+        }
+        askingFocus = true
+        let reader = reader
+        Task { @MainActor [weak self] in
+            let stillFocused = await Task.detached(priority: .utility) {
+                reader.isStillFocused()
+            }.value
+            guard let self else {
+                return
+            }
+            self.askingFocus = false
+            if !stillFocused {
+                self.end(flushing: true)
+            }
+        }
     }
 
     // MARK: - reading
