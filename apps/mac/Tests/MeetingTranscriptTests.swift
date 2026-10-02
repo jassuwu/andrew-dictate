@@ -420,6 +420,52 @@ final class MeetingTranscriptTests: XCTestCase {
         XCTAssertEqual(permissions(of: note), 0o600)
     }
 
+    func testANoteSomeoneElseWroteIsLeftAlone() throws {
+        let folder = parent.appendingPathComponent("meetings", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: folder, withIntermediateDirectories: true)
+        let note = folder.appendingPathComponent("README.md")
+        try "my own notes about these".write(to: note, atomically: true, encoding: .utf8)
+
+        try MeetingTranscriptFile.write(meeting(turns: []), in: parent, timeZone: tz)
+        try MeetingTranscriptFile.write(meeting(turns: []), in: parent, timeZone: tz)
+
+        XCTAssertEqual(
+            try String(contentsOf: note, encoding: .utf8), "my own notes about these")
+    }
+
+    func testTheNoteIsNeverListedAsAMeeting() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(turns: []), in: parent, timeZone: tz)
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: parent.appendingPathComponent("meetings/README.md").path))
+
+        XCTAssertEqual(MeetingTranscriptFile.listAll(in: parent).map(\.fileURL), [url])
+    }
+
+    /// The note is only worth having if it is the whole story: every key the
+    /// writer puts at the top of a file is explained in it.
+    func testTheNoteExplainsEveryKeyAFileCarries() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(
+                gaps: [.init(began: .seconds(41), ended: .seconds(63))],
+                turns: [.init(speaker: .you, at: .seconds(1), text: "hi")]),
+            in: parent, timeZone: tz)
+        let note = try String(
+            contentsOf: parent.appendingPathComponent("meetings/README.md"),
+            encoding: .utf8)
+
+        let keys = try frontMatter(of: url).keys
+        XCTAssertEqual(
+            Set(keys),
+            ["app", "started", "ended", "duration_s", "engine", "speakers",
+             "words", "complete", "reason", "gaps", "recovered"])
+        for key in keys {
+            XCTAssertTrue(note.contains("`\(key)`"), "\(key) is not in the note")
+        }
+    }
+
     // MARK: - who can read it
 
     /// The one file that holds other people's words was the one file left at
