@@ -515,6 +515,7 @@ final class DictationCoordinator: ObservableObject {
             }
         }
         listenForTheMeetingToggle()
+        listenForTheCallChecks()
         #endif
         // "fix a word…" is the menu's only time-sensitive action, and it used
         // to be grey until this session's first dictation — while the words
@@ -2687,6 +2688,33 @@ extension DictationCoordinator {
             self.answerTheQuestion(.unanswered)
         }
     }
+
+    #if DEBUG
+    /// Development only, compiled out of release like the meeting toggle:
+    /// the call watcher's two suggestions and the nudge, faked, so the
+    /// pill's questions can be seen and clicked without a call or an hour
+    /// of silence. `notifyutil -p gg.jass.dictate.dev.call.suggest-record`
+    /// is a zoom call beginning, `….call.suggest-stop` one ending under a
+    /// recording, `….meeting.nudge` the quiet hour running out.
+    private func listenForTheCallChecks() {
+        let checks: [(String, @MainActor @Sendable (DictationCoordinator) -> Void)] = [
+            ("call.suggest-record", { $0.ask(MeetingQuestion(.record("zoom"))) }),
+            ("call.suggest-stop", { $0.ask(MeetingQuestion(.stop("zoom"))) }),
+            ("meeting.nudge", { $0.handle(.nudge) }),
+        ]
+        for (name, check) in checks {
+            var token: Int32 = 0
+            notify_register_dispatch(
+                "\(AppIdentity.bundleID).\(name)", &token, .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    check(self)
+                }
+            }
+        }
+    }
+    #endif
 }
 
 
