@@ -11,12 +11,13 @@ enum CaptureInterruption: Equatable, Sendable {
 
 enum CaptureInterruptionNotice {
     /// nil means stay silent. sleeping is not a failure to explain — the pill
-    /// would be gone before the screen came back — but a microphone that
-    /// vanished mid-sentence is a loss, and losses speak (SPEC §4).
+    /// would be gone before the screen came back. a microphone that changed
+    /// mid-sentence ends the take but keeps it, so the pill rides the paste
+    /// and says what landed, in the cap's voice.
     static func message(for reason: CaptureInterruption) -> String? {
         switch reason {
         case .deviceChanged:
-            "the microphone changed — say that again"
+            "the mic changed — pasted what i had."
         case .systemPaused:
             nil
         }

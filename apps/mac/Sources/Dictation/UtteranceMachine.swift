@@ -466,6 +466,15 @@ final class UtteranceMachine {
     /// event: the time it spent reaching us is the user's wait, not ours to
     /// leave out of key-up → paste.
     func keyUp(eventAge: Duration = .zero) {
+        endTake(releasedAt: clock.now - max(.zero, eventAge))
+    }
+
+    /// the take is over — the key came up, the cap sealed it, or the mic
+    /// changed under it — and what was heard goes on to the page.
+    private func endTake(
+        releasedAt released: ContinuousClock.Instant,
+        micChanged: Bool = false
+    ) {
         guard state == .recording,
               var capture,
               !capture.isEnding else {
@@ -476,12 +485,12 @@ final class UtteranceMachine {
 
         // never before key-down: an event clock that disagrees with
         // ours must not make a press end before it began.
-        let released = clock.now - max(.zero, eventAge)
         let keyUp = activeTimeline.map { max($0.keyDown, released) }
             ?? released
         activeTimeline?.keyUp = keyUp
         press?.keyUp = keyUp
         press?.capped = capForcedEnd
+        press?.micChanged = micChanged
 
         guard capture.phase == .live else {
             // the mic has not answered yet: stop it the moment it does.
@@ -527,6 +536,16 @@ final class UtteranceMachine {
 
         press?.samplesReady = clock.now
         press?.samples = samples
+        if press?.micChanged == true, samples.isEmpty {
+            // the mic changed before it heard anything: the same answer as
+            // any silence, without asking the engine about nothing.
+            activeFocusAnchor = nil
+            activeTimeline = nil
+            setState(.idle, fastHUDDismiss: true)
+            flashFeedback("heard nothing")
+            endPress(.heardNothing)
+            return
+        }
         // taken now rather than at key-down: the window worth protecting
         // is key-up → paste, the ~600 ms when nobody is moving anything.
         // key-down → paste spans the whole utterance, which is exactly
@@ -630,22 +649,27 @@ final class UtteranceMachine {
     // MARK: - the mic, from underneath
 
     func captureInterrupted(_ reason: CaptureInterruption) {
-        switch state {
-        case .recording:
+        guard state == .recording else {
+            // once the words are with the engine, the mic going away costs
+            // nothing.
+            return
+        }
+
+        switch reason {
+        case .deviceChanged:
+            // the mic moved under the take: airpods taken by a call, a
+            // display's audio arriving, the engine rebuilt underneath. what
+            // it heard up to the change is the user's sentence, so the take
+            // ends the way a release would — kept, written out, pasted —
+            // and a pill after the paste says why it ended without them.
+            endTake(releasedAt: clock.now, micChanged: true)
+        case .systemPaused:
             cancelCapture()
             setRecordingLocked(false)
             activeFocusAnchor = nil
             activeTimeline = nil
             setState(.idle, fastHUDDismiss: true)
-            // they are still holding the key and still talking, and the
-            // whole sentence is gone. the one loss path that used to say
-            // nothing at all.
-            if let notice = CaptureInterruptionNotice.message(for: reason) {
-                flashNotice(notice, duration: 2)
-            }
             endPress(.interrupted(reason))
-        case .idle, .prewarming, .transcribing:
-            break
         }
     }
 
@@ -938,6 +962,12 @@ final class UtteranceMachine {
                         "five minutes — that's the cap. pasted what i had.",
                         duration: 2.4
                     )
+                } else if press?.micChanged == true,
+                          let notice = CaptureInterruptionNotice.message(
+                              for: .deviceChanged
+                          ) {
+                    setState(.idle)
+                    flashFeedback(notice, duration: 2.4)
                 }
                 endPress(.delivered)
             case let .leftOnPasteboard(reason):

@@ -1,10 +1,12 @@
 import XCTest
 
 final class CaptureInterruptionNoticeTests: XCTestCase {
-    func testALostMicrophoneSaysSo() {
+    /// the take is kept and pasted; the pill after the paste says why it
+    /// ended without you, in the cap's voice.
+    func testAMicChangeSaysWhatItPasted() {
         XCTAssertEqual(
             CaptureInterruptionNotice.message(for: .deviceChanged),
-            "the microphone changed — say that again"
+            "the mic changed — pasted what i had."
         )
     }
 

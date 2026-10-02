@@ -22,6 +22,8 @@ struct PressRecord: Equatable, Sendable, Codable {
         case couldNotTranscribe
         /// `esc`, the only way you throw an utterance away.
         case cancelled
+        /// sleep or the lock. a mic change ended takes here too until it
+        /// started keeping them (`micChanged`); records from then still read.
         case interrupted(CaptureInterruption)
         /// the press was answered with a pill and never recorded.
         case refused(Refusal)

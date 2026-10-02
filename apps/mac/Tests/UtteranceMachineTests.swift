@@ -777,20 +777,92 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(outcomes, [.interrupted(.systemPaused)])
     }
 
-    /// a microphone that vanished mid-sentence is a loss, and losses speak.
-    func testAMicThatChangesMidRecordingSaysSayThatAgain() async {
+    /// the mic changing mid-sentence ends the take but keeps it: what was
+    /// heard up to the change is pasted, and only then does a pill say why
+    /// the take ended without you.
+    func testAMicThatChangesMidRecordingPastesWhatItHad() async {
         let m = machine()
+        engine.reply = .success("half a thought")
         m.doubleTapped()
         await settle { !self.pills.isEmpty }
+        await pass(.seconds(2))
 
         m.captureInterrupted(.deviceChanged)
-        await settle { self.pills.count == 2 }
 
-        XCTAssertEqual(pills.last, Pill("the microphone changed — say that again", 2))
         XCTAssertEqual(lockFlags, [true, false])
+        XCTAssertEqual(mic.stops, 1)
+        XCTAssertEqual(mic.cancels, 0)
+        await settle { self.inserter.inserted.count == 1 }
+        XCTAssertEqual(inserter.inserted, ["Half a thought."])
+        XCTAssertEqual(engine.heard, [mic.samples])
+        XCTAssertEqual(
+            pills.last,
+            Pill("the mic changed — pasted what i had.", 2.4)
+        )
         XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(outcomes, [.delivered])
+        XCTAssertEqual(presses.map(\.micChanged), [true])
+        XCTAssertEqual(presses.first?.stages.keyUp, 2_000)
+
+        // the tap that would have ended the lock ends nothing more.
+        m.keyUp()
+        await settle()
+        XCTAssertEqual(mic.stops, 1)
+        XCTAssertEqual(presses.count, 1)
+    }
+
+    /// nothing heard before the change: it ends as any silence does, and
+    /// the engine is not asked about it.
+    func testAMicThatChangesBeforeAnythingWasHeardSaysHeardNothing() async {
+        let m = machine()
+        mic.samples = []
+        m.keyDown()
+        await pass(.seconds(1))
+
+        m.captureInterrupted(.deviceChanged)
+        await settle { !self.pills.isEmpty }
+
+        XCTAssertEqual(pills, [Pill("heard nothing", 2.4)])
+        XCTAssertEqual(states.last, .init(.idle, fast: true))
         XCTAssertEqual(engine.heard, [])
-        XCTAssertEqual(outcomes, [.interrupted(.deviceChanged)])
+        XCTAssertFalse(events.contains(.retryOffered(true)))
+        XCTAssertEqual(outcomes, [.heardNothing])
+        XCTAssertEqual(presses.map(\.micChanged), [true])
+    }
+
+    /// a mic that changes while it is still opening: the take ends the
+    /// moment it answers, with whatever it had.
+    func testAMicThatChangesWhileOpeningEndsTheTakeWhenItAnswers() async {
+        let m = machine()
+        mic.holdsStart = true
+        mic.samples = []
+        m.keyDown()
+
+        m.captureInterrupted(.deviceChanged)
+        XCTAssertEqual(m.state, .recording)
+        mic.finishStart()
+        await settle { !self.pills.isEmpty }
+
+        XCTAssertEqual(mic.stops, 1)
+        XCTAssertEqual(pills, [Pill("heard nothing", 2.4)])
+        XCTAssertEqual(outcomes, [.heardNothing])
+    }
+
+    /// the take after a mic change is not flagged because the last one was.
+    func testTheTakeAfterAMicChangeEndsQuietly() async {
+        let m = machine()
+        m.keyDown()
+        await pass(.seconds(1))
+        m.captureInterrupted(.deviceChanged)
+        await settle { self.inserter.inserted.count == 1 }
+        let pillsAfterTheChange = pills.count
+        await pass(.milliseconds(400))
+
+        await hold(m, for: .seconds(1))
+        await settle { self.inserter.inserted.count == 2 }
+
+        XCTAssertEqual(pills.count, pillsAfterTheChange)
+        XCTAssertEqual(presses.map(\.micChanged), [true, false])
     }
 
     /// once the words are with the engine, the mic going away costs nothing.
