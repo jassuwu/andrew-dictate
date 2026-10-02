@@ -204,10 +204,12 @@ final class UtteranceMachine {
                 // it silently left no text, no pill and no history row —
                 // spec §4's forbidden shape, wearing nothing at all.
                 flashNotice("still finishing the last one", duration: 1.4)
+                refuse(.stillFinishing)
                 return
             case .dropAndRestart:
                 invalidatePipeline()
                 setState(.idle)
+                endPress(.droppedAsHung)
             }
         }
 

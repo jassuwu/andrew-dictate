@@ -391,10 +391,14 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(pills, [Pill("still finishing the last one", 1.4)])
         XCTAssertEqual(m.state, .transcribing)
         XCTAssertEqual(mic.starts, 1)
+        XCTAssertEqual(outcomes, [.refused(.stillFinishing)])
 
         engine.release()
         await settle { self.inserter.inserted.count == 1 }
         XCTAssertEqual(inserter.inserted, ["First thought."])
+        // two presses, two records: the refusal does not end the sentence
+        // it was refused for.
+        XCTAssertEqual(outcomes, [.refused(.stillFinishing), .delivered])
     }
 
     /// long enough to be a hang: the key must not be wedged, so the old
@@ -416,6 +420,8 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(inserter.inserted, [])
         XCTAssertEqual(pills, [])
         XCTAssertEqual(m.state, .recording)
+        // the hung one is over; the new take is still in flight.
+        XCTAssertEqual(outcomes, [.droppedAsHung])
     }
 
     // MARK: - locked recording
