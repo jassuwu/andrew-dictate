@@ -1266,7 +1266,7 @@ final class UtteranceMachine {
                 // exactly zero), and it did ask.
                 if let held,
                    held > .zero,
-                   held < Duration.milliseconds(300) {
+                   held < Self.brushLimit {
                     guard generation == pipelineGeneration,
                           state == .transcribing else {
                         return
