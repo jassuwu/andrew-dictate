@@ -29,6 +29,8 @@ export type Sources = {
    * when counting is off. it may throw, and the answer goes out regardless.
    */
   count?: (field: string) => Promise<void>;
+  /** where a count that failed is mentioned: the error's message, nothing of the request. */
+  report?: (message: string) => void;
 };
 
 /**
@@ -38,7 +40,11 @@ export type Sources = {
 export async function answer(url: URL, sources: Sources): Promise<Response> {
   const [tag] = await Promise.all([
     settled(sources.latestTag, null),
-    settled(async () => sources.count?.(versionField(url.searchParams.get("version"))), undefined),
+    settled(
+      async () => sources.count?.(versionField(url.searchParams.get("version"))),
+      undefined,
+      (error) => sources.report?.(`check-in not counted: ${error instanceof Error ? error.message : error}`),
+    ),
   ]);
 
   const version = tag?.replace(/^v/i, "");
@@ -49,10 +55,19 @@ export async function answer(url: URL, sources: Sources): Promise<Response> {
 }
 
 /** a failed side of the request is no reason to fail the other. */
-async function settled<T>(work: () => Promise<T>, fallback: T): Promise<T> {
+async function settled<T>(
+  work: () => Promise<T>,
+  fallback: T,
+  onError?: (error: unknown) => void,
+): Promise<T> {
   try {
     return await work();
-  } catch {
+  } catch (error) {
+    try {
+      onError?.(error);
+    } catch {
+      // reporting is no more allowed to fail the answer than counting is.
+    }
     return fallback;
   }
 }
@@ -243,6 +258,7 @@ export function createHandler(deps: Deps): (request: Request) => Promise<Respons
     return answer(new URL(request.url), {
       latestTag,
       count: store ? checkInCounter(store, deps.now) : undefined,
+      report: (message) => console.error(message),
     });
   };
 }

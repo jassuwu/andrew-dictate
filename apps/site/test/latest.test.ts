@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   answer,
   cachedTag,
@@ -217,6 +217,20 @@ describe("counting a check", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ latest: "0.9.5" });
     expect(writes).toHaveLength(0);
+  });
+
+  // a token that was rotated would otherwise mean an empty table and no clue.
+  test("a store that fails is reported in the logs, by its error alone", async () => {
+    const { store } = fakeStore(new Error("store answered 401"));
+    const reported: string[] = [];
+
+    await answer(url, {
+      latestTag: newest,
+      count: checkInCounter(store, () => noon),
+      report: (message) => reported.push(message),
+    });
+
+    expect(reported).toEqual(["check-in not counted: store answered 401"]);
   });
 
   test("no counter configured is no counting, and the same answer", async () => {
@@ -487,11 +501,14 @@ describe("the handler", () => {
   test("a store that is down does not cost the app its answer", async () => {
     const internet = fakeInternet({ upstashDown: true });
     const handle = createHandler({ env: counting, fetch: internet.fetch, now: () => 0 });
+    const logged = spyOn(console, "error").mockImplementation(() => {});
 
     const response = await handle(checkRequest("0.9.4"));
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ latest: "0.9.5" });
+    expect(logged).toHaveBeenCalledWith("check-in not counted: upstash is unreachable");
+    logged.mockRestore();
   });
 
   // only the app's GET is a check. a HEAD from a link checker is not.
