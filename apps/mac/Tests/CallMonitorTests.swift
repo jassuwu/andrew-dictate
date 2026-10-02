@@ -118,7 +118,10 @@ final class CallMonitorTests: XCTestCase {
         await run(until: { !suggestions.isEmpty })
 
         XCTAssertEqual(suggestions, [.stop("zoom")])
-        XCTAssertEqual(clock.now - ended, .seconds(30), accuracy: .seconds(2))
+        // thirty seconds from the first read that found nobody, which is up
+        // to one read after the app let go, and seen on the next read after
+        // that: between thirty and thirty-four.
+        XCTAssertEqual(clock.now - ended, .seconds(32), accuracy: .seconds(2))
         await run(until: { false }, for: .seconds(120))
         XCTAssertEqual(suggestions, [.stop("zoom")])
         monitor.stop()
@@ -137,6 +140,9 @@ final class CallMonitorTests: XCTestCase {
         await run(until: { monitor.currentCall == "zoom" })
 
         mic.say(false)
+        // the change lands on the main actor a turn later; a read already
+        // under way when it does is the last one.
+        for _ in 0..<10 { await Task.yield() }
         let readsWhenFreed = reads
         await run(until: { monitor.currentCall == nil })
         XCTAssertNil(monitor.unrecordedCall)
