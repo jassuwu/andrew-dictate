@@ -674,6 +674,53 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(outcomes, [.micNotResponding, .delivered])
     }
 
+    /// a stop that never comes back loses the take, says so, and drops the
+    /// mic; its late answer goes nowhere.
+    func testARecordingThatNeverStopsIsLostAndDropped() async {
+        let m = machine()
+        mic.holdsStop = true
+        m.keyDown()
+        await pass(.seconds(1))
+        m.keyUp()
+        XCTAssertTrue(mic.isStopping)
+        XCTAssertEqual(m.state, .recording)
+
+        await pass(.milliseconds(1_500))
+        await settle { !self.pills.isEmpty }
+
+        XCTAssertEqual(pills, [Pill("recording was lost", 1.6)])
+        XCTAssertTrue(events.contains(.microphoneDropped))
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(states.last, .init(.idle, fast: true))
+        XCTAssertEqual(outcomes, [.recordingLost])
+
+        mic.finishStop()
+        await settle()
+        XCTAssertEqual(engine.heard, [])
+        XCTAssertEqual(outcomes, [.recordingLost])
+    }
+
+    /// pressing again while the last take's mic is still stopping: that
+    /// sentence is on its way, and the key says why it is deaf.
+    func testAPressWhileTheMicIsStillStoppingIsRefusedOutLoud() async {
+        let m = machine()
+        engine.reply = .success("first thought")
+        mic.holdsStop = true
+        await hold(m, for: .seconds(1))
+
+        m.keyDown()
+        await settle { !self.pills.isEmpty }
+
+        XCTAssertEqual(pills, [Pill("still finishing the last one", 1.4)])
+        XCTAssertEqual(outcomes, [.refused(.stillFinishing)])
+        XCTAssertEqual(mic.starts, 1)
+
+        mic.finishStop()
+        await settle { self.inserter.inserted.count == 1 }
+        XCTAssertEqual(inserter.inserted, ["First thought."])
+        XCTAssertEqual(outcomes, [.refused(.stillFinishing), .delivered])
+    }
+
     // MARK: - the mac underneath
 
     /// today's behaviour, which ticket 06 reverses: sleep or the lock ends
@@ -786,7 +833,8 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(presses.first?.mic, MicDescription(name: "AirPods Pro", transport: .bluetooth))
     }
 
-    /// they spoke and there is nothing to show for it, so it says so.
+    /// they spoke and there is nothing to show for it, so it says so, and
+    /// the next press opens a fresh mic.
     func testARecordingThatWillNotStopSaysItWasLost() async {
         let m = machine()
         mic.failsToStop = true
@@ -795,6 +843,8 @@ final class UtteranceMachineTests: XCTestCase {
         await settle { !self.pills.isEmpty }
 
         XCTAssertEqual(pills, [Pill("recording was lost", 1.6)])
+        // a mic that would not stop is not trusted with the next take.
+        XCTAssertTrue(events.contains(.microphoneDropped))
         XCTAssertEqual(states.last, .init(.idle, fast: true))
         XCTAssertEqual(chimes, [.start])
         XCTAssertEqual(engine.heard, [])

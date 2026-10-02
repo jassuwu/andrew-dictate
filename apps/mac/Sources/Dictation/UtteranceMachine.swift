@@ -142,6 +142,7 @@ final class UtteranceMachine {
     /// it has to meet.
     private var pendingStart: UInt64?
     private var startDeadline: Task<Void, Never>?
+    private var stopDeadline: Task<Void, Never>?
     /// a double-tapped key leaves nothing to hold, so nothing to feel. the
     /// HUD has to carry the difference for as long as the capture runs.
     private var isRecordingLocked = false
@@ -199,6 +200,17 @@ final class UtteranceMachine {
     // MARK: - the key
 
     func keyDown() {
+        // a take already running is the same hold arriving twice, not a new
+        // press, and the mic it holds is not the app's to hand out again.
+        // one whose mic is still being stopped is the last sentence on its
+        // way to the page, and the key says why it is deaf.
+        if state == .recording {
+            if capture?.isEnding == true {
+                flashNotice("still finishing the last one", duration: 1.4)
+                refuse(.stillFinishing)
+            }
+            return
+        }
         capForcedEnd = false
         // the pill still says the last one failed and the samples are still
         // here: this press means "that one", not "a new one". keyUp's state
@@ -228,12 +240,6 @@ final class UtteranceMachine {
                 setState(.idle)
                 endPress(.droppedAsHung)
             }
-        }
-
-        // a take already running is the same hold arriving twice, not a new
-        // press, and the mic it holds is not the app's to hand out again.
-        if state == .recording {
-            return
         }
 
         let microphone: any MicCapture
@@ -480,6 +486,14 @@ final class UtteranceMachine {
         self.capture = capture
         let id = capture.id
         let microphone = capture.microphone
+        stopDeadline?.cancel()
+        stopDeadline = Task { @MainActor [weak self, clock] in
+            try? await clock.sleep(for: Self.microphoneDeadline)
+            guard !Task.isCancelled else {
+                return
+            }
+            self?.microphoneStopTimedOut(id)
+        }
         Task.immediate { @MainActor [weak self] in
             do {
                 let samples = try await microphone.stop()
@@ -492,11 +506,10 @@ final class UtteranceMachine {
 
     private func microphoneStopped(_ id: UInt64, samples: [Float]) {
         // thrown away while it stopped: what it heard goes nowhere.
-        guard capture?.id == id else {
+        guard stopAnswered(id) else {
             return
         }
 
-        capture = nil
         press?.samplesReady = clock.now
         press?.samples = samples
         // taken now rather than at key-down: the window worth protecting
@@ -515,21 +528,49 @@ final class UtteranceMachine {
     }
 
     private func microphoneFailedToStop(_ id: UInt64, error: any Error) {
-        guard capture?.id == id else {
+        guard stopAnswered(id) else {
             return
         }
 
-        capture = nil
         audioLogger.error(
             """
             audio recording failed to stop: \
             \(error.localizedDescription, privacy: .public)
             """
         )
+        loseRecording()
+    }
+
+    /// the stop answered. false when the take was thrown away while it
+    /// stopped, or the deadline got there first: what it heard goes nowhere.
+    private func stopAnswered(_ id: UInt64) -> Bool {
+        guard let capture,
+              capture.id == id,
+              capture.phase == .stopping else {
+            return false
+        }
+        self.capture = nil
+        stopDeadline?.cancel()
+        stopDeadline = nil
+        return true
+    }
+
+    private func microphoneStopTimedOut(_ id: UInt64) {
+        guard stopAnswered(id) else {
+            return
+        }
+
+        audioLogger.error("the microphone didn't stop in time; dropping it")
+        loseRecording()
+    }
+
+    /// they spoke and there is nothing to show for it. say so, and drop the
+    /// mic: one that would not stop is not trusted with the next take.
+    private func loseRecording() {
         activeFocusAnchor = nil
         activeTimeline = nil
+        emit(.microphoneDropped)
         setState(.idle, fastHUDDismiss: true)
-        // they spoke and there is nothing to show for it. say so.
         flashNotice("recording was lost")
         endPress(.recordingLost)
     }
@@ -1061,6 +1102,8 @@ final class UtteranceMachine {
     private func cancelCapture() {
         capture?.microphone.cancel()
         capture = nil
+        stopDeadline?.cancel()
+        stopDeadline = nil
     }
 
     // MARK: - effects
