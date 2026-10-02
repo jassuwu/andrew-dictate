@@ -42,9 +42,9 @@ brew upgrade --cask jassuwu/tap/andrew-dictate
 
 that's it — you don't run the `xattr` line again. every release is signed with the same key, so homebrew carries your approval to the new version and your microphone and accessibility grants survive.
 
-you don't have to remember to look. when there's a new version, the menu says `update to 0.9.5`, and clicking it copies that brew line for you. if you installed from the dmg, it opens the releases page instead.
+you don't have to remember to look. when there's a new version, the menu says `update to 0.9.5`. click it and the app runs that brew line for you. the line reads `updating…` while brew works, then `restart to finish`, and clicking that brings andrew back as the new version. if brew can't do it, the line says `couldn't update — command copied`. paste it into a terminal and brew will tell you what went wrong. if you installed from the dmg, clicking opens the releases page instead.
 
-brew swaps the app on disk, it can't restart it for you: quit andrew from the menu bar and open it again to be running the new one. the about window notices, and offers you the restart.
+if you run the brew line yourself, brew swaps the app on disk but can't restart it for you. quit andrew from the menu bar and open it again to be running the new one. the about window notices, and offers you the restart.
 
 ## where your words go
 
