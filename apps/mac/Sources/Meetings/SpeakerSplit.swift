@@ -25,7 +25,7 @@ final class SpeakerSplit {
 
     /// How long a stop waits for the last pieces. They take a second or two
     /// (ticket 23's bench); this is for a diarizer that never answers.
-    static let patience = Duration.seconds(10)
+    nonisolated static let patience = Duration.seconds(10)
 
     private let hearing: (any SpeakerHearing)?
     private var pieces: SpeakerPieces
@@ -46,19 +46,20 @@ final class SpeakerSplit {
     private let logger = Logger(subsystem: AppIdentity.loggingSubsystem, category: "diarizer")
 
     /// With no hearing — the diarizer's models are not on this mac — it
-    /// keeps nothing and changes nothing.
+    /// keeps nothing and changes nothing. The pieces are as long as the
+    /// hearing says, unless they are given.
     init(
         _ hearing: (any SpeakerHearing)?,
-        pieces: SpeakerPieces = SpeakerPieces(),
+        pieces: SpeakerPieces? = nil,
         patience: Duration = SpeakerSplit.patience,
         now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now }
     ) {
         self.hearing = hearing
-        self.pieces = pieces
+        self.pieces = pieces ?? SpeakerPieces(length: hearing?.pieceLength ?? SpeakerPieces.length)
         self.patience = patience
         self.now = now
         if hearing != nil {
-            filling.reserveCapacity(pieces.length)
+            filling.reserveCapacity(self.pieces.length)
         }
     }
 

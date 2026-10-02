@@ -159,6 +159,9 @@ extension MeetingDiarizer {
 
 /// One meeting's far side as a diarizer hears it, a piece at a time.
 protocol SpeakerHearing: Sendable {
+    /// How much far side a piece is, in samples: the diarizer's to say, as
+    /// it hears in windows of its own and a piece should end on one.
+    var pieceLength: Int { get }
     /// One piece of the far side, `at` into the spool, after the piece
     /// before it. Throws when this piece could not be heard; the next one
     /// still can be.
@@ -167,6 +170,12 @@ protocol SpeakerHearing: Sendable {
     /// answers from what it has: a piece still being heard is not waited
     /// for, so a stop that gave up on one is not held up by it here.
     func split(_ turns: [MeetingTurn]) async -> [MeetingTurn]
+}
+
+extension SpeakerHearing {
+    var pieceLength: Int {
+        SpeakerPieces.length
+    }
 }
 
 /// The pieces, kept, and handed to a diarizer that hears only whole

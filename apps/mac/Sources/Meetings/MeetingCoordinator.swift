@@ -647,8 +647,9 @@ final class MeetingCoordinator: ObservableObject {
             sweepPeak = max(peak, chunk.themRMS)
         }
         #endif
-        if let audioFile = meeting.audioFile {
-            try? await audioFile.append(chunk)
+        if let audioFile = meeting.audioFile, (try? await audioFile.append(chunk)) != nil {
+            // what the spool kept, the speaker split hears, as it goes.
+            speakers(of: meeting).hear(chunk)
         }
         // stopped while the chunk was being written: everything below is the
         // meeting being recorded, and this one no longer is.
@@ -934,6 +935,9 @@ final class MeetingCoordinator: ObservableObject {
         }
 
         onEvent?(.writingItOut)
+        // no more audio is coming: the speaker split's last pieces are heard
+        // while the transcriber finishes its own.
+        meeting.speakers?.close()
         let live = Reading(
             turns: await meeting.transcriber?.finish() ?? [],
             tally: await meeting.transcriber?.decodeTally())
@@ -949,7 +953,7 @@ final class MeetingCoordinator: ObservableObject {
             covered, recording: recording, handle: handle,
             app: meeting.app, started: meeting.started, model: prefs.model,
             folder: prefs.folder, keepAudio: prefs.keepAudio, recovered: false,
-            notes: meeting.notes)
+            notes: meeting.notes, speakers: meeting.speakers)
         if let label = saved?.keep {
             await keep(handle, as: label)
         }
@@ -1066,7 +1070,8 @@ final class MeetingCoordinator: ObservableObject {
 
     /// turns → diarize → write → let the spool go, or mark it to be kept.
     /// Returns what comes after the file, or nil when it could not be
-    /// written.
+    /// written. `speakers` is the split that heard the meeting as it went;
+    /// without one, the spool is heard now.
     private func save(
         _ covered: Covered,
         recording: MeetingSession.Recording,
@@ -1077,14 +1082,13 @@ final class MeetingCoordinator: ObservableObject {
         folder: URL,
         keepAudio: KeepMeetingAudio,
         recovered: Bool,
-        notes: MeetingRecord.Notes = .init()
+        notes: MeetingRecord.Notes = .init(),
+        speakers: SpeakerSplit? = nil
     ) async -> Saved? {
         let turns = covered.reading.turns
         let tally = covered.reading.tally
-        let them = (try? SpoolAudioFile.read(handle.audioURL))?.them ?? []
-        let split = them.isEmpty
-            ? turns
-            : await splitSpeakers(in: turns, them: them, gaps: recording.gaps)
+        let (split, _) = await splitSpeakers(
+            in: turns, heardBy: speakers, spool: handle.audioURL, gaps: recording.gaps)
 
         let thin = covered.result == .thin
         let transcript = MeetingTranscript(
@@ -1174,16 +1178,38 @@ final class MeetingCoordinator: ObservableObject {
         }
     }
 
-    /// The diarizer hears the spool, so it is asked about the turns on the
-    /// spool's clock, and the file keeps the stamps the meeting actually
-    /// had (`SpoolClock`).
+    /// The meeting's speaker split, begun with the first audio the spool
+    /// keeps. Nothing waits on it: it hears the far side a piece at a time
+    /// off the main actor.
+    private func speakers(of meeting: Meeting) -> SpeakerSplit {
+        if let speakers = meeting.speakers {
+            return speakers
+        }
+        let speakers = SpeakerSplit(diarizer.hearing(), now: now)
+        meeting.speakers = speakers
+        return speakers
+    }
+
+    /// The far side's speakers, from the split that heard the meeting as it
+    /// went — or, for a spool nothing heard (one a crash left), from one
+    /// that hears it now, a piece at a time. The split hears the spool, so
+    /// it is asked about the turns on the spool's clock, and the file keeps
+    /// the stamps the meeting actually had (`SpoolClock`).
     private func splitSpeakers(
         in turns: [MeetingTurn],
-        them: [Float],
+        heardBy speakers: SpeakerSplit?,
+        spool url: URL,
         gaps: [MeetingSession.Gap]
-    ) async -> [MeetingTurn] {
-        let split = await diarizer.split(them: them, turns: SpoolClock.onTheSpool(turns, gaps: gaps))
-        return SpoolClock.speakers(of: split, onto: turns)
+    ) async -> (turns: [MeetingTurn], report: SpeakerSplit.Report?) {
+        let split: SpeakerSplit
+        if let speakers {
+            split = speakers
+        } else {
+            split = SpeakerSplit(diarizer.hearing(), now: now)
+            await split.hear(spool: url)
+        }
+        let (found, report) = await split.split(SpoolClock.onTheSpool(turns, gaps: gaps))
+        return (SpoolClock.speakers(of: found, onto: turns), report)
     }
 
     private func recover(
@@ -1415,6 +1441,9 @@ extension MeetingCoordinator {
         /// Set once the spool is open, and nil for good if it never was.
         var handle: MeetingSpool.Handle?
         var audioFile: SpoolAudioFile?
+        /// Its far side's speakers, heard a piece at a time as the spool
+        /// keeps it. Begun with the first audio kept.
+        var speakers: SpeakerSplit?
         var transcriber: (any MeetingTranscriber)?
         /// Opens the tap, then reads it until the meeting stops.
         var capture: Task<Void, Never>?
@@ -1623,9 +1652,8 @@ extension MeetingCoordinator {
             tally: await transcriber.decodeTally())
         // checked like any reading, and not read again: this was.
         let covered = Covered(checking: reading, farSideLoud: await farSideLoud(at: url))
-        let split = audio.them.isEmpty
-            ? reading.turns
-            : await splitSpeakers(in: reading.turns, them: audio.them, gaps: header.gaps)
+        let (split, _) = await splitSpeakers(
+            in: reading.turns, heardBy: nil, spool: url, gaps: header.gaps)
         attempt.turns = split
         attempt.covered = covered
 
