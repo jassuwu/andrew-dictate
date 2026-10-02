@@ -846,6 +846,75 @@ final class UpdateCheckTests: XCTestCase {
         XCTAssertEqual(world.relaunches, 0)
     }
 
+    /// a brew stopped at ten minutes is a failure like any other.
+    @MainActor
+    func testATimedOutUpgradeIsAFailure() async {
+        let world = HandOffWorld()
+        world.onDisk = "0.9.5"
+        world.runner.result = CommandResult(
+            ending: .timedOut,
+            stdout: "",
+            stderr: "==> Downloading https://github.com/…/AndrewDictate-0.9.5.dmg\n"
+        )
+
+        await world.handOff.click(offering: brewLine)?.value
+
+        XCTAssertEqual(world.handOff.state(offering: brewLine), .failedCopied)
+        XCTAssertEqual(
+            world.pasteboard.string(forType: .string),
+            "brew upgrade --cask jassuwu/tap/andrew-dictate"
+        )
+        XCTAssertEqual(
+            world.logged,
+            ["brew upgrade was stopped after 600 s: "
+                + "==> Downloading https://github.com/…/AndrewDictate-0.9.5.dmg"]
+        )
+    }
+
+    /// brew said yes and upgraded nothing — a tap it had not refreshed,
+    /// say. /Applications still holding this version is the tell.
+    @MainActor
+    func testACleanExitThatLeftTheOldVersionIsAFailure() async {
+        let world = HandOffWorld()
+        world.onDisk = "0.9.4"
+        world.runner.result = CommandResult(
+            ending: .exited(0),
+            stdout: "",
+            stderr: "Warning: Not upgrading andrew-dictate, the latest version is already installed\n"
+        )
+
+        await world.handOff.click(offering: brewLine)?.value
+
+        XCTAssertEqual(world.handOff.state(offering: brewLine), .failedCopied)
+        XCTAssertEqual(
+            world.pasteboard.string(forType: .string),
+            "brew upgrade --cask jassuwu/tap/andrew-dictate"
+        )
+        XCTAssertEqual(
+            world.logged,
+            ["brew upgrade exited 0, but /Applications still holds 0.9.4: "
+                + "Warning: Not upgrading andrew-dictate, the latest version is already installed"]
+        )
+    }
+
+    @MainActor
+    func testABrewThatCouldNotStartIsAFailure() async {
+        let world = HandOffWorld()
+        world.runner.result = CommandResult(
+            ending: .couldNotStart,
+            stdout: "",
+            stderr: ""
+        )
+
+        await world.handOff.click(offering: brewLine)?.value
+
+        XCTAssertEqual(world.handOff.state(offering: brewLine), .failedCopied)
+        XCTAssertEqual(
+            world.logged,
+            ["brew upgrade could not start /opt/homebrew/bin/brew"]
+        )
+    }
+
     /// the browser opening is the confirmation; the clipboard is left
     /// alone and the line stays as it was.
     @MainActor

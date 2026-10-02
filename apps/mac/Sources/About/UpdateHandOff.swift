@@ -122,20 +122,33 @@ final class UpdateHandOff: ObservableObject {
             running: runningVersion
         )
         if finished == .failedCopied {
-            logFailure(why(result))
+            logFailure(why(result, brew: brew, onDisk: onDisk))
             copy(UpdateCheck.upgradeCommand)
         }
         progress = finished
     }
 
-    private func why(_ result: CommandResult) -> String {
+    /// one line for the log: how brew ended, then what brew said last.
+    private func why(
+        _ result: CommandResult,
+        brew: URL,
+        onDisk: String?
+    ) -> String {
         let reason = BrewUpgrade.reason(inStderr: result.stderr)
             ?? "nothing on stderr"
         switch result.ending {
+        case .exited(0):
+            let holds = onDisk ?? "no readable version"
+            return "brew upgrade exited 0, but /Applications still holds "
+                + "\(holds): \(reason)"
         case let .exited(status):
             return "brew upgrade exited \(status): \(reason)"
-        default:
-            return "brew upgrade failed: \(reason)"
+        case .timedOut:
+            return "brew upgrade was stopped after "
+                + "\(Int(BrewUpgrade.timeout)) s: \(reason)"
+        case .couldNotStart:
+            return "brew upgrade could not start "
+                + brew.path(percentEncoded: false)
         }
     }
 
