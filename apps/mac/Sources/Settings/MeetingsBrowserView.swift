@@ -62,6 +62,8 @@ struct MeetingsBrowserView: View {
                             MeetingRow(
                                 meeting: meeting,
                                 audioNote: viewModel.audioNote(for: meeting),
+                                again: viewModel.again(for: meeting),
+                                transcribeAgain: { viewModel.transcribeAgain(meeting, with: $0) },
                                 deleteAudio: { viewModel.deleteAudio(of: meeting) },
                                 delete: { viewModel.delete(meeting) }
                             )
@@ -91,6 +93,9 @@ private struct MeetingRow: View {
     let meeting: MeetingSummary
     /// `audio until fri 14:02`, `audio kept`, or nil when there is none.
     let audioNote: String?
+    /// `transcribe again with ▸`, or why it is off, or that it is running.
+    let again: MeetingsListModel.Again
+    let transcribeAgain: (MeetingModel) -> Void
     let deleteAudio: () -> Void
     let delete: () -> Void
 
@@ -129,6 +134,15 @@ private struct MeetingRow: View {
                         .foregroundStyle(BrandUI.textSecondary)
                         .lineLimit(1)
                 }
+
+                // a rerun takes minutes, and nothing else on the row says
+                // it is happening.
+                if again == .running {
+                    separator
+                    Text("transcribing again…")
+                        .foregroundStyle(BrandUI.textSecondary)
+                        .lineLimit(1)
+                }
             }
             .font(BrandUI.bodyFont)
 
@@ -144,6 +158,7 @@ private struct MeetingRow: View {
                         [meeting.fileURL]
                     )
                 }
+                againAction
                 if audioNote != nil {
                     Button("delete audio now", action: deleteAudio)
                         .help("the transcript stays")
@@ -158,6 +173,31 @@ private struct MeetingRow: View {
         .contentShape(Rectangle())
         .onTapGesture(count: 2, perform: open)
         .onHover { isHovering = $0 }
+    }
+
+    /// while the audio is kept, the models to read it again with. off, it
+    /// says why beside itself, so the row never has a dead button.
+    @ViewBuilder
+    private var againAction: some View {
+        switch again {
+        case .none:
+            EmptyView()
+        case .offer(let models):
+            Menu("transcribe again with") {
+                ForEach(models, id: \.self) { model in
+                    Button(model.shortName) { transcribeAgain(model) }
+                }
+            }
+            .help("read the kept audio again; the transcript is replaced")
+        case .wait(let why):
+            Text(why)
+                .foregroundStyle(BrandUI.textSecondary)
+            Menu("transcribe again with") {}
+                .disabled(true)
+        case .running:
+            Menu("transcribe again with") {}
+                .disabled(true)
+        }
     }
 
     /// the file *is* the artifact (ADR 0040), so this hands it to whatever
