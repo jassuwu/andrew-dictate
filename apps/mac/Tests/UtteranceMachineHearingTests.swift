@@ -273,6 +273,25 @@ final class UtteranceMachineHearingTests: XCTestCase {
         XCTAssertEqual(outcomes, [.noAudio])
     }
 
+    /// a key let go inside a brush asked no question: a sliver is all a
+    /// working mic could give it, so it still ends in silence.
+    func testABrushIsNotTheMicsFault() async {
+        let m = machine()
+        mic.samples = []
+        engine.reply = .success("")
+
+        m.keyDown()
+        await pass(.milliseconds(200))
+        m.keyUp()
+        await settle { m.state == .idle }
+        await settle()
+
+        XCTAssertEqual(pills, [])
+        XCTAssertFalse(events.contains(.microphoneDropped))
+        XCTAssertEqual(states.last, .init(.idle, fast: true))
+        XCTAssertEqual(outcomes, [.brushed])
+    }
+
     // MARK: - helpers
 
     private var presses: [PressRecord] {

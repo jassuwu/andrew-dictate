@@ -139,6 +139,9 @@ final class UtteranceMachine {
     /// the least a take must hand back to be one: a tenth of a second at
     /// 16 kHz.
     static let usableSamples = 1_600
+    /// a key let go inside this asked no question: the pipeline's own
+    /// threshold for an empty transcript that ends in silence.
+    private static let brushLimit = Duration.milliseconds(300)
     private let dictionary: @MainActor () -> [DictionaryEntry]
     private let ownBundleIdentifier: String?
     /// how long the lamp's afterglow runs (`HUDWaveMotion.coolDuration`).
@@ -661,7 +664,14 @@ final class UtteranceMachine {
             endPress(.heardNothing)
             return
         }
-        if press?.micChanged != true, Self.sentNoSound(samples) {
+        // a brush gets a sliver from any mic, so only a held key's take
+        // is judged; a brush goes on to end in silence, as it always has.
+        let brushed = activeTimeline?.heldDuration.map {
+            $0 < Self.brushLimit
+        } ?? false
+        if press?.micChanged != true,
+           !brushed,
+           Self.sentNoSound(samples) {
             audioLogger.error("the microphone sent only silence; dropping it")
             endWithNoSound(from: press?.mic)
             return
