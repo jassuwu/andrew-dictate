@@ -362,13 +362,20 @@ private final class CaptureEngine: @unchecked Sendable {
         levelStorage.reset()
     }
 
-    /// built ahead of a press, and with pre-roll on, listening.
+    /// built ahead of a press, and with pre-roll on, listening. built
+    /// means the engine made, the default mic bound and the graph prepared
+    /// — the audio unit initialized, no I/O started — so with pre-roll off
+    /// the mic is not live and its indicator stays dark. a mic not yet
+    /// granted is left alone entirely: onboarding is the only place that
+    /// asks, and the grant prepares it.
     func prepare() {
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
+            return
+        }
         do {
             let (engine, _) = try built()
             guard preRollEnabled,
-                  !engine.isRunning,
-                  AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
+                  !engine.isRunning else {
                 return
             }
             try engine.start()
