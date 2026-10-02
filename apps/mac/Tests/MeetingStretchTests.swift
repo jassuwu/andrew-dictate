@@ -539,6 +539,68 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(lines, ["[00:00:01] them: are we all here"])
     }
 
+    /// Talking over them is not their voice coming back: yours is louder at
+    /// the mic than their copy, and rises and falls in its own time, with
+    /// theirs a fifth as loud underneath it. The mic has theirs from 1.38 s
+    /// and yours from 2.3, one stretch from 1.08 s.
+    func testYouTalkingOverTheFarSideAreKept() async throws {
+        let transcriber = stretches(threshold: Self.keen)
+        let c = coordinator(transcriber)
+        c.start(tapping: zoom)
+        await source.awaitStart()
+
+        let theirs = them("are we all here", from: 1.3, to: 4.3, voice: .theirs)
+        await play([
+            theirs, theirs.asBleed(),
+            you("no wait that is wrong", from: 2.3, to: 4.3, voice: .yours),
+        ], through: 6.0, on: c)
+        await waitForStretches(transcriber, 2)
+        await waitFor { c.liveLines.count == 2 }
+
+        XCTAssertEqual(live(c), [
+            "them 1.0 are we all here",
+            "you 1.1 no wait that is wrong",
+        ])
+        XCTAssertEqual(handed(), ["are we all here 52800", "no wait that is wrong 52800"])
+        let tally = await transcriber.tally
+        XCTAssertEqual(tally, StretchTally(decodedYou: 1, decodedThem: 1))
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, [
+            "[00:00:01] them: are we all here",
+            "[00:00:01] you: no wait that is wrong",
+        ])
+    }
+
+    /// They talk, and you say something else in a pause of theirs. The
+    /// copy of what they said is let go; what you said is not, because the
+    /// far side was quiet while you said it.
+    func testWhatYouSayInAPauseOfTheirsIsKept() async throws {
+        let transcriber = stretches(threshold: Self.keen)
+        let c = coordinator(transcriber)
+        c.start(tapping: zoom)
+        await source.awaitStart()
+
+        let theirs = them("are we all here", from: 1.3, to: 2.5, voice: .theirs)
+        await play([
+            theirs, theirs.asBleed(),
+            you("wait one second", from: 3.3, to: 4.3, voice: .yours),
+        ], through: 6.0, on: c)
+        await waitForStretches(transcriber, 3)
+        await waitFor { c.liveLines.count == 2 }
+
+        XCTAssertEqual(live(c), ["them 1.0 are we all here", "you 3.0 wait one second"])
+        XCTAssertEqual(handed(), ["are we all here 24000", "wait one second 20800"])
+        let tally = await transcriber.tally
+        XCTAssertEqual(tally, StretchTally(decodedYou: 1, decodedThem: 1, bleed: 1))
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, [
+            "[00:00:01] them: are we all here",
+            "[00:00:03] you: wait one second",
+        ])
+    }
+
     /// "Yes", said over the far side: 0.16 s of tone and 0.3 s of pre-roll,
     /// 0.46 s in all, nine frames to compare. Nine frames of loudness agree
     /// by chance as easily as by being a copy — this one agrees at 0.84 with
