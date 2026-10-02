@@ -686,6 +686,19 @@ final class UpdateCheckTests: XCTestCase {
         )
     }
 
+    /// brew says why last, then trails blank lines behind it.
+    func testTheReasonIsBrewsLastNonEmptyStderrLine() {
+        XCTAssertEqual(
+            BrewUpgrade.reason(
+                inStderr: "==> Upgrading 1 outdated package:\n"
+                    + "Error: Download failed on Cask 'andrew-dictate'\n\n   \n"
+            ),
+            "Error: Download failed on Cask 'andrew-dictate'"
+        )
+        XCTAssertNil(BrewUpgrade.reason(inStderr: ""))
+        XCTAssertNil(BrewUpgrade.reason(inStderr: "\n \n"))
+    }
+
     /// a run's end only moves a line that is waiting on it.
     func testOnlyAnUpdatingLineIsFinished() {
         for state: UpdateOffer.LineState in [.available(brewLine), .restartToFinish, .failedCopied] {

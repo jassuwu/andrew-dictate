@@ -61,4 +61,13 @@ enum BrewUpgrade {
             timeout: timeout
         )
     }
+
+    /// what gets logged when it fails: brew says why last. it is brew's
+    /// words about a cask, never the user's.
+    static func reason(inStderr stderr: String) -> String? {
+        stderr
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last { !$0.isEmpty }
+    }
 }
