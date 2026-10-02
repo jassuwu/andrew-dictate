@@ -315,8 +315,7 @@ final class UtteranceMachine {
                 return
             case .dropAndRestart:
                 invalidatePipeline()
-                setState(.idle)
-                endPress(.droppedAsHung)
+                endPressEarly(.droppedAsHung, fastHUDDismiss: false)
                 // the same evidence a timeout leaves.
                 emit(.engineSuspect)
             }
@@ -475,13 +474,8 @@ final class UtteranceMachine {
     /// fresh one. nothing is kept for a retry: there was nothing to hear,
     /// and pressing again records again.
     private func endWithNoSound(from mic: MicDescription?) {
-        setRecordingLocked(false)
-        activeFocusAnchor = nil
-        activeTimeline = nil
-        emit(.microphoneDropped)
-        setState(.idle, fastHUDDismiss: true)
+        endPressEarly(.noAudio, droppingMicrophone: true)
         flashFeedback(Self.noSound(from: mic))
-        endPress(.noAudio)
     }
 
     /// a working mic hands back at least a hiss, and a key held past a
@@ -580,16 +574,11 @@ final class UtteranceMachine {
         }
 
         audioLogger.error("the microphone didn't start in time; dropping it")
-        setRecordingLocked(false)
-        activeFocusAnchor = nil
-        activeTimeline = nil
         press?.mic = micTurn.microphone.deviceDescription
         // not cancelled: a mic that never answered is asked nothing more.
         self.micTurn = nil
-        emit(.microphoneDropped)
-        setState(.idle, fastHUDDismiss: true)
+        endPressEarly(.micNotResponding, droppingMicrophone: true)
         flashNotice("microphone isn't responding", duration: 2)
-        endPress(.micNotResponding)
     }
 
     /// a press thrown away while its mic was opening, and that mic then
@@ -619,26 +608,20 @@ final class UtteranceMachine {
             \(error.localizedDescription, privacy: .public)
             """
         )
-        setRecordingLocked(false)
-        activeFocusAnchor = nil
-        activeTimeline = nil
         // read before it is dropped: which mic refused is the evidence.
         press?.mic = micTurn.microphone.deviceDescription
         // the device may have been yanked between the check and the tap.
         // drop it so the next press rebuilds instead of retrying a corpse.
         cancelMicTurn()
-        emit(.microphoneDropped)
-        // the lamp was already up, so a failure takes it down fast.
-        setState(.idle, fastHUDDismiss: true)
         if case MicCaptureError.noInputDevice? = error as? MicCaptureError {
             // no mic at all is not one that refused. the next press looks
             // again: the headset may be back on by then.
+            endPressEarly(.refused(.noMicrophone), droppingMicrophone: true)
             flashNotice("no microphone available")
-            endPress(.refused(.noMicrophone))
             return
         }
+        endPressEarly(.couldNotStartRecording, droppingMicrophone: true)
         flashNotice("couldn't start recording")
-        endPress(.couldNotStartRecording)
     }
 
     func doubleTapped() {
@@ -749,11 +732,8 @@ final class UtteranceMachine {
         if press?.micChanged == true, samples.isEmpty {
             // the mic changed before it heard anything: the same answer as
             // any silence, without asking the engine about nothing.
-            activeFocusAnchor = nil
-            activeTimeline = nil
-            setState(.idle, fastHUDDismiss: true)
+            endPressEarly(.heardNothing)
             flashFeedback("heard nothing")
-            endPress(.heardNothing)
             return
         }
         // a brush gets a sliver from any mic, so only a held key's take
@@ -832,12 +812,8 @@ final class UtteranceMachine {
     /// they spoke and there is nothing to show for it. say so, and drop the
     /// mic: one that would not stop is not trusted with the next take.
     private func loseRecording() {
-        activeFocusAnchor = nil
-        activeTimeline = nil
-        emit(.microphoneDropped)
-        setState(.idle, fastHUDDismiss: true)
+        endPressEarly(.recordingLost, droppingMicrophone: true)
         flashNotice("recording was lost")
-        endPress(.recordingLost)
     }
 
     /// the hotkey's own cancel: a brush too short to be a hold, or a lock
@@ -852,12 +828,8 @@ final class UtteranceMachine {
         }
 
         cancelMicTurn()
-        setRecordingLocked(false)
-        activeFocusAnchor = nil
-        activeTimeline = nil
         // a brush of the key should read as a flicker, not a cut
-        setState(.idle, fastHUDDismiss: true)
-        endPress(.brushed)
+        endPressEarly(.brushed)
     }
 
     /// whether `esc` was ours to take: only while there is something to
@@ -983,11 +955,7 @@ final class UtteranceMachine {
         }
 
         cancelMicTurn()
-        setRecordingLocked(false)
-        activeFocusAnchor = nil
-        activeTimeline = nil
-        setState(.idle)
-        endPress(.abandoned)
+        endPressEarly(.abandoned, fastHUDDismiss: false)
     }
 
     /// the speech model is being taken away: whatever is in flight goes,
@@ -996,12 +964,8 @@ final class UtteranceMachine {
         invalidatePipeline()
         if state == .recording {
             cancelMicTurn()
-            setRecordingLocked(false)
-            activeFocusAnchor = nil
-            activeTimeline = nil
         }
-        setState(.idle)
-        endPress(.abandoned)
+        endPressEarly(.abandoned, fastHUDDismiss: false)
     }
 
     // MARK: - retry
@@ -1639,6 +1603,26 @@ final class UtteranceMachine {
                 engine: engineVersion?() ?? ""
             )
         ))
+    }
+
+    /// a press that ends short of the page, wherever it stood: the lock,
+    /// the standby anchor and the timeline go with it, the lamp settles —
+    /// fast unless asked otherwise, a failure or a brush is a flicker — and
+    /// the record leaves. a mic not trusted with the next press is dropped
+    /// on the way out. any pill is the caller's to say, after.
+    private func endPressEarly(
+        _ outcome: PressRecord.Outcome,
+        droppingMicrophone: Bool = false,
+        fastHUDDismiss: Bool = true
+    ) {
+        setRecordingLocked(false)
+        activeFocusAnchor = nil
+        activeTimeline = nil
+        if droppingMicrophone {
+            emit(.microphoneDropped)
+        }
+        setState(.idle, fastHUDDismiss: fastHUDDismiss)
+        endPress(outcome)
     }
 
     /// the one way a press ends: its record leaves once, and a second
