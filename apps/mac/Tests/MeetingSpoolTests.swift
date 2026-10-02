@@ -238,6 +238,26 @@ final class MeetingSpoolTests: XCTestCase {
         XCTAssertEqual(permissions(of: handle.manifestURL), 0o600)
     }
 
+    /// A manifest from a newer build, or one a disk damaged, is not ours to
+    /// overwrite: what it says may be the only record of the app and the
+    /// hour, so it stays beside the one that replaces it.
+    func testAManifestThatDidNotDecodeIsKeptBesideTheMinimalOneThatReplacesIt() throws {
+        let handle = try spool.begin(manifest())
+        try Data([7]).write(to: handle.audioURL)
+        try "from the future".write(to: handle.manifestURL, atomically: true, encoding: .utf8)
+        _ = spool.orphans()
+
+        let back = spool.bringBackSetAside()
+
+        XCTAssertEqual(back.map(\.manifest.app), ["meeting"])
+        XCTAssertEqual(
+            try String(
+                contentsOf: handle.folder.appendingPathComponent("manifest.unreadable.json"),
+                encoding: .utf8),
+            "from the future")
+        XCTAssertEqual(spool.orphans().map(\.handle), [handle])
+    }
+
     // MARK: -
 
     /// Where a set-aside spool's folder ends up.

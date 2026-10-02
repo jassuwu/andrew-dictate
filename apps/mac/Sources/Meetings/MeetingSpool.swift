@@ -157,9 +157,7 @@ struct MeetingSpool: Sendable {
             let aside = Handle(
                 folder: unreadableFolder.appendingPathComponent(name, isDirectory: true))
             let home = Handle(folder: root.appendingPathComponent(name, isDirectory: true))
-            var manifest = (try? Data(contentsOf: aside.manifestURL))
-                .flatMap { try? Self.decoder.decode(Manifest.self, from: $0) }
-                ?? minimalManifest(for: aside)
+            var manifest = manifestToTry(in: aside)
             manifest.attempts = nil
             guard let cleared = try? Self.encoder.encode(manifest),
                   (try? cleared.write(to: aside.manifestURL, options: .atomic)) != nil,
@@ -171,6 +169,21 @@ struct MeetingSpool: Sendable {
             back.append((home, manifest))
         }
         return back
+    }
+
+    /// The manifest as it reads, or a minimal one when it is gone or will
+    /// not. One that is there and will not read is not ours to overwrite:
+    /// it may be the only record of the app and the hour, so it is moved
+    /// beside the new one.
+    private func manifestToTry(in handle: Handle) -> Manifest {
+        if let data = try? Data(contentsOf: handle.manifestURL),
+           let manifest = try? Self.decoder.decode(Manifest.self, from: data) {
+            return manifest
+        }
+        try? FileManager.default.moveItem(
+            at: handle.manifestURL,
+            to: handle.folder.appendingPathComponent("manifest.unreadable.json"))
+        return minimalManifest(for: handle)
     }
 
     /// What a spool says about itself when its manifest is gone or will not
