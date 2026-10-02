@@ -131,9 +131,10 @@ final class LazyMeetings {
     // MARK: - calls (ADR 0047)
 
     /// starts listening for the mic being taken, so a call can be offered on
-    /// the pill. only for a mac that can record one: a meeting model on
-    /// disk. it costs a listener until somebody takes the mic. called again,
-    /// it is already listening.
+    /// the pill. only for a mac that can record one: the meeting model
+    /// settings chose, on disk. not any model — parakeet is on disk for
+    /// anyone who dictates with v3. it costs a listener until somebody takes
+    /// the mic. called again, it is already listening.
     func watchForCalls() {
         if let builtCallMonitor {
             builtCallMonitor.start()
@@ -148,13 +149,22 @@ final class LazyMeetings {
         built.start()
     }
 
+    /// the model settings chose is not on this mac: no call is offered that
+    /// `record` could not start. a watcher that was never built has nothing
+    /// to stop, and is not built to stop it.
+    func stopWatchingForCalls() {
+        builtCallMonitor?.stop()
+    }
+
     // MARK: - launch
 
-    /// what launch does about meetings, and all it does. `setUp` is a
-    /// meeting model on disk or a folder somebody chose: without either
-    /// there are no transcripts to repair and no banner from a past meeting
-    /// to answer. `watchesForCalls` is the model alone, because a call can
-    /// only be offered to a mac that can record it. a spool a crash left
+    /// what launch does about meetings, and all it does. `setUp` is the
+    /// meeting model settings chose, on disk, or a folder somebody chose:
+    /// without either there are no transcripts to repair and no banner from
+    /// a past meeting to answer. not just any model on disk: parakeet is
+    /// there for anyone who dictates with v3. `watchesForCalls` is the
+    /// chosen model alone, because a call can only be offered to a mac that
+    /// can record it. a spool a crash left
     /// behind is written out at every launch, but only a spool folder with
     /// something in it builds the coordinator to do it. the returned task is
     /// that recovery, or nil when there is none.

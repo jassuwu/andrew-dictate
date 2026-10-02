@@ -2426,19 +2426,36 @@ extension DictationCoordinator {
         // number is a guess, like the rest of MeetingThresholds.
         meetings.launch(
             setUp: hasMeetingsSetUp,
-            watchesForCalls: !installedMeetingModels.isEmpty,
+            watchesForCalls: chosenMeetingModelIsInstalled,
             transcripts: settings.meetingsFolder,
             spool: MeetingSpool(),
             recoveryDelay: .seconds(5),
             keptAudio: KeptAudio()
         )
+        // a model picked in settings starts the watch if it is on this mac,
+        // and stops it if it is not. a sink on a `@Published` runs before
+        // the new value is stored, so it reads the one it is handed.
+        settings.$meetingModel
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] model in
+                self?.watchForCallsIfSetUp(model)
+            }
+            .store(in: &settingsCancellables)
     }
 
-    /// a meeting model on disk, or a folder somebody chose. both are a
-    /// stat, so a mac that only dictates learns it has nothing to repair
-    /// without walking the transcripts folder.
+    /// the meeting model settings chose, on disk. not any meeting model:
+    /// parakeet is on disk for anyone who dictates with v3, and a mac that
+    /// only dictates is not set up for meetings.
+    private var chosenMeetingModelIsInstalled: Bool {
+        MeetingEngines.isInstalled(settings.meetingModel)
+    }
+
+    /// the chosen meeting model on disk, or a folder somebody chose. both
+    /// are a stat, so a mac that only dictates learns it has nothing to
+    /// repair without walking the transcripts folder.
     private var hasMeetingsSetUp: Bool {
-        !installedMeetingModels.isEmpty || settings.meetingsFolderWasChosen
+        chosenMeetingModelIsInstalled || settings.meetingsFolderWasChosen
     }
 
     /// the notifier's buttons. a nudge or a stop from a banner the last run
@@ -2470,10 +2487,16 @@ extension DictationCoordinator {
     }
 
     /// a meeting model arrived, from setup or from the first press of
-    /// record: from now on a call can be offered.
-    private func watchForCallsIfSetUp() {
-        guard !installedMeetingModels.isEmpty else { return }
-        meetings.watchForCalls()
+    /// record, or settings picked another: a call is offered only while
+    /// the chosen one is on this mac, so `record` can start what it offers.
+    /// a meeting that records keeps its watch, so the end of its call is
+    /// still asked about.
+    private func watchForCallsIfSetUp(_ model: MeetingModel? = nil) {
+        if MeetingEngines.isInstalled(model ?? settings.meetingModel) {
+            meetings.watchForCalls()
+        } else if !meetings.isRecording {
+            meetings.stopWatchingForCalls()
+        }
     }
 
     /// the coordinator's half of the wiring, run once, the moment it is

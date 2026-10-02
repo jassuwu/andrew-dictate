@@ -80,8 +80,9 @@ final class LazyMeetingsTests: XCTestCase {
         XCTAssertEqual(notifiersBuilt, 0)
     }
 
-    /// a model on disk or a chosen folder: the last run's banner still has
-    /// a delegate to click through to, and old transcripts get locked down.
+    /// the chosen meeting model on disk or a chosen folder: the last run's
+    /// banner still has a delegate to click through to, and old
+    /// transcripts get locked down.
     func testAMacSetUpForMeetingsGetsItsNotifierAndItsRepairAtLaunch() async throws {
         let transcript = try oldTranscript()
         let meetings = holder()
@@ -102,8 +103,8 @@ final class LazyMeetingsTests: XCTestCase {
         XCTAssertEqual(permissions(of: transcript), 0o600)
     }
 
-    /// a meeting model on disk: the app listens for the mic being taken,
-    /// and builds nothing else to do it.
+    /// the chosen meeting model on disk: the app listens for the mic being
+    /// taken, and builds nothing else to do it.
     func testAMacWithAMeetingModelWatchesForCalls() {
         let meetings = holder()
         var wired = 0
@@ -118,6 +119,31 @@ final class LazyMeetingsTests: XCTestCase {
         XCTAssertEqual(wired, 1)
         XCTAssertEqual(mic.starts, 1)
         XCTAssertEqual(coordinatorsBuilt, 0)
+    }
+
+    /// the meeting model picked in settings is not on this mac any more:
+    /// the listener goes, and comes back when one is.
+    func testWatchingForCallsStopsAndStartsAgain() {
+        let meetings = holder()
+        meetings.watchForCalls()
+
+        meetings.stopWatchingForCalls()
+        XCTAssertEqual(mic.stops, 1)
+
+        meetings.watchForCalls()
+        XCTAssertEqual(mic.starts, 2)
+        XCTAssertEqual(callMonitorsBuilt, 1)
+    }
+
+    /// a mac that never watched has nothing to stop, and builds nothing to
+    /// stop it.
+    func testStoppingAWatchThatNeverStartedBuildsNothing() {
+        let meetings = holder()
+
+        meetings.stopWatchingForCalls()
+
+        XCTAssertEqual(callMonitorsBuilt, 0)
+        XCTAssertEqual(mic.stops, 0)
     }
 
     func testEachIsBuiltOnceAndWiredBeforeItIsHandedOut() {
@@ -193,13 +219,16 @@ private struct NoModel: Error {}
 /// a mic nobody takes: the monitor listens and is never told to read.
 private final class IdleMic: MicUseSignal, @unchecked Sendable {
     private(set) var starts = 0
+    private(set) var stops = 0
 
     func start(onChange: @escaping @Sendable (Bool) -> Void) {
         starts += 1
         onChange(false)
     }
 
-    func stop() {}
+    func stop() {
+        stops += 1
+    }
 }
 
 private struct SilentSource: MeetingAudioSource {
