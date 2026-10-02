@@ -191,6 +191,9 @@ final class DictationCoordinator: ObservableObject {
                 panel = existing
             } else {
                 panel = HUDPanel(viewModel: self.hudViewModel)
+                panel.onPointerOverPill = { [weak self] over in
+                    self?.pointerOverPill(over)
+                }
                 self.hudPanelStorage = panel
             }
             action(panel)
@@ -223,6 +226,15 @@ final class DictationCoordinator: ObservableObject {
         duration: TimeInterval,
         at: Date
     )?
+    /// the pill's questions about meetings (ADR 0047): the one up and the
+    /// one waiting for the pill. a question is the one pill that waits its
+    /// turn and gives way to everything else.
+    private var questions = HUDQuestionSlot<MeetingQuestion>()
+    /// the feedback generation the question went up under, and how long it
+    /// has left.
+    private var questionShown: (token: UInt64, countdown: PillCountdown)?
+    private var questionExpiry: Task<Void, Never>?
+    private let questionClockOrigin = ContinuousClock.now
     private let timelineStore = UtteranceTimelineStore()
     /// held while the mic is live (`keepDisplayAwake`).
     private var displayAwakeActivity: (any NSObjectProtocol)?
@@ -429,6 +441,7 @@ final class DictationCoordinator: ObservableObject {
         .store(in: &settingsCancellables)
 
         wireMachine()
+        wirePillQuestions()
         installSystemLifecycleObservers()
         wireMeetings()
 
@@ -870,6 +883,7 @@ final class DictationCoordinator: ObservableObject {
     private func flushHeldFeedback() {
         guard let held = heldFeedback else {
             synchronizeHUD()
+            askTheWaitingQuestionIfFree()
             return
         }
 
@@ -885,6 +899,7 @@ final class DictationCoordinator: ObservableObject {
         case .drop:
             heldFeedback = nil
             synchronizeHUD()
+            askTheWaitingQuestionIfFree()
         }
     }
 
@@ -958,6 +973,12 @@ final class DictationCoordinator: ObservableObject {
         }
         isOnboardingPresented = true
         resettingHotkey { hotkeyMonitor.setDetectionOnly(true) }
+        // a question is not held through setup: the menu still has it.
+        if isQuestionUp {
+            questionTakenOffThePill()
+            activeFeedbackGeneration = nil
+            hudViewModel.clearFeedback()
+        }
         withHUDPanel { $0.dismiss() }
 
         // a cached window keeps the scope it was built with, and the screen
@@ -1860,22 +1881,16 @@ final class DictationCoordinator: ObservableObject {
             return nil
         }
 
+        // every sentence outranks a question: it is gone, unanswered.
+        if isQuestionUp {
+            questionTakenOffThePill()
+        }
         feedbackGeneration += 1
         let feedbackToken = feedbackGeneration
         let stateToken = stateGeneration
         activeFeedbackGeneration = feedbackToken
         hudViewModel.showFeedback(message)
-        // the pill is a non-key, click-through panel, so voiceover never
-        // visits it. without this, a failed dictation and a successful one
-        // are the same silence to someone who cannot look.
-        NSAccessibility.post(
-            element: NSApp as Any,
-            notification: .announcementRequested,
-            userInfo: [
-                .announcement: message,
-                .priority: NSAccessibilityPriorityLevel.high.rawValue,
-            ]
-        )
+        announce(message)
         synchronizeHUD()
 
         // a pill that wraps to two lines is two reads. measured here rather
@@ -1895,6 +1910,20 @@ final class DictationCoordinator: ObservableObject {
         )
     }
 
+    /// the pill is a non-key panel that voiceover never visits. without
+    /// this, a failed dictation and a successful one are the same silence
+    /// to someone who cannot look.
+    private func announce(_ message: String) {
+        NSAccessibility.post(
+            element: NSApp as Any,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: message,
+                .priority: NSAccessibilityPriorityLevel.high.rawValue,
+            ]
+        )
+    }
+
     private func expireFeedback(_ shown: ShownFeedback) async {
         try? await Task.sleep(for: .seconds(shown.lasts))
         guard shown.stateToken == stateGeneration,
@@ -1906,6 +1935,7 @@ final class DictationCoordinator: ObservableObject {
         activeFeedbackGeneration = nil
         hudViewModel.clearFeedback()
         synchronizeHUD()
+        askTheWaitingQuestionIfFree()
         sayLearnedIfQuiet()
     }
 
@@ -1914,6 +1944,13 @@ final class DictationCoordinator: ObservableObject {
         _ newState: State,
         fastHUDDismiss: Bool
     ) {
+        // dictation wins: a take takes the pill from a question, which is
+        // gone unanswered. the lamp settling at idle when it already was,
+        // as it does after an engine check, takes nothing.
+        let questionStays = isQuestionUp && state == .idle && newState == .idle
+        if isQuestionUp, !questionStays {
+            questionTakenOffThePill()
+        }
         if newState == .recording {
             // they have moved on and are talking again; a held sentence
             // about the last take would land on this one.
@@ -1937,11 +1974,15 @@ final class DictationCoordinator: ObservableObject {
             watchdog.watch(.transcribing)
         }
 
+        if questionStays {
+            putTheQuestionBack()
+        }
         synchronizeHUD(fastDismiss: fastHUDDismiss)
         if newState == .idle {
             // a turn later: a pill the take owes lands with this change,
             // and goes first.
             Task { @MainActor [weak self] in
+                self?.askTheWaitingQuestionIfFree()
                 self?.sayLearnedIfQuiet()
             }
         }
@@ -1972,6 +2013,10 @@ final class DictationCoordinator: ObservableObject {
                 )
             )
             panel.present()
+            // only a question takes the mouse, and only over the pill.
+            panel.makePillReachable(
+                self.isQuestionUp ? self.hudViewModel.layout.size : nil
+            )
         }
     }
 }
@@ -1988,8 +2033,11 @@ extension DictationCoordinator {
         machine.microphoneForPress = { [weak self] in
             self?.microphoneForPress() ?? .refused(.modelNotReady)
         }
+        // a question is not the pill a press can mean: a press while one is
+        // up is a new take, not a retry of the last failure.
         machine.isPillShowing = { [weak self] in
-            self?.activeFeedbackGeneration != nil
+            guard let self else { return false }
+            return self.activeFeedbackGeneration != nil && !self.isQuestionUp
         }
     }
 
@@ -2089,10 +2137,13 @@ extension DictationCoordinator {
         MeetingEngines.installed()
     }
 
-    /// `record a meeting`. the model is a download you may not have asked
-    /// for yet: then this is the route back to the one surface that knows
-    /// how to ask (SPEC §5).
-    func startMeeting() {
+    /// `record a meeting`, and the pill's `record`. the model is a download
+    /// you may not have asked for yet: then this is the route back to the
+    /// one surface that knows how to ask (SPEC §5). the meeting is named
+    /// after the call that is on, if one is, so the file, its front matter
+    /// and the hook say `zoom` (ADR 0047); `name` is the call the pill
+    /// asked about.
+    func startMeeting(name: String? = nil) {
         guard !meetings.isRecording else { return }
         guard installedMeetingModels.contains(settings.meetingModel) else {
             meetingWaitsOnSetup = true
@@ -2108,11 +2159,13 @@ extension DictationCoordinator {
         Task { [notifier = meetings.notifier] in
             await notifier.requestPermissionIfNeeded()
         }
-        meetings.coordinator.start()
+        withdrawQuestions { !$0.isAboutARecording }
+        meetings.coordinator.start(name: name)
     }
 
     func stopMeeting() {
         meetings.withdrawNudge()
+        withdrawQuestions(\.isAboutARecording)
         meetings.stop()
     }
 
@@ -2375,6 +2428,215 @@ extension DictationCoordinator {
         }
         meetingModelDownloads[model] = nil
         return ok
+    }
+}
+
+
+// MARK: - the pill's questions (ADR 0047)
+
+extension DictationCoordinator {
+    /// the two clicks a question can take, wired once: what they mean is up
+    /// to the question that is up when they land.
+    private func wirePillQuestions() {
+        hudViewModel.onPillButton = { [weak self] in
+            self?.answerTheQuestion(.button)
+        }
+        hudViewModel.onPillElsewhere = { [weak self] in
+            self?.answerTheQuestion(.elsewhere)
+        }
+    }
+
+    private var questionNow: Duration {
+        ContinuousClock.now - questionClockOrigin
+    }
+
+    /// up while the pill it went up on is still the pill.
+    private var isQuestionUp: Bool {
+        guard let questionShown else { return false }
+        return activeFeedbackGeneration == questionShown.token
+    }
+
+    /// from the call watcher, the nudge, or a development check. it goes up
+    /// on a free pill, or waits for one; it never interrupts anything.
+    private func ask(_ question: MeetingQuestion) {
+        guard isWorthAsking(question, afterWaiting: false) else { return }
+        let free = HUDPresentation.pillIsFreeForAQuestion(
+            state: state.lamp,
+            hasFeedback: activeFeedbackGeneration != nil && !isQuestionUp,
+            isOnboarding: isOnboardingPresented
+        )
+        if questions.ask(question, pillIsFree: free) {
+            putUp(question)
+        }
+    }
+
+    private func putUp(_ question: MeetingQuestion) {
+        feedbackGeneration += 1
+        let token = feedbackGeneration
+        activeFeedbackGeneration = token
+        questionShown = (
+            token,
+            PillCountdown(lasts: question.lasts, startedAt: questionNow)
+        )
+        showOnThePill(question)
+        announce(question.text)
+        synchronizeHUD()
+        timeTheQuestion()
+    }
+
+    private func showOnThePill(_ question: MeetingQuestion) {
+        hudViewModel.showQuestion(
+            question.text,
+            button: HUDPillButton(
+                title: question.button,
+                accessibilityLabel: question.buttonLabel
+            )
+        )
+    }
+
+    /// a take, a sentence or setup took the pill: the question is gone,
+    /// unanswered, and the menu is where it can still be answered.
+    private func questionTakenOffThePill() {
+        questions.pillTaken()
+        questionShown = nil
+        questionExpiry?.cancel()
+        questionExpiry = nil
+    }
+
+    /// the lamp settled at idle when it already was, and cleared the pill
+    /// on the way: the same question goes back up, with the time it had.
+    private func putTheQuestionBack() {
+        guard let shown = questionShown, let question = questions.asked else {
+            return
+        }
+        feedbackGeneration += 1
+        questionShown = (feedbackGeneration, shown.countdown)
+        activeFeedbackGeneration = feedbackGeneration
+        showOnThePill(question)
+        timeTheQuestion()
+    }
+
+    /// the pill just came free: a question that waited for it goes up, if
+    /// the moment it was about has not passed.
+    private func askTheWaitingQuestionIfFree() {
+        guard HUDPresentation.pillIsFreeForAQuestion(
+            state: state.lamp,
+            hasFeedback: activeFeedbackGeneration != nil,
+            isOnboarding: isOnboardingPresented
+        ) else {
+            return
+        }
+        let next = questions.pillFreed { question in
+            isWorthAsking(question, afterWaiting: true)
+        }
+        if let next {
+            putUp(next)
+        }
+    }
+
+    /// record is for a call nothing is recording; the other two are about a
+    /// recording that is running. a record question that waited is also
+    /// about a call that must still be on.
+    private func isWorthAsking(
+        _ question: MeetingQuestion,
+        afterWaiting: Bool
+    ) -> Bool {
+        switch question {
+        case let .record(app):
+            return !meetings.isRecording
+                && (!afterWaiting || meetings.currentCall == app)
+        case .stopAfterCall, .stillRecording:
+            return meetings.isRecording
+        }
+    }
+
+    /// a click on the button or beside it, or the countdown running out.
+    /// the first of them is the answer; the pill goes, then the answer
+    /// does what it does, which for anything but the button is little or
+    /// nothing.
+    private func answerTheQuestion(_ answer: MeetingQuestion.Answer) {
+        guard isQuestionUp,
+              let question = questions.asked,
+              questions.answer(question) else {
+            return
+        }
+        questionShown = nil
+        questionExpiry?.cancel()
+        questionExpiry = nil
+        activeFeedbackGeneration = nil
+        hudViewModel.clearFeedback()
+        synchronizeHUD(fastDismiss: answer != .unanswered)
+        act(on: question.effect(of: answer))
+        askTheWaitingQuestionIfFree()
+        sayLearnedIfQuiet()
+    }
+
+    /// only the button starts or stops a recording, and it does what the
+    /// menu item of the same name does.
+    private func act(on effect: MeetingQuestion.Effect) {
+        switch effect {
+        case let .startMeeting(name):
+            startMeeting(name: name)
+        case .stopMeeting:
+            stopMeeting()
+        case .keepGoing:
+            // the pill answered the nudge; the notification's copy goes.
+            meetings.keepGoing()
+            meetings.withdrawNudge()
+        case .declineTheCall:
+            meetings.declineTheCall()
+        case .nothing:
+            break
+        }
+    }
+
+    /// answered somewhere else, or made moot: a meeting started or stopped
+    /// from the menu, the nudge answered in its notification. the question
+    /// leaves without being acted on, or stops waiting.
+    private func withdrawQuestions(_ which: (MeetingQuestion) -> Bool) {
+        let candidates = [questions.asked, questions.waiting].compactMap { $0 }
+        for question in candidates where which(question) {
+            let wasUp = isQuestionUp && questions.asked == question
+            guard questions.withdraw(question), wasUp else { continue }
+            questionShown = nil
+            questionExpiry?.cancel()
+            questionExpiry = nil
+            activeFeedbackGeneration = nil
+            hudViewModel.clearFeedback()
+            synchronizeHUD(fastDismiss: true)
+        }
+    }
+
+    /// the countdown stops while the pointer is over the pill, so it never
+    /// leaves from under a hand on its way to the button.
+    private func pointerOverPill(_ over: Bool) {
+        guard isQuestionUp, var shown = questionShown else { return }
+        if over {
+            shown.countdown.pause(at: questionNow)
+        } else {
+            shown.countdown.resume(at: questionNow)
+        }
+        questionShown = shown
+        timeTheQuestion()
+    }
+
+    private func timeTheQuestion() {
+        questionExpiry?.cancel()
+        questionExpiry = nil
+        guard let shown = questionShown, !shown.countdown.isPaused else {
+            return
+        }
+        let token = shown.token
+        let remaining = shown.countdown.remaining(at: questionNow)
+        questionExpiry = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: remaining)
+            guard !Task.isCancelled,
+                  let self,
+                  self.questionShown?.token == token else {
+                return
+            }
+            self.answerTheQuestion(.unanswered)
+        }
     }
 }
 
