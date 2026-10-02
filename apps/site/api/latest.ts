@@ -4,6 +4,14 @@
 // sends the version it is running as `version` and no other identifier.
 // this file is a vercel function because it sits in `api/` at the vercel
 // project root (apps/site); astro never sees it, so the pages stay static.
+//
+// every check is also counted: one HINCRBY on the hash `checkins:<utc date>`,
+// field = the version (or "invalid"). that is all that is stored. no ip, no
+// user agent, no id, no other query parameter is read, let alone kept. the
+// counts live in upstash redis; scripts/checkins.ts reads them back, and
+// apps/site/COUNTING.md says how to switch counting on.
+//
+// the file imports nothing relative, on purpose: it is deployed as it is.
 
 const RELEASES_LATEST =
   "https://github.com/jassuwu/andrew-dictate/releases/latest";
@@ -221,12 +229,22 @@ export type Deps = {
 
 /**
  * the endpoint wired to its outside world: github through `deps.fetch`, with
- * its tag remembered by the handler for as long as the handler lives. the
- * function instance builds one at load, so the memory lasts the instance.
+ * its tag remembered by the handler for as long as the handler lives (the
+ * function instance builds one at load, so the memory lasts the instance),
+ * and the counter on the store the environment names, if it names one.
+ *
+ * the environment is read on every request, so adding the store's variables
+ * and redeploying is all it takes to start counting. only a GET is a check.
  */
 export function createHandler(deps: Deps): (request: Request) => Promise<Response> {
   const latestTag = cachedTag(() => tagFromGitHub(deps.fetch), deps.now);
-  return (request) => answer(new URL(request.url), { latestTag });
+  return (request) => {
+    const store = request.method === "GET" ? storeFromEnv(deps.env, deps.fetch) : null;
+    return answer(new URL(request.url), {
+      latestTag,
+      count: store ? checkInCounter(store, deps.now) : undefined,
+    });
+  };
 }
 
 export const GET = createHandler({

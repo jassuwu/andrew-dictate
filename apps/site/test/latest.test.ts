@@ -13,9 +13,10 @@ import {
 const url = new URL("https://dictate.jass.gg/api/latest?version=0.9.4");
 
 /** github and upstash as the function sees them, recording what it asked. */
-function fakeInternet() {
+function fakeInternet(options: { upstashDown?: boolean } = {}) {
   const githubLookups: string[] = [];
-  const fetchStub = async (input: string | URL | Request) => {
+  const upstashRequests: { url: string; authorization: string | null; commands: Command[] }[] = [];
+  const fetchStub = async (input: string | URL | Request, init?: RequestInit) => {
     const target = String(input);
     if (target.startsWith("https://github.com/")) {
       githubLookups.push(target);
@@ -26,10 +27,21 @@ function fakeInternet() {
         },
       });
     }
+    if (target.startsWith("https://eu1-x.upstash.io/")) {
+      if (options.upstashDown) throw new Error("upstash is unreachable");
+      upstashRequests.push({
+        url: target,
+        authorization: new Headers(init?.headers).get("authorization"),
+        commands: JSON.parse(String(init?.body)),
+      });
+      return Response.json([{ result: 1 }, { result: 1 }]);
+    }
     throw new Error(`unexpected request to ${target}`);
   };
-  return { fetch: fetchStub as typeof fetch, githubLookups };
+  return { fetch: fetchStub as typeof fetch, githubLookups, upstashRequests };
 }
+
+const counting = { KV_REST_API_URL: "https://eu1-x.upstash.io", KV_REST_API_TOKEN: "write-token" };
 
 function checkRequest(version: string) {
   return new Request(`https://dictate.jass.gg/api/latest?version=${version}`);
@@ -423,7 +435,79 @@ describe("cachedTag", () => {
 });
 
 describe("the handler", () => {
-  test("a day of checks is one github lookup, every one of them answered", async () => {
+  test("every check is counted under today's utc date and its own version, and nothing else of it is kept", async () => {
+    const internet = fakeInternet();
+    const clock = Date.UTC(2026, 9, 2, 22, 30);
+    const handle = createHandler({ env: counting, fetch: internet.fetch, now: () => clock });
+
+    // a real request carries an address, an agent and whatever else it likes.
+    const check = new Request("https://dictate.jass.gg/api/latest?version=0.9.4&id=4F2A-9C", {
+      headers: {
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        "x-forwarded-for": "203.0.113.7",
+        "x-real-ip": "203.0.113.7",
+        "accept-language": "en-IN",
+        cookie: "session=abc",
+      },
+    });
+    const response = await handle(check);
+    await handle(checkRequest("0.9.3"));
+
+    expect(response.status).toBe(200);
+    expect(internet.upstashRequests).toEqual([
+      {
+        url: "https://eu1-x.upstash.io/pipeline",
+        authorization: "Bearer write-token",
+        commands: [
+          ["HINCRBY", "checkins:2026-10-02", "0.9.4", 1],
+          ["EXPIRE", "checkins:2026-10-02", 34560000],
+        ],
+      },
+      {
+        url: "https://eu1-x.upstash.io/pipeline",
+        authorization: "Bearer write-token",
+        commands: [
+          ["HINCRBY", "checkins:2026-10-02", "0.9.3", 1],
+          ["EXPIRE", "checkins:2026-10-02", 34560000],
+        ],
+      },
+    ]);
+  });
+
+  test("without the store's variables it answers and counts nothing", async () => {
+    const internet = fakeInternet();
+    const handle = createHandler({ env: {}, fetch: internet.fetch, now: () => 0 });
+
+    const response = await handle(checkRequest("0.9.4"));
+
+    expect(await response.json()).toEqual({ latest: "0.9.5" });
+    expect(internet.upstashRequests).toHaveLength(0);
+  });
+
+  test("a store that is down does not cost the app its answer", async () => {
+    const internet = fakeInternet({ upstashDown: true });
+    const handle = createHandler({ env: counting, fetch: internet.fetch, now: () => 0 });
+
+    const response = await handle(checkRequest("0.9.4"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ latest: "0.9.5" });
+  });
+
+  // only the app's GET is a check. a HEAD from a link checker is not.
+  test("a HEAD request is answered but not counted", async () => {
+    const internet = fakeInternet();
+    const handle = createHandler({ env: counting, fetch: internet.fetch, now: () => 0 });
+
+    const response = await handle(
+      new Request("https://dictate.jass.gg/api/latest?version=0.9.4", { method: "HEAD" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(internet.upstashRequests).toHaveLength(0);
+  });
+
+  test("an hour of checks is one github lookup, every one of them answered", async () => {
     const internet = fakeInternet();
     let clock = Date.UTC(2026, 9, 2, 8);
     const handle = createHandler({ env: {}, fetch: internet.fetch, now: () => clock });
