@@ -164,4 +164,16 @@ struct TapHealthMonitor {
         quietProbeAskedAt = elapsed
         verdict = .waitingForQuietProbe
     }
+
+    /// The quiet probe could not be played at all, so the tap was asked
+    /// nothing: it is neither cleared nor accused, and the silence is timed
+    /// afresh from `elapsed`.
+    mutating func quietProbeCouldNotPlay(at elapsed: Duration) {
+        guard verdict == .waitingForQuietProbe else {
+            return
+        }
+        quietProbeAskedAt = nil
+        quietSince = elapsed
+        verdict = .capturing
+    }
 }

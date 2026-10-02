@@ -78,6 +78,26 @@ final class TapHealthMonitorTests: XCTestCase {
         XCTAssertEqual(monitor.verdict, .silentWhileSomethingPlays)
     }
 
+    /// A tone that could not be played at all — no output device, a player
+    /// that would not start — asked the tap nothing. It is neither cleared
+    /// nor accused, and the silence is timed afresh from there, so the
+    /// question comes round again a full timeout later.
+    func testAQuietProbeThatCouldNotPlayIsNoEvidence() {
+        var monitor = monitor()
+        monitor.observe(rms: 0.4, elapsed: .milliseconds(120))
+        monitor.observe(rms: 0, elapsed: .seconds(9), anythingIsPlaying: true)
+        monitor.askedWithTheQuietProbe(at: .seconds(9))
+
+        monitor.quietProbeCouldNotPlay(at: .seconds(9))
+        monitor.observe(rms: 0, elapsed: .seconds(12), anythingIsPlaying: true)
+        XCTAssertEqual(monitor.verdict, .capturing, "never played, so never missed")
+
+        monitor.observe(rms: 0, elapsed: .seconds(17), anythingIsPlaying: true)
+        XCTAssertEqual(monitor.verdict, .capturing)
+        monitor.observe(rms: 0, elapsed: .milliseconds(17_100), anythingIsPlaying: true)
+        XCTAssertEqual(monitor.verdict, .silentWhileSomethingPlays)
+    }
+
     /// Asked once, it is not asked again while it waits for the answer.
     func testAQuestionIsAskedOnceAndStandsUntilAnswered() {
         var monitor = monitor()
