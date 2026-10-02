@@ -6,16 +6,19 @@ import WhisperKit
 /// translate). Each stretch is one decode with no window of its own to
 /// manage, because none is longer than the 30 s whisper reads at once.
 ///
-/// Loaded from the folder setup downloaded it to and never from the network.
+/// Loaded from the folders setup downloaded the model and its tokenizer to,
+/// and never from the network.
 actor WhisperStretchEngine: StretchEngine {
     enum Failure: Error, LocalizedError {
         case notLoaded
         case notWhisper(MeetingModel)
+        case noTokenizer(MeetingModel)
 
         var errorDescription: String? {
             switch self {
             case .notLoaded: "whisper was asked to decode before it had loaded"
             case .notWhisper(let model): "\(model.shortName) is not a whisper model"
+            case .noTokenizer(let model): "\(model.shortName)'s tokenizer is not on this mac"
             }
         }
     }
@@ -34,14 +37,24 @@ actor WhisperStretchEngine: StretchEngine {
     func load() async throws {
         guard whisper == nil else { return }
         guard let variant = model.whisperVariant,
-              let folder = MeetingEngines.folder(for: model)
+              let folder = MeetingEngines.folder(for: model),
+              let tokenizerFolder = MeetingEngines.tokenizerFolder(for: model)
         else {
             throw Failure.notWhisper(model)
+        }
+        // WhisperKit fetches a tokenizer it cannot find or cannot read from
+        // the Hugging Face Hub, in the middle of loading. Read here first,
+        // a tokenizer that is missing or damaged stops the load instead.
+        do {
+            _ = try await AutoTokenizerWrapper.from(modelFolder: tokenizerFolder)
+        } catch {
+            throw Failure.noTokenizer(model)
         }
         whisper = try await WhisperKit(WhisperKitConfig(
             model: variant,
             downloadBase: MeetingEngines.modelDirectory,
             modelFolder: folder.path,
+            tokenizerFolder: tokenizerFolder,
             verbose: false,
             logLevel: .error,
             prewarm: true,

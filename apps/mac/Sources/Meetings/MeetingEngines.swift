@@ -76,8 +76,39 @@ enum MeetingEngines {
         FluidDiarizer()
     }
 
+    // MARK: - what a whisper meeting reads besides the model
+
+    /// Both whisper models have large-v3's vocabulary, 51,866 tokens, which
+    /// is how WhisperKit tells it, so both read large-v3's tokenizer.
+    private static let tokenizerRepo = "openai/whisper-large-v3"
+
+    /// Where WhisperKit looks for a whisper model's tokenizer first: the
+    /// repo's own folder under the base it is given. Nil for parakeet,
+    /// which has no use for one. Moving WhisperKit's pin in `project.yml`
+    /// means checking that this is still the repo it asks for.
+    static func tokenizerFolder(for model: MeetingModel) -> URL? {
+        guard model.whisperVariant != nil else { return nil }
+        return HubApiWrapper(downloadBase: modelDirectory)
+            .localRepoLocation(HubApiWrapper.Repo(id: tokenizerRepo))
+    }
+
+    /// WhisperKit fetches the tokenizer from the Hugging Face Hub the first
+    /// time it loads a model, which is a meeting waiting on the network at
+    /// its start. Setup fetches it instead, to the folder it looks in.
+    private static func fetchTokenizer(for model: MeetingModel) async throws {
+        guard model.whisperVariant != nil else { return }
+        _ = try await AutoTokenizerWrapper.from(
+            pretrained: tokenizerRepo,
+            hubApi: HubApiWrapper(downloadBase: modelDirectory))
+    }
+
     /// Downloads (or verifies) the model, reporting 0…1. False means it did
     /// not finish; the caller shows "try again".
+    ///
+    /// What a whisper meeting reads besides the model comes down after it,
+    /// so that no meeting waits on the network at its start: the tokenizer.
+    /// It failing is logged and is not the model failing: a meeting without
+    /// it says so rather than fetching it.
     static func prepare(
         _ model: MeetingModel,
         progress: @escaping @Sendable (Double) -> Void
@@ -96,10 +127,15 @@ enum MeetingEngines {
                     progressHandler: { progress($0.fractionCompleted) }
                 )
             }
-            progress(1)
-            return isInstalled(model)
         } catch {
             return false
         }
+        do {
+            try await fetchTokenizer(for: model)
+        } catch {
+            logger.error("whisper's tokenizer did not download: \(error.localizedDescription, privacy: .public)")
+        }
+        progress(1)
+        return isInstalled(model)
     }
 }
