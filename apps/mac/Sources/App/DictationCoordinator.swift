@@ -966,6 +966,14 @@ final class DictationCoordinator: ObservableObject {
         scope: OnboardingScope = .everything,
         openAt: OnboardingStep = .hello
     ) {
+        // a question is not held through setup, and must not come back as
+        // a sentence without its button: it goes, and the menu still has
+        // it.
+        if isQuestionUp {
+            questionTakenOffThePill()
+            activeFeedbackGeneration = nil
+            hudViewModel.clearFeedback()
+        }
         // whatever the pill is saying right now is about to be taken off
         // the screen mid-sentence. keep it rather than truncate it — it
         // gets a whole default reading when it comes back, since how much
@@ -980,12 +988,6 @@ final class DictationCoordinator: ObservableObject {
         }
         isOnboardingPresented = true
         resettingHotkey { hotkeyMonitor.setDetectionOnly(true) }
-        // a question is not held through setup: the menu still has it.
-        if isQuestionUp {
-            questionTakenOffThePill()
-            activeFeedbackGeneration = nil
-            hudViewModel.clearFeedback()
-        }
         withHUDPanel { $0.dismiss() }
 
         // a cached window keeps the scope it was built with, and the screen
