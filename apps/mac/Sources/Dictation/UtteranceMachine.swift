@@ -251,6 +251,8 @@ final class UtteranceMachine {
                 invalidatePipeline()
                 setState(.idle)
                 endPress(.droppedAsHung)
+                // the same evidence a timeout leaves.
+                emit(.engineSuspect)
             }
         }
 

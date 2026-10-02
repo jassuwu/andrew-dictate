@@ -111,6 +111,26 @@ final class UtteranceMachineTimeoutTests: XCTestCase {
         XCTAssertEqual(engineEvents, [])
     }
 
+    /// pressing again over a take three seconds stuck drops it, as it always
+    /// has. that is the same evidence as a timeout, so the engine is checked.
+    func testAPressThatDropsAHungTakeAsksForTheEngineToBeChecked() async {
+        let m = machine()
+        engine.holds = true
+        await hold(m, for: .seconds(1))
+        await settle { self.engine.isWaiting }
+        await pass(.seconds(3))
+
+        m.keyDown()
+
+        XCTAssertEqual(m.state, .recording)
+        XCTAssertEqual(outcomes, [.droppedAsHung])
+        XCTAssertEqual(engineEvents, [.engineSuspect])
+        // the dropped take's deadline says nothing when it comes due.
+        await pass(.seconds(1))
+        XCTAssertEqual(pills, [])
+        XCTAssertEqual(m.state, .recording)
+    }
+
     // MARK: - twice in a row
 
     /// a tap on the pill replays the samples, and an engine still wedged
