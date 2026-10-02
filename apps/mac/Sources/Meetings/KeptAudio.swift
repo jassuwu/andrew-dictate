@@ -158,6 +158,33 @@ struct KeptAudio: Sendable {
         return all().first { $0.label.transcript.standardizedFileURL.path == path }
     }
 
+    // MARK: - changing the label
+
+    /// The label after its transcript was made again: the model that wrote
+    /// the transcript now, and the date it is kept until — the old date when
+    /// the caller passes it back, none to keep it until you delete it. The
+    /// audio is not touched.
+    ///
+    /// False when there is no audio here any more, or no label: it was
+    /// deleted from history, or its day came, while the meeting was being
+    /// read. A label written for audio that is gone would be a file nobody
+    /// reads and nothing sweeps.
+    @discardableResult
+    func relabel(_ entry: Entry, model: MeetingModel, until: Date?) -> Bool {
+        guard audioURL(entry.id) != nil, label(entry.id) != nil else { return false }
+        do {
+            try write(
+                Label(
+                    transcript: entry.label.transcript, started: entry.label.started,
+                    model: model, until: until),
+                to: labelURL(entry.id))
+            return true
+        } catch {
+            Self.logger.error("could not relabel kept audio: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+    }
+
     // MARK: - letting go
 
     /// Gone now: the audio, then its label.
