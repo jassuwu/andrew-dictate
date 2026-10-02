@@ -200,7 +200,62 @@ final class KeptAudioTests: XCTestCase {
         XCTAssertEqual(failing.all().count, 1)
     }
 
+    // MARK: - the app stopped while it was keeping
+
+    /// The file was written and the app quit while the audio was being
+    /// kept. The next launch does not write the meeting out again: it
+    /// finishes keeping the audio, and not knowing for how long, keeps it
+    /// until you delete it.
+    func testASpoolLeftWhileItsAudioWasBeingKeptIsKeptAtTheNextLaunch() async throws {
+        let transcript = docs.appendingPathComponent("meetings/2026-10/2026-10-02-1222-meeting.md")
+        try await spoolLeft(writtenTo: transcript)
+
+        let c = coordinator()
+        c.recoverOrphans()
+        await waitFor { kept.all().count == 1 }
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).count, 0, "not written again")
+        XCTAssertEqual(try keptFiles().map(\.pathExtension), ["json", "m4a"])
+        let label = try keptLabel()
+        XCTAssertEqual(label["transcript"] as? String, transcript.path)
+        XCTAssertEqual(label["started"] as? String, "2026-10-02T06:52:31Z")
+        XCTAssertEqual(label["untilDeleted"] as? Bool, true)
+        XCTAssertEqual(try spoolFolders(), 0)
+    }
+
+    /// It had got as far as the label: the date on it stands.
+    func testASpoolLeftAfterItsLabelWasWrittenKeepsTheLabelsDate() async throws {
+        let transcript = docs.appendingPathComponent("meetings/2026-10/2026-10-02-1222-meeting.md")
+        let handle = try await spoolLeft(writtenTo: transcript)
+        try FileManager.default.createDirectory(at: audioFolder, withIntermediateDirectories: true)
+        let until = "2026-10-03T07:52:31Z"
+        try Data(#"{"model":"parakeetV3","started":"2026-10-02T06:52:31Z","transcript":"\#(transcript.path)","until":"\#(until)","untilDeleted":false}"#.utf8)
+            .write(to: audioFolder.appendingPathComponent("\(handle.folder.lastPathComponent).json"))
+
+        let c = coordinator()
+        c.recoverOrphans()
+        await waitFor { kept.all().count == 1 }
+
+        XCTAssertEqual(try keptFiles().map(\.pathExtension), ["json", "m4a"])
+        XCTAssertEqual(try keptLabel()["until"] as? String, until)
+    }
+
     // MARK: - helpers
+
+    /// A spool whose meeting was written out into `transcript`, marked to be
+    /// kept, with two seconds of audio still in it.
+    @discardableResult
+    private func spoolLeft(writtenTo transcript: URL) async throws -> MeetingSpool.Handle {
+        let spool = MeetingSpool(root: dir.appendingPathComponent("spool"))
+        let handle = try spool.begin(.init(
+            app: "meeting", started: started, engine: "parakeetV3", model: .parakeetV3))
+        let file = try SpoolAudioFile(url: handle.audioURL)
+        try await file.append(loud(at: .zero))
+        try await file.append(loud(at: .seconds(1)))
+        XCTAssertTrue(spool.keep(handle, writtenTo: transcript))
+        return handle
+    }
 
     /// A live reading the check finds thin, and a reading again that is no
     /// better.

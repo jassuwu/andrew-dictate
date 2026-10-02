@@ -475,6 +475,18 @@ final class MeetingCoordinator: ObservableObject {
         // being written out, has a spool that looks just like one a crash
         // left behind. it is not one.
         let ours = ([current] + writingOut).compactMap { $0?.handle }
+        // a meeting already on disk whose audio was still being kept when
+        // the app stopped: its audio is kept now, and it is not written
+        // out a second time.
+        let left = spool.writtenOut().filter { !ours.contains($0.handle) }
+        if !left.isEmpty {
+            let keptAudio = keptAudio
+            Task.detached(priority: .utility) {
+                for (handle, manifest) in left {
+                    keptAudio.adopt(handle, manifest: manifest)
+                }
+            }
+        }
         let orphans = spool.orphans().filter { !ours.contains($0.handle) }
         guard !orphans.isEmpty else { return }
         Task { [weak self] in

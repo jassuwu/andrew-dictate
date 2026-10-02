@@ -128,6 +128,20 @@ struct KeptAudio: Sendable {
         return true
     }
 
+    /// A spool whose meeting is written out, and whose audio was on its way
+    /// here when the app stopped. Kept under the label it had been given;
+    /// with none, until you delete it — not knowing how long it was meant to
+    /// stay, it errs on keeping.
+    @discardableResult
+    func adopt(_ handle: MeetingSpool.Handle, manifest: MeetingSpool.Manifest) -> Bool {
+        guard let transcript = manifest.transcript else { return false }
+        let id = handle.folder.lastPathComponent
+        let label = label(id) ?? Label(
+            transcript: transcript, started: manifest.started, model: manifest.model,
+            until: nil)
+        return keep(handle, label: label)
+    }
+
     // MARK: - what is kept
 
     /// Every meeting whose audio is here, oldest first.
@@ -205,11 +219,13 @@ struct KeptAudio: Sendable {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
         return names.filter { $0.hasSuffix(".json") && !$0.hasPrefix(".") }.compactMap { name in
             let id = String(name.dropLast(".json".count))
-            guard let data = try? Data(contentsOf: labelURL(id)),
-                  let label = try? Self.decoder.decode(Label.self, from: data)
-            else { return nil }
-            return (id, label)
+            return label(id).map { (id, $0) }
         }
+    }
+
+    private func label(_ id: String) -> Label? {
+        guard let data = try? Data(contentsOf: labelURL(id)) else { return nil }
+        return try? Self.decoder.decode(Label.self, from: data)
     }
 
     private func makeRoot() throws {

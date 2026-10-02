@@ -192,6 +192,25 @@ struct MeetingSpool: Sendable {
         return found.sorted { $0.manifest.started < $1.manifest.started }
     }
 
+    /// Spools whose meeting is written out and whose audio is still here:
+    /// on its way to being kept when the app stopped, or kept here because
+    /// it could not be moved.
+    func writtenOut() -> [(handle: Handle, manifest: Manifest)] {
+        let fm = FileManager.default
+        let names = (try? fm.contentsOfDirectory(atPath: root.path)) ?? []
+        return names
+            .filter { !$0.hasPrefix(".") && $0 != Self.unreadableFolderName }
+            .compactMap { name in
+                let handle = Handle(folder: root.appendingPathComponent(name, isDirectory: true))
+                guard let data = try? Data(contentsOf: handle.manifestURL),
+                      let manifest = try? Self.decoder.decode(Manifest.self, from: data),
+                      manifest.transcript != nil,
+                      fm.fileExists(atPath: handle.audioURL.path)
+                else { return nil }
+                return (handle, manifest)
+            }
+    }
+
     private static let encoder: JSONEncoder = {
         let e = JSONEncoder()
         e.dateEncodingStrategy = .iso8601
