@@ -26,8 +26,13 @@ final class MeetingsListModel: ObservableObject {
     /// its transcript.
     @Published private(set) var audio: [String: KeptAudio.Entry] = [:]
 
+    /// a retry of those is running. it can take a quarter of an hour a
+    /// recording, so the line says so instead of offering the button again.
+    @Published private(set) var tryingAgain = false
+
     private let load: () -> [MeetingSummary]
     private let countSetAside: () -> Int
+    private let retrySetAside: (@MainActor () async -> Void)?
     private let keptAudio: KeptAudio?
     private let now: () -> Date
     private let locale: Locale
@@ -41,6 +46,7 @@ final class MeetingsListModel: ObservableObject {
         fileManager: FileManager = .default,
         setAsideFolder: URL? = nil,
         countSetAside: @escaping () -> Int = { 0 },
+        tryAgain: (@MainActor () async -> Void)? = nil,
         keptAudio: KeptAudio? = nil,
         now: @escaping () -> Date = { Date() },
         locale: Locale = .current,
@@ -50,6 +56,7 @@ final class MeetingsListModel: ObservableObject {
     ) {
         self.setAsideFolder = setAsideFolder
         self.countSetAside = countSetAside
+        self.retrySetAside = tryAgain
         self.keptAudio = keptAudio
         self.now = now
         self.locale = locale
@@ -86,6 +93,22 @@ final class MeetingsListModel: ObservableObject {
         audio = Dictionary(
             (keptAudio?.all() ?? []).map { (Self.key($0.label.transcript), $0) },
             uniquingKeysWith: { first, _ in first })
+    }
+
+    // MARK: - recordings that could not be transcribed
+
+    /// whether this pane was given a way to try them again.
+    var canTryAgain: Bool { retrySetAside != nil }
+
+    /// the set-aside recordings, tried once more, and then the pane reads
+    /// the count and the meetings again: what worked is a meeting now, and
+    /// what did not is still counted.
+    func tryAgain() async {
+        guard let retrySetAside, !tryingAgain else { return }
+        tryingAgain = true
+        await retrySetAside()
+        tryingAgain = false
+        reload()
     }
 
     func delete(_ meeting: MeetingSummary) {
