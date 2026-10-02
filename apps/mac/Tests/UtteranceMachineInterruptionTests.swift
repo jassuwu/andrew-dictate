@@ -275,6 +275,69 @@ final class UtteranceMachineInterruptionTests: XCTestCase {
         XCTAssertEqual(outcomes, [.leftOnPasteboard(.locked), .delivered])
     }
 
+    // MARK: - a stop that spans the sleep
+
+    /// the mac slept with the stop still out. the time asleep counted
+    /// against the mic, and its answer could only come once the mac was
+    /// back: whatever it hands over then is still the take.
+    func testAStopThatAnswersAfterTheSleepStillCounts() async {
+        let m = machine()
+        mic.holdsStop = true
+        m.keyDown()
+        await pass(.seconds(3))
+        m.captureInterrupted(.systemPaused)
+        await settle { self.mic.isStopping }
+
+        await pass(.seconds(8 * 60 * 60))
+        XCTAssertEqual(outcomes, [])
+        XCTAssertFalse(events.contains(.microphoneDropped))
+
+        mic.finishStop()
+        await settle { !self.outcomes.isEmpty }
+        XCTAssertEqual(inserter.copied, ["Hello."])
+        XCTAssertEqual(outcomes, [.leftOnPasteboard(.locked)])
+    }
+
+    /// back, and the mic still says nothing: it gets the same second and a
+    /// half any stop gets, counted from your return, and then the take is
+    /// lost out loud.
+    func testAStopStillSilentAfterYouAreBackIsLost() async {
+        let m = machine()
+        mic.holdsStop = true
+        m.keyDown()
+        await pass(.seconds(3))
+        m.captureInterrupted(.systemPaused)
+        await settle { self.mic.isStopping }
+        await pass(.seconds(60))
+
+        m.systemResumed()
+        await pass(.seconds(1))
+        XCTAssertEqual(outcomes, [])
+        await pass(.seconds(1))
+
+        XCTAssertEqual(outcomes, [.recordingLost])
+        XCTAssertTrue(events.contains(.microphoneDropped))
+        XCTAssertEqual(pills, [Pill("recording was lost", 1.6)])
+        XCTAssertEqual(m.state, .idle)
+    }
+
+    /// a stop that throws has nothing to fall back on: lost, and said once
+    /// you are back.
+    func testAStopThatFailsUnderTheLockIsLostAndSaidWhenYouAreBack() async {
+        let m = machine()
+        mic.failsToStop = true
+        m.keyDown()
+        await pass(.seconds(3))
+        m.captureInterrupted(.systemPaused)
+        await settle { !self.outcomes.isEmpty }
+        await pass(.seconds(1))
+
+        XCTAssertEqual(outcomes, [.recordingLost])
+        XCTAssertEqual(pills, [])
+        m.systemResumed()
+        XCTAssertEqual(pills, [Pill("recording was lost", 1.6)])
+    }
+
     /// keys only reach the app from a session someone is sitting at. a
     /// press is proof the mac is back even if the unlock never said so:
     /// what was held is said, and nothing after it is held.

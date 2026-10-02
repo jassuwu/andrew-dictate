@@ -540,14 +540,7 @@ final class UtteranceMachine {
         self.capture = capture
         let id = capture.id
         let microphone = capture.microphone
-        stopDeadline?.cancel()
-        stopDeadline = Task { @MainActor [weak self, clock] in
-            try? await clock.sleep(for: Self.microphoneDeadline)
-            guard !Task.isCancelled else {
-                return
-            }
-            self?.microphoneStopTimedOut(id)
-        }
+        armStopDeadline(id)
         Task.immediate { @MainActor [weak self] in
             do {
                 let samples = try await microphone.stop()
@@ -555,6 +548,17 @@ final class UtteranceMachine {
             } catch {
                 self?.microphoneFailedToStop(id, error: error)
             }
+        }
+    }
+
+    private func armStopDeadline(_ id: UInt64) {
+        stopDeadline?.cancel()
+        stopDeadline = Task { @MainActor [weak self, clock] in
+            try? await clock.sleep(for: Self.microphoneDeadline)
+            guard !Task.isCancelled else {
+                return
+            }
+            self?.microphoneStopTimedOut(id)
         }
     }
 
@@ -620,6 +624,15 @@ final class UtteranceMachine {
     }
 
     private func microphoneStopTimedOut(_ id: UInt64) {
+        if isSystemPaused, let capture, capture.id == id,
+           capture.phase == .stopping {
+            // the mac slept with the stop still out: the time asleep
+            // counted against the mic, and its answer can only come once
+            // the mac is back. the take is the user's, so it waits for
+            // that; `systemResumed` gives the mic its deadline again.
+            stopDeadline = nil
+            return
+        }
         guard stopAnswered(id) else {
             return
         }
@@ -720,6 +733,11 @@ final class UtteranceMachine {
             return
         }
         isSystemPaused = false
+        if let capture, capture.phase == .stopping, stopDeadline == nil {
+            // a stop the sleep outlasted gets the deadline any stop gets,
+            // counted from now.
+            armStopDeadline(capture.id)
+        }
         if let heldPill {
             self.heldPill = nil
             emit(.pill(heldPill.message, duration: heldPill.duration))
