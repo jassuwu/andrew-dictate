@@ -28,6 +28,13 @@ enum BrewUpgrade {
         }
     }
 
+    /// where the cask's `app` stanza puts it, so where the new version is
+    /// read from once brew says it is done.
+    static let installedApp = URL(
+        fileURLWithPath: "/Applications/Andrew Dictate.app",
+        isDirectory: true
+    )
+
     /// generous: the dmg is a few hundred mb, and brew may update its taps
     /// first. a brew that is still going after this is stuck.
     static let timeout: TimeInterval = 10 * 60

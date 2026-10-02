@@ -616,6 +616,21 @@ final class UpdateCheckTests: XCTestCase {
         }
     }
 
+    /// a run's end only moves a line that is waiting on it.
+    func testOnlyAnUpdatingLineIsFinished() {
+        for state: UpdateOffer.LineState in [.available(brewLine), .restartToFinish, .failedCopied] {
+            XCTAssertEqual(
+                UpdateOffer.finished(
+                    state,
+                    ending: .exited(1),
+                    onDisk: nil,
+                    running: "0.9.4"
+                ),
+                state
+            )
+        }
+    }
+
     // MARK: - the brew run: what is run, where, with what
 
     /// the copied command and the run command are the same words, so the
@@ -771,69 +786,60 @@ final class UpdateCheckTests: XCTestCase {
         XCTAssertEqual(result.ending, .couldNotStart)
     }
 
-    /// a run's end only moves a line that is waiting on it.
-    func testOnlyAnUpdatingLineIsFinished() {
-        for state: UpdateOffer.LineState in [.available(brewLine), .restartToFinish, .failedCopied] {
-            XCTAssertEqual(
-                UpdateOffer.finished(
-                    state,
-                    ending: .exited(1),
-                    onDisk: nil,
-                    running: "0.9.4"
-                ),
-                state
-            )
-        }
-    }
+    // MARK: - the hand-off: one click, carried out
 
-    // MARK: - the hand-off: what the click does today
-
-    /// the menu closes on the click, so the pill says what happened.
+    /// the line follows brew: updating while it runs, then the restart.
     @MainActor
-    func testABrewLineCopiesTheCommandAndSaysSo() {
-        let pasteboard = NSPasteboard.withUniqueName()
-        defer { pasteboard.releaseGlobally() }
-        var opened: [URL] = []
-        var said: [String] = []
-        let handOff = ManualHandOff(
-            pasteboard: pasteboard,
-            open: { opened.append($0) },
-            confirm: { said.append($0) }
-        )
+    func testABrewUpgradeThatLandsEndsOnRestartToFinish() async {
+        let world = HandOffWorld()
+        world.onDisk = "0.9.5"
 
-        handOff.perform(
-            .brewUpgrade("brew upgrade --cask jassuwu/tap/andrew-dictate")
-        )
+        let run = world.handOff.click(offering: brewLine)
+        XCTAssertEqual(world.handOff.state(offering: brewLine), .updating)
+        await run?.value
 
         XCTAssertEqual(
-            pasteboard.string(forType: .string),
-            "brew upgrade --cask jassuwu/tap/andrew-dictate"
+            world.runner.commands,
+            [
+                BrewUpgrade.command(
+                    brew: URL(fileURLWithPath: "/opt/homebrew/bin/brew"),
+                    environment: world.environment
+                ),
+            ]
         )
-        XCTAssertEqual(said, ["copied — paste it in terminal"])
-        XCTAssertTrue(opened.isEmpty)
+        XCTAssertEqual(
+            world.handOff.state(offering: brewLine)?.title,
+            "restart to finish"
+        )
+        XCTAssertNil(world.pasteboard.string(forType: .string))
+
+        world.handOff.click(offering: brewLine)
+        XCTAssertEqual(world.relaunches, 1)
     }
 
-    /// the browser opening is the confirmation; the clipboard is left alone.
+    /// the browser opening is the confirmation; the clipboard is left
+    /// alone and the line stays as it was.
     @MainActor
     func testADmgLineOpensTheReleasesPage() {
-        let pasteboard = NSPasteboard.withUniqueName()
-        defer { pasteboard.releaseGlobally() }
-        var opened: [URL] = []
-        var said: [String] = []
-        let handOff = ManualHandOff(
-            pasteboard: pasteboard,
-            open: { opened.append($0) },
-            confirm: { said.append($0) }
+        let world = HandOffWorld()
+        let line = UpdateOffer.Line(
+            version: "0.9.5",
+            action: .openReleasePage(releasesPage)
         )
-        let page = URL(
-            string: "https://github.com/jassuwu/andrew-dictate/releases/latest"
-        )!
 
-        handOff.perform(.openReleasePage(page))
+        let run = world.handOff.click(offering: line)
 
-        XCTAssertEqual(opened, [page])
-        XCTAssertNil(pasteboard.string(forType: .string))
-        XCTAssertTrue(said.isEmpty)
+        XCTAssertNil(run)
+        XCTAssertEqual(world.opened, [releasesPage])
+        XCTAssertTrue(world.runner.commands.isEmpty)
+        XCTAssertNil(world.pasteboard.string(forType: .string))
+        XCTAssertEqual(world.handOff.state(offering: line), .available(line))
+    }
+
+    /// nothing heard, nothing clicked: no line.
+    @MainActor
+    func testNoOfferAndNoClickIsNoLine() {
+        XCTAssertNil(HandOffWorld().handOff.state(offering: nil))
     }
 
     private func makeFile(at url: URL, executable: Bool) throws {
@@ -913,5 +919,70 @@ private final class CheckWorld {
                 return answer
             }
         )
+    }
+}
+
+/// the one-click hand-off with brew, the disk, the clipboard and the app's
+/// business in the test's hands: running 0.9.4, brew at /opt/homebrew,
+/// nothing newer on disk and a brew that exits clean until told otherwise.
+@MainActor
+private final class HandOffWorld {
+    let runner = FakeRunner()
+    let pasteboard = NSPasteboard.withUniqueName()
+    let environment = ["HOME": "/Users/someone", "PATH": "/usr/bin:/bin"]
+    var busy = false
+    var onDisk: String? = "0.9.4"
+    var brew: URL? = URL(fileURLWithPath: "/opt/homebrew/bin/brew")
+    private(set) var opened: [URL] = []
+    private(set) var relaunches = 0
+    private(set) var logged: [String] = []
+    private let pasteboardName: NSPasteboard.Name
+
+    private(set) lazy var handOff: UpdateHandOff = {
+        let handOff = UpdateHandOff(
+            runningVersion: "0.9.4",
+            onDiskVersion: { [unowned self] in onDisk },
+            relaunch: { [unowned self] in relaunches += 1 },
+            runner: runner,
+            locateBrew: { [unowned self] in brew },
+            environment: environment,
+            pasteboard: pasteboard,
+            open: { [unowned self] in opened.append($0) },
+            logFailure: { [unowned self] in logged.append($0) },
+            idlePoll: .milliseconds(5)
+        )
+        handOff.isBusy = { [unowned self] in busy }
+        return handOff
+    }()
+
+    init() {
+        pasteboardName = pasteboard.name
+    }
+
+    deinit {
+        NSPasteboard(name: pasteboardName).releaseGlobally()
+    }
+}
+
+/// a brew that answers whatever the test says, and remembers being asked.
+private final class FakeRunner: CommandRunner, @unchecked Sendable {
+    private let lock = NSLock()
+    private var ran: [Command] = []
+    private var answer = CommandResult(ending: .exited(0), stdout: "", stderr: "")
+
+    var commands: [Command] {
+        lock.withLock { ran }
+    }
+
+    var result: CommandResult {
+        get { lock.withLock { answer } }
+        set { lock.withLock { answer = newValue } }
+    }
+
+    func run(_ command: Command) async -> CommandResult {
+        lock.withLock {
+            ran.append(command)
+            return answer
+        }
     }
 }
