@@ -62,7 +62,7 @@ enum Queueing {
         guard !sorted.isEmpty else { return result }
         (result.maxLag, result.p95Lag, result.meanLag) = QueueResult.summary(lags: sorted)
         result.utilisation = result.decodeSeconds / audioSeconds
-        result.drainAfterEnd = (finishes.last ?? 0) - audioSeconds
+        result.drainAfterEnd = max(0, (finishes.last ?? 0) - audioSeconds)
         return result
     }
 }

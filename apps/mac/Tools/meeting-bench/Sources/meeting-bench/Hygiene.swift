@@ -51,14 +51,29 @@ enum Hygiene {
         var busyNames: [String]
     }
 
-    /// waits for no build process, up to `maxMinutes`, then notes the load.
-    static func begin(maxMinutes: Double = 20) async -> Start {
+    /// waits for no build process (and, with `settle`, for that to hold for that many seconds), up
+    /// to `maxMinutes`, then notes the load.
+    static func begin(maxMinutes: Double = 20, settle: Double = 0) async -> Start {
         let began = ContinuousClock.now
-        var quiet = busyBuilders().isEmpty
-        while !quiet, ContinuousClock.now - began < .seconds(maxMinutes * 60) {
-            print("waiting for a quiet machine, running: \(busyBuilders().joined(separator: ", "))")
-            try? await Task.sleep(for: .seconds(10))
-            quiet = busyBuilders().isEmpty
+        var quietSince: ContinuousClock.Instant?
+        var quiet = false
+        var lastSaid = began
+        while ContinuousClock.now - began < .seconds(maxMinutes * 60) {
+            let busy = busyBuilders()
+            if busy.isEmpty {
+                quietSince = quietSince ?? ContinuousClock.now
+                if (ContinuousClock.now - quietSince!).seconds >= settle {
+                    quiet = true
+                    break
+                }
+            } else {
+                quietSince = nil
+                if (ContinuousClock.now - lastSaid).seconds >= 10 {
+                    print("waiting for a quiet machine, running: \(busy.joined(separator: ", "))")
+                    lastSaid = ContinuousClock.now
+                }
+            }
+            try? await Task.sleep(for: .seconds(2))
         }
         let waited = (ContinuousClock.now - began).seconds
         let start = Start(loadAverageAtStart: loadAverage(), quietAtStart: quiet, waitedSeconds: waited)
@@ -69,7 +84,7 @@ enum Hygiene {
         return start
     }
 
-    /// samples the load and the build processes every 15 s until stopped.
+    /// samples the load and the build processes every 5 s until stopped.
     final class Watch: @unchecked Sendable {
         private let lock = NSLock()
         private var during = During(maxLoadAverage: 0, samples: 0, busySamples: 0, busyNames: [])
@@ -79,7 +94,7 @@ enum Hygiene {
             task = Task.detached { [self] in
                 while !Task.isCancelled {
                     sample()
-                    try? await Task.sleep(for: .seconds(15))
+                    try? await Task.sleep(for: .seconds(5))
                 }
             }
         }

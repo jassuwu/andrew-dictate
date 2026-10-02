@@ -125,7 +125,7 @@ alone.
 
 other builds on the same machine move every number here. each run waits until
 no `xcodebuild`, `swift-frontend` or `swiftc` is running (up to 20 minutes),
-prints the 1-minute load average when it starts, and samples both every 15
+prints the 1-minute load average when it starts, and samples both every 5
 seconds while it runs, saying at the end whether a build showed up. do not
 build while a timed run is going.
 

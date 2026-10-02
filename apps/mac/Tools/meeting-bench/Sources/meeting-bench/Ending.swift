@@ -11,12 +11,15 @@ import Foundation
 /// process's peak after each step, so a step that raised it can be told from one that did not.
 enum Ending {
     static func run(_ arguments: [String]) async throws {
-        let options = try Options(arguments, flags: ["no-whisper"])
+        let options = try Options(arguments, flags: ["no-whisper", "strict"])
         let spool = URL(fileURLWithPath: try options.require("spool"))
         let tailURL = URL(fileURLWithPath: try options.require("tail"))
         let skipWhisper = options.has("no-whisper")
 
-        _ = await Hygiene.begin()
+        // --strict: a quiet machine for ten seconds before it starts, and the run is thrown away (exit 3)
+        // if a build showed up while it ran, so a script can try again.
+        let strict = options.has("strict")
+        _ = await Hygiene.begin(settle: strict ? 10 : 0)
         let watch = Hygiene.Watch()
         func peaks(_ after: String) {
             print("   after \(after): resident now \(gigabytes(currentResidentBytes())), peak so far \(gigabytes(peakResidentBytes()))")
@@ -76,11 +79,15 @@ enum Ending {
                      segments.count, speakers))
         peaks("step 2")
 
-        _ = watch.stop()
+        let during = watch.stop()
         let total = readSeconds + splitSeconds + (tailSeconds ?? 0)
         print(String(format: "\nSUMMARY step 1 read %.2f s | step 2 split %.2f s | step 3 tail %@ | sum %.2f s | process peak %@",
                      readSeconds, splitSeconds, tailSeconds.map { String(format: "%.2f s", $0) } ?? "skipped", total,
                      gigabytes(peakResidentBytes())))
+        if strict, during.busySamples > 0 {
+            print("DISCARD: a build ran during this run")
+            exit(3)
+        }
     }
 
     /// FluidDiarizer.modelDirectory

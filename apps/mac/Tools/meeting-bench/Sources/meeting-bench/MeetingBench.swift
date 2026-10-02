@@ -5,6 +5,8 @@ import Foundation
 @main
 struct MeetingBench {
     static func main() async {
+        // progress lines should show up in a log file as they happen, not at exit
+        setvbuf(stdout, nil, _IOLBF, 0)
         var arguments = Array(CommandLine.arguments.dropFirst())
         guard !arguments.isEmpty else {
             print(usage)
@@ -22,6 +24,9 @@ struct MeetingBench {
                 try Simulate.run(arguments)
             case "live":
                 try await Live.run(arguments)
+            case "compare":
+                guard arguments.count == 2 else { throw BenchError("compare needs paced.json offline.json") }
+                Live.compare(try RunFile.read(arguments[0]), offline: try RunFile.read(arguments[1]))
             case "spool":
                 try Spool.build(arguments)
             case "tail":
@@ -52,14 +57,17 @@ struct MeetingBench {
           the shared queue, from the decode times a run measured.
       live --engine E --you f.wav --them f.wav --seconds N --out run.json [--compare offline.json]
           the same, with the audio fed at wall-clock speed.
+      compare paced.json offline.json
+          the paced run's real lag beside the simulation, again, from the saved files.
 
     measurement B, how long does the end of a meeting take?
       spool --you f.wav --them f.wav --hours H --out spool.caf
           a two-channel spool in the app's format, the two files looped to H hours.
       tail --from f.wav [--start S] [--seconds 20] --out tail.wav
           20 seconds of a file, from S or ending at its last audible sample, for the stop-time decode.
-      ending --spool spool.caf --tail tail.wav [--no-whisper]
+      ending --spool spool.caf --tail tail.wav [--no-whisper] [--strict]
           the end of a meeting, step by step. wrap in /usr/bin/time -l for peak memory.
-          --no-whisper skips the model and the tail decode (steps 1 and 2 only).
+          --no-whisper skips the model and the tail decode (steps 1 and 2 only). --strict waits for ten quiet
+          seconds first and exits 3 if a build ran during the run.
     """
 }
