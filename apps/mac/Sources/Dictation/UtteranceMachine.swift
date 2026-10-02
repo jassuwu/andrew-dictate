@@ -383,6 +383,7 @@ final class UtteranceMachine {
         pendingStart = nil
         startDeadline = nil
         guard let capture, capture.id == id else {
+            dropOrphanedMicrophone()
             return
         }
 
@@ -399,10 +400,24 @@ final class UtteranceMachine {
         endPress(.micNotResponding)
     }
 
+    /// a press thrown away while its mic was opening, and that mic then
+    /// refused or never answered. the press is over, so nothing is said,
+    /// but the next one must not queue behind a wedged mic. a press already
+    /// holding a mic of its own keeps it: that one answers for itself.
+    private func dropOrphanedMicrophone() {
+        guard capture == nil else {
+            return
+        }
+        audioLogger.error("a thrown-away take's microphone never started; dropping it")
+        emit(.microphoneDropped)
+    }
+
     private func microphoneFailedToStart(_ id: UInt64, error: any Error) {
-        guard startAnswered(id),
-              let capture,
-              capture.id == id else {
+        guard startAnswered(id) else {
+            return
+        }
+        guard let capture, capture.id == id else {
+            dropOrphanedMicrophone()
             return
         }
 

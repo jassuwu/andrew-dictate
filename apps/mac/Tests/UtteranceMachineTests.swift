@@ -721,6 +721,40 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(outcomes, [.refused(.stillFinishing), .delivered])
     }
 
+    /// a take thrown away while its mic was still opening: if that mic
+    /// never answers it is dropped all the same, so the next press opens a
+    /// fresh one instead of queueing behind it. no pill: that press is over.
+    func testAMicThatNeverAnswersIsDroppedEvenAfterEsc() async {
+        let m = machine()
+        mic.holdsStart = true
+        m.keyDown()
+        XCTAssertTrue(m.escape())
+
+        await pass(.milliseconds(1_400))
+        XCTAssertFalse(events.contains(.microphoneDropped))
+        await pass(.milliseconds(100))
+
+        XCTAssertTrue(events.contains(.microphoneDropped))
+        XCTAssertEqual(pills, [])
+        XCTAssertEqual(outcomes, [.cancelled])
+    }
+
+    /// one that refuses after the take was thrown away is dropped too.
+    func testAMicThatRefusesAfterEscIsDropped() async {
+        let m = machine()
+        mic.holdsStart = true
+        mic.failsToStart = true
+        m.keyDown()
+        XCTAssertTrue(m.escape())
+
+        mic.finishStart()
+        await settle()
+
+        XCTAssertTrue(events.contains(.microphoneDropped))
+        XCTAssertEqual(pills, [])
+        XCTAssertEqual(outcomes, [.cancelled])
+    }
+
     // MARK: - the mac underneath
 
     /// today's behaviour, which ticket 06 reverses: sleep or the lock ends
