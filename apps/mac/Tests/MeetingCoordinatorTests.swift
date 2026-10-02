@@ -572,7 +572,53 @@ final class MeetingCoordinatorTests: XCTestCase {
         XCTAssertEqual(hookRuns.count, 0)
     }
 
+    // MARK: - recovery beside a live meeting
+
+    /// Launch recovery can run for a quarter of an hour, and a meeting can
+    /// start in the middle of it. What recovery finishes is the spool it
+    /// found; the meeting goes on and is saved like any other.
+    func testARecoveryThatEndsMidMeetingLeavesTheMeetingAlone() async throws {
+        try await orphan("teams", started: Date(timeIntervalSince1970: 1_787_000_000))
+        let recovery = FakeTranscriber(batchTurns: [
+            .init(speaker: .them(nil), at: .zero, text: "recovered words")])
+        let live = FakeTranscriber(finalTurns: [
+            .init(speaker: .you, at: .seconds(1), text: "live words")])
+        recovery.holds = true
+        transcribers.lineUp(recovery, live)
+        let c = coordinator(starting: [Date(timeIntervalSince1970: 1_787_090_000)])
+
+        c.recoverOrphans()
+        await held(recovery)
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+        recovery.release()
+        await settle()
+        source.send(loud(at: .seconds(1)))
+        await settle()
+        c.stop()
+        await settle(for: 1.0)
+
+        let all = MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs"))
+        XCTAssertEqual(all.map(\.app), ["zoom", "teams"])
+        XCTAssertEqual(all.map(\.recovered), [false, true])
+        let bodies = try all.map { try String(contentsOf: $0.fileURL, encoding: .utf8) }
+        XCTAssertEqual(bodies.map { $0.contains("[00:00:01] you: live words") }, [true, false])
+        XCTAssertEqual(MeetingSpool(root: dir.appendingPathComponent("spool")).orphans().count, 0)
+    }
+
     // MARK: - helpers
+
+    /// A spool a crash left behind, with a second of audio on it.
+    private func orphan(_ app: String, started: Date) async throws {
+        let spool = MeetingSpool(root: dir.appendingPathComponent("spool"))
+        let handle = try spool.begin(.init(
+            app: app, started: started,
+            engine: "whisper-large-v3-turbo", model: .whisperLargeV3Turbo))
+        let file = try SpoolAudioFile(url: handle.audioURL)
+        try await file.append(loud(at: .zero))
+    }
 
     private func loud(at: Duration) -> MeetingAudioChunk {
         let n = 16_000
