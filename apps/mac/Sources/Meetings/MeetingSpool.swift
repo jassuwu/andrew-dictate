@@ -145,6 +145,36 @@ struct MeetingSpool: Sendable {
         try? fm.moveItem(at: handle.folder, to: destination)
     }
 
+    /// Every recording set aside, home again: back in the spool, where
+    /// `orphans()` offers it, with its count of tries cleared. Returned as
+    /// they now stand, so the caller can run recovery for exactly these and
+    /// not for any other orphan that has a try left.
+    func bringBackSetAside() -> [(handle: Handle, manifest: Manifest)] {
+        let fm = FileManager.default
+        let names = (try? fm.contentsOfDirectory(atPath: unreadableFolder.path)) ?? []
+        var back: [(handle: Handle, manifest: Manifest)] = []
+        for name in names.sorted() where !name.hasPrefix(".") {
+            let aside = Handle(
+                folder: unreadableFolder.appendingPathComponent(name, isDirectory: true))
+            let home = Handle(folder: root.appendingPathComponent(name, isDirectory: true))
+            guard let data = try? Data(contentsOf: aside.manifestURL),
+                  var manifest = try? Self.decoder.decode(Manifest.self, from: data)
+            else {
+                continue
+            }
+            manifest.attempts = nil
+            guard let cleared = try? Self.encoder.encode(manifest),
+                  (try? cleared.write(to: aside.manifestURL, options: .atomic)) != nil,
+                  (try? fm.moveItem(at: aside.folder, to: home.folder)) != nil
+            else {
+                continue
+            }
+            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: home.manifestURL.path)
+            back.append((home, manifest))
+        }
+        return back
+    }
+
     /// The folder those go to, whether or not anything is in it — the
     /// settings row needs somewhere to send you.
     var unreadableFolder: URL {

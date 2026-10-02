@@ -190,6 +190,29 @@ final class MeetingSpoolTests: XCTestCase {
         XCTAssertEqual(Set(audio), [Data([1]), Data([2])])
     }
 
+    // MARK: - trying again
+
+    /// The recording comes home with its count of tries cleared: it was set
+    /// aside on two, and a third from there would set it aside on the first.
+    func testASetAsideSpoolComesBackWithItsAttemptsCleared() throws {
+        let handle = try spool.begin(manifest())
+        try Data([7]).write(to: handle.audioURL)
+        let tried = spool.noteAttempt(handle, manifest: manifest())
+        spool.noteAttempt(handle, manifest: tried)
+        spool.setAside(handle)
+        XCTAssertEqual(spool.unreadableCount(), 1)
+
+        let back = spool.bringBackSetAside()
+
+        XCTAssertEqual(back.map(\.handle), [handle])
+        XCTAssertEqual(back.map(\.manifest), [manifest()])
+        XCTAssertEqual(spool.orphans().map(\.handle), [handle])
+        XCTAssertNil(spool.orphans().first?.manifest.attempts)
+        XCTAssertEqual(spool.unreadableCount(), 0)
+        XCTAssertEqual(try Data(contentsOf: handle.audioURL), Data([7]))
+        XCTAssertEqual(permissions(of: handle.manifestURL), 0o600)
+    }
+
     // MARK: -
 
     /// Where a set-aside spool's folder ends up.
