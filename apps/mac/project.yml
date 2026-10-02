@@ -109,6 +109,7 @@ targets:
           - PipelinePlaygroundView.swift
           - WordFixerView.swift
       - Sources/Audio/CaptureCapWarning.swift
+      - Sources/Audio/CaptureSlot.swift
       - Sources/Audio/CaptureStaleness.swift
       - Sources/Audio/MicCapture.swift
       - Sources/Audio/RingSplicer.swift

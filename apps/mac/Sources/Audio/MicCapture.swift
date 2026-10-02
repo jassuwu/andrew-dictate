@@ -23,6 +23,19 @@ protocol MicCapture: AnyObject {
     var deviceDescription: MicDescription? { get }
 }
 
+/// a capture the app can throw away whole. a device change, a wedge or the
+/// mac going to sleep is answered with a new one, never by rebuilding this
+/// one in place.
+@MainActor
+protocol DisposableMicCapture: MicCapture {
+    /// ready ahead of a press, off the main thread: the graph built, and
+    /// with pre-roll on, the mic already listening.
+    func prepare()
+    /// gone for good: it tears itself down on its own and is never asked
+    /// anything again.
+    func discard()
+}
+
 /// the mic a press was heard through, as the press log names it: what the
 /// device calls itself, and how it is attached — the two facts that tell an
 /// airpods failure from a built-in one.
