@@ -208,6 +208,41 @@ final class MeetingRecoveryTests: XCTestCase {
         XCTAssertEqual(spool.orphans().count, 0)
     }
 
+    /// It was set aside on two failures and comes back with none counted.
+    /// One more that fails is not a third round of launches: it goes
+    /// straight back where it was, and the line that counts them still does.
+    func testARecordingThatFailsAgainIsSetAsideAgain() async throws {
+        let handle = try await orphan("teams", started: started)
+        let tried = spool.noteAttempt(handle, manifest: .init(
+            app: "teams", started: started, engine: "whisperLargeV3Turbo",
+            model: .whisperLargeV3Turbo))
+        spool.noteAttempt(handle, manifest: tried)
+        spool.setAside(handle)
+        transcribers.transcriber.batchFailure = Unreadable()
+        let c = coordinator()
+
+        await c.tryAgainSetAside()
+
+        XCTAssertEqual(records.map(\.outcome), [.setAside])
+        XCTAssertEqual(records.first?.recovered, true)
+        XCTAssertEqual(spool.unreadableCount(), 1)
+        XCTAssertEqual(spool.orphans().count, 0)
+        XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).count, 0)
+        XCTAssertEqual(
+            try Data(contentsOf: setAsideFolder(of: handle).appendingPathComponent("audio.caf"))
+                .isEmpty,
+            false)
+
+        // and it can be tried again, as often as someone asks.
+        transcribers.transcriber.batchFailure = nil
+        transcribers.transcriber.batchTurns = [
+            .init(speaker: .them(nil), at: .zero, text: "recovered words here")]
+        await c.tryAgainSetAside()
+
+        XCTAssertEqual(records.map(\.outcome), [.setAside, .saved])
+        XCTAssertEqual(spool.unreadableCount(), 0)
+    }
+
     // MARK: - helpers
 
     /// A spool a crash left behind, with a second of audio on it.

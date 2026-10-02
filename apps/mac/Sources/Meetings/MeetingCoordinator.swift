@@ -1041,10 +1041,12 @@ final class MeetingCoordinator: ObservableObject {
             // Only logging it meant the same quarter of an hour was spent on
             // the same failure at every launch, forever. Two tries, then the
             // spool is set aside — kept, never retried, and said out loud in
-            // settings › history.
+            // settings › history. one somebody asked to be tried again has
+            // had the one try it was asked for.
             logger.error("could not recover a spool: \(error.localizedDescription, privacy: .public)")
             let noted = spool.noteAttempt(handle, manifest: manifest)
-            let setAside = (noted.attempts ?? 0) >= MeetingSpool.attemptsBeforeSettingAside
+            let setAside = tryingAgain
+                || (noted.attempts ?? 0) >= MeetingSpool.attemptsBeforeSettingAside
             if setAside {
                 spool.setAside(handle)
             }
