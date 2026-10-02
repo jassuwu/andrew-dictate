@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 
 final class UpdateCheckTests: XCTestCase {
@@ -464,6 +465,56 @@ final class UpdateCheckTests: XCTestCase {
         let relaunched = world.makeCheck()
 
         XCTAssertEqual(relaunched.line?.title, "update to 0.9.5")
+    }
+
+    // MARK: - the hand-off: what the click does today
+
+    /// the menu closes on the click, so the pill says what happened.
+    @MainActor
+    func testABrewLineCopiesTheCommandAndSaysSo() {
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        var opened: [URL] = []
+        var said: [String] = []
+        let handOff = ManualHandOff(
+            pasteboard: pasteboard,
+            open: { opened.append($0) },
+            confirm: { said.append($0) }
+        )
+
+        handOff.perform(
+            .brewUpgrade("brew upgrade --cask jassuwu/tap/andrew-dictate")
+        )
+
+        XCTAssertEqual(
+            pasteboard.string(forType: .string),
+            "brew upgrade --cask jassuwu/tap/andrew-dictate"
+        )
+        XCTAssertEqual(said, ["copied — paste it in terminal"])
+        XCTAssertTrue(opened.isEmpty)
+    }
+
+    /// the browser opening is the confirmation; the clipboard is left alone.
+    @MainActor
+    func testADmgLineOpensTheReleasesPage() {
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        var opened: [URL] = []
+        var said: [String] = []
+        let handOff = ManualHandOff(
+            pasteboard: pasteboard,
+            open: { opened.append($0) },
+            confirm: { said.append($0) }
+        )
+        let page = URL(
+            string: "https://github.com/jassuwu/andrew-dictate/releases/latest"
+        )!
+
+        handOff.perform(.openReleasePage(page))
+
+        XCTAssertEqual(opened, [page])
+        XCTAssertNil(pasteboard.string(forType: .string))
+        XCTAssertTrue(said.isEmpty)
     }
 
     /// a throwaway `Andrew Dictate.app`, with or without a readable plist.
