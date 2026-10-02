@@ -1239,7 +1239,7 @@ final class UtteranceMachineTests: XCTestCase {
 
 // MARK: - what the tests read
 
-private struct Pill: Equatable, CustomStringConvertible {
+struct Pill: Equatable, CustomStringConvertible {
     let message: String
     let duration: TimeInterval
 
@@ -1251,7 +1251,7 @@ private struct Pill: Equatable, CustomStringConvertible {
     var description: String { "\(message) (\(duration)s)" }
 }
 
-private struct StateChange: Equatable {
+struct StateChange: Equatable {
     let state: UtteranceMachine.State
     let fast: Bool
 
@@ -1360,11 +1360,11 @@ private final class FakeMic: MicCapture {
     }
 }
 
-private struct EngineFailure: Error {}
+struct EngineFailure: Error {}
 
 /// answers with `reply`, or — while `holds` is set — waits for the test to
 /// `release()` it, the way a slow or hung engine would.
-private final class FakeEngine: TranscriptionEngine, @unchecked Sendable {
+final class FakeEngine: TranscriptionEngine, @unchecked Sendable {
     private let lock = NSLock()
     private var _reply: Result<String, any Error> = .success("hello")
     private var _holds = false
@@ -1420,7 +1420,7 @@ private final class FakeEngine: TranscriptionEngine, @unchecked Sendable {
 }
 
 @MainActor
-private struct FakeAnchor: InsertionAnchor {
+struct FakeAnchor: InsertionAnchor {
     var targetBundleIdentifier: String?
     var before: String?
 
@@ -1438,7 +1438,7 @@ private struct FakeAnchor: InsertionAnchor {
 }
 
 @MainActor
-private final class FakeInserter: Inserter {
+final class FakeInserter: Inserter {
     var anchor: FakeAnchor? = FakeAnchor(
         targetBundleIdentifier: "com.apple.TextEdit"
     )
