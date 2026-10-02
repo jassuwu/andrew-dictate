@@ -38,6 +38,10 @@ enum MeetingEvent: Equatable, Sendable {
     case gapEnded
     case nudge
     case writingItOut
+    /// The coverage check found the transcript thin, and the meeting is
+    /// being read again from its audio before anything is written. An hour
+    /// of it takes minutes, so the lamp says why it is still working.
+    case readingAgain
     case saved(MeetingSummary)
     case nothingToKeep
     case hookFailed(String)
@@ -61,6 +65,7 @@ enum MeetingEvent: Equatable, Sendable {
         case .nudge: nil
         case .recovering(let app): "found an unsaved \(app) recording — writing it out…"
         case .writingItOut: "writing it out…"
+        case .readingAgain: "the transcript looked thin — reading the audio again…"
         case .saved(let summary): Self.savedText(summary)
         case .nothingToKeep: "nothing was heard, nothing kept"
         case .hookFailed(let label): "hook failed (\(label))"
@@ -611,18 +616,21 @@ final class MeetingCoordinator: ObservableObject {
         }
 
         onEvent?(.writingItOut)
-        let turns = await meeting.transcriber?.finish() ?? []
-        let tally = await meeting.transcriber?.decodeTally()
+        let live = Reading(
+            turns: await meeting.transcriber?.finish() ?? [],
+            tally: await meeting.transcriber?.decodeTally())
         meeting.transcriber = nil
+        // closed before anything reads it back.
         meeting.audioFile = nil
         // the settings as they were at the start: a folder, model or hook
         // changed since is for the next meeting.
         let prefs = meeting.preferences
+        let covered = await cover(
+            live, handle: handle, model: prefs.model, gaps: recording.gaps)
         let saved = await save(
-            turns: turns, recording: recording, handle: handle,
+            covered, recording: recording, handle: handle,
             app: meeting.app, started: meeting.started, model: prefs.model,
-            folder: prefs.folder, recovered: false, notes: meeting.notes,
-            tally: tally)
+            folder: prefs.folder, recovered: false, notes: meeting.notes)
         // written out — or never will be, and the spool waits for the next
         // launch. the hook is not part of it: it can take minutes.
         writingOut.removeAll { $0 === meeting }
@@ -631,10 +639,96 @@ final class MeetingCoordinator: ObservableObject {
         }
     }
 
+    /// The coverage check (ADR 0048), before any audio is let go: the
+    /// reading held against what was said. A thin one is read again from
+    /// the spool by a fresh transcriber for the same model and checked on
+    /// its own numbers. Nothing is written until this is done, so the file
+    /// is written once, from whichever reading it settles on.
+    private func cover(
+        _ live: Reading,
+        handle: MeetingSpool.Handle,
+        model: MeetingModel,
+        gaps: [MeetingSession.Gap]
+    ) async -> Covered {
+        let farSideLoud = await farSideLoud(in: handle)
+        guard case .thin(let reason) = live.verdict(farSideLoud: farSideLoud) else {
+            return Covered(reading: live, result: .pass, farSideLoud: farSideLoud)
+        }
+        onEvent?(.readingAgain)
+        guard let again = await readAgain(handle, model: model, gaps: gaps) else {
+            return Covered(reading: live, result: .thin, reason: reason, farSideLoud: farSideLoud)
+        }
+        switch again.verdict(farSideLoud: farSideLoud) {
+        case .pass:
+            return Covered(
+                reading: again, result: .passAfterRerun, reason: reason,
+                farSideLoud: farSideLoud)
+        case .thin(let reasonAgain):
+            // still thin: the reading with more of what was said in it, and
+            // its own reason, so the file says why of the lines it holds.
+            return again.words > live.words
+                ? Covered(reading: again, result: .thin, reason: reasonAgain, farSideLoud: farSideLoud)
+                : Covered(reading: live, result: .thin, reason: reason, farSideLoud: farSideLoud)
+        }
+    }
+
+    /// The spool's own word on how long the far side was heard, read a
+    /// block at a time off the main actor. A spool it cannot read says
+    /// nothing was, and the check goes on the transcriber's numbers.
+    private func farSideLoud(in handle: MeetingSpool.Handle) async -> Duration {
+        let url = handle.audioURL
+        let floor = thresholds.silenceFloor
+        let loud = Task.detached(priority: .utility) {
+            try SpoolAudioFile.farSideLoud(in: url, above: floor)
+        }
+        return (try? await loud.value) ?? .zero
+    }
+
+    /// The whole spool, through a transcriber of its own, or nil when that
+    /// could not be done: the model would not come, or it threw.
+    private func readAgain(
+        _ handle: MeetingSpool.Handle,
+        model: MeetingModel,
+        gaps: [MeetingSession.Gap]
+    ) async -> Reading? {
+        let url = handle.audioURL
+        do {
+            let audio = try await Task.detached(priority: .utility) {
+                try SpoolAudioFile.read(url)
+            }.value
+            let transcriber = try await makeTranscriber(model)
+            let turns = try await transcriber.transcribe(you: audio.you, them: audio.them)
+            return Reading(
+                turns: Self.onTheMeetingsClock(turns, gaps: gaps),
+                tally: await transcriber.decodeTally())
+        } catch {
+            logger.error("could not read a thin meeting again: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    /// A spool has nothing in it for a gap, so a turn read from it is
+    /// stamped on the spool's clock. Moved on over every gap that began
+    /// before it, it is back on the meeting's — the reverse of what
+    /// `splitSpeakers` does for the diarizer.
+    private static func onTheMeetingsClock(
+        _ turns: [MeetingTurn],
+        gaps: [MeetingSession.Gap]
+    ) -> [MeetingTurn] {
+        guard !gaps.isEmpty else { return turns }
+        return turns.map { turn in
+            var at = turn.at
+            for gap in gaps where at >= gap.began {
+                at += gap.duration
+            }
+            return MeetingTurn(speaker: turn.speaker, at: at, text: turn.text)
+        }
+    }
+
     /// turns → diarize → write → delete spool. Returns what a hook is told
     /// about the file, or nil when it could not be written.
     private func save(
-        turns: [MeetingTurn],
+        _ covered: Covered,
         recording: MeetingSession.Recording,
         handle: MeetingSpool.Handle,
         app: String,
@@ -642,9 +736,10 @@ final class MeetingCoordinator: ObservableObject {
         model: MeetingModel,
         folder: URL,
         recovered: Bool,
-        notes: MeetingRecord.Notes = .init(),
-        tally: StretchTally? = nil
+        notes: MeetingRecord.Notes = .init()
     ) async -> MeetingSavedEvent? {
+        let turns = covered.reading.turns
+        let tally = covered.reading.tally
         let them = (try? SpoolAudioFile.read(handle.audioURL))?.them ?? []
         let split = them.isEmpty
             ? turns
@@ -760,20 +855,23 @@ final class MeetingCoordinator: ObservableObject {
         do {
             let transcriber = try await makeTranscriber(manifest.model)
             let turns = try await transcriber.transcribe(you: audio.you, them: audio.them)
-            let tally = await transcriber.decodeTally()
+            let reading = Reading(turns: turns, tally: await transcriber.decodeTally())
+            // checked like any meeting, and not read again: this was the
+            // reading from the spool.
+            let covered = Covered(
+                checking: reading, farSideLoud: await farSideLoud(in: handle))
             // a spool from a past run has no settings of its own; it goes
             // where meetings go now.
             let prefs = preferences()
             let saved = await save(
-                turns: turns,
+                covered,
                 recording: .init(duration: duration, gaps: []),
                 handle: handle,
                 app: manifest.app,
                 started: manifest.started,
                 model: manifest.model,
                 folder: prefs.folder,
-                recovered: true,
-                tally: tally)
+                recovered: true)
             if let saved {
                 await runHook(prefs.hook, telling: saved)
             }
@@ -856,6 +954,53 @@ extension MeetingCoordinator {
             self.app = app
             self.started = started
             self.preferences = preferences
+        }
+    }
+
+    /// One reading of a meeting: its turns, and the transcriber's count of
+    /// its work when it keeps one.
+    private struct Reading {
+        var turns: [MeetingTurn]
+        var tally: StretchTally?
+
+        /// Counted the way the file counts its `words:`.
+        var words: Int {
+            turns.reduce(0) { $0 + $1.text.split(whereSeparator: \.isWhitespace).count }
+        }
+
+        func verdict(farSideLoud: Duration) -> CoverageCheck.Verdict {
+            let sides = CoverageCheck.sides(of: turns, tally: tally)
+            return CoverageCheck.verdict(you: sides.you, them: sides.them, farSideLoud: farSideLoud)
+        }
+    }
+
+    /// The reading a meeting is written from, and how the check came out.
+    private struct Covered {
+        var reading: Reading
+        var result: CoverageCheck.Result
+        /// Why the check found it thin — the last time, for one that stayed
+        /// thin; the first, for one that passed when it was read again.
+        var reason: String?
+        var farSideLoud: Duration
+
+        init(
+            reading: Reading, result: CoverageCheck.Result, reason: String? = nil,
+            farSideLoud: Duration
+        ) {
+            self.reading = reading
+            self.result = result
+            self.reason = reason
+            self.farSideLoud = farSideLoud
+        }
+
+        /// Checked once, with no reading again.
+        init(checking reading: Reading, farSideLoud: Duration) {
+            switch reading.verdict(farSideLoud: farSideLoud) {
+            case .pass:
+                self.init(reading: reading, result: .pass, farSideLoud: farSideLoud)
+            case .thin(let reason):
+                self.init(reading: reading, result: .thin, reason: reason, farSideLoud: farSideLoud)
+            }
         }
     }
 }

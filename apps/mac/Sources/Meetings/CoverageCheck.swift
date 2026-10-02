@@ -28,6 +28,34 @@ enum CoverageCheck {
         case thin(reason: String)
     }
 
+    /// How a meeting came out of it, once any reading again is done: for the
+    /// meeting record.
+    enum Result: String, Equatable, Sendable, Codable {
+        case pass
+        /// Thin the first time, and read again from the spool into a
+        /// transcript that covers it.
+        case passAfterRerun = "pass-after-rerun"
+        /// Still thin: the file says `complete: false` and why, and the
+        /// audio is kept.
+        case thin
+    }
+
+    /// The two sides as a transcriber left them: its counts, when it keeps
+    /// them, and the words of each side's turns, counted the way the file
+    /// counts its `words:`.
+    static func sides(of turns: [MeetingTurn], tally: StretchTally?) -> (you: Side, them: Side) {
+        var you = Side(speech: tally?.speechYou, read: tally?.readYou, words: 0)
+        var them = Side(speech: tally?.speechThem, read: tally?.readThem, words: 0)
+        for turn in turns {
+            let words = turn.text.split(whereSeparator: \.isWhitespace).count
+            switch turn.speaker {
+            case .you: you.words += words
+            case .them: them.words += words
+            }
+        }
+        return (you, them)
+    }
+
     // Provisional, all of them (ADR 0048): reasoned from how people talk,
     // not tuned against a real meeting yet. Every result goes in the
     // meeting record, with the numbers it was reached from, so they can be.

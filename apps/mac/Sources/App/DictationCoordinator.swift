@@ -2333,7 +2333,7 @@ extension DictationCoordinator {
             meetingsNeedAttention = true
             liveTranscriptPanel?.dismissKeepingPreference()
             runOnboardingAgain(scope: .meetingsOnly, openAt: .permissions)
-        case .recovering, .gapBegan, .gapEnded, .writingItOut, .hookFailed:
+        case .recovering, .gapBegan, .gapEnded, .writingItOut, .readingAgain, .hookFailed:
             break
         }
 
@@ -2344,7 +2344,7 @@ extension DictationCoordinator {
             // a recovered meeting arrives unprompted and is about yesterday:
             // two seconds is not long enough to read it.
             case .saved(let summary): duration = summary.recovered ? 4 : 2
-            case .writingItOut, .recovering: duration = 6
+            case .writingItOut, .readingAgain, .recovering: duration = 6
             default: duration = 2
             }
             flashNotice(text, duration: duration)
