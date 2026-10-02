@@ -42,7 +42,7 @@ extension PressRecord {
         if let words {
             fields.append("words=\(words)")
         }
-        fields.append("engine=\(engine)")
+        fields.append("model=\(engine)")
         if capped {
             fields.append("capped=1")
         }

@@ -141,7 +141,9 @@ enum Presses {
                 value = String(rest[..<end])
                 rest = rest[end...]
             }
-            fields[key] = value
+            // the speech model was `engine=` in lines written before the
+            // key was renamed; both read as `model`.
+            fields[key == "engine" ? "model" : key] = value
         }
         return fields
     }

@@ -37,7 +37,7 @@ final class PressLogTests: XCTestCase {
             "first_buffer_ms=42 key_up_ms=1203 samples_ready_ms=1210",
             "transcript_ms=1290 cleaned_ms=1292 paste_posted_ms=1301",
             "paste_done_ms=1612 end_ms=1612",
-            "samples=19200 peak=0.4123 words=4 engine=v2",
+            "samples=19200 peak=0.4123 words=4 model=v2",
         ]
         XCTAssertEqual(
             record.line(in: kolkata),
@@ -64,7 +64,7 @@ final class PressLogTests: XCTestCase {
 
         XCTAssertEqual(
             record.line(in: kolkata),
-            "at=2026-10-02T12:22:31+05:30 outcome=refused why=meeting-running end_ms=0 engine=v3"
+            "at=2026-10-02T12:22:31+05:30 outcome=refused why=meeting-running end_ms=0 model=v3"
         )
     }
 
@@ -90,8 +90,8 @@ final class PressLogTests: XCTestCase {
                 "speech model v2",
                 "default mic: MacBook Pro Microphone (built-in)",
                 "last 2 presses, newest last:",
-                "at=2026-10-02T12:22:31+05:30 outcome=refused why=model-not-ready end_ms=0 engine=v2",
-                "at=2026-10-02T12:22:31+05:30 outcome=refused why=no-microphone end_ms=1 engine=v2",
+                "at=2026-10-02T12:22:31+05:30 outcome=refused why=model-not-ready end_ms=0 model=v2",
+                "at=2026-10-02T12:22:31+05:30 outcome=refused why=no-microphone end_ms=1 model=v2",
             ].joined(separator: "\n")
         )
     }
@@ -108,8 +108,8 @@ final class PressLogTests: XCTestCase {
 
         XCTAssertEqual(lines.count, 5 + 50)
         XCTAssertEqual(lines[4], "last 50 presses, newest last:")
-        XCTAssertTrue(lines[5].hasSuffix("end_ms=10 engine=v2"))
-        XCTAssertTrue(lines.last!.hasSuffix("end_ms=59 engine=v2"))
+        XCTAssertTrue(lines[5].hasSuffix("end_ms=10 model=v2"))
+        XCTAssertTrue(lines.last!.hasSuffix("end_ms=59 model=v2"))
     }
 
     func testDiagnosticsWithNothingToShowSaySo() {
@@ -195,7 +195,7 @@ final class PressLogTests: XCTestCase {
 
         XCTAssertEqual(
             record.line(in: kolkata),
-            "at=2026-10-02T12:22:31+05:30 outcome=delivered end_ms=900 engine=v2 mic_changed=1"
+            "at=2026-10-02T12:22:31+05:30 outcome=delivered end_ms=900 model=v2 mic_changed=1"
         )
     }
 
@@ -221,7 +221,7 @@ final class PressLogTests: XCTestCase {
             [
                 "at=2026-10-02T12:22:31+05:30 outcome=no-audio",
                 #"mic="AirPods Pro" transport=bluetooth"#,
-                "key_up_ms=600 samples_ready_ms=610 end_ms=610 samples=9600 peak=0 engine=v2",
+                "key_up_ms=600 samples_ready_ms=610 end_ms=610 samples=9600 peak=0 model=v2",
             ].joined(separator: " ")
         )
         let file = try JSONEncoder().encode(record)
@@ -250,7 +250,7 @@ final class PressLogTests: XCTestCase {
 
         XCTAssertEqual(
             record.line(in: kolkata),
-            "at=2026-10-02T12:22:31+05:30 outcome=chord-cancelled first_buffer_ms=12 end_ms=180 engine=v2"
+            "at=2026-10-02T12:22:31+05:30 outcome=chord-cancelled first_buffer_ms=12 end_ms=180 model=v2"
         )
         let file = try JSONEncoder().encode(record)
         XCTAssertEqual(
@@ -279,7 +279,7 @@ final class PressLogTests: XCTestCase {
         let expected: [String] = [
             "at=2026-10-02T12:22:31+05:30 outcome=heard-nothing",
             #"mic="jass's \"desk\" mic" transport=usb"#,
-            "end_ms=600 samples=8000 peak=0.0001234 words=0 engine=v2",
+            "end_ms=600 samples=8000 peak=0.0001234 words=0 model=v2",
             "capped=1 retry=1 main_stall_ms=812",
         ]
         XCTAssertEqual(
