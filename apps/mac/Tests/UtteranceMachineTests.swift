@@ -414,6 +414,68 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(pills, [])
     }
 
+    // MARK: - the capture ceiling
+
+    func testThirtySecondsBeforeTheCeilingItSaysSo() async {
+        let m = machine()
+        m.keyDown()
+
+        m.capApproaching()
+        await settle { !self.pills.isEmpty }
+
+        XCTAssertEqual(pills, [Pill("thirty seconds left", 2)])
+        XCTAssertEqual(m.state, .recording)
+    }
+
+    /// the ceiling ends the take and keeps it: what was heard is pasted,
+    /// and only then does a pill say why the take ended without you.
+    func testTheCeilingPastesWhatItHadAndSaysWhy() async {
+        let m = machine()
+        engine.reply = .success("a very long thought")
+        m.doubleTapped()
+        await pass(.seconds(300))
+
+        XCTAssertTrue(m.capReached())
+        XCTAssertEqual(lockFlags, [true, false])
+        XCTAssertEqual(m.state, .transcribing)
+        await settle { self.inserter.inserted.count == 1 }
+
+        XCTAssertEqual(inserter.inserted, ["A very long thought."])
+        XCTAssertEqual(completions, [.delivered])
+        XCTAssertEqual(
+            pills.last,
+            Pill("five minutes — that's the cap. pasted what i had.", 2.4)
+        )
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(states.last, .init(.idle, fast: false))
+    }
+
+    /// the next take is not capped because the last one was.
+    func testTheTakeAfterTheCeilingEndsQuietly() async {
+        let m = machine()
+        m.keyDown()
+        m.capReached()
+        await settle { self.inserter.inserted.count == 1 }
+        let pillsAfterTheCap = pills.count
+
+        await hold(m, for: .seconds(1))
+        await settle { self.inserter.inserted.count == 2 }
+
+        XCTAssertEqual(pills.count, pillsAfterTheCap)
+    }
+
+    /// a hop that lands after the take is over is about a finger that has
+    /// already lifted.
+    func testTheCeilingOutsideARecordingIsNotNews() async {
+        let m = machine()
+
+        XCTAssertFalse(m.capReached())
+        m.capApproaching()
+        await settle()
+
+        XCTAssertEqual(events, [])
+    }
+
     // MARK: - helpers
 
     private var pills: [Pill] {
