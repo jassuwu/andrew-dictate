@@ -731,7 +731,7 @@ struct SettingsView: View {
                 Text("keep meeting audio")
                     .font(BrandUI.bodyFont.weight(.medium))
 
-                Text("it stays on this mac, never in the transcripts folder, and is deleted by itself after that. a transcript that comes out thin keeps its audio until you delete it.")
+                Text(settings.keepMeetingAudio.caption)
                     .font(.caption)
                     .foregroundStyle(BrandUI.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -48,4 +48,18 @@ final class KeepMeetingAudioSettingTests: XCTestCase {
             KeepMeetingAudio.allCases.map(\.label),
             ["delete at once", "one day", "seven days"])
     }
+
+    /// the row's caption says what the choice does: `delete at once` keeps
+    /// nothing for a while to delete later, and a thin transcript keeps its
+    /// audio whichever is chosen.
+    func testTheCaptionFitsTheChoice() {
+        XCTAssertEqual(
+            KeepMeetingAudio.deleteAtOnce.caption,
+            "deleted the moment the transcript is written. a transcript that comes out thin keeps its audio on this mac, never in the transcripts folder, until you delete it.")
+        for kept in [KeepMeetingAudio.oneDay, .sevenDays] {
+            XCTAssertEqual(
+                kept.caption,
+                "it stays on this mac, never in the transcripts folder, and is deleted by itself after that. a transcript that comes out thin keeps its audio until you delete it.")
+        }
+    }
 }

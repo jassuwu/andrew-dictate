@@ -24,6 +24,17 @@ enum KeepMeetingAudio: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// What the row says under its name, for the choice it shows. A thin
+    /// transcript keeps its audio whatever is chosen.
+    var caption: String {
+        switch self {
+        case .deleteAtOnce:
+            "deleted the moment the transcript is written. a transcript that comes out thin keeps its audio on this mac, never in the transcripts folder, until you delete it."
+        case .oneDay, .sevenDays:
+            "it stays on this mac, never in the transcripts folder, and is deleted by itself after that. a transcript that comes out thin keeps its audio until you delete it."
+        }
+    }
+
     /// How long after the file it is kept, or nil for not at all.
     var keptFor: TimeInterval? {
         switch self {
