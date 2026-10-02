@@ -175,7 +175,8 @@ final class DictationCoordinator: ObservableObject {
     private var wordFixerWindowController: WordFixerWindowController?
 
     // MARK: meetings (ADR 0023, 0040)
-    let meetings: MeetingCoordinator
+    /// built on first use: a mac that only dictates never pays for meetings.
+    let meetings: LazyMeetings
     let liveTranscript = LiveTranscriptModel(app: "", elapsed: .zero)
     @Published private(set) var meetingModelDownloads: [MeetingModel: Double] = [:]
     @Published private(set) var isLiveTranscriptShown = false
@@ -230,18 +231,20 @@ final class DictationCoordinator: ObservableObject {
         }
         audioRecorder = recorder
         feedbackSounds = FeedbackSounds(settings: settings)
-        meetings = MeetingCoordinator(
-            source: CoreAudioMeetingSource(),
-            makeTranscriber: { try await MeetingEngines.makeTranscriber(for: $0) },
-            diarizer: MeetingEngines.makeDiarizer(),
-            preferences: {
-                MeetingPreferences(
-                    folder: settings.meetingsFolder,
-                    hook: settings.meetingHook,
-                    model: settings.meetingModel
-                )
-            }
-        )
+        meetings = LazyMeetings {
+            MeetingCoordinator(
+                source: CoreAudioMeetingSource(),
+                makeTranscriber: { try await MeetingEngines.makeTranscriber(for: $0) },
+                diarizer: MeetingEngines.makeDiarizer(),
+                preferences: {
+                    MeetingPreferences(
+                        folder: settings.meetingsFolder,
+                        hook: settings.meetingHook,
+                        model: settings.meetingModel
+                    )
+                }
+            )
+        }
 
         let viewModel = HUDViewModel(
             state: .prewarming,
@@ -1742,7 +1745,7 @@ extension DictationCoordinator {
         Task { [meetingNotifier] in
             await meetingNotifier.requestPermissionIfNeeded()
         }
-        meetings.start(tapping: app)
+        meetings.coordinator.start(tapping: app)
     }
 
     func stopMeeting() {
@@ -1794,39 +1797,9 @@ extension DictationCoordinator {
     }
 
     private func wireMeetings() {
-        meetings.onEvent = { [weak self] event in
-            self?.handle(event)
+        meetings.onCoordinatorBuilt = { [weak self] built in
+            self?.wire(built)
         }
-        meetings.onLine = { [weak self] line in
-            self?.liveTranscript.upsert(line)
-        }
-        meetings.recordHookRun = { [weak self] run in
-            self?.settings.meetingHookLastRunAt = run.finishedAt
-            self?.settings.meetingHookLastRunLabel = run.outcome.label
-        }
-        meetings.$elapsed
-            .sink { [weak self] elapsed in
-                self?.liveTranscript.elapsed = elapsed
-            }
-            .store(in: &meetingCancellables)
-        // The menu observes *this* object, not the one nested inside it: a
-        // meeting that starts without this line leaves the menu drawing the
-        // idle version, with no way to stop what it cannot see.
-        meetings.$state
-            .removeDuplicates()
-            .sink { [weak self] _ in self?.objectWillChange.send() }
-            .store(in: &meetingCancellables)
-        meetings.$elapsed
-            .map { $0.components.seconds }
-            .removeDuplicates()
-            .sink { [weak self] _ in self?.objectWillChange.send() }
-            .store(in: &meetingCancellables)
-        // same reason as the two above: the menu watches this object, and
-        // the recovery line lives on the one nested inside it.
-        meetings.$recovering
-            .removeDuplicates()
-            .sink { [weak self] _ in self?.objectWillChange.send() }
-            .store(in: &meetingCancellables)
         meetingNotifier.onKeepGoing = { [weak self] in
             self?.meetings.keepGoing()
         }
@@ -1849,8 +1822,46 @@ extension DictationCoordinator {
         // number is a guess, like the rest of MeetingThresholds.
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(5))
-            self?.meetings.recoverOrphans()
+            self?.meetings.coordinator.recoverOrphans()
         }
+    }
+
+    /// the coordinator's half of the wiring, run once, the moment it is
+    /// built — before anything it does can need answering.
+    private func wire(_ built: MeetingCoordinator) {
+        built.onEvent = { [weak self] event in
+            self?.handle(event)
+        }
+        built.onLine = { [weak self] line in
+            self?.liveTranscript.upsert(line)
+        }
+        built.recordHookRun = { [weak self] run in
+            self?.settings.meetingHookLastRunAt = run.finishedAt
+            self?.settings.meetingHookLastRunLabel = run.outcome.label
+        }
+        built.$elapsed
+            .sink { [weak self] elapsed in
+                self?.liveTranscript.elapsed = elapsed
+            }
+            .store(in: &meetingCancellables)
+        // The menu observes *this* object, not the one nested inside it: a
+        // meeting that starts without this line leaves the menu drawing the
+        // idle version, with no way to stop what it cannot see.
+        built.$state
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &meetingCancellables)
+        built.$elapsed
+            .map { $0.components.seconds }
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &meetingCancellables)
+        // same reason as the two above: the menu watches this object, and
+        // the recovery line lives on the one nested inside it.
+        built.$recovering
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &meetingCancellables)
     }
 
     private func handle(_ event: MeetingEvent) {
@@ -1861,7 +1872,11 @@ extension DictationCoordinator {
                 toggleLiveTranscript()
             }
         case .nudge:
-            meetingNotifier.ask(app: meetingAppName, quietFor: meetings.thresholds.quietNudgeAfter)
+            // only a built coordinator says anything, so this builds nothing
+            meetingNotifier.ask(
+                app: meetingAppName,
+                quietFor: meetings.coordinator.thresholds.quietNudgeAfter
+            )
         case .saved(let summary):
             liveTranscriptPanel?.dismissKeepingPreference()
             // the file *is* the feature, and the pill that names it is gone
