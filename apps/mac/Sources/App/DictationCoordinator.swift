@@ -716,12 +716,11 @@ final class DictationCoordinator: ObservableObject {
                 setup: setup,
                 presses: try? store.recent(PressDiagnostics.pressCount)
             )
-            Task { @MainActor [weak self] in
+            // silent, like any copy: the pill is for what needs saying.
+            Task { @MainActor in
                 let pasteboard = NSPasteboard.general
                 pasteboard.clearContents()
                 pasteboard.setString(text, forType: .string)
-                // what makes it safe to send is worth saying out loud.
-                self?.sayWhenIdle("diagnostics copied — no words in it")
             }
         }
     }
