@@ -29,6 +29,9 @@ extension MeetingRecord {
         if recovered {
             fields.append("recovered=1")
         }
+        if again {
+            fields.append("again=1")
+        }
         if !events.isEmpty {
             let named = events.map { "\($0.label.rawValue)@\(Self.plain($0.atS))" }
             fields.append("events=\(named.joined(separator: ","))")

@@ -81,6 +81,7 @@ struct MeetingRecord: Equatable, Sendable, Codable {
     var them = Side()
     /// seconds from the stop to the transcript being on disk. nil when it
     /// never got there, and for a recovery, which has no stop of its own.
+    /// for one made again, from the asking.
     var toDiskS: Double?
     /// the ending is a recovery's: the audio came from a spool a past run
     /// left, found at launch. true of a recovery that failed too.
@@ -98,6 +99,10 @@ struct MeetingRecord: Equatable, Sendable, Codable {
     /// it: the transcript did not cover the meeting.
     var audioKept = false
     var audioKeptUntil: Date?
+    /// the record is of a transcript made again from its kept audio, by
+    /// your asking, and not of a meeting that has just ended. one per
+    /// rerun; `toDiskS` is how long it took.
+    var again = false
 }
 
 // MARK: - coverage
@@ -220,7 +225,8 @@ extension MeetingRecord {
             // name for — is a coverage it does not have, not a record lost.
             coverage: (try? container.decodeIfPresent(Coverage.self, forKey: .coverage)) ?? nil,
             audioKept: try container.decodeIfPresent(Bool.self, forKey: .audioKept) ?? false,
-            audioKeptUntil: try container.decodeIfPresent(Date.self, forKey: .audioKeptUntil)
+            audioKeptUntil: try container.decodeIfPresent(Date.self, forKey: .audioKeptUntil),
+            again: try container.decodeIfPresent(Bool.self, forKey: .again) ?? false
         )
     }
 }
@@ -283,7 +289,8 @@ extension MeetingRecord {
         tally: StretchTally? = nil,
         coverage: Coverage? = nil,
         audioKept: Bool = false,
-        audioKeptUntil: Date? = nil
+        audioKeptUntil: Date? = nil,
+        again: Bool = false
     ) {
         self.init(
             outcome: outcome,
@@ -308,7 +315,8 @@ extension MeetingRecord {
             },
             coverage: coverage,
             audioKept: audioKept,
-            audioKeptUntil: audioKeptUntil
+            audioKeptUntil: audioKeptUntil,
+            again: again
         )
     }
 
