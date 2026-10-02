@@ -488,7 +488,8 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(lines, ["[00:00:01] them: are we all here"])
         XCTAssertEqual(handed(), ["are we all here 52800"])
         let tally = await transcriber.tally
-        XCTAssertEqual(tally, StretchTally(decodedThem: 1, bleed: 1))
+        XCTAssertEqual(tally, StretchTally(
+            decodedThem: 1, bleed: 1, speechThem: .milliseconds(3_300), readThem: .milliseconds(3_300)))
     }
 
     // MARK: - the numbers
@@ -522,9 +523,13 @@ final class MeetingStretchTests: XCTestCase {
         await waitFor { c.liveLines.count == 2 }
 
         let tally = await transcriber.tally
+        // the far side's second, cut and never read, is speech the file
+        // does not have.
         XCTAssertEqual(tally, StretchTally(
             decodedYou: 2, decodedThem: 0, failed: 1,
-            mostBehind: .seconds(13), lastBehind: .seconds(1)))
+            mostBehind: .seconds(13), lastBehind: .seconds(1),
+            speechYou: .seconds(2.5), speechThem: .seconds(1),
+            readYou: .seconds(2.5), readThem: .zero))
     }
 
     // MARK: - the far side coming back through the mic
@@ -550,7 +555,9 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(live(c), ["them 1.0 are we all here"])
         XCTAssertEqual(handed(), ["are we all here 52800"])
         let tally = await transcriber.tally
-        XCTAssertEqual(tally, StretchTally(decodedThem: 1, bleed: 1))
+        // the copy let go is not speech of yours.
+        XCTAssertEqual(tally, StretchTally(
+            decodedThem: 1, bleed: 1, speechThem: .milliseconds(3_300), readThem: .milliseconds(3_300)))
         c.stop()
         let lines = try await savedLines()
         XCTAssertEqual(lines, ["[00:00:01] them: are we all here"])
@@ -580,7 +587,10 @@ final class MeetingStretchTests: XCTestCase {
         ])
         XCTAssertEqual(handed(), ["are we all here 52800", "no wait that is wrong 52800"])
         let tally = await transcriber.tally
-        XCTAssertEqual(tally, StretchTally(decodedYou: 1, decodedThem: 1))
+        XCTAssertEqual(tally, StretchTally(
+            decodedYou: 1, decodedThem: 1,
+            speechYou: .milliseconds(3_300), speechThem: .milliseconds(3_300),
+            readYou: .milliseconds(3_300), readThem: .milliseconds(3_300)))
         c.stop()
         let lines = try await savedLines()
         XCTAssertEqual(lines, [
@@ -609,7 +619,10 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(live(c), ["them 1.0 are we all here", "you 3.0 wait one second"])
         XCTAssertEqual(handed(), ["are we all here 24000", "wait one second 20800"])
         let tally = await transcriber.tally
-        XCTAssertEqual(tally, StretchTally(decodedYou: 1, decodedThem: 1, bleed: 1))
+        XCTAssertEqual(tally, StretchTally(
+            decodedYou: 1, decodedThem: 1, bleed: 1,
+            speechYou: .milliseconds(1_300), speechThem: .seconds(1.5),
+            readYou: .milliseconds(1_300), readThem: .seconds(1.5)))
         c.stop()
         let lines = try await savedLines()
         XCTAssertEqual(lines, [
@@ -637,7 +650,10 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(live(c), ["you 1.9 yes", "them 1.0 are we all here"])
         XCTAssertEqual(handed(), ["yes 7360", "are we all here 68800"])
         let tally = await transcriber.tally
-        XCTAssertEqual(tally, StretchTally(decodedYou: 1, decodedThem: 1))
+        XCTAssertEqual(tally, StretchTally(
+            decodedYou: 1, decodedThem: 1,
+            speechYou: .milliseconds(460), speechThem: .milliseconds(4_300),
+            readYou: .milliseconds(460), readThem: .milliseconds(4_300)))
         c.stop()
         let lines = try await savedLines()
         XCTAssertEqual(lines, ["[00:00:01] them: are we all here", "[00:00:01] you: yes"])

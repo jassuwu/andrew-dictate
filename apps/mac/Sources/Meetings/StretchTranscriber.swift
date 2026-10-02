@@ -24,6 +24,15 @@ struct StretchTally: Equatable, Sendable {
     /// latest.
     var mostBehind: Duration = .zero
     var lastBehind: Duration = .zero
+    /// Speech cut into stretches, per side: bleed let go is not counted. Of
+    /// that, what the engine read — handed a stretch, it gave text back,
+    /// words or none. A stretch that failed twice, or was still waiting when
+    /// the engine never came, is speech that was not read; the coverage
+    /// check holds the difference against the transcript.
+    var speechYou: Duration = .zero
+    var speechThem: Duration = .zero
+    var readYou: Duration = .zero
+    var readThem: Duration = .zero
 }
 
 /// A meeting heard a stretch at a time, each stretch decoded once.
@@ -248,6 +257,7 @@ actor StretchTranscriber: MeetingTranscriber {
 
     private func queue(_ stretches: [Stretch]) {
         for stretch in stretches {
+            countSpeech(in: stretch)
             let index = waiting.firstIndex { $0.stretch.end > stretch.end } ?? waiting.endIndex
             waiting.insert((stretch, now()), at: index)
         }
@@ -283,8 +293,12 @@ actor StretchTranscriber: MeetingTranscriber {
             do {
                 let text = try await engine.text(of: stretch.samples)
                 switch stretch.side {
-                case .you: tally.decodedYou += 1
-                case .them: tally.decodedThem += 1
+                case .you:
+                    tally.decodedYou += 1
+                    tally.readYou += stretch.end - stretch.at
+                case .them:
+                    tally.decodedThem += 1
+                    tally.readThem += stretch.end - stretch.at
                 }
                 return text
             } catch {
@@ -300,10 +314,19 @@ actor StretchTranscriber: MeetingTranscriber {
     private func decodeAlone(_ stretches: [Stretch]) async -> [MeetingTurn] {
         var turns: [MeetingTurn] = []
         for stretch in stretches {
+            countSpeech(in: stretch)
             guard let text = await decode(stretch), let words = Self.words(in: text) else { continue }
             turns.append(Self.turn(words, from: stretch))
         }
         return turns
+    }
+
+    /// Counted when it is cut, whatever becomes of it after.
+    private func countSpeech(in stretch: Stretch) {
+        switch stretch.side {
+        case .you: tally.speechYou += stretch.end - stretch.at
+        case .them: tally.speechThem += stretch.end - stretch.at
+        }
     }
 
     private func keep(_ text: String, from stretch: Stretch) {
