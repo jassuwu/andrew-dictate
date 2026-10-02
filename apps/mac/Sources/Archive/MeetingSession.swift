@@ -33,11 +33,41 @@ struct MeetingSession {
     }
 
     /// Something wrong that the meeting records through rather than ends
-    /// on, named so it can be shown until it clears.
+    /// on, named so it can be shown until it clears. Several can stand at
+    /// once, one of each kind.
     enum Problem: Equatable, Sendable {
         /// The tap could not be rebuilt: the far side is not being heard,
         /// and the gap stays open while it is not. Your side still is.
         case cannotHearTheCall
+        /// The same, and the mic could not be kept going on its own
+        /// either: nothing is being recorded while the tap is tried again.
+        case cannotHearAnything
+        /// The mic has handed over nothing but silence while the far side
+        /// talked. Named, when the source knows which mic it is.
+        case cannotHearYourMic(String?)
+        /// The audio could not be written to the spool. The live
+        /// transcript still runs; it is the audio that is not being kept.
+        case cannotSaveTheAudio
+        /// The disk the spool is on is nearly full.
+        case diskNearlyFull
+
+        /// Which problem it is, whatever it names. In order of how much
+        /// of the meeting each costs, the worst first.
+        enum Kind: Comparable, Sendable {
+            case cannotHearTheCall
+            case cannotHearYourMic
+            case cannotSaveTheAudio
+            case diskNearlyFull
+        }
+
+        var kind: Kind {
+            switch self {
+            case .cannotHearTheCall, .cannotHearAnything: .cannotHearTheCall
+            case .cannotHearYourMic: .cannotHearYourMic
+            case .cannotSaveTheAudio: .cannotSaveTheAudio
+            case .diskNearlyFull: .diskNearlyFull
+            }
+        }
     }
 
     enum DictationResponse: Equatable, Sendable {
@@ -68,8 +98,14 @@ struct MeetingSession {
     let quietNudgeAfter: Duration
 
     private(set) var state: State = .idle
-    /// Only ever while recording or rebuilding, and cleared by the stop.
-    private(set) var problem: Problem?
+    /// Only ever while recording or rebuilding, one of each kind, the
+    /// worst first; cleared by the stop.
+    private(set) var problems: [Problem] = []
+
+    /// The worst of them, for wherever there is room to say one.
+    var problem: Problem? {
+        problems.first
+    }
     /// A meeting stopped before the probe was heard has nothing worth
     /// keeping; one that has heard anything at all has a recording, holes
     /// and all. This is the same "has it ever delivered audio" signal ADR
@@ -91,7 +127,7 @@ struct MeetingSession {
             return
         }
         state = .provingItCanHear
-        problem = nil
+        problems = []
         everCaptured = false
         gaps = []
         silenceBegan = nil
@@ -102,7 +138,7 @@ struct MeetingSession {
     mutating func finish(at elapsed: Duration) -> Recording? {
         defer {
             state = .idle
-            problem = nil
+            problems = []
         }
         guard everCaptured else {
             return nil
@@ -173,19 +209,34 @@ struct MeetingSession {
 
     /// A problem names what is wrong while the meeting goes on. Before the
     /// tap has been heard there is no meeting to go on with, and after the
-    /// stop there is nothing to name.
-    mutating func problemBegan(_ problem: Problem) {
-        guard state == .recording || state == .rebuilding else {
-            return
+    /// stop there is nothing to name. One of a kind already standing gives
+    /// way to it. Says whether anything changed: the same problem said
+    /// again is not news.
+    @discardableResult
+    mutating func problemBegan(_ problem: Problem) -> Bool {
+        guard state == .recording || state == .rebuilding,
+              !problems.contains(problem)
+        else {
+            return false
         }
-        self.problem = problem
+        problems.removeAll { $0.kind == problem.kind }
+        problems.append(problem)
+        problems.sort { $0.kind < $1.kind }
+        return true
     }
 
-    mutating func problemCleared(_ problem: Problem) {
-        guard self.problem == problem else {
-            return
-        }
-        self.problem = nil
+    /// The problem of this kind is over. Returns the one that stood, or nil
+    /// when none did.
+    @discardableResult
+    mutating func problemCleared(_ kind: Problem.Kind) -> Problem? {
+        let standing = problem(kind)
+        problems.removeAll { $0.kind == kind }
+        return standing
+    }
+
+    /// The problem of this kind, while one stands.
+    func problem(_ kind: Problem.Kind) -> Problem? {
+        problems.first { $0.kind == kind }
     }
 
     // MARK: - the two interactions the prototype argued about

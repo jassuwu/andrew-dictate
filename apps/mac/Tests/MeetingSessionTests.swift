@@ -146,6 +146,44 @@ final class MeetingSessionTests: XCTestCase {
         XCTAssertEqual(session.problem, .cannotHearTheCall)
     }
 
+    /// The mic going silent and the disk filling are two things wrong at
+    /// once: both stand, the worse first, and each clears on its own.
+    func testTwoProblemsStandAtOnceAndClearOneAtATime() {
+        var session = session()
+        session.start()
+        session.heardTheProbe()
+        session.problemBegan(.diskNearlyFull)
+        session.problemBegan(.cannotHearYourMic("MacBook Pro Microphone"))
+
+        XCTAssertEqual(session.problems, [
+            .cannotHearYourMic("MacBook Pro Microphone"), .diskNearlyFull,
+        ])
+        XCTAssertEqual(session.problem, .cannotHearYourMic("MacBook Pro Microphone"))
+
+        session.problemCleared(.cannotHearYourMic)
+        XCTAssertEqual(session.problems, [.diskNearlyFull])
+
+        session.problemCleared(.diskNearlyFull)
+        XCTAssertEqual(session.problems, [])
+        XCTAssertNil(session.problem)
+    }
+
+    /// One of each kind: the call unheard is said one way while your side
+    /// is still recorded and another once it is not, and the second
+    /// wording takes the first's place rather than standing beside it.
+    func testAProblemOfAKindAlreadyStandingTakesItsPlace() {
+        var session = session()
+        session.start()
+        session.heardTheProbe()
+        session.tapWentSilent(at: .seconds(60))
+        session.problemBegan(.cannotHearTheCall)
+        session.problemBegan(.cannotHearAnything)
+
+        XCTAssertEqual(session.problems, [.cannotHearAnything])
+        session.problemCleared(.cannotHearTheCall)
+        XCTAssertEqual(session.problems, [])
+    }
+
     // MARK: - dictation is blocked, and says so
 
     func testDictationIsRefusedWhileRecordingRatherThanIgnored() {

@@ -99,10 +99,8 @@ enum MeetingEvent: Equatable, Sendable {
         case .cannotHear: "can't hear the mac — opening setup"
         case .gapBegan: "lost \(Self.themWord) — rebuilding"
         case .gapEnded: "hearing them again"
-        // what is lost, and what is not: it is mid-call, and "still
-        // recording" is the part that decides whether to do anything.
-        case .problemBegan(.cannotHearTheCall): "can't hear the call — still recording your side"
-        case .problemCleared(.cannotHearTheCall): "hearing the call again"
+        case .problemBegan(let problem): Self.began(problem)
+        case .problemCleared(let problem): Self.cleared(problem)
         case .nudge: nil
         case .recovering(let app): "found an unsaved \(app) recording — writing it out…"
         case .writingItOut: "writing it out…"
@@ -148,6 +146,30 @@ enum MeetingEvent: Equatable, Sendable {
         return "saved · \(summary.gapCount) \(word)"
     }
 
+    /// What is lost, and what is not: it is mid-call, and whether your side
+    /// is still being recorded is the part that decides whether to do
+    /// anything.
+    private static func began(_ problem: MeetingSession.Problem) -> String {
+        switch problem {
+        case .cannotHearTheCall: "can't hear the call — still recording your side"
+        case .cannotHearAnything: "can't hear the call or your mic — still trying"
+        // the mac's name for it, which is what the sound settings list.
+        case .cannotHearYourMic(let mic?): "can't hear your mic — \(mic.lowercased())"
+        case .cannotHearYourMic(nil): "can't hear your mic"
+        case .cannotSaveTheAudio: "can't save the audio — still transcribing"
+        case .diskNearlyFull: "disk nearly full"
+        }
+    }
+
+    private static func cleared(_ problem: MeetingSession.Problem) -> String {
+        switch problem {
+        case .cannotHearTheCall, .cannotHearAnything: "hearing the call again"
+        case .cannotHearYourMic: "hearing your mic again"
+        case .cannotSaveTheAudio: "saving the audio again"
+        case .diskNearlyFull: "the disk has room again"
+        }
+    }
+
     private static let themWord = "the other side"
 }
 
@@ -165,8 +187,14 @@ enum MeetingEvent: Equatable, Sendable {
 @MainActor
 final class MeetingCoordinator: ObservableObject {
     @Published private(set) var state: MeetingSession.State = .idle
-    /// What is wrong while the meeting goes on, for as long as it is.
-    @Published private(set) var problem: MeetingSession.Problem?
+    /// What is wrong while the meeting goes on, for as long as it is: one
+    /// of each kind, the worst first.
+    @Published private(set) var problems: [MeetingSession.Problem] = []
+
+    /// The worst of them, for wherever there is room to say one.
+    var problem: MeetingSession.Problem? {
+        problems.first
+    }
     @Published private(set) var elapsed: Duration = .zero
     @Published private(set) var liveLines: [LiveLine] = []
     /// The app of the spool being written out at launch, while it runs. The
@@ -781,15 +809,14 @@ final class MeetingCoordinator: ObservableObject {
     private func tapIsBack(_ meeting: Meeting) {
         session.tapRecovered(at: elapsed)
         meeting.notes.note(.gapEnded, at: elapsed)
-        guard session.problem == .cannotHearTheCall else {
+        guard let problem = session.problemCleared(.cannotHearTheCall) else {
             publish()
             onEvent?(.gapEnded)
             return
         }
-        session.problemCleared(.cannotHearTheCall)
         meeting.notes.note(.problemCleared, at: elapsed)
         publish()
-        onEvent?(.problemCleared(.cannotHearTheCall))
+        onEvent?(.problemCleared(problem))
     }
 
     private func rebuildTap(_ meeting: Meeting) {
@@ -849,13 +876,13 @@ final class MeetingCoordinator: ObservableObject {
             failures += 1
             // with the problem standing, the problem is the record: a try
             // every half minute for an hour is not kept one by one.
-            if session.problem == nil {
+            if session.problem(.cannotHearTheCall) == nil {
                 meeting.notes.note(failed, at: elapsed)
             }
             if failures < thresholds.rebuildAttempts {
                 wait = thresholds.rebuildSpacing[failures - 1]
             } else {
-                if session.problem == nil {
+                if session.problem(.cannotHearTheCall) == nil {
                     cannotHearTheCall(meeting)
                 }
                 wait = thresholds.retryWhileTheProblemStands
@@ -1340,7 +1367,7 @@ final class MeetingCoordinator: ObservableObject {
 
     private func publish() {
         state = session.state
-        problem = session.problem
+        problems = session.problems
     }
 
     /// Returns once `done` is true, looking again each time a meeting starts,
