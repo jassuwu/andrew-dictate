@@ -26,8 +26,12 @@ actor StretchTranscriber: MeetingTranscriber {
     private let now: @Sendable () -> ContinuousClock.Instant
     private let logger = Logger(subsystem: AppIdentity.loggingSubsystem, category: "stretches")
 
+    /// The two sides are two streams, each with its own detector: whoever
+    /// is speaking is the side the speech came from.
     private let youDetector: any SpeechDetector
+    private let themDetector: any SpeechDetector
     private var you = StretchCutter(side: .you)
+    private var them = StretchCutter(side: .them)
 
     /// Each chunk is heard after the one before it has been, whoever calls.
     /// The detector is awaited, so without this a chunk could overtake its
@@ -53,6 +57,7 @@ actor StretchTranscriber: MeetingTranscriber {
         self.makeDetector = makeDetector
         self.now = now
         youDetector = makeDetector()
+        themDetector = makeDetector()
         (lines, emit) = AsyncStream<LiveLine>.makeStream()
     }
 
@@ -79,12 +84,12 @@ actor StretchTranscriber: MeetingTranscriber {
     func finish() async -> [MeetingTurn] {
         await hearing?.value
         isFinished = true
-        queue(you.flush())
+        queue(you.flush() + them.flush())
         while let worker {
             await worker.value
         }
         emit.finish()
-        return turns
+        return Self.inOrder(turns)
     }
 
     func transcribe(you: [Float], them: [Float]) async throws -> [MeetingTurn] {
@@ -95,8 +100,10 @@ actor StretchTranscriber: MeetingTranscriber {
 
     private func hear(_ chunk: MeetingAudioChunk) async {
         guard !isFinished else { return }
-        let edges = await youDetector.hear(chunk.you)
-        queue(you.take(chunk.you, at: chunk.at, edges: edges))
+        let youEdges = await youDetector.hear(chunk.you)
+        let themEdges = await themDetector.hear(chunk.them)
+        queue(you.take(chunk.you, at: chunk.at, edges: youEdges)
+            + them.take(chunk.them, at: chunk.at, edges: themEdges))
     }
 
     // MARK: - decoding
@@ -126,8 +133,26 @@ actor StretchTranscriber: MeetingTranscriber {
     }
 
     private func keep(_ text: String, from stretch: Stretch) {
-        let turn = MeetingTurn(speaker: .you, at: stretch.at, text: text)
+        let turn = Self.turn(text, from: stretch)
         turns.append(turn)
-        emit.yield(LiveLine(speaker: .you, at: turn.at, text: turn.text, isConfirmed: true))
+        let speaker: LiveLine.Speaker = stretch.side == .you ? .you : .them
+        emit.yield(LiveLine(speaker: speaker, at: turn.at, text: turn.text, isConfirmed: true))
+    }
+
+    // MARK: -
+
+    private static func turn(_ text: String, from stretch: Stretch) -> MeetingTurn {
+        MeetingTurn(
+            speaker: stretch.side == .you ? .you : .them(nil),
+            at: stretch.at,
+            text: text)
+    }
+
+    /// By the time each was said. Two that began together stay in the order
+    /// they were decoded, so the file does not shuffle them between runs.
+    private static func inOrder(_ turns: [MeetingTurn]) -> [MeetingTurn] {
+        turns.enumerated()
+            .sorted { ($0.element.at, $0.offset) < ($1.element.at, $1.offset) }
+            .map(\.element)
     }
 }

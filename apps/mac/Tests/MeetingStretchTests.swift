@@ -52,6 +52,34 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(lines, ["[00:00:01] you: the deploy is blocked"])
     }
 
+    /// The speaker is the side it came from — nothing is guessed from who
+    /// was louder.
+    func testTheFarSideIsThemAndTheTurnsComeInTheOrderTheyWereSaid() async throws {
+        let c = coordinator(stretches())
+        c.start(tapping: zoom)
+        await source.awaitStart()
+
+        await play([
+            them("are we all here", from: 1.3, to: 2.0),
+            you("the deploy is blocked", from: 2.8, to: 4.0),
+            them("since when", from: 5.3, to: 6.0),
+        ], through: 7.0, on: c)
+        await waitFor { c.liveLines.count == 3 }
+
+        XCTAssertEqual(live(c), [
+            "them 1.0 are we all here",
+            "you 2.5 the deploy is blocked",
+            "them 5.0 since when",
+        ])
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, [
+            "[00:00:01] them: are we all here",
+            "[00:00:02] you: the deploy is blocked",
+            "[00:00:05] them: since when",
+        ])
+    }
+
     // MARK: - building a meeting
 
     private func stretches(ceiling: Duration = .seconds(25), clock: FakeClock = FakeClock()) -> StretchTranscriber {
