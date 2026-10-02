@@ -252,6 +252,19 @@ final class HotkeyLogicTests: XCTestCase {
             .includesTheDictationKey(.rightCommand))
     }
 
+    /// the key alone, or with only shift, would fire in the middle of
+    /// typing: one of control, option or command has to be held too.
+    func testAShortcutNeedsControlOptionOrCommand() {
+        let bare = MeetingShortcut(keyCode: 46, modifiers: [], keyName: "M")
+        let shifted = MeetingShortcut(keyCode: 46, modifiers: [.shift], keyName: "M")
+
+        XCTAssertEqual(bare.refusal(againstDictationKey: .fn), .needsAModifier)
+        XCTAssertEqual(shifted.refusal(againstDictationKey: .fn), .needsAModifier)
+        XCTAssertEqual(
+            bare.refusal(againstDictationKey: .fn)?.message,
+            "needs ⌃, ⌥ or ⌘ held with it")
+    }
+
     private func lockedDetector() -> TapLockDetector {
         var detector = TapLockDetector()
         _ = detector.modifierPressed(at: 1.0)

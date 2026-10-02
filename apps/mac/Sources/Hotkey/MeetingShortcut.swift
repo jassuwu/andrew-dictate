@@ -24,10 +24,13 @@ struct MeetingShortcut: Codable, Hashable, Sendable {
 
     /// Why settings will not take a shortcut, in the few words the row says.
     enum Refusal: Equatable, Sendable {
+        case needsAModifier
         case includesTheDictationKey(HotkeyBinding)
 
         var message: String {
             switch self {
+            case .needsAModifier:
+                "needs ⌃, ⌥ or ⌘ held with it"
             case .includesTheDictationKey(let key):
                 "includes your dictation key, \(key.displayName)"
             }
@@ -35,6 +38,9 @@ struct MeetingShortcut: Codable, Hashable, Sendable {
     }
 
     func refusal(againstDictationKey key: HotkeyBinding) -> Refusal? {
+        guard !modifiers.isDisjoint(with: [.control, .option, .command]) else {
+            return .needsAModifier
+        }
         if let held = Self.modifier(of: key), modifiers.contains(held) {
             return .includesTheDictationKey(key)
         }
