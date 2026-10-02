@@ -638,19 +638,29 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             AudioHardwareDestroyProcessTap(tapID)
             throw Failure.micGone(mic.name)
         }
-        let micChannels = CoreAudioProperties.inputChannels(micDevice).reduce(0, +)
+        // An aggregate device (one made in Audio MIDI Setup) cannot sit
+        // inside ours: the HAL leaves its channels out. The inputs inside it
+        // go in instead, its main one first, as the clock.
+        let parts = CoreAudioProperties.inputsInside(aggregate: micDevice) ?? [mic.uid]
+        let micChannels = parts.compactMap { CoreAudioProperties.device(uid: $0) }
+            .reduce(0) { $0 + CoreAudioProperties.inputChannels($1).reduce(0, +) }
         progress.stage = .startingTheMic(mic.name)
 
         let uid = uid(for: slot)
         destroyStaleAggregate(uid)
+        let subDevices: [[String: Any]] = parts.enumerated().map { index, part in
+            index == 0
+                ? [kAudioSubDeviceUIDKey: part]
+                : [kAudioSubDeviceUIDKey: part, kAudioSubDeviceDriftCompensationKey: true]
+        }
         let aggregate: [String: Any] = [
             kAudioAggregateDeviceNameKey: "andrew dictate meeting",
             kAudioAggregateDeviceUIDKey: uid,
-            kAudioAggregateDeviceMainSubDeviceKey: mic.uid,
+            kAudioAggregateDeviceMainSubDeviceKey: parts[0],
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceIsStackedKey: false,
             kAudioAggregateDeviceTapAutoStartKey: false,
-            kAudioAggregateDeviceSubDeviceListKey: [[kAudioSubDeviceUIDKey: mic.uid]],
+            kAudioAggregateDeviceSubDeviceListKey: subDevices,
             kAudioAggregateDeviceTapListKey: [[
                 kAudioSubTapDriftCompensationKey: true,
                 kAudioSubTapUIDKey: tapUID,
@@ -695,7 +705,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             teardown(rig)
             throw error
         }
-        logger.notice("tap up: the whole mac and \(mic.name, privacy: .public) (\(micChannels, privacy: .public) ch), at \(rate, privacy: .public) Hz, through \(uid, privacy: .public)")
+        let from = parts == [mic.uid] ? "" : ", from \(parts.joined(separator: " + "))"
+        logger.notice("tap up: the whole mac and \(mic.name, privacy: .public) (\(micChannels, privacy: .public) ch\(from, privacy: .public)), at \(rate, privacy: .public) Hz, through \(uid, privacy: .public)")
         return rig
     }
 
@@ -1019,17 +1030,36 @@ private enum CoreAudioProperties {
     }
 
     private static func devices() -> [AudioObjectID] {
-        var address = address(kAudioHardwarePropertyDevices)
+        objects(kAudioHardwarePropertyDevices, of: AudioObjectID(kAudioObjectSystemObject))
+    }
+
+    /// The uids of the inputs inside an aggregate device, its main one
+    /// first; nil when `device` is not an aggregate, or has none.
+    static func inputsInside(aggregate device: AudioObjectID) -> [String]? {
+        guard transportType(device) == kAudioDeviceTransportTypeAggregate else { return nil }
+        let inputs = objects(kAudioAggregateDevicePropertyActiveSubDeviceList, of: device)
+            .filter { inputChannels($0).reduce(0, +) > 0 }
+            .compactMap { deviceUID($0) }
+        guard !inputs.isEmpty else { return nil }
+        guard let main = string(kAudioAggregateDevicePropertyMainSubDevice, of: device),
+              inputs.contains(main)
+        else { return inputs }
+        return [main] + inputs.filter { $0 != main }
+    }
+
+    private static func objects(
+        _ selector: AudioObjectPropertySelector, of object: AudioObjectID
+    ) -> [AudioObjectID] {
+        var address = address(selector)
         var size: UInt32 = 0
-        guard AudioObjectGetPropertyDataSize(
-            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size
-        ) == noErr, size > 0 else { return [] }
-        var devices = [AudioObjectID](
+        guard AudioObjectGetPropertyDataSize(object, &address, 0, nil, &size) == noErr,
+              size > 0
+        else { return [] }
+        var objects = [AudioObjectID](
             repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
-        guard AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &devices
-        ) == noErr else { return [] }
-        return devices
+        guard AudioObjectGetPropertyData(object, &address, 0, nil, &size, &objects) == noErr
+        else { return [] }
+        return objects
     }
 
     /// True unless the HAL says otherwise: one it cannot be asked about is
