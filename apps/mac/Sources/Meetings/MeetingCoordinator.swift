@@ -35,6 +35,12 @@ struct MeetingThresholds: Sendable {
     /// whose hiss alone is louder, so only a mic that is not delivering
     /// reads as it.
     var micSilenceFloor: Float = 0.0001
+    /// Less free than this on the spool's disk, at the start or later, and
+    /// the disk is nearly full. An hour of spool is about 460 mb.
+    /// Provisional.
+    var diskNearlyFullUnder: Int64 = 1_000_000_000
+    /// How often the disk is looked at again while a meeting records.
+    var diskLookedAtEvery: Duration = .seconds(60)
 
     /// Tries in a row before the meeting stops waiting on the tap.
     var rebuildAttempts: Int { rebuildSpacing.count + 1 }
@@ -291,6 +297,12 @@ final class MeetingCoordinator: ObservableObject {
     /// The spool's audio file, opened for a meeting: injected so a test can
     /// hand it one that refuses what it is given.
     private let openAudioFile: @Sendable (URL) throws -> any MeetingAudioWriter
+    /// The bytes free on the disk holding a folder, or nil when that cannot
+    /// be told. Injected so a test can fill the disk.
+    private let freeSpace: @Sendable (URL) -> Int64?
+    /// When the disk is next looked at, from the meeting's start: nil
+    /// before it has started.
+    private var nextDiskLook: Duration?
     #if DEBUG
     /// The loudest far-side chunk since the probe sweep last looked, while
     /// one runs.
@@ -318,6 +330,7 @@ final class MeetingCoordinator: ObservableObject {
         openAudioFile: @escaping @Sendable (URL) throws -> any MeetingAudioWriter = {
             try SpoolAudioFile(url: $0)
         },
+        freeSpace: @escaping @Sendable (URL) -> Int64? = MeetingCoordinator.freeSpace(at:),
         preferences: @escaping @MainActor () -> MeetingPreferences
     ) {
         self.source = source
@@ -335,6 +348,7 @@ final class MeetingCoordinator: ObservableObject {
         self.date = date
         self.keepAwake = keepAwake
         self.openAudioFile = openAudioFile
+        self.freeSpace = freeSpace
         self.preferences = preferences
         session = MeetingSession(quietNudgeAfter: thresholds.quietNudgeAfter)
         health = Self.freshMonitor(thresholds)
@@ -388,6 +402,7 @@ final class MeetingCoordinator: ObservableObject {
         session.start()
         health = Self.freshMonitor(thresholds)
         micWatch = Self.freshMicWatch(thresholds)
+        nextDiskLook = nil
         elapsed = .zero
         liveLines = []
         startedOn = now()
@@ -786,6 +801,9 @@ final class MeetingCoordinator: ObservableObject {
         }
 
         watchTheMic(chunk, in: meeting)
+        if let next = nextDiskLook, elapsed >= next {
+            lookAtTheDisk(meeting)
+        }
 
         if session.state == .recording || session.state == .rebuilding {
             await meeting.transcriber?.feed(withoutOurTones(chunk))
@@ -806,6 +824,36 @@ final class MeetingCoordinator: ObservableObject {
         if micWatch.isMuted {
             onEvent?(.micMuted)
         }
+        lookAtTheDisk(meeting)
+    }
+
+    /// The disk the spool is on, at the start and once a minute after: one
+    /// with too little free is said while there is still room to do
+    /// something, and over once there is room again. Asked off the main
+    /// actor — a volume's free space for important use can take a moment
+    /// to work out — and kept at the meeting time it was asked.
+    private func lookAtTheDisk(_ meeting: Meeting) {
+        nextDiskLook = elapsed + thresholds.diskLookedAtEvery
+        let at = elapsed
+        let root = spool.root
+        let freeSpace = freeSpace
+        let under = thresholds.diskNearlyFullUnder
+        Task { [weak self] in
+            let free = await Task.detached(priority: .utility) { freeSpace(root) }.value
+            guard let self, current === meeting, let free else { return }
+            if free < under {
+                begin(.diskNearlyFull, noting: .diskNearlyFull, in: meeting, at: at)
+            } else {
+                clear(.diskNearlyFull, noting: .diskNearlyFullCleared, in: meeting, at: at)
+            }
+        }
+    }
+
+    /// The bytes free for important use on the volume holding `url`: what
+    /// the mac would clear room for, which is what a spool needs.
+    nonisolated static func freeSpace(at url: URL) -> Int64? {
+        let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        return values?.volumeAvailableCapacityForImportantUsage
     }
 
     /// What the source did by itself that the meeting answers to, besides
@@ -857,16 +905,17 @@ final class MeetingCoordinator: ObservableObject {
         begin(.cannotSaveTheAudio, noting: .audioUnsaved, in: meeting)
     }
 
-    /// A problem begins: said on the lamp, and noted in the record. One of
-    /// its kind already standing gives way to it and is said again in its
-    /// new words, but noted once.
+    /// A problem begins: said on the lamp, and noted in the record at `at`,
+    /// or now. One of its kind already standing gives way to it and is
+    /// said again in its new words, but noted once.
     private func begin(
-        _ problem: MeetingSession.Problem, noting label: MeetingRecord.Label, in meeting: Meeting
+        _ problem: MeetingSession.Problem, noting label: MeetingRecord.Label,
+        in meeting: Meeting, at: Duration? = nil
     ) {
         let stood = session.problem(problem.kind) != nil
         guard session.problemBegan(problem) else { return }
         if !stood {
-            meeting.notes.note(label, at: elapsed)
+            meeting.notes.note(label, at: at ?? elapsed)
         }
         publish()
         onEvent?(.problemBegan(problem))
@@ -874,10 +923,11 @@ final class MeetingCoordinator: ObservableObject {
 
     /// The problem of this kind is over, if one stood.
     private func clear(
-        _ kind: MeetingSession.Problem.Kind, noting label: MeetingRecord.Label, in meeting: Meeting
+        _ kind: MeetingSession.Problem.Kind, noting label: MeetingRecord.Label,
+        in meeting: Meeting, at: Duration? = nil
     ) {
         guard let problem = session.problemCleared(kind) else { return }
-        meeting.notes.note(label, at: elapsed)
+        meeting.notes.note(label, at: at ?? elapsed)
         publish()
         onEvent?(.problemCleared(problem))
     }

@@ -203,6 +203,11 @@ extension MeetingRecord {
         static let audioUnsaved = Label(rawValue: "audio-unsaved")
         /// and it took it again.
         static let audioUnsavedCleared = Label(rawValue: "audio-unsaved-cleared")
+        /// the disk the spool is on had too little free, at the start or
+        /// at a look since: a problem, named on the lamp.
+        static let diskNearlyFull = Label(rawValue: "disk-nearly-full")
+        /// and a later look found room.
+        static let diskNearlyFullCleared = Label(rawValue: "disk-nearly-full-cleared")
         /// a far side silent while something played was asked with the
         /// quiet probe, and the tap heard it: nothing was wrong.
         static let probeHeard = Label(rawValue: "probe-heard")

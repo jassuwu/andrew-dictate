@@ -35,7 +35,8 @@ final class MeetingProblemsTests: XCTestCase {
             silenceFloor: 0.001, quietNudgeAfter: .seconds(3_600),
             quietProbeWindow: .seconds(2),
             settleBeforeRebuild: .milliseconds(50)),
-        writer: FallibleWriter = FallibleWriter()
+        writer: FallibleWriter = FallibleWriter(),
+        disk: FakeDisk = FakeDisk()
     ) -> MeetingCoordinator {
         let docs = dir.appendingPathComponent("docs")
         let c = MeetingCoordinator(
@@ -50,6 +51,7 @@ final class MeetingProblemsTests: XCTestCase {
             thresholds: thresholds,
             keepAwake: .init(hold: { NSObject() }, release: { _ in }),
             openAudioFile: { try writer.open($0) },
+            freeSpace: { disk.free(at: $0) },
             preferences: {
                 MeetingPreferences(folder: docs, hook: nil, model: .whisperLargeV3Turbo)
             }
@@ -191,6 +193,43 @@ final class MeetingProblemsTests: XCTestCase {
         XCTAssertEqual(records.first?.events, [
             .init(.init(rawValue: "audio-unsaved"), atS: 2),
             .init(.init(rawValue: "audio-unsaved-cleared"), atS: 5),
+        ])
+    }
+
+    /// Half a gigabyte free on the spool's disk when the meeting starts: it
+    /// starts all the same, and says the disk is nearly full until a look
+    /// a minute later finds room again.
+    func testLowDiskAtTheStartIsSaidAndTheMeetingRecordsAllTheSame() async throws {
+        let disk = FakeDisk(free: 500_000_000)
+        let c = coordinator(disk: disk)
+        c.start()
+        await source.awaitStart()
+        await play(both(at: .zero))
+        await until { !c.problems.isEmpty }
+
+        XCTAssertEqual(c.problems, [.diskNearlyFull])
+        XCTAssertEqual(c.state, .recording)
+        XCTAssertEqual(events, [.started, .problemBegan(.diskNearlyFull)])
+        XCTAssertEqual(events.last?.hudText, "disk nearly full")
+        XCTAssertEqual(disk.lookedAt.map(\.path), [dir.appendingPathComponent("spool").path])
+
+        disk.free = 5_000_000_000
+        for s in 1...59 {
+            await play(both(at: .seconds(s)))
+        }
+        XCTAssertEqual(c.problems, [.diskNearlyFull], "looked at once a minute")
+
+        await play(both(at: .seconds(60)))
+        await until { c.problems.isEmpty }
+        XCTAssertEqual(c.problems, [])
+        XCTAssertEqual(events.last, .problemCleared(.diskNearlyFull))
+        XCTAssertEqual(events.last?.hudText, "the disk has room again")
+
+        c.stop()
+        await c.untilWrittenOut()
+        XCTAssertEqual(records.first?.events, [
+            .init(.init(rawValue: "disk-nearly-full"), atS: 1),
+            .init(.init(rawValue: "disk-nearly-full-cleared"), atS: 61),
         ])
     }
 
@@ -355,6 +394,35 @@ private final class FallibleWriter: @unchecked Sendable {
         func append(_ chunk: MeetingAudioChunk) async throws {
             if owner.fails { throw CocoaError(.fileWriteOutOfSpace) }
             try await file.append(chunk)
+        }
+    }
+}
+
+/// The disk the spool is on: as much free as the test says, ten gigabytes
+/// unless it says otherwise, and where it was asked about.
+private final class FakeDisk: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _free: Int64
+    private var _lookedAt: [URL] = []
+
+    init(free: Int64 = 10_000_000_000) {
+        _free = free
+    }
+
+    var free: Int64 {
+        get { lock.withLock { _free } }
+        set { lock.withLock { _free = newValue } }
+    }
+
+    /// Each folder asked about, once over: a minute's looks are one.
+    var lookedAt: [URL] {
+        lock.withLock { _lookedAt }
+    }
+
+    func free(at url: URL) -> Int64? {
+        lock.withLock {
+            if !_lookedAt.contains(url) { _lookedAt.append(url) }
+            return _free
         }
     }
 }
