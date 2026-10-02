@@ -126,8 +126,9 @@ protocol MeetingDiarizer: Sendable {
 }
 
 /// The spool on disk: one two-channel 16 kHz float caf, left = you,
-/// right = them. Written as the meeting runs, read back once at the end for
-/// diarization (or at launch, for recovery), then deleted.
+/// right = them. Written as the meeting runs, read back at the end for the
+/// coverage check and diarization (or at launch, for recovery), then kept
+/// compressed or deleted (ADR 0048).
 actor SpoolAudioFile {
     private let file: AVAudioFile
     private let format: AVAudioFormat

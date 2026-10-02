@@ -23,8 +23,8 @@ struct MeetingTurn: Equatable, Sendable {
 }
 
 /// A finished meeting, ready to become a file. The artifact is the transcript
-/// (ADR 0040): the audio is let go after it, so everything worth knowing is
-/// in here.
+/// (ADR 0040): the audio waits only as long as the setting says, unless the
+/// file is thin (ADR 0048), so everything worth knowing is in here.
 struct MeetingTranscript: Equatable, Sendable {
     let app: String
     let started: Date

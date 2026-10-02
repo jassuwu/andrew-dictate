@@ -1,10 +1,11 @@
 import Foundation
 
-/// The audio that exists only while a meeting is being recorded. It lives in
-/// application support, not in your meetings folder, at 0600, and is deleted
-/// the moment the transcript is written (ADR 0040). A spool still on disk at
-/// launch means the app died mid-meeting — and that is worth a transcript
-/// too, flagged `recovered`.
+/// The audio of a meeting while it is being recorded. It lives in
+/// application support, not in your meetings folder, at 0600. Once the
+/// transcript is written it becomes kept audio, or is deleted then and there
+/// when that is the setting (ADR 0048). A spool still on disk at launch with
+/// no transcript means the app died mid-meeting — and that is worth a
+/// transcript too, flagged `recovered`.
 struct MeetingSpool: Sendable {
     struct Manifest: Codable, Equatable, Sendable {
         let app: String
@@ -17,9 +18,9 @@ struct MeetingSpool: Sendable {
         /// existed must still read — sweeping it would be losing a meeting.
         var attempts: Int?
         /// The transcript this audio was written out into, once it has been
-        /// and the audio is still wanted: the transcript did not cover it.
-        /// A spool with one is not an orphan — its meeting is on disk, and
-        /// writing it out again would be a second file for one meeting.
+        /// and the audio is to be kept. A spool with one is not an orphan —
+        /// its meeting is on disk, and writing it out again would be a
+        /// second file for one meeting — but audio on its way to being kept.
         var transcript: URL?
     }
 
@@ -59,7 +60,8 @@ struct MeetingSpool: Sendable {
         return handle
     }
 
-    /// The transcript is written; the audio has done its job.
+    /// The transcript is written and the audio is not to be kept: it has
+    /// done its job.
     func finish(_ handle: Handle) throws {
         try FileManager.default.removeItem(at: handle.folder)
     }
@@ -97,9 +99,10 @@ struct MeetingSpool: Sendable {
         return updated
     }
 
-    /// Its meeting is written out, into `transcript`, and the audio stays:
-    /// `orphans()` stops offering it. False when the manifest could not be
-    /// read or rewritten — then the next launch would write it out again.
+    /// Its meeting is written out, into `transcript`, and the audio is to be
+    /// kept: `orphans()` stops offering it, and `writtenOut()` starts. False
+    /// when the manifest could not be read or rewritten — then the next
+    /// launch would write it out again.
     @discardableResult
     func keep(_ handle: Handle, writtenTo transcript: URL) -> Bool {
         guard let data = try? Data(contentsOf: handle.manifestURL),
