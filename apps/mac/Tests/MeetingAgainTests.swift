@@ -104,6 +104,49 @@ final class MeetingAgainTests: XCTestCase {
         XCTAssertEqual(transcribers.made, [.whisperLargeV3])
     }
 
+    // MARK: - the lamp
+
+    /// It says it started, and that it finished, in the words a save uses.
+    func testTheLampSaysItStartedAndThatItFinished() async throws {
+        let file = try await existingMeeting()
+        let again = FakeTranscriber()
+        again.batchTurns = [.init(speaker: .you, at: .seconds(1), text: "namaste")]
+        again.tally = passing
+        transcribers.lineUp(again)
+
+        await coordinator().transcribeAgain(file, with: .whisperLargeV3)
+
+        let summary = MeetingSummary(
+            fileURL: file, app: "zoom", started: started, duration: .seconds(6_120),
+            complete: true, gapCount: 0, recovered: false)
+        XCTAssertEqual(events, [
+            .transcribingAgain(.whisperLargeV3),
+            .transcribedAgain(summary, .whisperLargeV3),
+        ])
+        XCTAssertEqual(events.map(\.hudText), [
+            "transcribing again with whisper large…",
+            "transcribed again · whisper large",
+        ])
+    }
+
+    /// Done is not always whole, and the lamp never says it was, in the
+    /// two ways a save already tells it.
+    func testTheLampDoesNotCallAnIncompleteOneWhole() {
+        func said(complete: Bool, gaps: Int) -> String? {
+            MeetingEvent.transcribedAgain(
+                MeetingSummary(
+                    fileURL: URL(fileURLWithPath: "/tmp/a.md"), app: "zoom", started: .now,
+                    duration: .seconds(60), complete: complete, gapCount: gaps, recovered: false),
+                .whisperLargeV3Turbo
+            ).hudText
+        }
+
+        XCTAssertEqual(
+            said(complete: false, gaps: 0), "transcribed again · whisper turbo · incomplete, audio kept")
+        XCTAssertEqual(said(complete: false, gaps: 1), "transcribed again · whisper turbo · 1 gap")
+        XCTAssertEqual(said(complete: false, gaps: 2), "transcribed again · whisper turbo · 2 gaps")
+    }
+
     // MARK: - the audio after it
 
     /// A meeting whose audio was kept until you deleted it because its

@@ -1589,6 +1589,12 @@ extension MeetingCoordinator {
             if !keptAudio.relabel(entry, model: model, until: until) {
                 logger.error("a meeting's audio could not be relabelled after its transcript was made again")
             }
+            onEvent?(.transcribedAgain(
+                (try? MeetingTranscriptFile.summary(of: transcript)) ?? MeetingSummary(
+                    fileURL: transcript, app: header.app, started: header.started,
+                    duration: header.duration, complete: again.complete,
+                    gapCount: header.gaps.count, recovered: header.recovered),
+                model))
             await runHook(prefs.hook, telling: MeetingSavedEvent(
                 transcript: transcript,
                 app: header.app,
