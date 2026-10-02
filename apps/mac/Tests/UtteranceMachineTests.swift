@@ -751,6 +751,31 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertFalse(press.retry)
     }
 
+    /// the record is what gets sent to jass, so no field of it may carry a
+    /// word of what was said — not the engine's words, not the pasted ones.
+    func testNoRecordCarriesAWordOfWhatWasSaid() async throws {
+        let m = machine()
+        engine.reply = .success("zanzibar marmalade")
+        await hold(m, for: .seconds(1))
+        await settle { self.presses.count == 1 }
+        await pass(.milliseconds(400))
+
+        inserter.result = .leftOnPasteboard(.focusChanged)
+        await hold(m, for: .seconds(1))
+        await settle { self.presses.count == 2 }
+
+        XCTAssertEqual(inserter.inserted, ["Zanzibar marmalade.", "Zanzibar marmalade."])
+        XCTAssertEqual(presses.map(\.words), [2, 2])
+        for record in presses {
+            let json = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+            let fields = String(reflecting: record)
+            for said in ["zanzibar", "marmalade"] {
+                XCTAssertFalse(json.localizedCaseInsensitiveContains(said), json)
+                XCTAssertFalse(fields.localizedCaseInsensitiveContains(said), fields)
+            }
+        }
+    }
+
     // MARK: - helpers
 
     private var presses: [PressRecord] {
