@@ -112,10 +112,24 @@ extension LampGround: Identifiable {
 }
 #endif
 
+/// the pill's one button (ADR 0047): the word on it, and the whole action
+/// for VoiceOver, which a word alone does not say.
+struct HUDPillButton: Equatable, Sendable {
+    let title: String
+    let accessibilityLabel: String
+}
+
 @MainActor
 final class HUDViewModel: ObservableObject {
     @Published private(set) var state: DictationCoordinator.State
     @Published private(set) var feedbackMessage: String?
+    /// set while the pill asks something rather than says it. every
+    /// sentence clears it, and so does every change of the lamp.
+    @Published private(set) var pillButton: HUDPillButton?
+    /// the two clicks a pill with a button can take: the button, and
+    /// anywhere else on the pill. whoever asked decides what each means.
+    var onPillButton: (@MainActor () -> Void)?
+    var onPillElsewhere: (@MainActor () -> Void)?
     @Published private(set) var layout: HUDLayout
     @Published private(set) var presentationGeneration = 0
     /// shaped + thermally smoothed loudness: fast attack, slow release —
@@ -152,7 +166,7 @@ final class HUDViewModel: ObservableObject {
 
     var content: HUDContent {
         if let feedbackMessage {
-            return .text(feedbackMessage)
+            return .text(feedbackMessage, button: pillButton?.title)
         }
 
         switch state {
@@ -187,6 +201,7 @@ final class HUDViewModel: ObservableObject {
         withAnimation(Self.morph) {
             self.state = state
             feedbackMessage = nil
+            pillButton = nil
             presentationGeneration += 1
         }
     }
@@ -219,6 +234,16 @@ final class HUDViewModel: ObservableObject {
     func showFeedback(_ message: String) {
         withAnimation(Self.morph) {
             feedbackMessage = message
+            pillButton = nil
+            presentationGeneration += 1
+        }
+    }
+
+    /// a pill that asks: the sentence and its one button.
+    func showQuestion(_ message: String, button: HUDPillButton) {
+        withAnimation(Self.morph) {
+            feedbackMessage = message
+            pillButton = button
             presentationGeneration += 1
         }
     }
@@ -226,6 +251,7 @@ final class HUDViewModel: ObservableObject {
     func clearFeedback() {
         withAnimation(Self.morph) {
             feedbackMessage = nil
+            pillButton = nil
             presentationGeneration += 1
         }
     }
@@ -321,7 +347,11 @@ struct HUDView: View {
                     HUDTextPill(
                         message: feedbackMessage,
                         lineCount: viewModel.layout.lineCount,
-                        size: viewModel.layout.size
+                        size: viewModel.layout.size,
+                        button: viewModel.pillButton,
+                        buttonSize: viewModel.layout.button,
+                        onButton: { viewModel.onPillButton?() },
+                        onElsewhere: { viewModel.onPillElsewhere?() }
                     )
                     .glassEffectID(Self.glassID, in: glassNamespace)
                 } else {
@@ -383,18 +413,40 @@ struct HUDView: View {
     }
 }
 
-/// the lamp's one line of text, on real Liquid Glass.
+/// the lamp's one line of text, on real Liquid Glass, and at most one
+/// button beside it.
 struct HUDTextPill: View {
     let message: String
     let lineCount: Int
     let size: CGSize
+    /// a pill that asks (ADR 0047). without one it is the pill it always
+    /// was, drawn by the same code.
+    var button: HUDPillButton?
+    var buttonSize: CGSize?
+    var onButton: () -> Void = {}
+    var onElsewhere: () -> Void = {}
     /// dark glass: gold-tinted glass went light over a light page and took
     /// the pale gold text with it (lamp lab, 2026-09-21). the lab can still
     /// try the gold.
     static let darkTint = BrandUI.black.opacity(0.35)
     var glassTint: Color = HUDTextPill.darkTint
 
+    private var shape: RoundedRectangle {
+        RoundedRectangle(
+            cornerRadius: HUDLayoutEngine.pillCornerRadius,
+            style: .continuous
+        )
+    }
+
     var body: some View {
+        if let button, let buttonSize {
+            asking(button, buttonSize: buttonSize)
+        } else {
+            saying
+        }
+    }
+
+    private var saying: some View {
         Text(message)
             // the lamp phases already name themselves; the pill is the one
             // that carries the words, so it needs the same identity.
@@ -419,8 +471,62 @@ struct HUDTextPill: View {
             // sentence, and gold-on-gold vanished over a white document.
             .glassEffect(
                 .regular.tint(glassTint),
-                in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+                in: shape
             )
+    }
+
+    /// the sentence on the leading side, the button on the trailing one,
+    /// both on the same glass. a click beside the button is an answer too,
+    /// so the whole pill takes clicks.
+    private func asking(
+        _ button: HUDPillButton,
+        buttonSize: CGSize
+    ) -> some View {
+        HStack(spacing: HUDLayoutEngine.buttonGap) {
+            Text(message)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(message)
+                .font(Font(HUDLayoutEngine.primaryFont))
+                .foregroundStyle(BrandUI.goldPale)
+                .lineLimit(lineCount)
+                .lineSpacing(HUDLayoutEngine.wrappedLineSpacing)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button(button.title, action: onButton)
+                .buttonStyle(HUDPillButtonStyle())
+                .frame(width: buttonSize.width, height: buttonSize.height)
+                .accessibilityLabel(button.accessibilityLabel)
+        }
+        .padding(.leading, HUDLayoutEngine.horizontalPadding)
+        .padding(.trailing, HUDLayoutEngine.buttonInset)
+        .frame(width: size.width, height: size.height)
+        .contentShape(shape)
+        .onTapGesture(perform: onElsewhere)
+        .glassEffect(
+            .regular.tint(glassTint),
+            in: shape
+        )
+    }
+}
+
+/// the pill's one button: a capsule of the pill's own glass, set into it,
+/// its word in the pill's pale gold a step heavier. quiet on purpose, the
+/// way the owner wants every button on the hud: no system blue, no fill
+/// that shouts over the sentence it answers.
+struct HUDPillButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(Font(HUDLayoutEngine.buttonFont))
+            .foregroundStyle(BrandUI.goldPale)
+            .lineLimit(1)
+            .fixedSize()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Capsule())
+            .glassEffect(
+                .regular.tint(BrandUI.goldPale.opacity(0.10)).interactive(),
+                in: Capsule()
+            )
+            .opacity(configuration.isPressed ? 0.72 : 1)
     }
 }
 
