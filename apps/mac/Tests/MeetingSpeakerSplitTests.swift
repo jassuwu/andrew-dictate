@@ -69,6 +69,9 @@ final class MeetingSpeakerSplitTests: XCTestCase {
             .init(at: .seconds(2), samples: 16_000),
         ])
 
+        // the last half second is still on its way through `ingest` when the
+        // third piece is heard; a stop before it is spooled has no tail.
+        await until { c.elapsed >= .seconds(3.5) }
         c.stop()
         await c.untilWrittenOut()
 
