@@ -87,6 +87,15 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     static let buildDeadline = Duration.seconds(8)
     static let teardownDeadline = Duration.seconds(5)
 
+    #if DEBUG
+    /// Development only, compiled out of release: while this is set in the
+    /// app's defaults, every tap build fails at its first call, so a check
+    /// on a real mac can drive a meeting through a tap that will not come
+    /// back. `defaults write gg.jass.dictate.dev meetingTapRefused -bool
+    /// true`, and `defaults delete` to let it come back.
+    static let tapRefusedKey = "meetingTapRefused"
+    #endif
+
     /// The aggregate device's uid: one per build of the app, the same every
     /// session. A uid made fresh each time left a setting behind in the
     /// audio server for every session that did not stop cleanly. The
@@ -139,6 +148,9 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     private var startSoundSounded: Bool?
     private var playingTimer: DispatchSourceTimer?
     private var playing: Bool?
+    /// What was last told of the mic alone, since the tap was last whole:
+    /// `.micAlone`, `.micAloneFailed`, or nil.
+    private var aloneTold: MeetingSourceEvent.Kind?
     /// The device the last teardown under each uid destroyed. The HAL's
     /// answer to a uid lags a destroy, so for a moment it still names this
     /// one, which is gone rather than stale.
@@ -199,6 +211,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             self.told = told
             self.framesDelivered = 0
             self.lastDelivery = ContinuousClock.now
+            self.aloneTold = nil
             self.epoch += 1
             return self.epoch
         }
@@ -209,23 +222,84 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         return stream
     }
 
+    /// A whole rig again. One with the mic alone, left by a rebuild before
+    /// this that failed, keeps your side coming while this one is built
+    /// beside it under the other uid, and goes once this one is live. Any
+    /// other is retired first, as before: its tap is dead, and its uid is
+    /// the one the new rig is built under.
+    ///
+    /// A whole rig that will not come up leaves the mic alone, or brings it
+    /// up alone (`keepYourSide`), and the error goes back to the meeting,
+    /// which tries again.
     func rebuild() async throws {
-        let (old, epoch) = lock.withLock { () -> ([Rig], Int) in
-            defer {
-                live = nil
-                standby = nil
-            }
+        let (old, alone, epoch) = lock.withLock { () -> ([Rig], Rig?, Int) in
             self.epoch += 1
-            return ([live, standby].compactMap { $0 }, self.epoch)
+            let alone = live.flatMap { $0.hasTap ? nil : $0 }
+            let old = [alone == nil ? live : nil, standby].compactMap { $0 }
+            live = alone
+            standby = nil
+            return (old, alone, self.epoch)
         }
         await retire(old)
         // The live rig's uid, which it has just let go of: the other may
-        // still be closing a standby that never delivered.
-        let rig = try await bringUp(old.first?.slot ?? .first, on: nil)
-        try await adopt(rig, epoch: epoch)
+        // still be closing a standby that never delivered. Beside the mic
+        // alone, the other one.
+        let slot = alone?.slot.other ?? old.first?.slot ?? .first
+        do {
+            let rig = try await bringUp(slot, on: nil)
+            try await adopt(rig, epoch: epoch)
+        } catch {
+            await keepYourSide(alone, in: slot, epoch: epoch, after: error)
+            throw error
+        }
+        if let alone {
+            await retire([alone])
+        }
+        lock.withLock { aloneTold = nil }
         skipTheTimeNothingWasDelivered()
         // The tone again: a rebuilt tap must prove itself like a new one.
         playProbeTone()
+    }
+
+    /// The tap would not come back, and your side is to go on being
+    /// recorded: a rig with the mic alone already doing it carries on, and
+    /// without one, one is brought up, through the same chunks, the far side
+    /// silence, on the meeting's one clock. Told for the record when it
+    /// comes up or cannot, once, not at every try.
+    private func keepYourSide(
+        _ alone: Rig?, in slot: MicHandoff.Slot, epoch: Int, after error: any Error
+    ) async {
+        guard lock.withLock({ self.epoch == epoch }) else { return }
+        if let alone {
+            // still live; followed again under this rebuild's count.
+            follow(alone, epoch: epoch)
+            return
+        }
+        logger.error("tap would not come back (\(error.localizedDescription, privacy: .public)); bringing the mic up alone")
+        do {
+            let rig = try await bringUp(slot, on: nil, withTap: false)
+            try await adopt(rig, epoch: epoch)
+            skipTheTimeNothingWasDelivered()
+            tellAlone(.micAlone, mic: rig.mic)
+        } catch is CancellationError {
+            return
+        } catch {
+            logger.error("the mic would not come up alone either: \(error.localizedDescription, privacy: .public)")
+            tellAlone(.micAloneFailed, mic: nil)
+        }
+    }
+
+    /// The mic alone, or its failing, told only when it differs from what
+    /// was last told: the meeting tries every half minute for as long as
+    /// the tap stays lost.
+    private func tellAlone(_ kind: MeetingSourceEvent.Kind, mic: MicHandoff.Mic?) {
+        let changed = lock.withLock { () -> Bool in
+            defer { aloneTold = kind }
+            return aloneTold != kind
+        }
+        if changed {
+            tell(kind, mic: mic, at: nil)
+        }
     }
 
     /// `rig` is the live one, and the mic is followed from it — unless the
@@ -281,6 +355,13 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     /// The live rig's: after a move to another mic, the one moved to.
     var micName: String? {
         lock.withLock { live?.mic.name }
+    }
+
+    var capturing: MeetingCapture? {
+        lock.withLock {
+            guard let live else { return .nothing }
+            return live.hasTap ? .bothSides : .yourSideAlone
+        }
     }
 
     /// Once a second while the tap is open, ask the HAL whether any process
@@ -502,11 +583,14 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     /// tone: this tap is heard the moment anything plays.
     private func bringUpStandby(on mic: MicHandoff.Mic, slot: MicHandoff.Slot) {
         let epoch = handoffEpoch
+        // like the live one: with the tap lost, the mic follows you alone,
+        // and the meeting's own tries bring the tap back.
+        let withTap = lock.withLock { live?.hasTap ?? true }
         logger.notice("mic: bringing up \(mic.name, privacy: .public) beside the live rig, through \(self.uid(for: slot), privacy: .public)")
         Task { [weak self] in
             guard let self else { return }
             do {
-                let rig = try await bringUp(slot, on: mic)
+                let rig = try await bringUp(slot, on: mic, withTap: withTap)
                 following.async { self.standbyBuilt(rig, epoch: epoch) }
             } catch {
                 following.async { self.standbyFailed(error, epoch: epoch) }
@@ -563,6 +647,10 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             logger.notice("mic: \(name, privacy: .public) muted at \(seconds, privacy: .public) s")
         case .micUnmuted:
             logger.notice("mic: \(name, privacy: .public) unmuted at \(seconds, privacy: .public) s")
+        case .micAlone:
+            logger.notice("mic: \(name, privacy: .public) going on alone at \(seconds, privacy: .public) s; the far side is silence until the tap is back")
+        case .micAloneFailed:
+            logger.error("mic: could not go on alone at \(seconds, privacy: .public) s; nothing is being recorded")
         }
         told?.yield(MeetingSourceEvent(kind: kind, mic: mic?.name, at: at))
     }
@@ -607,7 +695,9 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     /// now — under `slot`'s uid, built and started on the HAL queue with
     /// eight seconds to do it. One that comes back later is nobody's, and
     /// is torn down where it lands.
-    private func bringUp(_ slot: MicHandoff.Slot, on mic: MicHandoff.Mic?) async throws -> Rig {
+    private func bringUp(
+        _ slot: MicHandoff.Slot, on mic: MicHandoff.Mic?, withTap: Bool = true
+    ) async throws -> Rig {
         let progress = BuildProgress()
         return try await onHAL(
             within: Self.buildDeadline,
@@ -616,7 +706,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
                 self?.logger.notice("a rig came up after its deadline; tearing it down")
                 self?.teardown(rig)
             },
-            { try self.build(slot, on: mic, progress) })
+            { try self.build(slot, on: mic, withTap: withTap, progress) })
     }
 
     /// Tears `rigs` down on the HAL queue, and waits five seconds for it at
@@ -682,30 +772,48 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
     /// A rig on `wanted`, or on the default input — the built-in mic when
     /// the default is none a meeting can use — under `slot`'s uid, started.
-    /// Only ever on the HAL queue. `progress` is told how far it got.
+    /// `withTap` false is the mic alone, for when the tap cannot be brought
+    /// back: the same aggregate and the same chunks, with no channels after
+    /// the mic's, so the far side is silence. Only ever on the HAL queue.
+    /// `progress` is told how far it got.
     private func build(
-        _ slot: MicHandoff.Slot, on wanted: MicHandoff.Mic?, _ progress: BuildProgress
+        _ slot: MicHandoff.Slot, on wanted: MicHandoff.Mic?, withTap: Bool,
+        _ progress: BuildProgress
     ) throws -> Rig {
-        progress.stage = .openingTheTap
-        // Everything, ours included: the probe tone (ADR 0021) is played by
-        // *this* process, and a tap that left us out could never hear it.
-        // The cost is a third of a second of our own start sound at the
-        // head of every recording, which whisper ignores.
-        let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
-        description.isPrivate = true
-        description.muteBehavior = .unmuted
-        description.name = "andrew dictate meeting tap"
+        var tap: (id: AudioObjectID, uid: String)?
+        if withTap {
+            progress.stage = .openingTheTap
+            #if DEBUG
+            // development only: a tap that will not open, on demand, so the
+            // meeting's way through one can be driven on a real mac.
+            if UserDefaults.standard.bool(forKey: Self.tapRefusedKey) {
+                throw Failure.coreAudio(
+                    "AudioHardwareCreateProcessTap (refused for development)", -1, progress.stage)
+            }
+            #endif
+            // Everything, ours included: the probe tone (ADR 0021) is played
+            // by *this* process, and a tap that left us out could never hear
+            // it. The cost is a third of a second of our own start sound at
+            // the head of every recording, which whisper ignores.
+            let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
+            description.isPrivate = true
+            description.muteBehavior = .unmuted
+            description.name = "andrew dictate meeting tap"
 
-        var tapID = AudioObjectID(0)
-        try check(AudioHardwareCreateProcessTap(description, &tapID), "AudioHardwareCreateProcessTap", at: progress.stage)
-        let tapUID = description.uuid.uuidString
+            var tapID = AudioObjectID(0)
+            try check(AudioHardwareCreateProcessTap(description, &tapID), "AudioHardwareCreateProcessTap", at: progress.stage)
+            tap = (tapID, description.uuid.uuidString)
+        }
+        func dropTheTap() {
+            if let tap { AudioHardwareDestroyProcessTap(tap.id) }
+        }
 
         guard let mic = wanted ?? CoreAudioProperties.micToUse() else {
-            AudioHardwareDestroyProcessTap(tapID)
+            dropTheTap()
             throw Failure.noMicrophone
         }
         guard let micDevice = CoreAudioProperties.device(uid: mic.uid) else {
-            AudioHardwareDestroyProcessTap(tapID)
+            dropTheTap()
             throw Failure.micGone(mic.name)
         }
         // An aggregate device (one made in Audio MIDI Setup) cannot sit
@@ -723,26 +831,28 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
                 ? [kAudioSubDeviceUIDKey: part]
                 : [kAudioSubDeviceUIDKey: part, kAudioSubDeviceDriftCompensationKey: true]
         }
-        let aggregate: [String: Any] = [
+        var aggregate: [String: Any] = [
             kAudioAggregateDeviceNameKey: "andrew dictate meeting",
             kAudioAggregateDeviceUIDKey: uid,
             kAudioAggregateDeviceMainSubDeviceKey: parts[0],
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceIsStackedKey: false,
-            kAudioAggregateDeviceTapAutoStartKey: false,
             kAudioAggregateDeviceSubDeviceListKey: subDevices,
-            kAudioAggregateDeviceTapListKey: [[
-                kAudioSubTapDriftCompensationKey: true,
-                kAudioSubTapUIDKey: tapUID,
-            ]],
         ]
+        if let tap {
+            aggregate[kAudioAggregateDeviceTapAutoStartKey] = false
+            aggregate[kAudioAggregateDeviceTapListKey] = [[
+                kAudioSubTapDriftCompensationKey: true,
+                kAudioSubTapUIDKey: tap.uid,
+            ]]
+        }
         var aggregateID = AudioObjectID(0)
         do {
             try check(
                 AudioHardwareCreateAggregateDevice(aggregate as CFDictionary, &aggregateID),
                 "AudioHardwareCreateAggregateDevice", at: progress.stage)
         } catch {
-            AudioHardwareDestroyProcessTap(tapID)
+            dropTheTap()
             throw error
         }
 
@@ -762,12 +872,12 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         }
         guard status == noErr, let procID else {
             AudioHardwareDestroyAggregateDevice(aggregateID)
-            AudioHardwareDestroyProcessTap(tapID)
+            dropTheTap()
             throw Failure.coreAudio("AudioDeviceCreateIOProcIDWithBlock", status, progress.stage)
         }
 
         let rig = Rig(
-            id: id, slot: slot, uid: uid, mic: mic, tapID: tapID,
+            id: id, slot: slot, uid: uid, mic: mic, tapID: tap?.id,
             aggregateID: aggregateID, procID: procID, micChannels: micChannels, rate: rate)
         do {
             try check(AudioDeviceStart(aggregateID, procID), "AudioDeviceStart", at: progress.stage)
@@ -776,7 +886,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             throw error
         }
         let from = parts == [mic.uid] ? "" : ", from \(parts.joined(separator: " + "))"
-        logger.notice("tap up: the whole mac and \(mic.name, privacy: .public) (\(micChannels, privacy: .public) ch\(from, privacy: .public)), at \(rate, privacy: .public) Hz, through \(uid, privacy: .public)")
+        let what = withTap ? "the whole mac and" : "the mic alone, no tap:"
+        logger.notice("tap up: \(what, privacy: .public) \(mic.name, privacy: .public) (\(micChannels, privacy: .public) ch\(from, privacy: .public)), at \(rate, privacy: .public) Hz, through \(uid, privacy: .public)")
         return rig
     }
 
@@ -786,7 +897,9 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         queue.sync {}
         AudioDeviceDestroyIOProcID(rig.aggregateID, rig.procID)
         AudioHardwareDestroyAggregateDevice(rig.aggregateID)
-        AudioHardwareDestroyProcessTap(rig.tapID)
+        if let tapID = rig.tapID {
+            AudioHardwareDestroyProcessTap(tapID)
+        }
         lock.withLock { lastDestroyed[rig.uid] = rig.aggregateID }
         logger.info("tap down: \(rig.mic.name, privacy: .public), through \(rig.uid, privacy: .public)")
     }
@@ -924,7 +1037,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         let slot: MicHandoff.Slot
         let uid: String
         let mic: MicHandoff.Mic
-        let tapID: AudioObjectID
+        /// nil for a rig with the mic alone.
+        let tapID: AudioObjectID?
         let aggregateID: AudioObjectID
         let procID: AudioDeviceIOProcID
         /// How many of the flat channels, from the first, are the mic's.
@@ -935,9 +1049,13 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         /// tap's together.
         var layout: Int?
 
+        var hasTap: Bool {
+            tapID != nil
+        }
+
         init(
             id: Int, slot: MicHandoff.Slot, uid: String, mic: MicHandoff.Mic,
-            tapID: AudioObjectID, aggregateID: AudioObjectID, procID: AudioDeviceIOProcID,
+            tapID: AudioObjectID?, aggregateID: AudioObjectID, procID: AudioDeviceIOProcID,
             micChannels: Int, rate: Double
         ) {
             self.id = id

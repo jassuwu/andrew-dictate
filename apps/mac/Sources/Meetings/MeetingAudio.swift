@@ -53,6 +53,11 @@ struct MeetingSourceEvent: Equatable, Sendable {
         case micMuted
         /// And it is not any more.
         case micUnmuted
+        /// The tap could not be rebuilt, and the mic was brought up on its
+        /// own: your side is still recorded, the far side is silence.
+        case micAlone
+        /// And not even that would come up: nothing is being recorded.
+        case micAloneFailed
     }
 
     let kind: Kind
@@ -69,6 +74,8 @@ struct MeetingSourceEvent: Equatable, Sendable {
         case .micFellBack: .micFellBack
         case .micMuted: .micMuted
         case .micUnmuted: .micUnmuted
+        case .micAlone: .micAlone
+        case .micAloneFailed: .micAloneFailed
         }
     }
 }
@@ -85,6 +92,11 @@ extension MeetingRecord.Label {
     static let micMuted = MeetingRecord.Label(rawValue: "mic-muted")
     /// and it was not any more.
     static let micUnmuted = MeetingRecord.Label(rawValue: "mic-unmuted")
+    /// the tap could not be rebuilt, and the mic went on alone: your side
+    /// recorded, the far side silence.
+    static let micAlone = MeetingRecord.Label(rawValue: "mic-alone")
+    /// not even the mic alone would come up: nothing was recorded.
+    static let micAloneFailed = MeetingRecord.Label(rawValue: "mic-alone-failed")
 }
 
 /// What a source is delivering, as far as it knows.

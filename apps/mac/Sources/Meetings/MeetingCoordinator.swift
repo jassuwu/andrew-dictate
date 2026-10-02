@@ -351,7 +351,7 @@ final class MeetingCoordinator: ObservableObject {
         openAudioFile: @escaping @Sendable (URL) throws -> any MeetingAudioWriter = {
             try SpoolAudioFile(url: $0)
         },
-        freeSpace: @escaping @Sendable (URL) -> Int64? = MeetingCoordinator.freeSpace(at:),
+        freeSpace: @escaping @Sendable (URL) -> Int64? = { MeetingCoordinator.freeSpace(at: $0) },
         preferences: @escaping @MainActor () -> MeetingPreferences
     ) {
         self.source = source
@@ -917,7 +917,9 @@ final class MeetingCoordinator: ObservableObject {
         case .micUnmuted:
             micWatch.muted(false)
             onEvent?(.micUnmuted)
-        case .micChanged, .micHandoffFailed, .micFellBack:
+        // the lamp's words for the call unheard follow `capturing`, which
+        // says the same thing without waiting on this stream.
+        case .micChanged, .micHandoffFailed, .micFellBack, .micAlone, .micAloneFailed:
             break
         }
     }
