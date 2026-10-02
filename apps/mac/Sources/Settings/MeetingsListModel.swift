@@ -8,6 +8,9 @@ import Foundation
 /// back whatever is in the folder right now and `delete` moves that file to
 /// the trash — recoverable, because the app is not entitled to shred an hour
 /// of someone else's words on one click.
+///
+/// a meeting's audio, while it is kept (ADR 0048), is the other thing a row
+/// can let go of: `delete audio now`, or the transcript going with it.
 @MainActor
 final class MeetingsListModel: ObservableObject {
     @Published private(set) var items: [MeetingSummary] = []
@@ -19,10 +22,17 @@ final class MeetingsListModel: ObservableObject {
     /// recordings the app tried twice to write out and could not. it keeps
     /// them rather than deleting them, so something has to say they exist.
     @Published private(set) var setAsideCount = 0
+    /// the audio kept for each meeting that still has some, by the path of
+    /// its transcript.
+    @Published private(set) var audio: [String: KeptAudio.Entry] = [:]
 
     private let load: () -> [MeetingSummary]
     private let countSetAside: () -> Int
-    private let fileManager: FileManager
+    private let keptAudio: KeptAudio?
+    private let now: () -> Date
+    private let locale: Locale
+    private let timeZone: TimeZone
+    private let trash: (URL) throws -> Void
 
     /// where the ones it could not read are kept, for the row's button.
     let setAsideFolder: URL?
@@ -31,11 +41,20 @@ final class MeetingsListModel: ObservableObject {
         fileManager: FileManager = .default,
         setAsideFolder: URL? = nil,
         countSetAside: @escaping () -> Int = { 0 },
+        keptAudio: KeptAudio? = nil,
+        now: @escaping () -> Date = { Date() },
+        locale: Locale = .current,
+        timeZone: TimeZone = .current,
+        trash: ((URL) throws -> Void)? = nil,
         load: @escaping () -> [MeetingSummary]
     ) {
-        self.fileManager = fileManager
         self.setAsideFolder = setAsideFolder
         self.countSetAside = countSetAside
+        self.keptAudio = keptAudio
+        self.now = now
+        self.locale = locale
+        self.timeZone = timeZone
+        self.trash = trash ?? { try fileManager.trashItem(at: $0, resultingItemURL: nil) }
         self.load = load
         reload()
     }
@@ -64,20 +83,62 @@ final class MeetingsListModel: ObservableObject {
     func reload() {
         items = load()
         setAsideCount = countSetAside()
+        audio = Dictionary(
+            (keptAudio?.all() ?? []).map { (Self.key($0.label.transcript), $0) },
+            uniquingKeysWith: { first, _ in first })
     }
 
     func delete(_ meeting: MeetingSummary) {
         do {
-            try fileManager.trashItem(
-                at: meeting.fileURL,
-                resultingItemURL: nil
-            )
+            try trash(meeting.fileURL)
             failure = nil
+            // nothing to check it against any more, and no reason to keep
+            // someone's voice past the words they said.
+            keptAudio?.deleteAudio(of: meeting.fileURL)
         } catch {
             // SPEC §4: a delete that did not happen must not look like one
             // that did, so the row comes back when the folder is re-read.
             failure = "couldn’t delete that one — it’s still on disk."
         }
         reload()
+    }
+
+    // MARK: - kept audio
+
+    /// what the row says about the meeting's audio, or nil when it has
+    /// none: `audio until fri 14:02`, or `audio kept` for a thin meeting's,
+    /// which waits for you to delete it.
+    func audioNote(for meeting: MeetingSummary) -> String? {
+        guard let entry = audio[Self.key(meeting.fileURL)] else { return nil }
+        guard let until = entry.label.until else { return "audio kept" }
+        return "audio until \(when(until))"
+    }
+
+    /// `delete audio now`: gone, the transcript left as it is.
+    func deleteAudio(of meeting: MeetingSummary) {
+        keptAudio?.deleteAudio(of: meeting.fileURL)
+        reload()
+    }
+
+    /// the day and the time, in the row's own locale and side by side: a
+    /// locale that joins them with a word would make the note a sentence.
+    /// within the week a weekday is enough; further out it would read as
+    /// this week's, so the date.
+    private func when(_ date: Date) -> String {
+        let withinTheWeek = date.timeIntervalSince(now()) < 6 * 86_400
+        let day = format(date, withinTheWeek ? "EEE" : "dMMM")
+        return "\(day) \(format(date, "jmm"))".lowercased()
+    }
+
+    private func format(_ date: Date, _ template: String) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeZone = timeZone
+        formatter.setLocalizedDateFormatFromTemplate(template)
+        return formatter.string(from: date)
+    }
+
+    private static func key(_ transcript: URL) -> String {
+        transcript.standardizedFileURL.path
     }
 }
