@@ -134,6 +134,34 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(handed().count, 3, "stopping decodes nothing again")
     }
 
+    // MARK: - an engine that fails
+
+    func testAStretchTheEngineFailsOnOnceIsTriedAgain() async throws {
+        engine.failing("the deploy is blocked", times: 1)
+        let c = coordinator(stretches())
+        c.start(tapping: zoom)
+        await source.awaitStart()
+
+        await play([
+            you("the deploy is blocked", from: 1.3, to: 2.5),
+            them("since when", from: 3.3, to: 4.0),
+        ], through: 5.0, on: c)
+        await waitFor { c.liveLines.count == 2 }
+
+        XCTAssertEqual(handed(), [
+            "the deploy is blocked 24000",
+            "the deploy is blocked 24000",
+            "since when 16000",
+        ])
+        XCTAssertEqual(live(c), ["you 1.0 the deploy is blocked", "them 3.0 since when"])
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, [
+            "[00:00:01] you: the deploy is blocked",
+            "[00:00:03] them: since when",
+        ])
+    }
+
     // MARK: - building a meeting
 
     private func stretches(
@@ -323,6 +351,7 @@ private final class PhraseEngine: StretchEngine, @unchecked Sendable {
     private let lock = NSLock()
     private var phrases: [String] = []
     private var decoded: [(phrase: String, samples: Int)] = []
+    private var failures: [String: Int] = [:]
 
     func loudness(of phrase: String) -> Float {
         lock.withLock {
@@ -331,8 +360,13 @@ private final class PhraseEngine: StretchEngine, @unchecked Sendable {
         }
     }
 
-    /// Every stretch the engine was handed, as the phrase it heard and its
-    /// length in samples, in the order it was handed them.
+    /// The next `times` stretches heard as `phrase` throw instead.
+    func failing(_ phrase: String, times: Int) {
+        lock.withLock { failures[phrase] = times }
+    }
+
+    /// Every stretch the engine was handed, failed or not, as the phrase it
+    /// heard and its length in samples, in the order it was handed them.
     var handed: [(phrase: String, samples: Int)] {
         lock.withLock { decoded }
     }
@@ -341,10 +375,14 @@ private final class PhraseEngine: StretchEngine, @unchecked Sendable {
 
     func text(of samples: [Float]) async throws -> String {
         let peak = samples.reduce(Float(0)) { max($0, abs($1)) }
-        return lock.withLock {
+        return try lock.withLock {
             let index = Int((peak * 10).rounded()) - 1
             let phrase = peak < 0.05 ? "" : phrases.indices.contains(index) ? phrases[index] : "?"
             decoded.append((phrase, samples.count))
+            if let left = failures[phrase], left > 0 {
+                failures[phrase] = left - 1
+                throw Garbled()
+            }
             return phrase
         }
     }

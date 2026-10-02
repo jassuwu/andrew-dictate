@@ -126,10 +126,23 @@ actor StretchTranscriber: MeetingTranscriber {
     private func work() async {
         while !waiting.isEmpty {
             let stretch = waiting.removeFirst()
-            guard let text = try? await engine.text(of: stretch.samples) else { continue }
+            guard let text = await decode(stretch) else { continue }
             keep(text, from: stretch)
         }
         worker = nil
+    }
+
+    /// A stretch the engine throws on gets one more try: a decode that
+    /// failed once is often a hiccup, not the audio.
+    private func decode(_ stretch: Stretch) async -> String? {
+        for attempt in 1...2 {
+            do {
+                return try await engine.text(of: stretch.samples)
+            } catch {
+                logger.error("a stretch failed to decode, try \(attempt): \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        return nil
     }
 
     private func keep(_ text: String, from stretch: Stretch) {
