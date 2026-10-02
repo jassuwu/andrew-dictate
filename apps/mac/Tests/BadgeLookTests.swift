@@ -28,4 +28,20 @@ final class BadgeLookTests: XCTestCase {
             }
         }
     }
+
+    /// a meeting losing its audio is the next most urgent thing on the
+    /// mac: it stays on the badge until it clears, take or no take.
+    func testAMeetingProblemOutranksDictating() {
+        for isDictating in [false, true] {
+            XCTAssertEqual(
+                BadgeLook(
+                    needsSetup: false,
+                    isDictating: isDictating,
+                    meeting: .problem
+                ),
+                .meetingProblem,
+                "dictating: \(isDictating)"
+            )
+        }
+    }
 }

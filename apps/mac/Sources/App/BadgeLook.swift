@@ -34,6 +34,17 @@ enum BadgeLook: Equatable, Sendable, CaseIterable {
             self = .needsSetup
             return
         }
-        self = .idle
+
+        switch meeting {
+        // a problem stays until it clears, so it outranks a take that
+        // started around it.
+        case .problem:
+            self = .meetingProblem
+        case .none,
+             .callNotRecorded,
+             .gettingReady,
+             .recording:
+            self = .idle
+        }
     }
 }
