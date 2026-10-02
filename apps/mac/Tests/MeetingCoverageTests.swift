@@ -238,7 +238,31 @@ final class MeetingCoverageTests: XCTestCase {
             bleed: 0, farSideLoudS: 2))
     }
 
+    /// A call where nobody said anything: whole, and the page says why it is
+    /// empty instead of looking like a transcript that lost everything.
+    func testAMeetingWhereNobodySpokePassesAndSaysSo() async throws {
+        let live = FakeTranscriber()
+        live.tally = StretchTally()
+        transcribers.lineUp(live)
+
+        try await meeting(seconds: 2)
+
+        let file = try XCTUnwrap(MeetingTranscriptFile.listAll(in: docs).first)
+        XCTAssertTrue(file.complete)
+        XCTAssertEqual(try frontMatter(of: file)["complete"], "true")
+        XCTAssertEqual(try body(of: file), ["> nobody spoke"])
+        XCTAssertEqual(records.first?.coverage?.result, .pass)
+    }
+
     // MARK: - helpers
+
+    /// What follows the front matter, line by line, blank lines left out.
+    private func body(of file: MeetingSummary) throws -> [String] {
+        let text = try String(contentsOf: file.fileURL, encoding: .utf8)
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let closing = try XCTUnwrap(lines.dropFirst().firstIndex(of: "---"))
+        return lines[(closing + 1)...].filter { !$0.isEmpty }
+    }
 
     /// Spool folders with their audio still in them.
     private func keptSpools() throws -> Int {

@@ -40,6 +40,14 @@ enum CoverageCheck {
         case thin
     }
 
+    /// Whether the meeting had no speech in it at all, so its file can say
+    /// so rather than be an empty page. Only a count can tell: without one,
+    /// no words is as likely a transcriber that never got going as a quiet
+    /// room, and nobody is said not to have spoken.
+    static func nobodySpoke(you: Side, them: Side) -> Bool {
+        you.speech == .zero && them.speech == .zero
+    }
+
     /// The two sides as a transcriber left them: its counts, when it keeps
     /// them, and the words of each side's turns, counted the way the file
     /// counts its `words:`.

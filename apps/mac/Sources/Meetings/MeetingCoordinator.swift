@@ -754,6 +754,7 @@ final class MeetingCoordinator: ObservableObject {
             gaps: recording.gaps,
             recovered: recovered,
             reason: thin ? covered.reason : nil,
+            nobodySpoke: !thin && covered.reading.nobodySpoke,
             turns: split
         )
         func record(
@@ -991,6 +992,11 @@ extension MeetingCoordinator {
         func verdict(farSideLoud: Duration) -> CoverageCheck.Verdict {
             let sides = CoverageCheck.sides(of: turns, tally: tally)
             return CoverageCheck.verdict(you: sides.you, them: sides.them, farSideLoud: farSideLoud)
+        }
+
+        var nobodySpoke: Bool {
+            let sides = CoverageCheck.sides(of: turns, tally: tally)
+            return CoverageCheck.nobodySpoke(you: sides.you, them: sides.them)
         }
     }
 

@@ -135,6 +135,28 @@ final class CoverageCheckTests: XCTestCase {
             .pass)
     }
 
+    // MARK: - nobody spoke
+
+    /// A count of no speech on either side is a meeting nobody spoke in, and
+    /// the file can say so.
+    func testNoSpeechCountedOnEitherSideIsNobodySpeaking() {
+        XCTAssertTrue(CoverageCheck.nobodySpoke(you: Self.quiet, them: Self.quiet))
+    }
+
+    func testSpeechOnOneSideIsSomebodySpeaking() {
+        let them = CoverageCheck.Side(speech: .seconds(2), read: .seconds(2), words: 0)
+
+        XCTAssertFalse(CoverageCheck.nobodySpoke(you: Self.quiet, them: them))
+    }
+
+    /// Without a count there is no knowing: no words can be a transcriber
+    /// that never got going as easily as a quiet room.
+    func testWithNoCountNobodyIsSaidToHaveSpoken() {
+        let uncounted = CoverageCheck.Side(speech: nil, read: nil, words: 0)
+
+        XCTAssertFalse(CoverageCheck.nobodySpoke(you: uncounted, them: uncounted))
+    }
+
     // MARK: -
 
     private static let quiet = CoverageCheck.Side(speech: .zero, read: .zero, words: 0)

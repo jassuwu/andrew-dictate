@@ -37,6 +37,10 @@ struct MeetingTranscript: Equatable, Sendable {
     /// gets the default, that audio was lost in N gaps. Only written when
     /// `complete` is false.
     var reason: String? = nil
+    /// The transcriber counted no speech on either side, and the check
+    /// passed it: the body says so, so an empty page is not taken for a
+    /// transcript that lost everything.
+    var nobodySpoke = false
     let turns: [MeetingTurn]
 
     /// SPEC §4 extended: a transcript with holes says so, in its front matter
@@ -177,6 +181,10 @@ enum MeetingTranscriptFile {
                 .joined(separator: ", and ")
             lines.append(
                 "> \(count) \(count == 1 ? "gap" : "gaps") — audio was lost \(spans)")
+            lines.append("")
+        }
+        if transcript.nobodySpoke {
+            lines.append("> nobody spoke")
             lines.append("")
         }
 
