@@ -96,6 +96,8 @@ extension HUDLayoutEngineTests {
             "locked — tap to end",
             "the mic changed — pasted what i had.",
             "microphone isn't responding",
+            "no sound from MacBook Pro Microphone",
+            "no sound from the microphone",
             "accessibility is off — the dictation key is dead",
             "still finishing the last one",
             "couldn't transcribe — tap to try again",

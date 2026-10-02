@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 import OSLog
 
@@ -19,6 +20,9 @@ enum UtteranceEvent: Equatable, Sendable {
     /// `fastDismiss` is a brush, a cancel or a failure: a flicker, not the
     /// afterglow's slow cut.
     case state(UtteranceMachine.State, fastDismiss: Bool)
+    /// the take's first audio landed: the mic is hearing you. a recording
+    /// lamp is warming until this, and lit from it.
+    case hearing
     case chime(UtteranceMachine.Chime)
     /// an exceptional message, and how long it stays.
     case pill(String, duration: TimeInterval)
@@ -134,6 +138,15 @@ final class UtteranceMachine {
     /// how long the mic gets to start, or to stop, before the press stops
     /// waiting on it. a healthy one answers in tens of milliseconds.
     static let microphoneDeadline = Duration.milliseconds(1_500)
+    /// how long a mic that answered gets to send its first audio. a
+    /// healthy one is heard within a tap buffer, about a tenth of that.
+    static let firstAudioDeadline = Duration.seconds(1)
+    /// the least a take must hand back to be one: a tenth of a second at
+    /// 16 kHz.
+    static let usableSamples = 1_600
+    /// a key let go inside this asked no question: the pipeline's own
+    /// threshold for an empty transcript that ends in silence.
+    private static let brushLimit = Duration.milliseconds(300)
     private let dictionary: @MainActor () -> [DictionaryEntry]
     private let ownBundleIdentifier: String?
     /// how long the lamp's afterglow runs (`HUDWaveMotion.coolDuration`).
@@ -155,6 +168,8 @@ final class UtteranceMachine {
     private var pendingStart: UInt64?
     private var startDeadline: Task<Void, Never>?
     private var stopDeadline: Task<Void, Never>?
+    /// the live mic of the press in flight, not heard yet.
+    private var firstAudioWait: Task<Void, Never>?
     /// a double-tapped key leaves nothing to hold, so nothing to feel. the
     /// HUD has to carry the difference for as long as the capture runs.
     private var isRecordingLocked = false
@@ -326,7 +341,8 @@ final class UtteranceMachine {
         Task.immediate { @MainActor [weak self] in
             do {
                 try await microphone.start { [weak self] instant in
-                    self?.recordFirstBuffer(
+                    self?.firstBufferLanded(
+                        id,
                         at: instant,
                         timelineID: timelineID
                     )
@@ -352,18 +368,106 @@ final class UtteranceMachine {
         self.capture = capture
         press?.mic = capture.microphone.deviceDescription
         guard !capture.stopRequested else {
-            // let go before the mic answered: the take still counts, and a
-            // start chime after the release would be noise.
+            // let go before the mic answered: the take still counts.
             stopMicrophone()
             return
         }
+        if !capture.isHearing {
+            awaitFirstAudio(id)
+        }
+    }
+
+    /// a mic can open and still send nothing — one the phone took for a
+    /// call, a driver that wedged — so it gets a second to be heard.
+    private func awaitFirstAudio(_ id: UInt64) {
+        firstAudioWait?.cancel()
+        firstAudioWait = Task { @MainActor [weak self, clock] in
+            try? await clock.sleep(for: Self.firstAudioDeadline)
+            guard !Task.isCancelled else {
+                return
+            }
+            self?.microphoneStayedSilent(id)
+        }
+    }
+
+    /// a second since it answered, and not a sound.
+    private func microphoneStayedSilent(_ id: UInt64) {
+        firstAudioWait = nil
+        guard let capture,
+              capture.id == id,
+              capture.phase == .live,
+              !capture.isHearing else {
+            return
+        }
+
+        audioLogger.error("the microphone sent nothing for a second; dropping it")
+        cancelCapture()
+        endWithNoSound(from: press?.mic)
+    }
+
+    /// the mic answered and sent no sound. the pill names it, so you know
+    /// which one to look at, and it is dropped, so the next press opens a
+    /// fresh one. nothing is kept for a retry: there was nothing to hear,
+    /// and pressing again records again.
+    private func endWithNoSound(from mic: MicDescription?) {
+        setRecordingLocked(false)
+        activeFocusAnchor = nil
+        activeTimeline = nil
+        emit(.microphoneDropped)
+        setState(.idle, fastHUDDismiss: true)
+        flashFeedback(Self.noSound(from: mic))
+        endPress(.noAudio)
+    }
+
+    /// a working mic hands back at least a hiss, and a key held past a
+    /// brush gives it a few tenths of a second to: a take of exact zeros,
+    /// or of less than `usableSamples`, is the mic failing, not you being
+    /// quiet.
+    private static func sentNoSound(_ samples: [Float]) -> Bool {
+        samples.count < usableSamples
+            || vDSP.maximumMagnitude(samples) == 0
+    }
+
+    /// the mic as it names itself, which is what you would look for in
+    /// the menu bar or system settings.
+    private static func noSound(from mic: MicDescription?) -> String {
+        guard let name = mic?.name.trimmingCharacters(in: .whitespaces),
+              !name.isEmpty else {
+            return "no sound from the microphone"
+        }
+        return "no sound from \(name)"
+    }
+
+    /// the mic's first audio: it is hearing you. the key only said you
+    /// pressed; this is the moment the chime can promise something.
+    private func firstBufferLanded(
+        _ id: UInt64,
+        at instant: ContinuousClock.Instant,
+        timelineID: UInt64
+    ) {
+        recordFirstBuffer(at: instant, timelineID: timelineID)
+        guard var capture,
+              capture.id == id,
+              !capture.isHearing else {
+            return
+        }
+        capture.isHearing = true
+        self.capture = capture
+        firstAudioWait?.cancel()
+        firstAudioWait = nil
+        guard !capture.isEnding else {
+            // let go before it was heard: lighting the lamp, or a start
+            // chime, after the release would be noise.
+            return
+        }
+        emit(.hearing)
         scheduleStartChime()
     }
 
-    /// the mic and the lamp start at key-down; only the chime waits, long
-    /// enough to know the key is being held rather than caught. a brush of
-    /// fn should make no sound at all. a mic slow to answer has already
-    /// spent some of that wait.
+    /// the mic and the lamp start at key-down; the chime waits for the
+    /// mic's first audio, and then long enough to know the key is being
+    /// held rather than caught. a brush of fn should make no sound at all.
+    /// a mic slow to be heard has already spent some of that wait.
     private func scheduleStartChime() {
         let held = press.map { $0.keyDown.duration(to: clock.now) } ?? .zero
         let wait = Duration.milliseconds(120) - held
@@ -512,6 +616,9 @@ final class UtteranceMachine {
         }
 
         setRecordingLocked(false)
+        // let go inside the brush wait: a start chime still due would land
+        // after the take's end.
+        startCueTask?.cancel()
 
         // never before key-down: an event clock that disagrees with
         // ours must not make a press end before it began.
@@ -538,6 +645,10 @@ final class UtteranceMachine {
 
         capture.phase = .stopping
         self.capture = capture
+        // the take is over: whether it was heard is judged on what the
+        // stop hands back.
+        firstAudioWait?.cancel()
+        firstAudioWait = nil
         let id = capture.id
         let microphone = capture.microphone
         armStopDeadline(id)
@@ -578,6 +689,18 @@ final class UtteranceMachine {
             setState(.idle, fastHUDDismiss: true)
             flashFeedback("heard nothing")
             endPress(.heardNothing)
+            return
+        }
+        // a brush gets a sliver from any mic, so only a held key's take
+        // is judged; a brush goes on to end in silence, as it always has.
+        let brushed = activeTimeline?.heldDuration.map {
+            $0 < Self.brushLimit
+        } ?? false
+        if press?.micChanged != true,
+           !brushed,
+           Self.sentNoSound(samples) {
+            audioLogger.error("the microphone sent only silence; dropping it")
+            endWithNoSound(from: press?.mic)
             return
         }
         // taken now rather than at key-down: the window worth protecting
@@ -1228,6 +1351,8 @@ final class UtteranceMachine {
         capture = nil
         stopDeadline?.cancel()
         stopDeadline = nil
+        firstAudioWait?.cancel()
+        firstAudioWait = nil
     }
 
     // MARK: - effects
@@ -1352,6 +1477,9 @@ extension UtteranceMachine {
         var phase = Phase.starting
         /// let go before the mic answered: stopped the moment it does.
         var stopRequested = false
+        /// its first audio has landed. the mic answering its start only
+        /// says the device opened; this says it is hearing you.
+        var isHearing = false
 
         /// the take is already over, whatever ended it.
         var isEnding: Bool {

@@ -39,6 +39,10 @@ struct PressRecord: Equatable, Sendable, Codable {
         /// still transcribing so long after key-up that the next press
         /// dropped it and recorded instead.
         case droppedAsHung
+        /// the mic answered but sent no sound: nothing within a second of
+        /// starting, or by key-up only zeros or a sliver. a mic failure,
+        /// not "heard nothing", so no retry is offered.
+        case noAudio
     }
 
     enum Refusal: String, Equatable, Sendable, Codable {
@@ -209,6 +213,7 @@ extension PressRecord.Outcome {
         case .recordingLost: "recording-lost"
         case .abandoned: "abandoned"
         case .droppedAsHung: "dropped-as-hung"
+        case .noAudio: "no-audio"
         }
     }
 
@@ -226,7 +231,7 @@ extension PressRecord.Outcome {
             refusal.rawValue
         case .delivered, .heardNothing, .brushed, .couldNotTranscribe,
              .cancelled, .couldNotStartRecording, .micNotResponding,
-             .recordingLost, .abandoned, .droppedAsHung:
+             .recordingLost, .abandoned, .droppedAsHung, .noAudio:
             nil
         }
     }
@@ -243,6 +248,7 @@ extension PressRecord.Outcome {
         case ("recording-lost", nil): self = .recordingLost
         case ("abandoned", nil): self = .abandoned
         case ("dropped-as-hung", nil): self = .droppedAsHung
+        case ("no-audio", nil): self = .noAudio
         case let ("left-on-pasteboard", why?):
             guard let reason = Self.leftOnPasteboardReasons.first(where: {
                 Self.name(of: $0) == why

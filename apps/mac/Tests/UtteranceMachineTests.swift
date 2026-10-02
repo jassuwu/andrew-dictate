@@ -1361,7 +1361,7 @@ final class FakeMic: MicCapture {
     }
 }
 
-private struct EngineFailure: Error {}
+struct EngineFailure: Error {}
 
 /// answers with `reply`, or — while `holds` is set — waits for the test to
 /// `release()` it, the way a slow or hung engine would.
