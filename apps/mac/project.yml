@@ -165,6 +165,7 @@ targets:
       - Sources/Insertion/Inserter.swift
       - Sources/Instrumentation/UtteranceTimeline.swift
       - Sources/Instrumentation/TimelineSummary.swift
+      - Sources/Instrumentation/PressLogStore.swift
       # the protocol only; ParakeetEngine is the FluidAudio half.
       - Sources/Transcription/TranscriptionEngine.swift
     settings:
