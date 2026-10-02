@@ -104,6 +104,35 @@ final class MeetingAgainTests: XCTestCase {
         XCTAssertEqual(transcribers.made, [.whisperLargeV3])
     }
 
+    // MARK: - when it fails
+
+    /// The model threw. The file is exactly the bytes it was, the lamp says
+    /// it could not and that nothing changed, the audio is still there for
+    /// another try, and a hook has nothing to be told.
+    func testAModelThatThrowsLeavesTheFileExactlyAsItWasAndSaysSo() async throws {
+        hook = try script("#!/bin/sh\ntouch \"$ANDREW_FOLDER/hook-ran\"\nexit 0\n")
+        let file = try await existingMeeting(thin: true)
+        let before = try Data(contentsOf: file)
+        let again = FakeTranscriber()
+        again.batchFailure = FellOver()
+        transcribers.lineUp(again)
+
+        await coordinator().transcribeAgain(file, with: .whisperLargeV3)
+
+        XCTAssertEqual(try Data(contentsOf: file), before)
+        XCTAssertEqual(events, [
+            .transcribingAgain(.whisperLargeV3),
+            .couldNotTranscribeAgain("the model fell over"),
+        ])
+        XCTAssertEqual(
+            events.last?.hudText,
+            "couldn't transcribe again — the model fell over. the transcript is as it was")
+        XCTAssertNotNil(kept.entry(for: file), "the audio is still there")
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: file.deletingLastPathComponent().appendingPathComponent("hook-ran").path))
+    }
+
     // MARK: - the hook
 
     /// The hook runs again for the new file, so an agent's copy of the old
@@ -281,6 +310,10 @@ final class MeetingAgainTests: XCTestCase {
 }
 
 // MARK: - fakes
+
+private struct FellOver: LocalizedError {
+    var errorDescription: String? { "the model fell over" }
+}
 
 /// A wall the test holds still: what kept audio's dates are read against.
 private final class FakeWall: @unchecked Sendable {

@@ -77,6 +77,17 @@ enum MeetingEvent: Equatable, Sendable {
     /// The transcript could not be written where it was asked to go. The
     /// spool stays; the next launch tries again.
     case saveFailed(String)
+    /// A meeting's transcript is being made again from its kept audio, with
+    /// the model you picked. It loads that model and reads the whole
+    /// meeting, minutes for an hour of one, so the lamp says what it is
+    /// doing.
+    case transcribingAgain(MeetingModel)
+    /// The new reading is the file, in the same place.
+    case transcribedAgain(MeetingSummary, MeetingModel)
+    /// It did not happen — the model failed, or what it read was thin over
+    /// a whole transcript, or the audio was gone — and the file is as it
+    /// was. The audio is still there for another try.
+    case couldNotTranscribeAgain(String)
 
     /// The words on the lamp. `nil` means the HUD stays quiet.
     var hudText: String? {
@@ -101,7 +112,21 @@ enum MeetingEvent: Equatable, Sendable {
         case .hookFailed(let label): "hook failed (\(label))"
         case .engineFailed(let reason): "meeting model failed — \(reason)"
         case .saveFailed(let reason): "couldn't save the transcript — \(reason). kept for next launch"
+        case .transcribingAgain(let model): "transcribing again with \(model.shortName)…"
+        case .transcribedAgain(let summary, let model): Self.againText(summary, model)
+        case .couldNotTranscribeAgain(let reason):
+            "couldn't transcribe again — \(reason). the transcript is as it was"
         }
+    }
+
+    /// `saved`, said for a file that was replaced: the model that wrote it
+    /// now, and the same two ways it can fall short of whole.
+    private static func againText(_ summary: MeetingSummary, _ model: MeetingModel) -> String {
+        let said = "transcribed again · \(model.shortName)"
+        if summary.gapCount > 0 {
+            return "\(said) · \(summary.gapCount) \(summary.gapCount == 1 ? "gap" : "gaps")"
+        }
+        return summary.complete ? said : "\(said) · incomplete, audio kept"
     }
 
     /// A recovery nobody asked for is about a meeting they had yesterday, so
@@ -1500,6 +1525,7 @@ extension MeetingCoordinator {
 
 extension MeetingCoordinator {
     func transcribeAgain(_ transcript: URL, with model: MeetingModel) async {
+        onEvent?(.transcribingAgain(model))
         do {
             let header = try MeetingTranscriptFile.header(of: transcript)
             guard let entry = keptAudio.entry(for: transcript) else { return }
@@ -1529,6 +1555,9 @@ extension MeetingCoordinator {
                 gaps: header.gaps.map { [$0.began.totalSeconds, $0.ended.totalSeconds] },
                 recovered: header.recovered,
                 again: true))
-        } catch {}
+        } catch {
+            logger.error("could not transcribe a meeting again: \(error.localizedDescription, privacy: .public)")
+            onEvent?(.couldNotTranscribeAgain(error.localizedDescription))
+        }
     }
 }
