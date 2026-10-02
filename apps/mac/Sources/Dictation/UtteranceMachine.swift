@@ -35,6 +35,9 @@ enum UtteranceEvent: Equatable, Sendable {
     case retryOffered(Bool)
     /// the mic would not start; the next press must build a fresh one.
     case microphoneDropped
+    /// a take the engine never answered: a slow moment or a wedge, and
+    /// only the engine's keeper can ask it which, without waiting on it.
+    case engineSuspect
     /// how one press ended, whatever the ending: exactly one per press.
     case pressEnded(PressRecord)
 }
@@ -912,6 +915,7 @@ final class UtteranceMachine {
         pipelineGeneration += 1
         pipelineTask?.cancel()
         pipelineTask = nil
+        emit(.engineSuspect)
     }
 
     private func transcribeAndInsert(

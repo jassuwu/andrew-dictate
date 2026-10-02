@@ -86,6 +86,31 @@ final class UtteranceMachineTimeoutTests: XCTestCase {
         XCTAssertEqual(presses.first?.line().contains("timed_out=1"), true)
     }
 
+    /// one take gone unanswered might be a slow moment or a wedge, and only
+    /// the app can ask the engine which: it is told to check.
+    func testATimeoutAsksForTheEngineToBeChecked() async {
+        let m = machine()
+        engine.holds = true
+
+        await timeOut(m)
+
+        XCTAssertEqual(engineEvents, [.engineSuspect])
+    }
+
+    /// an engine that threw answered: it is not wedged, so nothing is asked.
+    func testAnEngineThatThrowsIsNotSuspect() async {
+        let m = machine()
+        engine.reply = .failure(EngineThrew())
+
+        await hold(m, for: .seconds(1))
+        await settle { !self.pills.isEmpty }
+        await pass(TranscriptionDeadline.floor)
+
+        XCTAssertEqual(pills, [Pill("couldn't transcribe — tap to try again", 4)])
+        XCTAssertEqual(presses.map(\.timedOut), [false])
+        XCTAssertEqual(engineEvents, [])
+    }
+
     /// once the pill has gone, a press is a new sentence: the mic opens and
     /// the take is written out, while the hung call is still out there.
     func testTheNextPressRecordsWhileTheHungCallIsStillOut() async {
@@ -198,6 +223,18 @@ final class UtteranceMachineTimeoutTests: XCTestCase {
         }
     }
 
+    /// what the machine asked of the engine's keeper.
+    private var engineEvents: [UtteranceEvent] {
+        events.filter {
+            switch $0 {
+            case .engineSuspect:
+                true
+            default:
+                false
+            }
+        }
+    }
+
     private var retryOffers: [Bool] {
         events.compactMap {
             if case let .retryOffered(offered) = $0 {
@@ -253,3 +290,5 @@ final class UtteranceMachineTimeoutTests: XCTestCase {
         XCTFail("never settled", file: file, line: line)
     }
 }
+
+private struct EngineThrew: Error {}

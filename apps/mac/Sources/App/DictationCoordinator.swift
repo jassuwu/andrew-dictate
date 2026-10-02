@@ -1436,6 +1436,92 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
+    /// a take went unanswered. the engine is asked a second of silence
+    /// with a deadline of its own — awaited, never waited on, so the main
+    /// thread and the next press go on meanwhile — and one that doesn't
+    /// answer is restarted.
+    private func checkEngineAnswers() {
+        // a restart, a switch or a first load is already building a fresh
+        // engine; a check already out is the same question.
+        guard isPrewarmed, engineHealthTask == nil else {
+            return
+        }
+
+        let engine = transcriptionEngine
+        let generation = engineGeneration
+        engineHealthTask = Task { @MainActor [weak self] in
+            let answered = await EngineProbe.answers(engine)
+            guard let self,
+                  !Task.isCancelled,
+                  generation == self.engineGeneration else {
+                return
+            }
+            self.engineHealthTask = nil
+            guard !answered else {
+                self.engineLogger.notice("the speech model answered its check")
+                return
+            }
+            self.engineLogger.error("the speech model didn't answer its check")
+            self.restartEngine()
+        }
+    }
+
+    /// a wedged engine can't be cancelled, only replaced: the loaded model
+    /// goes and the same one loads fresh, in the background. a press
+    /// meanwhile hears "loading the speech model…"; a restart that fails
+    /// leaves `.failed`, which the next press retries out loud. the lamp is
+    /// left alone — a pill may be saying why, and a take may be in flight.
+    private func restartEngine() {
+        guard isPrewarmed,
+              enginePrewarmTask == nil,
+              engineSwapTask == nil else {
+            return
+        }
+
+        engineLogger.error("restarting the speech model")
+        engineHealthTask?.cancel()
+        engineHealthTask = nil
+        engineGeneration += 1
+        let generation = engineGeneration
+        isPrewarmed = false
+        enginePreparationState = .warmingUp
+        let engine = transcriptionEngine
+        enginePrewarmTask = Task { @MainActor [weak self] in
+            await engine.unloadModels()
+            do {
+                try await engine.prewarm(progressHandler: nil)
+                try Task.checkCancellation()
+                guard let self,
+                      generation == self.engineGeneration else {
+                    return
+                }
+                self.enginePrewarmTask = nil
+                self.isPrewarmed = true
+                self.enginePreparationState = .ready
+                self.engineLogger.notice("the speech model restarted")
+            } catch is CancellationError {
+                return
+            } catch {
+                guard let self,
+                      generation == self.engineGeneration else {
+                    return
+                }
+                self.enginePrewarmTask = nil
+                self.enginePreparationState = .failed
+                self.engineLogger.error(
+                    """
+                    the speech model didn't restart: \
+                    \(error.localizedDescription, privacy: .public)
+                    """
+                )
+            }
+            // a press during the restart lit the ember; it settles now.
+            if let self, self.state == .prewarming {
+                self.machine.engineSettled()
+            }
+        }
+    }
+
     private func beginRecording(locked: Bool) {
         // ADR 0023: refused during a meeting, and it says why. you started
         // the recording, so a dead hotkey is not a mystery — but a silent
@@ -1765,6 +1851,8 @@ extension DictationCoordinator {
             canRetryLastFailure = offered
         case .microphoneDropped:
             captureSlot.drop()
+        case .engineSuspect:
+            checkEngineAnswers()
         case let .pressEnded(record):
             keep(record)
         }
