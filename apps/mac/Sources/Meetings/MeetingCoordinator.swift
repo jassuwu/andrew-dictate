@@ -641,6 +641,12 @@ final class MeetingCoordinator: ObservableObject {
             recovered: recovered,
             turns: split
         )
+        func record(_ outcome: MeetingRecord.Outcome, toDisk: Duration? = nil) -> MeetingRecord {
+            MeetingRecord(
+                outcome, app: app, model: model, startedAt: started,
+                duration: recording.duration, gaps: recording.gaps, turns: split,
+                toDisk: toDisk)
+        }
 
         let url: URL
         do {
@@ -651,14 +657,12 @@ final class MeetingCoordinator: ObservableObject {
             // the last thing the lamp showed, and silence after it would
             // read as done (SPEC §4).
             logger.error("could not write the transcript: \(error.localizedDescription, privacy: .public)")
+            keepMeetingRecord?(record(.couldNotWrite))
             onEvent?(.saveFailed(error.localizedDescription))
             return nil
         }
         try? spool.finish(handle)
-        keepMeetingRecord?(MeetingRecord(
-            .saved, app: app, model: model, startedAt: started,
-            duration: recording.duration, gaps: recording.gaps, turns: split,
-            toDisk: notes.stopped.map { now() - $0 }))
+        keepMeetingRecord?(record(.saved, toDisk: notes.stopped.map { now() - $0 }))
 
         let summary = (try? MeetingTranscriptFile.summary(of: url)) ?? MeetingSummary(
             fileURL: url, app: app, started: started, duration: recording.duration,

@@ -182,6 +182,39 @@ final class MeetingRecordTests: XCTestCase {
         XCTAssertEqual(records.first?.durationS, 1)
     }
 
+    // MARK: - the file
+
+    /// the transcript could not be written where it was asked to go: the
+    /// audio stays, the next launch tries again, and the record says it was
+    /// the file that failed — with what was heard, since that was not lost.
+    func testATranscriptThatCouldNotBeWrittenLeavesARecordAndKeepsTheSpool() async throws {
+        // a file where the meetings folder should be: nothing can be made in it.
+        XCTAssertTrue(FileManager.default.createFile(
+            atPath: dir.appendingPathComponent("docs").path, contents: Data()))
+        transcriber.finalTurns = [
+            .init(speaker: .you, at: .seconds(1), text: "hello there"),
+            .init(speaker: .them(nil), at: .seconds(2), text: "hi"),
+        ]
+        let c = coordinator()
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        source.send(loud(at: .seconds(1)))
+        await settle()
+
+        c.stop()
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(records.count, 1)
+        let record = try XCTUnwrap(records.first)
+        XCTAssertEqual(record.outcome, .couldNotWrite)
+        XCTAssertEqual(record.durationS, 2)
+        XCTAssertEqual(record.you, .init(turns: 1, words: 2))
+        XCTAssertEqual(record.them, .init(turns: 1, words: 1))
+        XCTAssertNil(record.toDiskS)
+        XCTAssertEqual(try spoolFolders(), 1)
+    }
+
     // MARK: - the model
 
     /// the engine failing is the app's fault: the recording stops, the audio
