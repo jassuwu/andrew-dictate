@@ -93,4 +93,17 @@ final class BadgeLookTests: XCTestCase {
             .dictating
         )
     }
+
+    /// the one meeting look that needs nothing to be running: a call app
+    /// has the mic, so you could still start late.
+    func testACallNobodyRecordsOutranksTheBareBadge() {
+        XCTAssertEqual(
+            BadgeLook(
+                needsSetup: false,
+                isDictating: false,
+                meeting: .callNotRecorded
+            ),
+            .callNotRecorded
+        )
+    }
 }
