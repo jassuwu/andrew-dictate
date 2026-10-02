@@ -65,4 +65,23 @@ final class LazyMeetings {
     func stop() {
         builtCoordinator?.stop()
     }
+
+    // MARK: - launch
+
+    /// a spool a crash left behind is written out at every launch — but
+    /// only a spool folder with something in it builds the coordinator to
+    /// do it. the returned task is the recovery, or nil when there is none.
+    @discardableResult
+    func recoverOrphansAtLaunch(
+        in spool: MeetingSpool,
+        after delay: Duration
+    ) -> Task<Void, Never>? {
+        guard spool.mayHoldOrphans() else {
+            return nil
+        }
+        return Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            self?.coordinator.recoverOrphans()
+        }
+    }
 }

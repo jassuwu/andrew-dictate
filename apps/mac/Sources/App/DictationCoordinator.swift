@@ -1821,10 +1821,7 @@ extension DictationCoordinator {
         // hour. five seconds of head start keeps it off the dictation
         // model's prewarm, so the first fn press is not slower for it. the
         // number is a guess, like the rest of MeetingThresholds.
-        Task { [weak self] in
-            try? await Task.sleep(for: .seconds(5))
-            self?.meetings.coordinator.recoverOrphans()
-        }
+        meetings.recoverOrphansAtLaunch(in: MeetingSpool(), after: .seconds(5))
     }
 
     /// the coordinator's half of the wiring, run once, the moment it is
