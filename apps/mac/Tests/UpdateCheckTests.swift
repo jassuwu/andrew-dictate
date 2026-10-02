@@ -587,6 +587,35 @@ final class UpdateCheckTests: XCTestCase {
         }
     }
 
+    func testClickingRestartToFinishRelaunches() {
+        XCTAssertEqual(
+            UpdateOffer.click(.restartToFinish, busy: false, brew: optBrew),
+            UpdateOffer.Click(state: .restartToFinish, effect: .relaunch)
+        )
+    }
+
+    /// the clipboard has had a day since: a click puts the command back.
+    func testClickingTheCopiedLineCopiesTheCommandAgain() {
+        XCTAssertEqual(
+            UpdateOffer.click(.failedCopied, busy: false, brew: optBrew),
+            UpdateOffer.Click(
+                state: .failedCopied,
+                effect: .copy("brew upgrade --cask jassuwu/tap/andrew-dictate")
+            )
+        )
+    }
+
+    /// a relaunch would end the take, and the clipboard is the inserter's
+    /// while it pastes.
+    func testABusyAppRefusesTheRestartAndTheCopy() {
+        for state: UpdateOffer.LineState in [.restartToFinish, .failedCopied] {
+            XCTAssertEqual(
+                UpdateOffer.click(state, busy: true, brew: optBrew),
+                UpdateOffer.Click(state: state, effect: nil)
+            )
+        }
+    }
+
     /// a run's end only moves a line that is waiting on it.
     func testOnlyAnUpdatingLineIsFinished() {
         for state: UpdateOffer.LineState in [.available(brewLine), .restartToFinish, .failedCopied] {

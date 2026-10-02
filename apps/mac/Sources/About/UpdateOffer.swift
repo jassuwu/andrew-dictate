@@ -189,6 +189,9 @@ enum UpdateOffer {
         /// `brew upgrade` with the brew at this path.
         case upgrade(brew: URL)
         case open(URL)
+        /// quit and come back as whatever brew put in /Applications.
+        case relaunch
+        case copy(String)
     }
 
     struct Click: Equatable, Sendable {
@@ -197,17 +200,35 @@ enum UpdateOffer {
     }
 
     /// a click on the line as it is shown. `busy` — a take, a model load or
-    /// a meeting — refuses every click quietly, the way the check waits.
-    /// `brew` is where brew lives; nil, at neither prefix, makes a brew
+    /// a meeting — refuses every click quietly, the way the check waits: a
+    /// relaunch would end the take, and the clipboard is the inserter's
+    /// while it pastes. `brew` is where brew lives; nil, at neither prefix, makes a brew
     /// install a dmg one, since there is nothing here to run.
     static func click(
         _ state: LineState,
         busy: Bool,
         brew: URL?
     ) -> Click {
-        guard !busy, case let .available(line) = state else {
+        guard !busy else {
             return Click(state: state, effect: nil)
         }
+        switch state {
+        case let .available(line):
+            return click(line, brew: brew)
+        case .updating:
+            return Click(state: state, effect: nil)
+        case .restartToFinish:
+            return Click(state: state, effect: .relaunch)
+        case .failedCopied:
+            return Click(
+                state: state,
+                effect: .copy(UpdateCheck.upgradeCommand)
+            )
+        }
+    }
+
+    private static func click(_ line: Line, brew: URL?) -> Click {
+        let state = LineState.available(line)
         switch line.action {
         case .brewUpgrade:
             guard let brew else {
