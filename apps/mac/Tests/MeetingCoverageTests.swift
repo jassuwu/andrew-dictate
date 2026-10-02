@@ -156,6 +156,88 @@ final class MeetingCoverageTests: XCTestCase {
         XCTAssertNil(record.audioKeptUntil)
     }
 
+    /// Reading it again threw: there is only the live reading, and it is
+    /// written as it is — not whole, with the reason it was thin, and its
+    /// audio kept.
+    func testAReadingAgainThatThrowsLeavesTheLiveReadingWrittenIncompleteWithItsAudio() async throws {
+        hook = try script("#!/bin/sh\ncat > \"$ANDREW_FOLDER/seen.json\"\nexit 0\n")
+        let (live, again) = stillThin()
+        again.batchFailure = Unreadable()
+        transcribers.lineUp(live, again)
+
+        try await meeting(seconds: 2)
+
+        let files = MeetingTranscriptFile.listAll(in: docs)
+        XCTAssertEqual(files.count, 1, "written once")
+        let file = try XCTUnwrap(files.first)
+        XCTAssertEqual(try frontMatter(of: file)["complete"], "false")
+        XCTAssertEqual(
+            try frontMatter(of: file)["reason"], "far fewer words than the talk that was heard")
+        XCTAssertEqual(try lines(of: file), ["[00:00:01] them 1: hmm right"])
+        let told = try await toldTheHook(beside: file)
+        XCTAssertEqual(told["complete"] as? Bool, false)
+        XCTAssertEqual(try keptSpools(), 1)
+        XCTAssertEqual(spool.orphans().count, 0)
+        XCTAssertEqual(records.map(\.outcome), [.savedThin])
+        XCTAssertEqual(records.first?.coverage?.result, .thin)
+        XCTAssertEqual(records.first?.audioKept, true)
+    }
+
+    // MARK: - covered
+
+    /// A meeting the transcript covers is written once, from the live
+    /// reading, and nothing is read again.
+    func testAHealthyMeetingPassesWithOneWriteAndNoReadingAgain() async throws {
+        let live = FakeTranscriber()
+        live.finalTurns = [
+            .init(speaker: .you, at: .seconds(1), text: "the deploy is blocked"),
+            .init(speaker: .them(nil), at: .seconds(2), text: "since when"),
+        ]
+        live.tally = StretchTally(
+            decodedYou: 1, decodedThem: 1,
+            speechYou: .seconds(1), speechThem: .seconds(1),
+            readYou: .seconds(1), readThem: .seconds(1))
+        transcribers.lineUp(live)
+
+        try await meeting(seconds: 2)
+
+        let files = MeetingTranscriptFile.listAll(in: docs)
+        XCTAssertEqual(files.count, 1)
+        let file = try XCTUnwrap(files.first)
+        XCTAssertTrue(file.complete)
+        XCTAssertEqual(try lines(of: file), [
+            "[00:00:01] you: the deploy is blocked",
+            "[00:00:02] them 1: since when",
+        ])
+        XCTAssertEqual(transcribers.made, [.parakeetV3], "read once")
+        XCTAssertFalse(events.contains(.readingAgain))
+        XCTAssertEqual(records.map(\.outcome), [.saved])
+        XCTAssertEqual(records.first?.coverage, .init(
+            result: .pass, speechYouS: 1, speechThemS: 1, unreadYouS: 0, unreadThemS: 0,
+            bleed: 0, farSideLoudS: 2))
+        XCTAssertEqual(records.first?.audioKept, false)
+    }
+
+    /// Thin the first time and whole the second: the record says it was
+    /// read again, and why.
+    func testTheRecordOfAMeetingReadAgainIntoAWholeTranscriptSaysWhy() async throws {
+        let live = FakeTranscriber()
+        live.tally = StretchTally(
+            decodedYou: 70, failed: 30, speechYou: .seconds(100), readYou: .seconds(70))
+        let again = FakeTranscriber()
+        again.batchTurns = [.init(speaker: .you, at: .seconds(1), text: "the deploy is blocked")]
+        again.tally = StretchTally(decodedYou: 1, speechYou: .seconds(1), readYou: .seconds(1))
+        transcribers.lineUp(live, again)
+
+        try await meeting(seconds: 2)
+
+        XCTAssertEqual(records.map(\.outcome), [.saved])
+        XCTAssertEqual(records.first?.coverage, .init(
+            result: .passAfterRerun, reason: "some of what was said could not be read",
+            speechYouS: 1, speechThemS: 0, unreadYouS: 0, unreadThemS: 0,
+            bleed: 0, farSideLoudS: 2))
+    }
+
     // MARK: - helpers
 
     /// Spool folders with their audio still in them.
