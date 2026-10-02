@@ -106,13 +106,45 @@ final class MeetingStretchTests: XCTestCase {
         ])
     }
 
+    /// Every stretch is handed to the engine once, and no sample is in two
+    /// of them. With a hangover shorter than the pre-roll, "two" begins
+    /// 0.2 s after "one" ended: its pre-roll would reach back into "one",
+    /// and stops where "one" did instead.
+    func testEachStretchReachesTheEngineOnceAndNoAudioTwice() async throws {
+        let c = coordinator(stretches(hangover: .milliseconds(200)))
+        c.start(tapping: zoom)
+        await source.awaitStart()
+
+        await play([
+            you("one", from: 1.3, to: 2.0),
+            you("two", from: 2.2, to: 3.0),
+            them("three", from: 3.3, to: 4.5),
+        ], through: 5.5, on: c)
+        await waitFor { c.liveLines.count == 3 }
+
+        XCTAssertEqual(handed(), ["one 16000", "two 16000", "three 24000"])
+        XCTAssertEqual(live(c), ["you 1.0 one", "you 2.0 two", "them 3.0 three"])
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, [
+            "[00:00:01] you: one",
+            "[00:00:02] you: two",
+            "[00:00:03] them: three",
+        ])
+        XCTAssertEqual(handed().count, 3, "stopping decodes nothing again")
+    }
+
     // MARK: - building a meeting
 
-    private func stretches(ceiling: Duration = .seconds(25), clock: FakeClock = FakeClock()) -> StretchTranscriber {
+    private func stretches(
+        ceiling: Duration = .seconds(25),
+        hangover: Duration = .milliseconds(500),
+        clock: FakeClock = FakeClock()
+    ) -> StretchTranscriber {
         StretchTranscriber(
             engine: engine,
             ceiling: ceiling,
-            detector: { LoudnessDetector(threshold: 0.02, hangover: .milliseconds(500)) },
+            detector: { LoudnessDetector(threshold: 0.02, hangover: hangover) },
             now: { clock.now })
     }
 
@@ -216,6 +248,12 @@ final class MeetingStretchTests: XCTestCase {
             let confirmed = line.isConfirmed ? "" : " (tentative)"
             return "\(who) \(seconds(line.at)) \(line.text)\(confirmed)"
         }
+    }
+
+    /// What the engine was handed, in order: the phrase it heard and how
+    /// many samples it heard it in.
+    private func handed() -> [String] {
+        engine.handed.map { "\($0.phrase) \($0.samples)" }
     }
 
     private func seconds(_ duration: Duration) -> String {
