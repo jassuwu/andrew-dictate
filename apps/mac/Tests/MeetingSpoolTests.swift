@@ -213,6 +213,31 @@ final class MeetingSpoolTests: XCTestCase {
         XCTAssertEqual(permissions(of: handle.manifestURL), 0o600)
     }
 
+    /// What app and when are what the manifest said; with none, the audio
+    /// says when it was made, and the meeting is the unnamed one, to be
+    /// read with the model the app would pick now.
+    func testASetAsideFolderWithNoManifestGetsAMinimalOneSoItCanBeTried() throws {
+        let handle = try spool.begin(manifest())
+        try Data([7]).write(to: handle.audioURL)
+        let madeAt = Date(timeIntervalSince1970: 1_787_100_000)
+        try FileManager.default.setAttributes(
+            [.creationDate: madeAt], ofItemAtPath: handle.audioURL.path)
+        try FileManager.default.removeItem(at: handle.manifestURL)
+        _ = spool.orphans()
+        XCTAssertEqual(spool.unreadableCount(), 1)
+
+        let back = spool.bringBackSetAside()
+
+        XCTAssertEqual(back.map(\.handle), [handle])
+        XCTAssertEqual(back.map(\.manifest), [
+            .init(
+                app: "meeting", started: madeAt, engine: "whisperLargeV3",
+                model: .whisperLargeV3),
+        ])
+        XCTAssertEqual(spool.orphans().map(\.manifest), back.map(\.manifest))
+        XCTAssertEqual(permissions(of: handle.manifestURL), 0o600)
+    }
+
     // MARK: -
 
     /// Where a set-aside spool's folder ends up.

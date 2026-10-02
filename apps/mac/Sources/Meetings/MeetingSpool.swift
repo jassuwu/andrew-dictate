@@ -157,11 +157,9 @@ struct MeetingSpool: Sendable {
             let aside = Handle(
                 folder: unreadableFolder.appendingPathComponent(name, isDirectory: true))
             let home = Handle(folder: root.appendingPathComponent(name, isDirectory: true))
-            guard let data = try? Data(contentsOf: aside.manifestURL),
-                  var manifest = try? Self.decoder.decode(Manifest.self, from: data)
-            else {
-                continue
-            }
+            var manifest = (try? Data(contentsOf: aside.manifestURL))
+                .flatMap { try? Self.decoder.decode(Manifest.self, from: $0) }
+                ?? minimalManifest(for: aside)
             manifest.attempts = nil
             guard let cleared = try? Self.encoder.encode(manifest),
                   (try? cleared.write(to: aside.manifestURL, options: .atomic)) != nil,
@@ -173,6 +171,21 @@ struct MeetingSpool: Sendable {
             back.append((home, manifest))
         }
         return back
+    }
+
+    /// What a spool says about itself when its manifest is gone or will not
+    /// read: nothing but its audio. That says when it was made, and the
+    /// meeting is the unnamed one, to be read with the model the app would
+    /// pick for a new meeting.
+    private func minimalManifest(for handle: Handle) -> Manifest {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: handle.audioURL.path)
+        let made = (attributes?[.creationDate] as? Date)
+            ?? (attributes?[.modificationDate] as? Date)
+            ?? Date()
+        let model = MeetingModel.default
+        return Manifest(
+            app: MeetingCoordinator.unnamed, started: made, engine: model.rawValue,
+            model: model)
     }
 
     /// The folder those go to, whether or not anything is in it — the

@@ -238,7 +238,7 @@ final class MeetingCoordinator: ObservableObject {
     /// What a meeting nobody named is called in its file's name, its front
     /// matter and the hook's payload. Nothing picks an app any more (ADR
     /// 0049).
-    static let unnamed = "meeting"
+    nonisolated static let unnamed = "meeting"
 
     /// `name` is the call app's, once something can tell which one held the
     /// mic at the start (ADR 0047); without one the meeting is `unnamed`.
