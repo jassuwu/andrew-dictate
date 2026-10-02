@@ -80,8 +80,16 @@ final class CaptureSlot {
     }
 
     /// pre-roll was switched. a capture is built for one mode or the
-    /// other, so it goes, and a fresh one is built ready for the new one.
+    /// other, so it goes, and a fresh one is built ready for the new one —
+    /// but never from under a take: only you throw an utterance away. a
+    /// take holding it keeps it, and it goes stale instead, replaced once
+    /// the take lets go, the way a device change is.
     func listeningChanged() {
+        guard !isInUse() else {
+            staleness.changed(at: clock.now)
+            scheduleSettle()
+            return
+        }
         throwAway()
         build().prepare()
     }

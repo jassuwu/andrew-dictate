@@ -37,8 +37,9 @@ struct PressRecord: Equatable, Sendable, Codable {
         /// the mic never answered the start, and the press stopped waiting.
         case micNotResponding
         case recordingLost
-        /// the app took the take away: a setting that rebuilds the mic, or
-        /// the speech model being switched or removed under it.
+        /// the app took the take away: the speech model switched or
+        /// removed under it. older records also say it for a pre-roll
+        /// switch, which now waits for the take to let go.
         case abandoned
         /// still transcribing so long after key-up that the next press
         /// dropped it and recorded instead. its samples are kept and the

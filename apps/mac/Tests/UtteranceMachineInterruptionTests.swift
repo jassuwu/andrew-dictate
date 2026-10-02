@@ -77,7 +77,6 @@ final class UtteranceMachineInterruptionTests: XCTestCase {
             ("the lock", { $0.captureInterrupted(.systemPaused) }),
             ("the mic changed", { $0.captureInterrupted(.deviceChanged) }),
             ("the cap", { _ = $0.capReached() }),
-            ("a setting rebuilt the mic", { $0.abandonRecording() }),
             ("the speech model went", { $0.abandon() }),
         ]
         for (ending, end) in endings {

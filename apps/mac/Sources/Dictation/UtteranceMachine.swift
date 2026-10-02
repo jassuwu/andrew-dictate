@@ -995,17 +995,6 @@ final class UtteranceMachine {
 
     // MARK: - the app pulling the rug
 
-    /// a setting that rebuilds the capture path (pre-roll) cannot do it
-    /// under a live take.
-    func abandonRecording() {
-        guard state == .recording else {
-            return
-        }
-
-        cancelMicTurn()
-        endPressEarly(.abandoned, fastHUDDismiss: false)
-    }
-
     /// the speech model is being taken away: whatever is in flight goes,
     /// silently, and the lamp settles.
     func abandon() {

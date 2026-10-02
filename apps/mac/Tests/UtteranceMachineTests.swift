@@ -1057,21 +1057,6 @@ final class UtteranceMachineTests: XCTestCase {
 
     // MARK: - the app pulling the rug
 
-    /// a setting that rebuilds the mic cannot do it under a live take.
-    func testASettingThatRebuildsTheMicAbandonsTheTake() async {
-        let m = machine()
-        m.keyDown()
-        await pass(.seconds(1))
-
-        m.abandonRecording()
-        await settle()
-
-        XCTAssertEqual(m.state, .idle)
-        XCTAssertEqual(mic.cancels, 1)
-        XCTAssertEqual(engine.heard, [])
-        XCTAssertEqual(outcomes, [.abandoned])
-    }
-
     /// the speech model being taken away takes the sentence in flight with
     /// it, and the engine's late answer goes nowhere.
     func testTakingTheSpeechModelAwayAbandonsWhatIsInFlight() async {

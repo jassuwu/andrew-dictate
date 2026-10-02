@@ -160,6 +160,44 @@ final class CaptureSlotTests: XCTestCase {
         XCTAssertEqual(made[2].prepares, 1)
     }
 
+    /// pre-roll switched under a take: only you throw an utterance away, so
+    /// the take keeps the capture it started with, and the switch lands
+    /// once it has let go — or at the next press, whichever is first.
+    func testSwitchingPreRollUnderATakeWaitsForTheTake() async {
+        let slot = slot()
+        let holding = slot.captureForPress()
+        inUse = true
+
+        preRoll = true
+        slot.listeningChanged()
+        await pass(.milliseconds(500))
+        await pass(.milliseconds(500))
+        XCTAssertEqual(made[0].discards, 0)
+        XCTAssertEqual(made.count, 1)
+
+        inUse = false
+        await pass(.milliseconds(500))
+        XCTAssertEqual(made[0].discards, 1)
+        XCTAssertEqual(made.count, 2)
+        XCTAssertEqual(made[1].prepares, 1)
+        XCTAssertFalse(holding === slot.captureForPress())
+    }
+
+    /// a press before the switch has landed is handed a capture built for
+    /// the new mode, not the one the last take held.
+    func testAPressAfterASwitchUnderATakeGetsAFreshCapture() {
+        let slot = slot()
+        let holding = slot.captureForPress()
+        inUse = true
+
+        slot.listeningChanged()
+        inUse = false
+        let next = slot.captureForPress()
+
+        XCTAssertFalse(holding === next)
+        XCTAssertEqual(made[0].discards, 1)
+    }
+
     // MARK: - helpers
 
     private func pass(_ duration: Duration) async {

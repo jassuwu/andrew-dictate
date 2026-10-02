@@ -349,8 +349,8 @@ final class DictationCoordinator: ObservableObject {
         settings.$preRollEnabled
             .dropFirst()
             .removeDuplicates()
-            .sink { [weak self] enabled in
-                self?.applyPreRoll(enabled)
+            .sink { [weak self] _ in
+                self?.applyPreRoll()
             }
             .store(in: &settingsCancellables)
 
@@ -957,10 +957,9 @@ final class DictationCoordinator: ObservableObject {
     }
 
     /// a capture is built for one mode or the other, so switching throws it
-    /// away — never under a live take — and with pre-roll on, a fresh one
-    /// starts listening.
-    private func applyPreRoll(_ enabled: Bool) {
-        machine.abandonRecording()
+    /// away — never under a live take, which keeps its capture until it
+    /// lets go — and with pre-roll on, a fresh one starts listening.
+    private func applyPreRoll() {
         captureSlot.listeningChanged()
     }
 
