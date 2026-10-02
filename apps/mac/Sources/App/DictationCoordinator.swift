@@ -1429,6 +1429,8 @@ final class DictationCoordinator: ObservableObject {
         audioLogger.notice(
             "audio devices moved: \(change.rawValue, privacy: .public)"
         )
+        // the hourglass after a monitor or the lid came before any press.
+        watchdog.watchAfterHardwareChange()
         captureSlot.deviceChanged()
         if change == .defaultOutput {
             feedbackSounds.outputChanged()

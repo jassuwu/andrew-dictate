@@ -7,11 +7,15 @@ import XCTest
 final class MainThreadWatchdogTests: XCTestCase {
     private var stalls: [Int] = []
 
-    private func watchdog(linger: TimeInterval = 1) -> MainThreadWatchdog {
+    private func watchdog(
+        linger: TimeInterval = 1,
+        afterHardwareChange: TimeInterval = 1
+    ) -> MainThreadWatchdog {
         MainThreadWatchdog(
             interval: 0.05,
             threshold: 0.2,
             linger: linger,
+            afterHardwareChange: afterHardwareChange,
             onStall: { [weak self] milliseconds in
                 self?.stalls.append(milliseconds)
             }
@@ -51,6 +55,53 @@ final class MainThreadWatchdogTests: XCTestCase {
         dog.windDown()
         dog.watch(.recording)
         try await Task.sleep(for: .milliseconds(300))
+        XCTAssertTrue(dog.isWatching)
+        dog.windDown()
+    }
+
+    /// a monitor, the lid, a wake: the hourglass that followed them came
+    /// before any press. the watch starts at the change, runs its window,
+    /// then costs nothing again.
+    func testAHardwareChangeIsWatchedForItsWindow() async throws {
+        let dog = watchdog(afterHardwareChange: 0.2)
+
+        dog.watchAfterHardwareChange()
+        XCTAssertTrue(dog.isWatching)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertTrue(dog.isWatching)
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertFalse(dog.isWatching)
+    }
+
+    /// a press that ends inside a change's window doesn't cut it short,
+    /// and a change during a press's linger stretches it.
+    func testAPressAndAChangeKeepWatchingUntilTheLaterEnds() async throws {
+        let dog = watchdog(linger: 0.05, afterHardwareChange: 0.3)
+
+        dog.watchAfterHardwareChange()
+        dog.watch(.recording)
+        dog.windDown()
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertTrue(dog.isWatching)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertFalse(dog.isWatching)
+
+        dog.watch(.transcribing)
+        dog.windDown()
+        dog.watchAfterHardwareChange()
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertTrue(dog.isWatching)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertFalse(dog.isWatching)
+    }
+
+    /// a change's window never ends a press still in flight.
+    func testAChangeWindowEndingMidPressKeepsWatching() async throws {
+        let dog = watchdog(afterHardwareChange: 0.05)
+
+        dog.watchAfterHardwareChange()
+        dog.watch(.recording)
+        try await Task.sleep(for: .milliseconds(200))
         XCTAssertTrue(dog.isWatching)
         dog.windDown()
     }

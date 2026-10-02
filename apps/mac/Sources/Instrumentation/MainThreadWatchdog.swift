@@ -8,9 +8,10 @@ private let watchdogLogger = Logger(
 )
 
 /// Pings the main thread from a background queue while a press is in
-/// flight, and for a few seconds after, and says when a ping went
-/// unanswered for more than half a second — the hourglass in the menu bar,
-/// caught in the field instead of described afterwards.
+/// flight, and for a few seconds after, and for ten seconds after the
+/// hardware moves underneath — a device, a wake, the displays — and says
+/// when a ping went unanswered for more than half a second: the hourglass
+/// in the menu bar, caught in the field instead of described afterwards.
 ///
 /// Only while something is happening: at idle there is no timer at all,
 /// because a menu bar app that wakes four times a second to check on itself
@@ -28,11 +29,15 @@ final class MainThreadWatchdog: @unchecked Sendable {
         case prewarming
         case recording
         case transcribing
+        /// no press in flight, inside the window after the hardware moved:
+        /// the stall a monitor or the lid used to leave.
+        case hardwareChanged = "hardware-changed"
     }
 
     private let interval: TimeInterval
     private let threshold: TimeInterval
     private let linger: TimeInterval
+    private let afterHardwareChange: TimeInterval
     private let stuckAfter: TimeInterval
     private let onStall: @MainActor @Sendable (_ milliseconds: Int) -> Void
     private let queue = DispatchQueue(
@@ -42,8 +47,13 @@ final class MainThreadWatchdog: @unchecked Sendable {
 
     // everything below is touched only on `queue`.
     private var timer: DispatchSourceTimer?
-    private var windingDown: DispatchWorkItem?
-    private var phase = Phase.idle
+    /// the press in flight, and what it is doing. nil between presses.
+    private var press: Phase?
+    /// with no press in flight, the timer runs until this: a press's
+    /// linger or a hardware change's window, whichever ends later.
+    private var watchUntil: DispatchTime?
+    private var hardwareChangedUntil: DispatchTime?
+    private var stopCheck: DispatchWorkItem?
     private var outstandingPing: (sentAt: UInt64, saidStuck: Bool)?
 
     /// `onStall` runs on the main thread once it answers, with how long it
@@ -52,12 +62,14 @@ final class MainThreadWatchdog: @unchecked Sendable {
         interval: TimeInterval = 0.25,
         threshold: TimeInterval = 0.5,
         linger: TimeInterval = 5,
+        afterHardwareChange: TimeInterval = 10,
         stuckAfter: TimeInterval = 5,
         onStall: @escaping @MainActor @Sendable (_ milliseconds: Int) -> Void
     ) {
         self.interval = interval
         self.threshold = threshold
         self.linger = linger
+        self.afterHardwareChange = afterHardwareChange
         self.stuckAfter = stuckAfter
         self.onStall = onStall
     }
@@ -71,26 +83,11 @@ final class MainThreadWatchdog: @unchecked Sendable {
         queue.sync { timer != nil }
     }
 
-    /// a press is in flight, in `phase`: ping, and forget any wind-down.
+    /// a press is in flight, in `phase`: ping until it winds down.
     func watch(_ phase: Phase) {
         queue.async { [self] in
-            self.phase = phase
-            windingDown?.cancel()
-            windingDown = nil
-            guard timer == nil else {
-                return
-            }
-            let timer = DispatchSource.makeTimerSource(queue: queue)
-            timer.schedule(
-                deadline: .now() + interval,
-                repeating: interval,
-                leeway: .milliseconds(25)
-            )
-            timer.setEventHandler { [weak self] in
-                self?.tick()
-            }
-            timer.resume()
-            self.timer = timer
+            press = phase
+            startTicking()
         }
     }
 
@@ -98,21 +95,79 @@ final class MainThreadWatchdog: @unchecked Sendable {
     /// keep pinging through the linger, then stop costing anything.
     func windDown() {
         queue.async { [self] in
-            phase = .idle
-            guard timer != nil, windingDown == nil else {
+            guard press != nil else {
                 return
             }
-            let work = DispatchWorkItem { [weak self] in
-                guard let self else {
-                    return
-                }
-                self.timer?.cancel()
-                self.timer = nil
-                self.windingDown = nil
-            }
-            windingDown = work
-            queue.asyncAfter(deadline: .now() + linger, execute: work)
+            press = nil
+            keepTicking(until: .now() + linger)
         }
+    }
+
+    /// the hardware moved underneath: a device, a wake, the displays. the
+    /// main thread stalled after these before any key was pressed, so the
+    /// window starts here, press or not.
+    func watchAfterHardwareChange() {
+        queue.async { [self] in
+            let until = DispatchTime.now() + afterHardwareChange
+            hardwareChangedUntil = until
+            startTicking()
+            keepTicking(until: until)
+        }
+    }
+
+    private func startTicking() {
+        guard timer == nil else {
+            return
+        }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(
+            deadline: .now() + interval,
+            repeating: interval,
+            leeway: .milliseconds(25)
+        )
+        timer.setEventHandler { [weak self] in
+            self?.tick()
+        }
+        timer.resume()
+        self.timer = timer
+    }
+
+    private func keepTicking(until deadline: DispatchTime) {
+        let until = max(watchUntil ?? deadline, deadline)
+        watchUntil = until
+        stopCheck?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.stopIfDone()
+        }
+        stopCheck = work
+        queue.asyncAfter(deadline: until, execute: work)
+    }
+
+    /// nothing in flight and every window over: no timer at all.
+    private func stopIfDone() {
+        stopCheck = nil
+        guard press == nil else {
+            // a press took over; its wind-down sets the next check.
+            return
+        }
+        if let watchUntil, DispatchTime.now() < watchUntil {
+            keepTicking(until: watchUntil)
+            return
+        }
+        timer?.cancel()
+        timer = nil
+        watchUntil = nil
+        hardwareChangedUntil = nil
+    }
+
+    private var phase: Phase {
+        if let press {
+            return press
+        }
+        if let hardwareChangedUntil, DispatchTime.now() < hardwareChangedUntil {
+            return .hardwareChanged
+        }
+        return .idle
     }
 
     private func tick() {
