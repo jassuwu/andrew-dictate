@@ -1515,13 +1515,20 @@ extension MeetingCoordinator {
             let split = audio.them.isEmpty
                 ? reading.turns
                 : await splitSpeakers(in: reading.turns, them: audio.them, gaps: header.gaps)
-            try MeetingTranscriptFile.replace(
-                at: transcript,
-                with: MeetingTranscript(
-                    app: header.app, started: header.started, duration: header.duration,
-                    engine: model.rawValue, gaps: header.gaps, recovered: header.recovered,
-                    turns: split),
-                timeZone: header.timeZone)
+            let again = MeetingTranscript(
+                app: header.app, started: header.started, duration: header.duration,
+                engine: model.rawValue, gaps: header.gaps, recovered: header.recovered,
+                turns: split)
+            try MeetingTranscriptFile.replace(at: transcript, with: again, timeZone: header.timeZone)
+            await runHook(preferences().hook, telling: MeetingSavedEvent(
+                transcript: transcript,
+                app: header.app,
+                startedAt: header.started,
+                durationS: Int(header.duration.components.seconds),
+                complete: again.complete,
+                gaps: header.gaps.map { [$0.began.totalSeconds, $0.ended.totalSeconds] },
+                recovered: header.recovered,
+                again: true))
         } catch {}
     }
 }

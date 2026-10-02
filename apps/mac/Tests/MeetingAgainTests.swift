@@ -104,7 +104,104 @@ final class MeetingAgainTests: XCTestCase {
         XCTAssertEqual(transcribers.made, [.whisperLargeV3])
     }
 
+    // MARK: - the hook
+
+    /// The hook runs again for the new file, so an agent's copy of the old
+    /// one does not go stale: the same event and the same facts of the
+    /// meeting, and one key more that says this is not the first time.
+    func testTheHookRunsAgainForTheNewFileAndSaysItIsARerun() async throws {
+        hook = try script("""
+            #!/bin/sh
+            cat > "$ANDREW_FOLDER/seen.json"
+            echo "$ANDREW_AGAIN" > "$ANDREW_FOLDER/again.txt"
+            exit 0
+            """)
+        let gap = MeetingSession.Gap(began: .seconds(5), ended: .seconds(8))
+        let file = try await existingMeeting(gaps: [gap], recovered: true)
+        let again = FakeTranscriber()
+        again.batchTurns = [.init(speaker: .you, at: .seconds(1), text: "namaste")]
+        again.tally = passing
+        transcribers.lineUp(again)
+
+        await coordinator().transcribeAgain(file, with: .whisperLargeV3)
+
+        let told = try await toldTheHook(beside: file)
+        XCTAssertEqual(told.payload["again"] as? Bool, true)
+        XCTAssertEqual(told.again, "1")
+        XCTAssertEqual(told.payload["event"] as? String, "meeting-saved")
+        XCTAssertEqual(told.payload["transcript"] as? String, file.path)
+        XCTAssertEqual(told.payload["app"] as? String, "zoom")
+        XCTAssertEqual(told.payload["started_at"] as? String, "2026-08-17T20:53:20Z")
+        XCTAssertEqual(told.payload["duration_s"] as? Int, 6_120)
+        XCTAssertEqual(told.payload["complete"] as? Bool, false, "the gap is still in it")
+        XCTAssertEqual(told.payload["gaps"] as? [[Double]], [[5, 8]])
+        XCTAssertEqual(told.payload["recovered"] as? Bool, true)
+    }
+
+    /// A meeting that has just ended is not a rerun, and its hook says so
+    /// with the same key, so a script never has to wonder what a missing one
+    /// means.
+    func testTheHookOfAFirstSaveSaysItIsNotARerun() async throws {
+        hook = try script("""
+            #!/bin/sh
+            cat > "$ANDREW_FOLDER/seen.json"
+            echo "$ANDREW_AGAIN" > "$ANDREW_FOLDER/again.txt"
+            exit 0
+            """)
+        let live = FakeTranscriber()
+        live.finalTurns = [.init(speaker: .you, at: .seconds(1), text: "the deploy is blocked")]
+        live.tally = passing
+        transcribers.lineUp(live)
+
+        try await meeting(seconds: 2)
+
+        let file = try XCTUnwrap(MeetingTranscriptFile.listAll(in: docs).first).fileURL
+        let told = try await toldTheHook(beside: file)
+        XCTAssertEqual(told.payload["again"] as? Bool, false)
+        XCTAssertEqual(told.again, "0")
+    }
+
     // MARK: - helpers
+
+    /// A meeting `seconds` long, loud on both sides, stopped and written out.
+    private func meeting(seconds: Int) async throws {
+        let c = coordinator()
+        c.start()
+        await source.awaitStart()
+        for s in 0..<seconds {
+            source.send(loud(at: .seconds(s)))
+        }
+        await waitFor { c.elapsed >= .seconds(seconds) }
+        c.stop()
+        await c.untilWrittenOut()
+    }
+
+    /// What the hook was handed, as a hook that saves it beside the
+    /// transcript left it. It runs after the file is written, so this waits.
+    private func toldTheHook(
+        beside file: URL
+    ) async throws -> (payload: [String: Any], again: String) {
+        let folder = file.deletingLastPathComponent()
+        let seen = folder.appendingPathComponent("seen.json")
+        let flag = folder.appendingPathComponent("again.txt")
+        // `cat >` makes the file before it has written to it.
+        await waitFor {
+            (try? JSONSerialization.jsonObject(with: Data(contentsOf: seen))) != nil
+                && ((try? String(contentsOf: flag, encoding: .utf8)) ?? "").hasSuffix("\n")
+        }
+        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: seen))
+        return (
+            try XCTUnwrap(object as? [String: Any]),
+            try String(contentsOf: flag, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private func script(_ text: String) throws -> URL {
+        let url = dir.appendingPathComponent("hook.sh")
+        try text.write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        return url
+    }
 
     /// The tally of a reading that covers what was said.
     private var passing: StretchTally {
