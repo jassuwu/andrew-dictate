@@ -64,7 +64,7 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
         switch self {
         case .hello:
             return jobs.scope == .meetingsOnly
-                ? "your mic is you, what the mac plays is them. one english transcript."
+                ? "your mic is you, what the mac plays is them. one markdown transcript."
                 : "hold \(key), talk, let go. the text lands where your cursor is."
         case .model:
             return jobs.dictation && jobs.meetings
