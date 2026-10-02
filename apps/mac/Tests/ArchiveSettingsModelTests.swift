@@ -87,6 +87,46 @@ final class ArchiveSettingsModelTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: pressLog.fileURL.path))
     }
 
+    /// history switched off keeps no dictations, but the press log still
+    /// fills — so an empty archive must not grey out the one button that
+    /// can wipe it.
+    @MainActor
+    func testAPressLogAloneStillLeavesSomethingToDelete() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let archive = DictationArchive(
+            fileURL: directory.appendingPathComponent("dictations.jsonl")
+        )
+        let pressLog = PressLogStore(
+            fileURL: directory.appendingPathComponent("presses.jsonl")
+        )
+        try pressLog.append(
+            PressRecord(
+                outcome: .delivered,
+                startedAt: aug29,
+                mic: nil,
+                samples: 16_000,
+                peak: 0.2,
+                words: 2,
+                stages: PressRecord.Stages(ended: 900),
+                engine: "v2",
+                capped: false,
+                retry: false,
+                mainStallMs: nil
+            )
+        )
+        let model = ArchiveSettingsModel(archive: archive, pressLog: pressLog)
+
+        XCTAssertEqual(model.count, 0)
+        XCTAssertTrue(model.hasAnythingToDelete)
+
+        model.deleteEverything()
+
+        XCTAssertFalse(model.hasAnythingToDelete)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: pressLog.fileURL.path))
+    }
+
     /// Every string this app shows is lowercase; a date formatter does not
     /// know that, whichever order the locale puts the day and the month in.
     func testTheDateIsLowercaseInAnyLocale() {

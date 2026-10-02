@@ -12,6 +12,13 @@ final class ArchiveSettingsModel: ObservableObject {
     @Published private(set) var count = 0
     /// nil while everything is fine. Otherwise a sentence to show verbatim.
     @Published private(set) var failure: String?
+    /// the press log fills even with history off, so an empty archive is
+    /// not the same as nothing to delete.
+    @Published private(set) var hasPressLog = false
+
+    var hasAnythingToDelete: Bool {
+        count > 0 || hasPressLog
+    }
 
     private let archive: DictationArchive
     /// no words in it, but it says when you were at your mac, so it goes
@@ -28,6 +35,7 @@ final class ArchiveSettingsModel: ObservableObject {
     }
 
     func refresh() {
+        hasPressLog = !((try? pressLog.recent(1)) ?? []).isEmpty
         do {
             count = try archive.all().count
             failure = nil
@@ -66,6 +74,7 @@ final class ArchiveSettingsModel: ObservableObject {
             try archive.deleteAll()
             try pressLog.deleteAll()
             count = 0
+            hasPressLog = false
             failure = nil
         } catch {
             failure = "couldn’t delete those — they’re still on disk."
