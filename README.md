@@ -46,14 +46,17 @@ brew swaps the app on disk, it can't restart it for you: quit andrew from the me
 
 ## where your words go
 
-nowhere. the app has two things that touch the network, and you trigger both.
+nowhere. the speech models run on your mac, so nothing you say leaves it. the app does go online in three places, and this is all of them.
 
-- downloading a speech model, the first time you set up a job.
-- `check for updates` in the about window, which asks github for the latest tag.
+- downloading a speech model, the first time you set up a job. you click for it.
+- `check for updates` in the about window, which asks github for the latest tag. you click for that too.
+- once a day, the app asks dictate.jass.gg for the newest version. the request is `dictate.jass.gg/api/latest?version=0.9.4` with your version in it, and that's all. no id, no account, nothing about your mac. vercel hosts the site, so it sees your ip address like any web host would. if there's something newer, a line in the menu says so. it never asks while you're dictating or recording a meeting, and a switch in settings › general stops it.
+
+that last one is new. i used to say the app only went online when you clicked something. but fixes weren't reaching people, so now it asks once a day, and you can turn it off.
 
 there's no account, no analytics, and no crash reporting. audio is never written to disk, except during a meeting, where a temp file holds it until the transcript is saved and then it's deleted. dictations are kept in a local history you can switch off or wipe.
 
-it's about 17k lines of swift. read it.
+it's about 22k lines of swift. read it.
 
 ## limits
 
