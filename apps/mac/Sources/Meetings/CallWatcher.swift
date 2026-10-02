@@ -59,6 +59,14 @@ struct CallWatcher {
     /// bar icon shows to say there is a call you could be keeping.
     var unrecordedCall: String? { recording ? nil : call?.app }
 
+    /// The user said no to the record suggestion.
+    ///
+    /// There is nothing to remember. The watcher asks once per call and never
+    /// again, so a no is final for that call without any state of its own,
+    /// and the next call asks afresh. `currentCall` and `unrecordedCall` go
+    /// on reporting the call: a no is not the call ending.
+    func dismissRecordSuggestion() {}
+
     mutating func observe(
         _ apps: [App],
         isRecording: Bool,

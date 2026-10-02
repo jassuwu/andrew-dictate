@@ -273,6 +273,60 @@ final class CallWatcherTests: XCTestCase {
         )
     }
 
+    // MARK: - saying no
+
+    /// No is an answer. The call is still on, and the icon still says so,
+    /// but nobody is asked again.
+    func testDismissingTheSuggestionLeavesTheCallOnAndUnrecordedButSilent() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(0))
+        XCTAssertEqual(
+            watcher.observe([zoom], isRecording: false, at: .seconds(3)),
+            [.record("zoom")]
+        )
+
+        watcher.dismissRecordSuggestion()
+
+        XCTAssertEqual(watcher.observe([zoom], isRecording: false, at: .seconds(4)), [])
+        XCTAssertEqual(watcher.observe([zoom], isRecording: false, at: .seconds(600)), [])
+        XCTAssertEqual(watcher.unrecordedCall, "zoom")
+        XCTAssertEqual(watcher.currentCall, "zoom")
+    }
+
+    /// The no was about that call. Ending it and starting another is
+    /// starting over.
+    func testADismissalDoesNotOutliveItsCall() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(0))
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(3))
+        watcher.dismissRecordSuggestion()
+        _ = watcher.observe([], isRecording: false, at: .seconds(100))
+        _ = watcher.observe([], isRecording: false, at: .seconds(130))
+
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(200))
+        XCTAssertEqual(
+            watcher.observe([zoom], isRecording: false, at: .seconds(203)),
+            [.record("zoom")]
+        )
+    }
+
+    /// A pill tapped away after its call is over, or before any call, is not
+    /// a no to the call that comes next.
+    func testADismissalWithNoCallOnIsForgotten() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+
+        watcher.dismissRecordSuggestion()
+
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(0))
+        XCTAssertEqual(
+            watcher.observe([zoom], isRecording: false, at: .seconds(3)),
+            [.record("zoom")]
+        )
+    }
+
     // MARK: - recordings the watcher did not ask for
 
     /// Dictating notes to yourself, or a lecture: you started it, there was
