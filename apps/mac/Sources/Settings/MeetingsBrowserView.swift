@@ -56,6 +56,8 @@ struct MeetingsBrowserView: View {
                         ForEach(viewModel.filtered) { meeting in
                             MeetingRow(
                                 meeting: meeting,
+                                audioNote: viewModel.audioNote(for: meeting),
+                                deleteAudio: { viewModel.deleteAudio(of: meeting) },
                                 delete: { viewModel.delete(meeting) }
                             )
                             Divider().overlay(BrandUI.hairline)
@@ -72,6 +74,9 @@ struct MeetingsBrowserView: View {
 
 private struct MeetingRow: View {
     let meeting: MeetingSummary
+    /// `audio until fri 14:02`, `audio kept`, or nil when there is none.
+    let audioNote: String?
+    let deleteAudio: () -> Void
     let delete: () -> Void
 
     @State private var isHovering = false
@@ -100,6 +105,15 @@ private struct MeetingRow: View {
                 separator
                 Text(completeness.text)
                     .foregroundStyle(completeness.tint)
+
+                // the audio is on this mac for a while yet: said on the
+                // row, so nobody has to go looking to know it is there.
+                if let audioNote {
+                    separator
+                    Text(audioNote)
+                        .foregroundStyle(BrandUI.textSecondary)
+                        .lineLimit(1)
+                }
             }
             .font(BrandUI.bodyFont)
 
@@ -114,6 +128,10 @@ private struct MeetingRow: View {
                     NSWorkspace.shared.activateFileViewerSelecting(
                         [meeting.fileURL]
                     )
+                }
+                if audioNote != nil {
+                    Button("delete audio now", action: deleteAudio)
+                        .help("the transcript stays")
                 }
                 Button("delete", action: delete)
             }

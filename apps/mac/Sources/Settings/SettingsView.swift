@@ -69,6 +69,7 @@ struct SettingsView: View {
             wrappedValue: MeetingsListModel(
                 setAsideFolder: spool.unreadableFolder,
                 countSetAside: { spool.unreadableCount() },
+                keptAudio: KeptAudio(),
                 load: meetingsLoader
             )
         )
