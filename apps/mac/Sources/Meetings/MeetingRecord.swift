@@ -66,6 +66,42 @@ struct MeetingRecord: Equatable, Sendable {
     /// the ending is a recovery's: the audio came from a spool a past run
     /// left, found at launch. true of a recovery that failed too.
     var recovered = false
+    /// what happened on the way, in order, each with the meeting time it
+    /// happened at.
+    var events: [Event] = []
+}
+
+// MARK: - events
+
+extension MeetingRecord {
+    /// something a meeting went through, as a short fixed label. a string
+    /// underneath, not a case list: a label a later build adds is still a
+    /// label to an earlier one reading the file, and adding one is a line.
+    struct Label: RawRepresentable, Hashable, Sendable {
+        let rawValue: String
+
+        init(rawValue: String) {
+            self.rawValue = rawValue
+        }
+
+        /// the tap stopped delivering and is being rebuilt.
+        static let gapBegan = Label(rawValue: "gap-began")
+        /// the rebuilt tap was heard again.
+        static let gapEnded = Label(rawValue: "gap-ended")
+        /// the tap could not be rebuilt, and the meeting ended there.
+        static let rebuildFailed = Label(rawValue: "rebuild-failed")
+    }
+
+    struct Event: Equatable, Sendable {
+        var label: Label
+        /// seconds into the meeting.
+        var atS: Double
+
+        init(_ label: Label, atS: Double) {
+            self.label = label
+            self.atS = atS
+        }
+    }
 }
 
 // MARK: - from a meeting
@@ -82,7 +118,8 @@ extension MeetingRecord {
         gaps: [MeetingSession.Gap] = [],
         turns: [MeetingTurn] = [],
         toDisk: Duration? = nil,
-        recovered: Bool = false
+        recovered: Bool = false,
+        events: [Event] = []
     ) {
         self.init(
             outcome: outcome,
@@ -95,7 +132,8 @@ extension MeetingRecord {
             you: Self.side(.you, in: turns),
             them: Self.side(.them, in: turns),
             toDiskS: toDisk.map(Self.seconds),
-            recovered: recovered
+            recovered: recovered,
+            events: events
         )
     }
 
@@ -122,7 +160,7 @@ extension MeetingRecord {
 
     /// to a tenth: a gap of four and a half seconds is not four, and a
     /// stored record is not the place for seventeen digits.
-    private static func seconds(_ duration: Duration) -> Double {
+    fileprivate static func seconds(_ duration: Duration) -> Double {
         (duration.totalSeconds * 10).rounded() / 10
     }
 }
@@ -138,5 +176,10 @@ extension MeetingRecord {
         /// how far into itself it was when it was let go. a meeting that
         /// kept nothing has no recording to say.
         var ran: Duration = .zero
+        var events: [Event] = []
+
+        mutating func note(_ label: Label, at: Duration) {
+            events.append(Event(label, atS: MeetingRecord.seconds(at)))
+        }
     }
 }

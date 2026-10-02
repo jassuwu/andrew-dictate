@@ -344,7 +344,7 @@ final class MeetingCoordinator: ObservableObject {
         keepMeetingRecord?(MeetingRecord(
             .modelFailed, app: meeting.app, model: meeting.preferences.model,
             startedAt: meeting.started, duration: elapsed,
-            gaps: recording?.gaps ?? []))
+            gaps: recording?.gaps ?? [], events: meeting.notes.events))
     }
 
     /// The meeting stops being the one recorded, before anything is
@@ -413,6 +413,7 @@ final class MeetingCoordinator: ObservableObject {
         // — then the clock catches up, so the menu stops counting a meeting
         // in frames that no longer arrive.
         session.tapWentSilent(at: elapsed)
+        meeting.notes.note(.gapBegan, at: elapsed)
         elapsed = max(elapsed, wallElapsed)
         publish()
         onEvent?(.gapBegan)
@@ -495,7 +496,11 @@ final class MeetingCoordinator: ObservableObject {
                 onEvent?(.started(app: meeting.app))
             }
             session.tapRecovered(at: elapsed)
-            if wasRebuilding { onEvent?(.gapEnded); publish() }
+            if wasRebuilding {
+                meeting.notes.note(.gapEnded, at: elapsed)
+                onEvent?(.gapEnded)
+                publish()
+            }
             // A working tap is not the same thing as a room with people
             // talking in it: the verdict stays `.capturing` through every
             // pause. Only a chunk with sound in it, and only past the probe
@@ -517,6 +522,7 @@ final class MeetingCoordinator: ObservableObject {
         case .wentSilent:
             if session.state == .recording {
                 session.tapWentSilent(at: elapsed)
+                meeting.notes.note(.gapBegan, at: elapsed)
                 publish()
                 onEvent?(.gapBegan)
                 rebuildTap(meeting)
@@ -552,6 +558,7 @@ final class MeetingCoordinator: ObservableObject {
                 logger.error("tap rebuild failed: \(error.localizedDescription, privacy: .public)")
                 guard current === meeting else { return }
                 session.rebuildFailed()
+                meeting.notes.note(.rebuildFailed, at: elapsed)
                 publish()
                 onEvent?(.cannotHear(app: meeting.app))
                 // Most of a meeting is on the spool; write what there is.
@@ -589,7 +596,8 @@ final class MeetingCoordinator: ObservableObject {
             keepMeetingRecord?(MeetingRecord(
                 .nothingKept(announcingNothingKept ? .stoppedBeforeCapture : .tapNeverHeard),
                 app: meeting.app, model: meeting.preferences.model,
-                startedAt: meeting.started, duration: meeting.notes.ran))
+                startedAt: meeting.started, duration: meeting.notes.ran,
+                events: meeting.notes.events))
             writingOut.removeAll { $0 === meeting }
             if announcingNothingKept { onEvent?(.nothingToKeep) }
             return
@@ -645,7 +653,7 @@ final class MeetingCoordinator: ObservableObject {
             MeetingRecord(
                 outcome, app: app, model: model, startedAt: started,
                 duration: recording.duration, gaps: recording.gaps, turns: split,
-                toDisk: toDisk, recovered: recovered)
+                toDisk: toDisk, recovered: recovered, events: notes.events)
         }
 
         let url: URL

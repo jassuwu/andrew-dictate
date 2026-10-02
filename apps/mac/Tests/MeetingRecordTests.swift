@@ -198,6 +198,89 @@ final class MeetingRecordTests: XCTestCase {
         XCTAssertEqual(records.first?.durationS, 1)
     }
 
+    // MARK: - what happened on the way
+
+    /// the mac sleeps through most of an hour and wakes: the record says
+    /// when the tap was lost and when it was heard again, by the meeting's
+    /// clock.
+    func testTheRecordKeepsWhenTheTapWasLostAndHeardAgain() async throws {
+        let clock = FakeClock()
+        let c = coordinator(clock: clock)
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        source.send(loud(at: .seconds(1_082)))
+        await settle()
+        clock.advance(by: .seconds(3_498))
+        c.probeTapIsAlive()
+        await settle()
+        source.send(loud(at: .seconds(3_498)))
+        await settle()
+
+        c.stop()
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records.first?.events, [
+            .init(.gapBegan, atS: 1_083),
+            .init(.gapEnded, atS: 3_499),
+        ])
+    }
+
+    /// the other way a tap is lost: it keeps calling back, with nothing but
+    /// zeros in it, for longer than a quiet room would.
+    func testTheRecordKeepsATapThatKeptCallingBackWithSilence() async throws {
+        let c = coordinator()
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+        source.send(quiet(at: .seconds(1)))
+        await settle()
+        // seven seconds in, and six since anything was heard.
+        source.send(quiet(at: .seconds(6)))
+        await settle()
+        source.send(loud(at: .seconds(7)))
+        await settle()
+
+        c.stop()
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records.first?.events, [
+            .init(.gapBegan, atS: 7),
+            .init(.gapEnded, atS: 8),
+        ])
+    }
+
+    /// a tap that cannot be rebuilt ends the meeting with most of it on the
+    /// spool: the record has the gap that never closed, and the failure.
+    func testTheRecordKeepsATapThatCouldNotBeRebuilt() async throws {
+        source.rebuilding = Unreadable()
+        let clock = FakeClock()
+        let c = coordinator(clock: clock)
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        source.send(loud(at: .seconds(1_082)))
+        await settle()
+
+        clock.advance(by: .seconds(3_498))
+        c.probeTapIsAlive()
+        await awaitRecords(1)
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(records.count, 1)
+        let record = try XCTUnwrap(records.first)
+        XCTAssertEqual(record.outcome, .saved)
+        XCTAssertEqual(record.events, [
+            .init(.gapBegan, atS: 1_083),
+            .init(.rebuildFailed, atS: 3_498),
+        ])
+        XCTAssertEqual(record.gaps, 1)
+        XCTAssertEqual(record.gapsLostS, 2_415)
+    }
+
     // MARK: - recovery
 
     /// a spool the app died on, written out at the next launch: the same
@@ -436,6 +519,8 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     private var startsSeen = 0
     private var nextAt: Duration = .zero
     var rebuilds = 0
+    /// what rebuilding the tap does, while it is set: the device is gone.
+    var rebuilding: (any Error)?
     /// what opening the tap does, while it is set: the permission is off.
     var opening: (any Error)?
 
@@ -455,6 +540,7 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
 
     func rebuild() async throws {
         rebuilds += 1
+        if let rebuilding { throw rebuilding }
     }
 
     func stop() async {
