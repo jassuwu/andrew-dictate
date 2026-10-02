@@ -27,6 +27,7 @@ final class CallMonitor {
     private let read: @Sendable () async -> [AudioProcess]?
     private let ownPID: Int32
     private let now: () -> Duration
+    private let sleep: @Sendable (Duration) async -> Void
     private let logger = Logger(subsystem: AppIdentity.loggingSubsystem, category: "call")
 
     private var watcher = CallWatcher()
@@ -43,13 +44,15 @@ final class CallMonitor {
         mic: any MicUseSignal = MicInUseListener(),
         read: @escaping @Sendable () async -> [AudioProcess]? = CallMonitor.readOffTheMainThread,
         ownPID: Int32 = ProcessInfo.processInfo.processIdentifier,
-        now: (() -> Duration)? = nil
+        now: (() -> Duration)? = nil,
+        sleep: @escaping @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) }
     ) {
         self.mic = mic
         self.read = read
         self.ownPID = ownPID
         let origin = ContinuousClock.now
         self.now = now ?? { ContinuousClock.now - origin }
+        self.sleep = sleep
     }
 
     private nonisolated static let readingQueue = DispatchQueue(
@@ -147,7 +150,7 @@ final class CallMonitor {
             }
             let wait = next - now()
             if wait > .zero {
-                try? await Task.sleep(for: wait)
+                await sleep(wait)
             }
         }
     }
