@@ -36,6 +36,11 @@ struct CallWatcher {
         self.endAfter = endAfter
     }
 
+    private struct Call {
+        let app: String
+    }
+
+    private var call: Call?
     private var qualifyingSince: Duration?
 
     mutating func observe(
@@ -43,12 +48,19 @@ struct CallWatcher {
         isRecording: Bool,
         at now: Duration
     ) -> [Suggestion] {
+        guard call == nil else {
+            return []
+        }
         guard let app = apps.first(where: \.looksLikeACall) else {
             qualifyingSince = nil
             return []
         }
         let since = qualifyingSince ?? now
         qualifyingSince = since
-        return now - since >= startAfter ? [.record(app.name)] : []
+        guard now - since >= startAfter else {
+            return []
+        }
+        call = Call(app: app.name)
+        return [.record(app.name)]
     }
 }

@@ -27,6 +27,22 @@ final class CallWatcherTests: XCTestCase {
         )
     }
 
+    /// Asking again every second for an hour is not a suggestion, it is a
+    /// nag.
+    func testTheRecordSuggestionIsMadeOnceForACall() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(0))
+
+        XCTAssertEqual(
+            watcher.observe([zoom], isRecording: false, at: .seconds(3)),
+            [.record("zoom")]
+        )
+        XCTAssertEqual(watcher.observe([zoom], isRecording: false, at: .seconds(4)), [])
+        XCTAssertEqual(watcher.observe([zoom], isRecording: false, at: .seconds(5)), [])
+        XCTAssertEqual(watcher.observe([zoom], isRecording: false, at: .seconds(3_600)), [])
+    }
+
     /// A browser tab playing music is not a call, and neither is a podcast.
     func testAudioAloneIsNotACall() {
         var watcher = watcher()
