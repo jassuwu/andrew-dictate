@@ -438,7 +438,7 @@ final class OnboardingFlowTests: XCTestCase {
                 key: "fn",
                 verdict: .ready
             ),
-            "that's everything. your mic is you, their app is them."
+            "that's everything. your mic is you, what the mac plays is them."
         )
     }
 }

@@ -64,7 +64,7 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
         switch self {
         case .hello:
             return jobs.scope == .meetingsOnly
-                ? "your mic is you, their app is them. one english transcript."
+                ? "your mic is you, what the mac plays is them. one english transcript."
                 : "hold \(key), talk, let go. the text lands where your cursor is."
         case .model:
             return jobs.dictation && jobs.meetings
@@ -75,7 +75,7 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
             case .ready:
                 return jobs.dictation
                     ? "that's everything macos had to say yes to."
-                    : "that's everything. your mic is you, their app is them."
+                    : "that's everything. your mic is you, what the mac plays is them."
             case .downloading:
                 // closing is allowed to be the right answer here, so say so.
                 return "granted. the model is still coming down — closing won't stop it."
@@ -89,7 +89,7 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
                 case (true, false):
                     return "so it can hear you, and put the text where your cursor is."
                 case (false, true):
-                    return "so it can hear you, and hear the app you're meeting in."
+                    return "so it can hear you, and hear what the mac plays."
                 case (false, false):
                     return "so it can hear you."
                 }
