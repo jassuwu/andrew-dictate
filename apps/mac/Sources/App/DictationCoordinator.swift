@@ -1354,6 +1354,9 @@ final class DictationCoordinator: ObservableObject {
             "audio devices moved: \(change.rawValue, privacy: .public)"
         )
         captureSlot.deviceChanged()
+        if change == .defaultOutput {
+            feedbackSounds.outputChanged()
+        }
         if change.endsLiveTake, machine.state == .recording {
             handleCaptureInterruption(reason: .deviceChanged)
         }
