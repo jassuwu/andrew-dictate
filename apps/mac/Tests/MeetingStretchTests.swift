@@ -702,6 +702,15 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(verdict(mic: copy(of: faint), far: faint), .keep)
     }
 
+    /// A tone that holds its loudness has no pattern to follow. Its frames
+    /// still differ a hair — by where in a cycle each began — and two such
+    /// tones differ in the same hairs, so they would agree perfectly. That
+    /// is two people with steady voices, not an echo.
+    func testALoudnessThatHardlyMovesIsNotAPatternToFollow() {
+        let steady: [Float] = (0..<40).map { 0.05 + 0.0005 * Float($0 % 3) }
+        XCTAssertEqual(verdict(mic: copy(of: steady), far: steady), .keep)
+    }
+
     // MARK: - building a meeting
 
     private func stretches(

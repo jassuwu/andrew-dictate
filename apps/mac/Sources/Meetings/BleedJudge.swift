@@ -109,6 +109,9 @@ enum BleedJudge {
     /// How far behind the far side the mic may run: the speakers, the air,
     /// the input buffer.
     static let reach = Duration.milliseconds(300)
+    /// A loudness whose spread is under this share of its own level has no
+    /// pattern to follow, and its agreement with anything is rounding.
+    static let flat = 0.1
     /// How closely the mic's loudness must follow the far side's, at the
     /// best delay, for the stretch to be theirs. -1 to 1.
     static let agreement = 0.6
@@ -142,7 +145,7 @@ enum BleedJudge {
     }
 
     /// Pearson's: how closely `a` rises and falls with `b`, -1 to 1, and 0
-    /// where one of them is the same loudness throughout.
+    /// where one of them is the same loudness throughout, or near enough.
     private static func correlation(_ a: ArraySlice<Float>, _ b: ArraySlice<Float>) -> Double {
         let n = Double(a.count)
         let meanA = a.reduce(0) { $0 + Double($1) } / n
@@ -157,7 +160,12 @@ enum BleedJudge {
             spreadA += dx * dx
             spreadB += dy * dy
         }
-        guard spreadA > 0, spreadB > 0 else { return 0 }
+        guard meanA > 0, meanB > 0,
+              (spreadA / n).squareRoot() >= flat * meanA,
+              (spreadB / n).squareRoot() >= flat * meanB
+        else {
+            return 0
+        }
         return together / (spreadA * spreadB).squareRoot()
     }
 }
