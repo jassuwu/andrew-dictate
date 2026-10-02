@@ -43,4 +43,16 @@ enum HUDPresentation {
             return true
         }
     }
+
+    /// whether a question (a pill with a button, ADR 0047) may go up now.
+    /// it waits for everything else: a take, a sentence, setup. an ember
+    /// counts as busy even when it shows nothing, because the lamp settling
+    /// back to idle clears the pill, and the question with it.
+    static func pillIsFreeForAQuestion(
+        state: HUDLampState,
+        hasFeedback: Bool,
+        isOnboarding: Bool
+    ) -> Bool {
+        state == .idle && !hasFeedback && !isOnboarding
+    }
 }
