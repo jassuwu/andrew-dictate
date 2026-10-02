@@ -1103,9 +1103,8 @@ final class MeetingCoordinator: ObservableObject {
             if failures < thresholds.rebuildAttempts {
                 wait = thresholds.rebuildSpacing[failures - 1]
             } else {
-                if session.problem(.cannotHearTheCall) == nil {
-                    cannotHearTheCall(meeting)
-                }
+                // after every try, in the words that are true of it now.
+                cannotHearTheCall(meeting)
                 wait = thresholds.retryWhileTheProblemStands
             }
         }
@@ -1123,11 +1122,15 @@ final class MeetingCoordinator: ObservableObject {
         return !isRebuilding(meeting)
     }
 
+    /// The call is not heard, and the lamp says whether your side still
+    /// is: the source keeps the mic going on its own when it can, and one
+    /// that could not is not recording anything. Said again only when that
+    /// changes, as a later try brings the mic back alone or loses it.
     private func cannotHearTheCall(_ meeting: Meeting) {
-        session.problemBegan(.cannotHearTheCall)
-        meeting.notes.note(.problemBegan, at: elapsed)
-        publish()
-        onEvent?(.problemBegan(.cannotHearTheCall))
+        let problem: MeetingSession.Problem = source.capturing == .nothing
+            ? .cannotHearAnything
+            : .cannotHearTheCall
+        begin(problem, noting: .problemBegan, in: meeting)
     }
 
     /// The meeting is still the one recorded, and its tap is still lost.

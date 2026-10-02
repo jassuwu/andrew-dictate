@@ -36,7 +36,8 @@ final class MeetingProblemsTests: XCTestCase {
             quietProbeWindow: .seconds(2),
             settleBeforeRebuild: .milliseconds(50)),
         writer: FallibleWriter = FallibleWriter(),
-        disk: FakeDisk = FakeDisk()
+        disk: FakeDisk = FakeDisk(),
+        clock: FakeClock = FakeClock()
     ) -> MeetingCoordinator {
         let docs = dir.appendingPathComponent("docs")
         let c = MeetingCoordinator(
@@ -49,6 +50,7 @@ final class MeetingProblemsTests: XCTestCase {
                 root: dir.appendingPathComponent("meeting-audio"),
                 compress: { _, _ in throw CocoaError(.featureUnsupported) }),
             thresholds: thresholds,
+            now: { clock.now },
             keepAwake: .init(hold: { NSObject() }, release: { _ in }),
             openAudioFile: { try writer.open($0) },
             freeSpace: { disk.free(at: $0) },
@@ -231,6 +233,52 @@ final class MeetingProblemsTests: XCTestCase {
             .init(.init(rawValue: "disk-nearly-full"), atS: 1),
             .init(.init(rawValue: "disk-nearly-full-cleared"), atS: 61),
         ])
+    }
+
+    // MARK: - the call unheard
+
+    /// The tap cannot be rebuilt, and the source could not keep even the
+    /// mic going on its own: nothing at all is being recorded, and the
+    /// lamp must not say your side is. Once a later try brings the mic back
+    /// alone, it says the call is unheard and your side recorded.
+    func testWithNothingDeliveredTheLampDoesNotClaimYourSideIsRecorded() async throws {
+        source.rebuildsFail = true
+        source.capturing = .nothing
+        let clock = FakeClock()
+        let c = coordinator(thresholds: retrying, clock: clock)
+        c.start()
+        await source.awaitStart()
+        await play(both(at: .zero), both(at: .seconds(1)))
+
+        clock.advance(by: .seconds(60))
+        c.probeTapIsAlive()
+        await until { c.problem != nil }
+        XCTAssertEqual(c.problems, [.cannotHearAnything])
+        XCTAssertEqual(events.last, .problemBegan(.cannotHearAnything))
+        XCTAssertEqual(events.last?.hudText, "can't hear the call or your mic — still trying")
+
+        source.capturing = .yourSideAlone
+        await until { c.problem == .cannotHearTheCall }
+        XCTAssertEqual(c.problems, [.cannotHearTheCall])
+        XCTAssertEqual(events.last?.hudText, "can't hear the call — still recording your side")
+
+        c.stop()
+        await c.untilWrittenOut()
+        XCTAssertEqual(
+            records.first?.events.filter { $0.label == .problemBegan }.count, 1,
+            "the same problem in new words is noted once")
+    }
+
+    /// A settle, then three tries in a row 100 ms and 200 ms apart, then
+    /// one every 300 ms with the problem standing.
+    private var retrying: MeetingThresholds {
+        .init(
+            probeTimeout: .seconds(1), silenceTimeout: .seconds(60),
+            silenceFloor: 0.001, quietNudgeAfter: .seconds(3_600),
+            quietProbeWindow: .seconds(2),
+            settleBeforeRebuild: .milliseconds(50),
+            rebuildSpacing: [.milliseconds(100), .milliseconds(200)],
+            retryWhileTheProblemStands: .milliseconds(300))
     }
 
     // MARK: - a start that fails
@@ -442,7 +490,24 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
         return stream
     }
 
-    func rebuild() async throws {}
+    /// While set, every rebuild throws: the tap is not coming back.
+    var rebuildsFail: Bool {
+        get { lock.withLock { _rebuildsFail } }
+        set { lock.withLock { _rebuildsFail = newValue } }
+    }
+    private var _rebuildsFail = false
+
+    func rebuild() async throws {
+        if rebuildsFail { throw DeviceGone() }
+    }
+
+    /// What it says it is delivering: after a rebuild that threw, the mic
+    /// alone, or nothing.
+    var capturing: MeetingCapture? {
+        get { lock.withLock { _capturing } }
+        set { lock.withLock { _capturing = newValue } }
+    }
+    private var _capturing: MeetingCapture?
 
     func stop() async {
         let (chunks, told) = lock.withLock {
@@ -478,6 +543,23 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
         }
     }
 }
+
+/// A wall the test moves by hand — the coordinator only ever reads it.
+private final class FakeClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private let origin = ContinuousClock.now
+    private var offset: Duration = .zero
+
+    var now: ContinuousClock.Instant {
+        lock.withLock { origin + offset }
+    }
+
+    func advance(by amount: Duration) {
+        lock.withLock { offset += amount }
+    }
+}
+
+private struct DeviceGone: Error {}
 
 /// A start that failed, and the part it failed on.
 private struct CaptureFailed: CaptureFailure {

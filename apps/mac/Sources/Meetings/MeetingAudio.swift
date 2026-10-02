@@ -87,6 +87,17 @@ extension MeetingRecord.Label {
     static let micUnmuted = MeetingRecord.Label(rawValue: "mic-unmuted")
 }
 
+/// What a source is delivering, as far as it knows.
+enum MeetingCapture: Equatable, Sendable {
+    /// The tap and the mic: both sides.
+    case bothSides
+    /// The tap could not be rebuilt, and the mic is delivered on its own,
+    /// the far side as silence: your side is still being recorded.
+    case yourSideAlone
+    /// Neither: nothing is being delivered.
+    case nothing
+}
+
 /// Which part of capture would not start, so the meeting can say which and
 /// point at the fix that part has, rather than sending every failure to the
 /// system-audio switch.
@@ -151,9 +162,14 @@ protocol MeetingAudioSource: Sendable {
     /// problem with it can say which. `nil` when there is none, or the
     /// source cannot say. Kept, like `anythingIsPlaying`: cheap to read.
     var micName: String? { get }
+    /// What is being delivered right now: after a rebuild that threw,
+    /// whether the mic was kept going on its own. `nil` when the source
+    /// cannot say. Kept, like `anythingIsPlaying`.
+    var capturing: MeetingCapture? { get }
 }
 
 extension MeetingAudioSource {
+    var capturing: MeetingCapture? { nil }
     func micAllowed() async -> Bool { true }
     var anythingIsPlaying: Bool? { nil }
     var micName: String? { nil }
