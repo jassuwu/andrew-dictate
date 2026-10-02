@@ -34,16 +34,20 @@ protocol MeetingAudioSource: Sendable {
     /// 002 §6's response to a tap that went all-zero: tear down, rebuild.
     func rebuild() async throws
     func stop() async
-    /// Whether anything but this app is putting audio out at this moment, or
-    /// `nil` when that cannot be told. Silence from a mac that is playing
-    /// nothing is what a working tap should deliver — it is not evidence of
-    /// a dead one. The other direction proves nothing (002 §6), so this is
-    /// only ever used to *withhold* a verdict, never to reach one sooner.
-    func tappedAppIsPlaying() -> Bool?
+    /// Whether anything but this app was putting audio out when the source
+    /// last asked, or `nil` when that cannot be told. Silence from a mac that
+    /// is playing nothing is what a working tap should deliver — it is not
+    /// evidence of a dead one. The other direction proves nothing (002 §6),
+    /// so this is only ever used to *withhold* a verdict, never to reach one
+    /// sooner.
+    ///
+    /// An answer kept, not a question asked: the source asks the HAL on its
+    /// own queue, so reading this from the main actor costs nothing.
+    var anythingIsPlaying: Bool? { get }
 }
 
 extension MeetingAudioSource {
-    func tappedAppIsPlaying() -> Bool? { nil }
+    var anythingIsPlaying: Bool? { nil }
 }
 
 /// The engine listening to a meeting. Lines arrive as whisper decides them,

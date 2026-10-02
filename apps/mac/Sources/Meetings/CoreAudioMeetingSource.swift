@@ -34,6 +34,10 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
     private let logger = Logger(subsystem: AppIdentity.loggingSubsystem, category: "tap")
     private let queue = DispatchQueue(label: "gg.jass.dictate.meeting-io", qos: .userInitiated)
+    /// Where the HAL is asked what is playing. Not the main thread, which
+    /// only reads the answer, and not the IO queue, which has audio to keep
+    /// up with.
+    private let asking = DispatchQueue(label: "gg.jass.dictate.meeting-playing", qos: .utility)
     private let lock = NSLock()
 
     // All guarded by `lock`, touched from the caller and the IO queue.
@@ -43,6 +47,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     private var framesDelivered: Int64 = 0
     private var lastDelivery: ContinuousClock.Instant?
     private var player: AVAudioPlayer?
+    private var playingTimer: DispatchSourceTimer?
+    private var playing: Bool?
 
     init() {}
 
@@ -57,6 +63,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             self.lastDelivery = ContinuousClock.now
         }
         try build()
+        keepAskingWhatIsPlaying()
         playProbeTone()
         return stream
     }
@@ -86,17 +93,42 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         }
     }
 
-    /// Ask the HAL whether any process but this one is putting audio out.
-    /// Ours is left out of the question: the tap hears it, but all it plays
-    /// is the probe tone.
-    ///
-    /// `nil` when the HAL will not list its processes — an answer we cannot
-    /// get must not be read as "no".
-    func tappedAppIsPlaying() -> Bool? {
-        CoreAudioProperties.anotherProcessIsRunningOutput()
+    var anythingIsPlaying: Bool? {
+        lock.withLock { playing }
+    }
+
+    /// Once a second while the tap is open, ask the HAL whether any process
+    /// but this one is putting audio out, and keep the answer for whoever
+    /// reads `anythingIsPlaying`. Ours is left out of the question: the tap
+    /// hears it, but all it plays is the probe tone. `nil` until the first
+    /// answer, and whenever the HAL will not list its processes — an answer
+    /// we cannot get must not be read as "no".
+    private func keepAskingWhatIsPlaying() {
+        let timer = DispatchSource.makeTimerSource(queue: asking)
+        timer.schedule(deadline: .now(), repeating: .seconds(1), leeway: .milliseconds(100))
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            let answer = CoreAudioProperties.anotherProcessIsRunningOutput()
+            lock.withLock { self.playing = answer }
+        }
+        let previous = lock.withLock { () -> DispatchSourceTimer? in
+            defer { playingTimer = timer; playing = nil }
+            return playingTimer
+        }
+        previous?.cancel()
+        timer.resume()
+    }
+
+    private func stopAskingWhatIsPlaying() {
+        let timer = lock.withLock { () -> DispatchSourceTimer? in
+            defer { playingTimer = nil; playing = nil }
+            return playingTimer
+        }
+        timer?.cancel()
     }
 
     func stop() async {
+        stopAskingWhatIsPlaying()
         teardown()
         let continuation = lock.withLock { () -> AsyncStream<MeetingAudioChunk>.Continuation? in
             defer { self.continuation = nil }

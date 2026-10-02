@@ -76,15 +76,15 @@ struct TapHealthMonitor {
     /// `elapsed` is measured from the start of capture, which is also when the
     /// probe tone starts playing.
     ///
-    /// `tappedAppIsPlaying` is the one thing that can tell a quiet room from
-    /// a dead tap, and only in one direction: an app putting nothing out
+    /// `anythingIsPlaying` is the one thing that can tell a quiet room from
+    /// a dead tap, and only in one direction: a mac putting nothing out
     /// cannot be misheard, so its silence is never a verdict. `true` is still
     /// not consulted — see the note above about muted participants — and
     /// `nil` means the question could not be asked at all.
     mutating func observe(
         rms: Float,
         elapsed: Duration,
-        tappedAppIsPlaying: Bool? = nil
+        anythingIsPlaying: Bool? = nil
     ) {
         guard rms <= silenceFloor else {
             // Real audio outranks every guess made before it, including a
@@ -106,7 +106,7 @@ struct TapHealthMonitor {
         // Nothing is playing, so there is nothing to have missed: the
         // recording carries on through the quiet, no gap, no rebuild, no
         // start sound in the middle of a call.
-        if tappedAppIsPlaying == false {
+        if anythingIsPlaying == false {
             return
         }
 

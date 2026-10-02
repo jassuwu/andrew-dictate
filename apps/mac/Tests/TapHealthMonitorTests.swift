@@ -98,29 +98,29 @@ final class TapHealthMonitorTests: XCTestCase {
 
     // MARK: - quiet rooms
 
-    /// Two minutes of nothing while the app plays nothing is a quiet room,
+    /// Two minutes of nothing while the mac plays nothing is a quiet room,
     /// not a dead tap: the recording carries on, no gap is recorded, and no
     /// start sound goes off in the middle of a call.
-    func testAnAppThatIsPlayingNothingIsNeverCalledADeadTap() {
+    func testAMacThatIsPlayingNothingIsNeverCalledADeadTap() {
         var monitor = monitor()
         monitor.observe(rms: 0.5, elapsed: .seconds(1))
 
-        monitor.observe(rms: 0, elapsed: .seconds(200), tappedAppIsPlaying: false)
+        monitor.observe(rms: 0, elapsed: .seconds(200), anythingIsPlaying: false)
 
         XCTAssertEqual(monitor.verdict, .capturing)
     }
 
     /// The other direction is not trusted: a room of muted participants
-    /// still satisfies `isRunningOutput` (002 §6), so an app that says it is
+    /// still satisfies `isRunningOutput` (002 §6), so a mac that says it is
     /// playing changes nothing about the timeout.
-    func testAnAppThatSaysItIsPlayingKeepsTheOrdinaryTimeout() {
+    func testAMacThatSaysItIsPlayingKeepsTheOrdinaryTimeout() {
         var monitor = monitor()
         monitor.observe(rms: 0.5, elapsed: .seconds(1))
 
-        monitor.observe(rms: 0, elapsed: .seconds(5), tappedAppIsPlaying: true)
+        monitor.observe(rms: 0, elapsed: .seconds(5), anythingIsPlaying: true)
         XCTAssertEqual(monitor.verdict, .capturing)
 
-        monitor.observe(rms: 0, elapsed: .seconds(20), tappedAppIsPlaying: true)
+        monitor.observe(rms: 0, elapsed: .seconds(20), anythingIsPlaying: true)
         XCTAssertEqual(monitor.verdict, .wentSilent)
     }
 
@@ -128,7 +128,7 @@ final class TapHealthMonitorTests: XCTestCase {
         var monitor = monitor()
         monitor.observe(rms: 0.5, elapsed: .seconds(1))
 
-        monitor.observe(rms: 0, elapsed: .seconds(20), tappedAppIsPlaying: nil)
+        monitor.observe(rms: 0, elapsed: .seconds(20), anythingIsPlaying: nil)
 
         XCTAssertEqual(monitor.verdict, .wentSilent)
     }

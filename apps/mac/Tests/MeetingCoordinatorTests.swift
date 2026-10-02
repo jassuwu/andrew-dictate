@@ -355,7 +355,7 @@ final class MeetingCoordinatorTests: XCTestCase {
     /// and once it means "it was quiet" it means nothing at all.
     func testAQuietRoomIsNotRecordedAsDamage() async throws {
         let c = coordinator()
-        source.playing = false
+        source.anythingIsPlaying = false
         c.start()
         await source.awaitStart()
         source.send(loud(at: .zero))
@@ -374,6 +374,42 @@ final class MeetingCoordinatorTests: XCTestCase {
             MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).first)
         XCTAssertTrue(saved.complete)
         XCTAssertEqual(saved.gapCount, 0)
+    }
+
+    /// The other half: the mac says something is playing and the tap hears
+    /// none of it. That is the dead tap 002 §6 describes, and it gets a gap
+    /// and a rebuild.
+    func testSilenceWhileSomethingPlaysIsADeadTap() async throws {
+        let c = coordinator()
+        source.anythingIsPlaying = true
+        c.start()
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+
+        await beQuiet(from: 5, through: 15)
+
+        XCTAssertTrue(events.contains(.gapBegan), "\(events)")
+        XCTAssertGreaterThan(source.rebuilds, 0)
+    }
+
+    /// The answer is read as it stands when each chunk lands, not once: a
+    /// quiet stretch with nothing playing is left alone, and the same
+    /// silence once something starts playing is a dead tap.
+    func testTheVerdictFollowsWhatIsPlayingNow() async throws {
+        let c = coordinator()
+        source.anythingIsPlaying = false
+        c.start()
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+
+        await beQuiet(from: 5, through: 30)
+        XCTAssertFalse(events.contains(.gapBegan), "\(events)")
+
+        source.anythingIsPlaying = true
+        await beQuiet(from: 35, through: 40)
+        XCTAssertTrue(events.contains(.gapBegan), "\(events)")
     }
 
     /// The banner is the only surface that waits until you are back at the
@@ -945,11 +981,9 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
         send(MeetingAudioChunk(you: tone.you, them: tone.them, at: nextAt))
     }
 
-    /// What the tapped app says about its own output. `nil` is "cannot
-    /// tell", which is what the real source returns for a helper process.
-    var playing: Bool?
-
-    func tappedAppIsPlaying() -> Bool? { playing }
+    /// The source's last answer to "is anything but this app playing", as
+    /// the real one caches it from its own queue. `nil` is "cannot tell".
+    var anythingIsPlaying: Bool?
 
     func stop() async {
         let holds = lock.withLock {
