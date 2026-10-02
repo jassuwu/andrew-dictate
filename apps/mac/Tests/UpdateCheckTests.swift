@@ -915,6 +915,54 @@ final class UpdateCheckTests: XCTestCase {
         )
     }
 
+    /// a take or a meeting running: the click is refused as quietly as the
+    /// check waits. no brew, no page, no relaunch, the line as it was.
+    @MainActor
+    func testItNeverStartsWhileDictatingOrRecording() async {
+        let world = HandOffWorld()
+        world.busy = true
+
+        XCTAssertNil(world.handOff.click(offering: brewLine))
+        XCTAssertEqual(world.handOff.state(offering: brewLine), .available(brewLine))
+        XCTAssertTrue(world.runner.commands.isEmpty)
+
+        world.busy = false
+        world.onDisk = "0.9.5"
+        await world.handOff.click(offering: brewLine)?.value
+        world.busy = true
+        world.handOff.click(offering: brewLine)
+
+        XCTAssertEqual(world.relaunches, 0)
+        XCTAssertEqual(world.handOff.state(offering: brewLine), .restartToFinish)
+    }
+
+    /// the second click lands on `updating…`, which has nothing to add.
+    @MainActor
+    func testASecondClickWhileUpdatingIsIgnored() async {
+        let world = HandOffWorld()
+        world.onDisk = "0.9.5"
+
+        let first = world.handOff.click(offering: brewLine)
+        let second = world.handOff.click(offering: brewLine)
+        await first?.value
+
+        XCTAssertNil(second)
+        XCTAssertEqual(world.runner.commands.count, 1)
+        XCTAssertEqual(world.handOff.state(offering: brewLine), .restartToFinish)
+    }
+
+    /// once clicked, the click's outcome is the line — even if the daily
+    /// check has since heard nothing, or something newer.
+    @MainActor
+    func testTheClickOutlastsWhatTheCheckHearsNext() async {
+        let world = HandOffWorld()
+        world.onDisk = "0.9.5"
+
+        await world.handOff.click(offering: brewLine)?.value
+
+        XCTAssertEqual(world.handOff.state(offering: nil), .restartToFinish)
+    }
+
     /// the browser opening is the confirmation; the clipboard is left
     /// alone and the line stays as it was.
     @MainActor
