@@ -288,6 +288,9 @@ final class MeetingCoordinator: ObservableObject {
     /// matter. injected so two meetings in one test can start on two.
     private let date: @Sendable () -> Date
     private let keepAwake: KeepAwake
+    /// The spool's audio file, opened for a meeting: injected so a test can
+    /// hand it one that refuses what it is given.
+    private let openAudioFile: @Sendable (URL) throws -> any MeetingAudioWriter
     #if DEBUG
     /// The loudest far-side chunk since the probe sweep last looked, while
     /// one runs.
@@ -312,6 +315,9 @@ final class MeetingCoordinator: ObservableObject {
         now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now },
         date: @escaping @Sendable () -> Date = { Date() },
         keepAwake: KeepAwake = .system,
+        openAudioFile: @escaping @Sendable (URL) throws -> any MeetingAudioWriter = {
+            try SpoolAudioFile(url: $0)
+        },
         preferences: @escaping @MainActor () -> MeetingPreferences
     ) {
         self.source = source
@@ -328,6 +334,7 @@ final class MeetingCoordinator: ObservableObject {
         self.now = now
         self.date = date
         self.keepAwake = keepAwake
+        self.openAudioFile = openAudioFile
         self.preferences = preferences
         session = MeetingSession(quietNudgeAfter: thresholds.quietNudgeAfter)
         health = Self.freshMonitor(thresholds)
@@ -404,7 +411,7 @@ final class MeetingCoordinator: ObservableObject {
                     app: meeting.app, started: meeting.started,
                     engine: model.rawValue, model: model))
                 meeting.handle = handle
-                meeting.audioFile = try SpoolAudioFile(url: handle.audioURL)
+                meeting.audioFile = try openAudioFile(handle.audioURL)
                 transcriber = try await makeTranscriber(model)
             } catch {
                 logger.error("meeting could not start: \(error.localizedDescription, privacy: .public)")
@@ -518,7 +525,8 @@ final class MeetingCoordinator: ObservableObject {
         keepMeetingRecord?(MeetingRecord(
             .modelFailed, app: meeting.app, model: meeting.preferences.model,
             startedAt: meeting.started, duration: elapsed,
-            gaps: recording?.gaps ?? [], events: meeting.notes.events))
+            gaps: recording?.gaps ?? [], events: meeting.notes.events,
+            spoolWriteFailures: meeting.notes.spoolWriteFailures))
     }
 
     /// The meeting stops being the one recorded, before anything is
@@ -698,13 +706,28 @@ final class MeetingCoordinator: ObservableObject {
             sweepPeak = max(peak, chunk.themRMS)
         }
         #endif
-        if let audioFile = meeting.audioFile, (try? await audioFile.append(chunk)) != nil {
-            // what the spool kept, the speaker split hears, as it goes.
-            speakers(of: meeting).hear(chunk)
+        // A chunk the spool will not take is still transcribed: the meeting
+        // goes on, and a problem says what is not being kept.
+        var refused: (any Error)?
+        var written = false
+        if let audioFile = meeting.audioFile {
+            do {
+                try await audioFile.append(chunk)
+                written = true
+                // what the spool kept, the speaker split hears, as it goes.
+                speakers(of: meeting).hear(chunk)
+            } catch {
+                refused = error
+            }
         }
         // stopped while the chunk was being written: everything below is the
         // meeting being recorded, and this one no longer is.
         guard current === meeting else { return }
+        if let refused {
+            spoolRefused(meeting, refused)
+        } else if written {
+            clear(.cannotSaveTheAudio, noting: .audioUnsavedCleared, in: meeting)
+        }
 
         // What the source last heard from the HAL, asked on its own queue:
         // a round trip from here would be one on the main actor, ten times
@@ -823,6 +846,15 @@ final class MeetingCoordinator: ObservableObject {
         } else if session.problem(.cannotHearYourMic) == nil {
             begin(.cannotHearYourMic(source.micName), noting: .micSilent, in: meeting)
         }
+    }
+
+    /// Every chunk the spool would not take is counted for the record; the
+    /// first of a run is the problem, and the reason goes in the log.
+    private func spoolRefused(_ meeting: Meeting, _ error: any Error) {
+        meeting.notes.spoolWriteFailures += 1
+        guard session.problem(.cannotSaveTheAudio) == nil else { return }
+        logger.error("the spool would not take the audio: \(error.localizedDescription, privacy: .public)")
+        begin(.cannotSaveTheAudio, noting: .audioUnsaved, in: meeting)
     }
 
     /// A problem begins: said on the lamp, and noted in the record. One of
@@ -1055,7 +1087,8 @@ final class MeetingCoordinator: ObservableObject {
                 .nothingKept(announcingNothingKept ? .stoppedBeforeCapture : .tapNeverHeard),
                 app: meeting.app, model: meeting.preferences.model,
                 startedAt: meeting.started, duration: meeting.notes.ran,
-                events: meeting.notes.events))
+                events: meeting.notes.events,
+                spoolWriteFailures: meeting.notes.spoolWriteFailures))
             writingOut.removeAll { $0 === meeting }
             if announcingNothingKept { onEvent?(.nothingToKeep) }
             return
@@ -1241,7 +1274,8 @@ final class MeetingCoordinator: ObservableObject {
                 coverage: .init(
                     covered.result, reason: covered.reason, tally: tally,
                     farSideLoud: covered.farSideLoud),
-                audioKept: audioKept, audioKeptUntil: until, split: speakersReport)
+                audioKept: audioKept, audioKeptUntil: until, split: speakersReport,
+                spoolWriteFailures: notes.spoolWriteFailures)
         }
 
         let url: URL
@@ -1571,7 +1605,7 @@ extension MeetingCoordinator {
         let preferences: MeetingPreferences
         /// Set once the spool is open, and nil for good if it never was.
         var handle: MeetingSpool.Handle?
-        var audioFile: SpoolAudioFile?
+        var audioFile: (any MeetingAudioWriter)?
         /// Its far side's speakers, heard a piece at a time as the spool
         /// keeps it. Begun with the first audio kept.
         var speakers: SpeakerSplit?

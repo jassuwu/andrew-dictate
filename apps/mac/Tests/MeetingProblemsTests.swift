@@ -34,7 +34,8 @@ final class MeetingProblemsTests: XCTestCase {
             probeTimeout: .seconds(1), silenceTimeout: .seconds(60),
             silenceFloor: 0.001, quietNudgeAfter: .seconds(3_600),
             quietProbeWindow: .seconds(2),
-            settleBeforeRebuild: .milliseconds(50))
+            settleBeforeRebuild: .milliseconds(50)),
+        writer: FallibleWriter = FallibleWriter()
     ) -> MeetingCoordinator {
         let docs = dir.appendingPathComponent("docs")
         let c = MeetingCoordinator(
@@ -48,6 +49,7 @@ final class MeetingProblemsTests: XCTestCase {
                 compress: { _, _ in throw CocoaError(.featureUnsupported) }),
             thresholds: thresholds,
             keepAwake: .init(hold: { NSObject() }, release: { _ in }),
+            openAudioFile: { try writer.open($0) },
             preferences: {
                 MeetingPreferences(folder: docs, hook: nil, model: .whisperLargeV3Turbo)
             }
@@ -153,6 +155,42 @@ final class MeetingProblemsTests: XCTestCase {
             .init(.init(rawValue: "mic-muted"), atS: 11),
             .init(.init(rawValue: "mic-silent-cleared"), atS: 11),
             .init(.init(rawValue: "mic-unmuted"), atS: 26),
+        ])
+    }
+
+    // MARK: - the audio
+
+    /// The spool will not take the audio. The meeting goes on — the live
+    /// transcript is still fed — with a problem said on the lamp, every
+    /// chunk that did not go in is counted, and the first that does go in
+    /// ends it.
+    func testAnAudioWriteThatFailsIsAProblemTheMeetingTranscribesThrough() async throws {
+        let writer = FallibleWriter()
+        let c = coordinator(writer: writer)
+        c.start()
+        await source.awaitStart()
+        await play(both(at: .zero))
+
+        writer.fails = true
+        await play(both(at: .seconds(1)), both(at: .seconds(2)), both(at: .seconds(3)))
+        XCTAssertEqual(c.problems, [.cannotSaveTheAudio])
+        XCTAssertEqual(c.state, .recording)
+        XCTAssertEqual(events, [.started, .problemBegan(.cannotSaveTheAudio)])
+        XCTAssertEqual(events.last?.hudText, "can't save the audio — still transcribing")
+        XCTAssertEqual(transcriber.fed.map(\.at), [.zero, .seconds(1), .seconds(2), .seconds(3)])
+
+        writer.fails = false
+        await play(both(at: .seconds(4)))
+        XCTAssertEqual(c.problems, [])
+        XCTAssertEqual(events.last, .problemCleared(.cannotSaveTheAudio))
+        XCTAssertEqual(events.last?.hudText, "saving the audio again")
+
+        c.stop()
+        await c.untilWrittenOut()
+        XCTAssertEqual(records.first?.spoolWriteFailures, 3)
+        XCTAssertEqual(records.first?.events, [
+            .init(.init(rawValue: "audio-unsaved"), atS: 2),
+            .init(.init(rawValue: "audio-unsaved-cleared"), atS: 5),
         ])
     }
 
@@ -293,6 +331,32 @@ private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
     }
     func finish() async -> [MeetingTurn] { [] }
     func transcribe(you: [Float], them: [Float]) async throws -> [MeetingTurn] { [] }
+}
+
+/// The spool's audio file, which can be told to refuse what it is given:
+/// the disk full, or the file gone from under it.
+private final class FallibleWriter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _fails = false
+
+    var fails: Bool {
+        get { lock.withLock { _fails } }
+        set { lock.withLock { _fails = newValue } }
+    }
+
+    func open(_ url: URL) throws -> any MeetingAudioWriter {
+        Writer(file: try SpoolAudioFile(url: url), owner: self)
+    }
+
+    private struct Writer: MeetingAudioWriter {
+        let file: SpoolAudioFile
+        let owner: FallibleWriter
+
+        func append(_ chunk: MeetingAudioChunk) async throws {
+            if owner.fails { throw CocoaError(.fileWriteOutOfSpace) }
+            try await file.append(chunk)
+        }
+    }
 }
 
 private struct FakeDiarizer: MeetingDiarizer {

@@ -109,6 +109,9 @@ struct MeetingRecord: Equatable, Sendable, Codable {
     var again = false
     /// what the speaker split did at the stop, for a meeting that had one.
     var split: Split?
+    /// chunks of audio the spool would not take while the meeting ran:
+    /// transcribed live, and missing from the audio.
+    var spoolWriteFailures = 0
 }
 
 // MARK: - the speaker split
@@ -195,6 +198,11 @@ extension MeetingRecord {
         static let micSilent = Label(rawValue: "mic-silent")
         /// and it was over: the mic was heard, or muted.
         static let micSilentCleared = Label(rawValue: "mic-silent-cleared")
+        /// the spool would not take the audio: a problem, named on the lamp.
+        /// the live transcript went on.
+        static let audioUnsaved = Label(rawValue: "audio-unsaved")
+        /// and it took it again.
+        static let audioUnsavedCleared = Label(rawValue: "audio-unsaved-cleared")
         /// a far side silent while something played was asked with the
         /// quiet probe, and the tap heard it: nothing was wrong.
         static let probeHeard = Label(rawValue: "probe-heard")
@@ -250,7 +258,8 @@ extension MeetingRecord {
             audioKept: try container.decodeIfPresent(Bool.self, forKey: .audioKept) ?? false,
             audioKeptUntil: try container.decodeIfPresent(Date.self, forKey: .audioKeptUntil),
             again: try container.decodeIfPresent(Bool.self, forKey: .again) ?? false,
-            split: try container.decodeIfPresent(Split.self, forKey: .split)
+            split: try container.decodeIfPresent(Split.self, forKey: .split),
+            spoolWriteFailures: try container.decodeIfPresent(Int.self, forKey: .spoolWriteFailures) ?? 0
         )
     }
 }
@@ -325,7 +334,8 @@ extension MeetingRecord {
         audioKept: Bool = false,
         audioKeptUntil: Date? = nil,
         again: Bool = false,
-        split: SpeakerSplit.Report? = nil
+        split: SpeakerSplit.Report? = nil,
+        spoolWriteFailures: Int = 0
     ) {
         self.init(
             outcome: outcome,
@@ -352,7 +362,8 @@ extension MeetingRecord {
             audioKept: audioKept,
             audioKeptUntil: audioKeptUntil,
             again: again,
-            split: split.map { Split(tailS: Self.seconds($0.tail), skipped: $0.skipped) }
+            split: split.map { Split(tailS: Self.seconds($0.tail), skipped: $0.skipped) },
+            spoolWriteFailures: spoolWriteFailures
         )
     }
 
@@ -419,6 +430,8 @@ extension MeetingRecord {
         /// kept nothing has no recording to say.
         var ran: Duration = .zero
         var events: [Event] = []
+        /// chunks the spool would not take.
+        var spoolWriteFailures = 0
 
         mutating func note(_ label: Label, at: Duration) {
             events.append(Event(label, atS: MeetingRecord.seconds(at)))

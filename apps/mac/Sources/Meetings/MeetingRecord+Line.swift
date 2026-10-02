@@ -40,6 +40,9 @@ extension MeetingRecord {
             let named = events.map { "\($0.label.rawValue)@\(Self.plain($0.atS))" }
             fields.append("events=\(named.joined(separator: ","))")
         }
+        if spoolWriteFailures > 0 {
+            fields.append("spool_write_failures=\(spoolWriteFailures)")
+        }
         if let decoding {
             fields.append("decoded_you=\(decoding.decodedYou)")
             fields.append("decoded_them=\(decoding.decodedThem)")

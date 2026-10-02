@@ -222,6 +222,14 @@ private actor WholeMeeting: SpeakerHearing {
     }
 }
 
+/// Where a meeting's audio is written as it arrives: the spool's audio
+/// file. Named apart from it so a test can hand a meeting one that refuses.
+protocol MeetingAudioWriter: Sendable {
+    func append(_ chunk: MeetingAudioChunk) async throws
+}
+
+extension SpoolAudioFile: MeetingAudioWriter {}
+
 /// The spool on disk: one two-channel 16 kHz float caf, left = you,
 /// right = them. Written as the meeting runs, read back at the end a block
 /// at a time for the coverage check (or whole at launch, for recovery, and
