@@ -19,6 +19,9 @@ struct StretchTally: Equatable, Sendable {
     /// `you` stretches let go before they were decoded, because they were only
     /// the far side coming back through the mic. Not decoded, not failed.
     var bleed = 0
+    /// Stretches read, and let go because they were room noise the engine put
+    /// a stock phrase to. Counted as read too: the engine did read them.
+    var quietDropped = 0
     /// How far behind the meeting the decoding ran: from a stretch joining
     /// the queue to its decode finishing, the worst of the meeting and the
     /// latest.
@@ -94,6 +97,20 @@ actor StretchTranscriber: MeetingTranscriber {
     /// The 100 ms the capture layer hands over, so a spool is heard in the
     /// same steps the meeting was.
     private static let spoolChunk = 1_600
+
+    /// A stretch this quiet, over all of it, is room noise: a real recording
+    /// with nothing on the mic measured about 0.003. Provisional, to be
+    /// tuned against real meetings.
+    private static let quietBelow: Float = 0.006
+
+    /// What whisper writes over room noise, from the subtitles it learned
+    /// on, lowercased and without punctuation. Said over a quiet stretch
+    /// these are not words that were said; over a loud one they may be.
+    private static let inventedOnQuiet: Set<String> = [
+        "thank you", "thank you very much", "thanks for watching",
+        "thank you for watching", "thanks", "bye", "bye bye", "you",
+        "please subscribe", "subtitles by the amara org community",
+    ]
 
     /// `ceiling` is the longest stretch the engine is handed — about 25 s
     /// for whisper, 15 s for parakeet. `detector` makes one detector per
@@ -315,8 +332,8 @@ actor StretchTranscriber: MeetingTranscriber {
         var turns: [MeetingTurn] = []
         for stretch in stretches {
             countSpeech(in: stretch)
-            guard let text = await decode(stretch), let words = Self.words(in: text) else { continue }
-            turns.append(Self.turn(words, from: stretch))
+            guard let text = await decode(stretch), let turn = read(text, from: stretch) else { continue }
+            turns.append(turn)
         }
         return turns
     }
@@ -330,14 +347,25 @@ actor StretchTranscriber: MeetingTranscriber {
     }
 
     private func keep(_ text: String, from stretch: Stretch) {
-        guard let words = Self.words(in: text) else { return }
-        let turn = Self.turn(words, from: stretch)
+        guard let turn = read(text, from: stretch) else { return }
         turns.append(turn)
         let speaker: LiveLine.Speaker = stretch.side == .you ? .you : .them
         emit.yield(LiveLine(speaker: speaker, at: turn.at, text: turn.text, isConfirmed: true))
     }
 
     // MARK: -
+
+    /// The turn a stretch's text makes, or nil when it makes none: there are
+    /// no words in it, or the stretch was room noise and the words are ones
+    /// whisper writes over room noise. That one is counted.
+    private func read(_ text: String, from stretch: Stretch) -> MeetingTurn? {
+        guard let words = Self.words(in: text) else { return nil }
+        if Self.isInvented(words, over: stretch) {
+            tally.quietDropped += 1
+            return nil
+        }
+        return Self.turn(words, from: stretch)
+    }
 
     /// The chunk of a spool's side that begins at `start`: the last may be
     /// short, and a side that has ended is empty.
@@ -355,6 +383,20 @@ actor StretchTranscriber: MeetingTranscriber {
             of: #"\[[^\]]*\]|\([^)]*\)"#, with: " ", options: .regularExpression)
         let words = unmarked.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         return words.contains { $0.isLetter || $0.isNumber } ? words : nil
+    }
+
+    private static func isInvented(_ words: String, over stretch: Stretch) -> Bool {
+        let plain = words.lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .joined(separator: " ")
+        return inventedOnQuiet.contains(plain) && rms(of: stretch.samples) < quietBelow
+    }
+
+    private static func rms(of samples: [Float]) -> Float {
+        guard !samples.isEmpty else { return 0 }
+        var sum: Float = 0
+        for sample in samples { sum += sample * sample }
+        return (sum / Float(samples.count)).squareRoot()
     }
 
     private static func turn(_ text: String, from stretch: Stretch) -> MeetingTurn {

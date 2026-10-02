@@ -424,6 +424,34 @@ final class MeetingStretchTests: XCTestCase {
         ])
     }
 
+    // MARK: - words made up for the quiet
+
+    /// On a mic with nothing on it whisper writes "Thank you." over the room.
+    /// Two seconds of that is not a turn, and not a line in the panel. It was
+    /// still read, so the coverage check is not told it was left unread; it
+    /// is counted as let go.
+    func testAQuietStretchReadAsThankYouIsNotATurn() async throws {
+        engine.inventsWords(forRoomNoise: ["Thank you."])
+        let transcriber = stretches(threshold: Self.faint)
+        let c = coordinator(transcriber)
+        c.start()
+        await source.awaitStart()
+
+        await play([roomNoise(from: 1.3, to: 3.3)], through: 5.0, on: c)
+        await waitForStretches(transcriber, 2)
+
+        XCTAssertEqual(live(c), [])
+        let tally = await transcriber.tally
+        // the other stretch is the hum on the first chunk, 0.1 s of it.
+        XCTAssertEqual(tally, StretchTally(
+            decodedYou: 1, decodedThem: 1, quietDropped: 1,
+            speechYou: .milliseconds(2_300), speechThem: .milliseconds(100),
+            readYou: .milliseconds(2_300), readThem: .milliseconds(100)))
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, [])
+    }
+
     // MARK: - a spool found at launch
 
     /// The app died mid-meeting. At the next launch the spool is read back
@@ -857,6 +885,10 @@ final class MeetingStretchTests: XCTestCase {
     /// mac is. Still above the hum on the far side's first chunk.
     private static let keen: Float = 0.006
 
+    /// A detector that hears a mic with nothing on it, which is a tone this
+    /// quiet: 0.002 at the loudest. It hears the hum on the first chunk too.
+    private static let faint: Float = 0.001
+
     private func coordinator(
         _ transcriber: StretchTranscriber,
         clock: FakeClock = FakeClock()
@@ -954,6 +986,13 @@ final class MeetingStretchTests: XCTestCase {
 
     private func them(_ phrase: String, from: Double, to: Double, voice: Voice? = nil) -> Said {
         Said(side: .them, phrase: phrase, from: from, to: to, voice: voice)
+    }
+
+    /// The mic with nothing on it: a tone a thirtieth as loud as the first
+    /// phrase played, 0.003 at its loudest and about 0.002 RMS, nowhere near
+    /// speech. Play it before any phrase, so it is that first one.
+    private func roomNoise(from: Double, to: Double) -> Said {
+        Said(side: .you, phrase: "room noise", from: from, to: to, scale: 0.03)
     }
 
     /// The meeting from `start` to `end` seconds, a 100 ms chunk at a time,
@@ -1134,6 +1173,7 @@ private final class PhraseEngine: StretchEngine, @unchecked Sendable {
     private var refuses = false
     private var wall: FakeClock?
     private var eachDecode: Duration = .zero
+    private var invented: [String] = []
 
     func loudness(of phrase: String) -> Float {
         lock.withLock {
@@ -1148,6 +1188,15 @@ private final class PhraseEngine: StretchEngine, @unchecked Sendable {
             self.wall = wall
             eachDecode = duration
         }
+    }
+
+    /// What whisper writes over a mic with nothing on it: each stretch of
+    /// room noise a second long or more — too quiet to be words — is heard
+    /// as the next of `texts`, and as nothing once they run out. A blip
+    /// shorter than that, like the hum on the first chunk, is heard as
+    /// nothing.
+    func inventsWords(forRoomNoise texts: [String]) {
+        lock.withLock { invented = texts }
     }
 
     /// The next `times` stretches heard as `phrase` throw instead.
@@ -1186,9 +1235,14 @@ private final class PhraseEngine: StretchEngine, @unchecked Sendable {
         return try lock.withLock {
             let index = Int((peak * 10).rounded()) - 1
             let quiet = Int((peak * 50).rounded()) - 1
-            let phrase = peak >= 0.05
-                ? (phrases.indices.contains(index) ? phrases[index] : "?")
-                : (peak >= 0.015 && phrases.indices.contains(quiet) ? phrases[quiet] : "")
+            var phrase = ""
+            if peak >= 0.05 {
+                phrase = phrases.indices.contains(index) ? phrases[index] : "?"
+            } else if peak >= 0.015 {
+                phrase = phrases.indices.contains(quiet) ? phrases[quiet] : ""
+            } else if samples.count >= 16_000, !invented.isEmpty {
+                phrase = invented.removeFirst()
+            }
             decoded.append((phrase, samples.count))
             wall?.advance(by: eachDecode)
             if let left = failures[phrase], left > 0 {
