@@ -198,6 +198,99 @@ final class MeetingRecordTests: XCTestCase {
         XCTAssertEqual(records.first?.durationS, 1)
     }
 
+    // MARK: - never a word
+
+    /// a meeting whose words are known: they are in the transcript, and in
+    /// no form the record takes — not as it is handed over, not in the file
+    /// it is kept in, not in its line in the log, not in what "copy
+    /// diagnostics" says. no path to the transcript either: where it went
+    /// is the owner's business.
+    func testNoWordOfTheTalkIsInTheRecordOrAnywhereItGoes() async throws {
+        transcriber.finalTurns = [
+            .init(speaker: .you, at: .seconds(1), text: "mulberry quarterly payroll"),
+            .init(speaker: .them(nil), at: .seconds(2), text: "xylophone budgeting"),
+        ]
+        let c = coordinator(starting: [started])
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        source.send(loud(at: .seconds(1)))
+        await settle()
+
+        c.stop()
+        await c.untilWrittenOut()
+
+        // they were said, and they are in the transcript — so the absence
+        // below is the record's doing and not the meeting's.
+        let saved = try XCTUnwrap(
+            MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).first)
+        let body = try String(contentsOf: saved.fileURL, encoding: .utf8)
+        XCTAssertTrue(body.contains("xylophone budgeting"), body)
+
+        let record = try XCTUnwrap(records.first)
+        XCTAssertEqual(record.you, .init(turns: 1, words: 3))
+        XCTAssertEqual(record.them, .init(turns: 1, words: 2))
+        try assertNothingSpoken(in: record, transcript: saved.fileURL)
+    }
+
+    /// a recovery reads the whole of a spool and keeps nothing of it
+    /// either.
+    func testNoWordOfARecoveredMeetingIsInItsRecordEither() async throws {
+        try await orphan("teams", started: started)
+        transcriber.batchTurns = [
+            .init(speaker: .you, at: .zero, text: "mulberry quarterly payroll"),
+            .init(speaker: .them(nil), at: .seconds(1), text: "xylophone budgeting"),
+        ]
+        let c = coordinator()
+
+        c.recoverOrphans()
+        await awaitRecords(1)
+        await c.untilWrittenOut()
+
+        let saved = try XCTUnwrap(
+            MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).first)
+        XCTAssertTrue(
+            try String(contentsOf: saved.fileURL, encoding: .utf8).contains("mulberry"))
+        let record = try XCTUnwrap(records.first)
+        XCTAssertTrue(record.recovered)
+        try assertNothingSpoken(in: record, transcript: saved.fileURL)
+    }
+
+    /// every form the record takes, held up to the words that were said.
+    private func assertNothingSpoken(
+        in record: MeetingRecord,
+        transcript: URL,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let store = MeetingRecordStore(
+            fileURL: dir.appendingPathComponent("evidence").appendingPathComponent("meeting-records.jsonl"))
+        try store.append(record)
+        let setup = PressDiagnostics.Setup(
+            appVersion: "0.9.4", build: "6", macOS: "27.0.1", engine: "v2", defaultMic: nil)
+
+        let forms: [(String, String)] = [
+            ("encoded", String(decoding: try JSONEncoder().encode(record), as: UTF8.self)),
+            ("stored", try String(contentsOf: store.fileURL, encoding: .utf8)),
+            ("logged", record.line()),
+            ("diagnostics", PressDiagnostics.text(setup: setup, presses: [], meetings: [record])),
+        ]
+        let spoken = ["mulberry", "quarterly", "payroll", "xylophone", "budgeting"]
+        for (name, form) in forms {
+            for word in spoken {
+                XCTAssertFalse(
+                    form.localizedCaseInsensitiveContains(word),
+                    "\(word) is in the \(name) record: \(form)", file: file, line: line)
+            }
+            XCTAssertFalse(
+                form.contains(transcript.lastPathComponent),
+                "the transcript's name is in the \(name) record: \(form)", file: file, line: line)
+            XCTAssertFalse(
+                form.contains(dir.path),
+                "a path is in the \(name) record: \(form)", file: file, line: line)
+        }
+    }
+
     // MARK: - one meeting, one record
 
     /// back to back, the way a calendar runs: the first is still being
