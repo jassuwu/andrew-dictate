@@ -45,6 +45,18 @@ final class MeetingSessionTests: XCTestCase {
         XCTAssertNil(session.finish(at: .seconds(10)))
     }
 
+    /// No output to play the start sound on: the tap was never asked, so
+    /// its silence proves nothing. "Could not check" is not "cannot hear" —
+    /// the meeting records, and what it captures is kept.
+    func testAProbeThatCouldNotPlayIsNotAProbeThatWentUnheard() {
+        var session = session()
+        session.start()
+        session.couldNotPlayTheProbe()
+
+        XCTAssertEqual(session.state, .recording)
+        XCTAssertEqual(session.finish(at: .seconds(30))?.isComplete, true)
+    }
+
     // MARK: - the tap dying mid-meeting
 
     func testADeadTapIsRebuiltAndTheGapIsRemembered() {

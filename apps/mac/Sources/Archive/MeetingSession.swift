@@ -125,6 +125,18 @@ struct MeetingSession {
         state = .recording
     }
 
+    /// The start sound could not be played — no output device, a player
+    /// that would not start — so the tap was never asked, and its silence
+    /// proves nothing. "Could not check" is not "cannot hear": the meeting
+    /// records, and the tap is checked later the way any quiet one is.
+    mutating func couldNotPlayTheProbe() {
+        guard state == .provingItCanHear else {
+            return
+        }
+        everCaptured = true
+        state = .recording
+    }
+
     mutating func neverHeardTheProbe() {
         guard state == .provingItCanHear else {
             return

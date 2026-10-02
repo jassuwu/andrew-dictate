@@ -155,6 +155,17 @@ struct TapHealthMonitor {
         }
     }
 
+    /// The start sound could not be played, so the probe window passing in
+    /// silence would prove nothing. The tap is taken as working from
+    /// `elapsed` — it is the quiet probe's to say otherwise later.
+    mutating func probeToneCouldNotPlay(at elapsed: Duration) {
+        guard quietSince == nil else {
+            return
+        }
+        quietSince = elapsed
+        verdict = .capturing
+    }
+
     /// The quiet probe has been asked for, at `elapsed`: the tap has the
     /// window from here to hear it in.
     mutating func askedWithTheQuietProbe(at elapsed: Duration) {

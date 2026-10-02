@@ -32,6 +32,20 @@ final class TapHealthMonitorTests: XCTestCase {
         XCTAssertEqual(monitor.verdict, .neverHeardTheProbeTone)
     }
 
+    /// The start sound could not be played, so the tap had nothing to hear:
+    /// the probe window passing in silence is not a verdict, and from then
+    /// on the tap is treated like one that worked — asked again, quietly,
+    /// if the far side stays silent while something plays.
+    func testAProbeToneThatCouldNotPlayIsNotNeverHearingIt() {
+        var monitor = monitor()
+        monitor.probeToneCouldNotPlay(at: .zero)
+
+        monitor.observe(rms: 0, elapsed: .seconds(2), anythingIsPlaying: true)
+        XCTAssertEqual(monitor.verdict, .capturing)
+        monitor.observe(rms: 0, elapsed: .milliseconds(8_100), anythingIsPlaying: true)
+        XCTAssertEqual(monitor.verdict, .silentWhileSomethingPlays)
+    }
+
     func testSamplesUnderTheFloorCountAsSilence() {
         var monitor = monitor()
         monitor.observe(rms: 0.0005, elapsed: .milliseconds(600))
