@@ -178,6 +178,7 @@ targets:
       - Sources/Instrumentation/MainThreadWatchdog.swift
       # the protocol only; ParakeetEngine is the FluidAudio half.
       - Sources/Transcription/TranscriptionEngine.swift
+      - Sources/Transcription/SerialGate.swift
     settings:
       base:
         GENERATE_INFOPLIST_FILE: true
