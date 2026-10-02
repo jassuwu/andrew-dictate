@@ -162,6 +162,21 @@ final class MeetingProblemsTests: XCTestCase {
         ])
     }
 
+    /// The mic was muted before the meeting began: said once the meeting
+    /// is recording, after `recording a meeting`, so that line does not
+    /// cover it.
+    func testAMicMutedFromTheStartIsSaidOnceTheMeetingRecords() async throws {
+        let c = coordinator()
+        c.start()
+        await source.awaitStart()
+        source.tell(.init(kind: .micMuted, mic: "MacBook Pro Microphone", at: .zero))
+        try? await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(events, [], "nothing is recording yet")
+
+        await play(both(at: .zero))
+        XCTAssertEqual(events, [.started, .micMuted])
+    }
+
     // MARK: - the audio
 
     /// The spool will not take the audio. The meeting goes on — the live
