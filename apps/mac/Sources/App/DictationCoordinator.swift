@@ -519,6 +519,13 @@ final class DictationCoordinator: ObservableObject {
                 if let next {
                     self.hudViewModel.update(state: next)
                 }
+                if next == .recording {
+                    // the mic's first audio, a beat after the press.
+                    Task { @MainActor [weak self] in
+                        try? await Task.sleep(for: .milliseconds(120))
+                        self?.hudViewModel.micHeard()
+                    }
+                }
                 if let feedback {
                     self.hudViewModel.showFeedback(feedback)
                 }
@@ -1739,7 +1746,7 @@ extension DictationCoordinator {
         case let .state(state, fastDismiss):
             apply(state, fastHUDDismiss: fastDismiss)
         case .hearing:
-            break
+            hudViewModel.micHeard()
         case let .chime(chime):
             guard !isOnboardingPresented else {
                 return

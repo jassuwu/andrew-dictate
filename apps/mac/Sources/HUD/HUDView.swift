@@ -125,6 +125,10 @@ final class HUDViewModel: ObservableObject {
     /// hands-free capture looks exactly like a held key unless the lamp
     /// says otherwise. the coordinator owns the fact; the line wears it.
     @Published private(set) var isRecordingLocked = false
+    /// whether this take's mic has sent its first audio. until it has, the
+    /// recording lamp wears the ember: the key is down, the mic is not
+    /// hearing you yet.
+    @Published private(set) var isHearing = false
 
     private var audioRecorder: AudioRecorder?
     private var levelSamplingTask: Task<Void, Never>?
@@ -172,6 +176,8 @@ final class HUDViewModel: ObservableObject {
 
         if state != previousState {
             waveTransitionStartedAt = Date()
+            // every take starts deaf.
+            isHearing = false
         }
 
         configureLevelSampling(
@@ -183,6 +189,16 @@ final class HUDViewModel: ObservableObject {
             feedbackMessage = nil
             presentationGeneration += 1
         }
+    }
+
+    /// the mic's first audio landed: the ember lights. the ignite starts
+    /// here, not at the key, so it plays whole however long the mic took.
+    func micHeard() {
+        guard state == .recording, !isHearing else {
+            return
+        }
+        waveTransitionStartedAt = Date()
+        isHearing = true
     }
 
     /// not folded into `update(state:)`: the lock is set a beat after the
@@ -316,6 +332,13 @@ struct HUDView: View {
                         lampLine(phase: .ember)
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel("Warming up")
+                    case .recording where !viewModel.isHearing:
+                        // pressed, not yet heard: the ember until the
+                        // mic's first audio, so a lit lamp means it is
+                        // hearing you.
+                        lampLine(phase: .ember)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Waiting for the microphone")
                     case .recording:
                         lampLine(phase: .burn)
                             .accessibilityElement(children: .ignore)
