@@ -40,6 +40,31 @@ extension MeetingRecord {
             fields.append("most_behind_s=\(Self.plain(decoding.mostBehindS))")
             fields.append("last_behind_s=\(Self.plain(decoding.lastBehindS))")
         }
+        if let coverage {
+            fields.append("coverage=\(coverage.result.rawValue)")
+            if let reason = coverage.reason {
+                fields.append("coverage_why=\(LogLine.quoted(reason))")
+            }
+            let counted: [(String, Double?)] = [
+                ("speech_you_s", coverage.speechYouS),
+                ("speech_them_s", coverage.speechThemS),
+                ("unread_you_s", coverage.unreadYouS),
+                ("unread_them_s", coverage.unreadThemS),
+            ]
+            for case let (key, seconds?) in counted {
+                fields.append("\(key)=\(Self.plain(seconds))")
+            }
+            if let bleed = coverage.bleed {
+                fields.append("bleed=\(bleed)")
+            }
+            fields.append("far_loud_s=\(Self.plain(coverage.farSideLoudS))")
+        }
+        if audioKept {
+            fields.append("audio=kept")
+            if let audioKeptUntil {
+                fields.append("audio_until=\(LogLine.timestamp(audioKeptUntil, in: timeZone))")
+            }
+        }
         return fields.joined(separator: " ")
     }
 
