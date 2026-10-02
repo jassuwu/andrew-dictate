@@ -80,6 +80,32 @@ final class MeetingStretchTests: XCTestCase {
         ])
     }
 
+    /// Talking over each other is two people saying two things. Neither is
+    /// folded into the other or lost under it.
+    func testBothSidesAtOnceIsATurnEach() async throws {
+        let c = coordinator(stretches())
+        c.start(tapping: zoom)
+        await source.awaitStart()
+
+        await play([
+            you("i think we should ship it", from: 1.3, to: 4.0),
+            them("no wait", from: 2.3, to: 3.0),
+        ], through: 5.0, on: c)
+        await waitFor { c.liveLines.count == 2 }
+
+        // the panel shows each as it is decoded, and theirs ended first.
+        XCTAssertEqual(live(c), [
+            "them 2.0 no wait",
+            "you 1.0 i think we should ship it",
+        ])
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, [
+            "[00:00:01] you: i think we should ship it",
+            "[00:00:02] them: no wait",
+        ])
+    }
+
     // MARK: - building a meeting
 
     private func stretches(ceiling: Duration = .seconds(25), clock: FakeClock = FakeClock()) -> StretchTranscriber {
