@@ -164,6 +164,33 @@ final class MeetingStretchTests: XCTestCase {
         ])
     }
 
+    /// Whisper names a stretch with no words in it rather than leaving it
+    /// blank. A name is not a turn: the file and the panel only get words,
+    /// and a marker in front of words is taken off them.
+    func testMarkersForNoSpeechAndEmptyTextAreNotTurns() async throws {
+        let c = coordinator(stretches())
+        c.start(tapping: zoom)
+        await source.awaitStart()
+
+        await play([
+            you("[BLANK_AUDIO]", from: 1.3, to: 1.8),
+            you("(silence)", from: 2.8, to: 3.3),
+            you("[ Silence ]", from: 4.3, to: 4.8),
+            you("[MUSIC]", from: 5.8, to: 6.3),
+            you("", from: 7.3, to: 7.8),
+            you("  ", from: 8.8, to: 9.3),
+            you("right", from: 10.3, to: 10.8),
+            you("[MUSIC] so anyway", from: 11.8, to: 12.3),
+        ], through: 13.5, on: c)
+        await waitFor { c.liveLines.count == 2 }
+
+        XCTAssertEqual(handed().count, 8, "every stretch was decoded: \(handed())")
+        XCTAssertEqual(live(c), ["you 10.0 right", "you 11.5 so anyway"])
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, ["[00:00:10] you: right", "[00:00:11] you: so anyway"])
+    }
+
     // MARK: - a gap
 
     /// The lid closes at 3.0 s while they are mid-sentence, and the mac

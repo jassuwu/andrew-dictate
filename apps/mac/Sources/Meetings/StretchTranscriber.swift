@@ -158,13 +158,25 @@ actor StretchTranscriber: MeetingTranscriber {
     }
 
     private func keep(_ text: String, from stretch: Stretch) {
-        let turn = Self.turn(text, from: stretch)
+        guard let words = Self.words(in: text) else { return }
+        let turn = Self.turn(words, from: stretch)
         turns.append(turn)
         let speaker: LiveLine.Speaker = stretch.side == .you ? .you : .them
         emit.yield(LiveLine(speaker: speaker, at: turn.at, text: turn.text, isConfirmed: true))
     }
 
     // MARK: -
+
+    /// The words in what the engine said, or nil when there are none.
+    /// Whisper names a stretch with no speech in it — `[BLANK_AUDIO]`,
+    /// `(silence)`, `[MUSIC]` — instead of leaving it blank; the names come
+    /// out, and a stretch with nothing else in it is not a turn.
+    private static func words(in text: String) -> String? {
+        let unmarked = text.replacingOccurrences(
+            of: #"\[[^\]]*\]|\([^)]*\)"#, with: " ", options: .regularExpression)
+        let words = unmarked.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        return words.contains { $0.isLetter || $0.isNumber } ? words : nil
+    }
 
     private static func turn(_ text: String, from stretch: Stretch) -> MeetingTurn {
         MeetingTurn(
