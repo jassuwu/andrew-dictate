@@ -24,6 +24,15 @@ struct MeetingShortcut: Codable, Hashable, Sendable {
 
     static let escapeKeyCode: UInt16 = 53
 
+    /// the chip in settings: modifiers in the order the mac writes them,
+    /// then the key.
+    var displayName: String {
+        let held = [
+            (Modifiers.control, "⌃"), (.option, "⌥"), (.shift, "⇧"), (.command, "⌘"),
+        ]
+        return held.filter { modifiers.contains($0.0) }.map(\.1).joined() + keyName
+    }
+
     /// Why settings will not take a shortcut, in the few words the row says.
     enum Refusal: Equatable, Sendable {
         case needsAModifier

@@ -290,6 +290,18 @@ final class HotkeyLogicTests: XCTestCase {
         XCTAssertNil(controlOptionM.refusal(againstDictationKey: .leftCommand))
     }
 
+    func testTheShortcutIsWrittenTheWayTheMacWritesIt() {
+        XCTAssertEqual(
+            MeetingShortcut(
+                keyCode: 46, modifiers: [.command, .control, .shift, .option], keyName: "M"
+            ).displayName,
+            "⌃⌥⇧⌘M")
+        XCTAssertEqual(
+            MeetingShortcut(keyCode: 49, modifiers: [.control, .option], keyName: "space")
+                .displayName,
+            "⌃⌥space")
+    }
+
     private func lockedDetector() -> TapLockDetector {
         var detector = TapLockDetector()
         _ = detector.modifierPressed(at: 1.0)
