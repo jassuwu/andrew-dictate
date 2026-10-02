@@ -104,6 +104,12 @@ final class DictationCoordinator: ObservableObject {
     /// cleared by the next meeting that starts.
     @Published private(set) var meetingsNeedAttention = false
 
+    /// the meeting shortcut, registered as a global hot key, which needs no
+    /// permission. whether another app holds its combination is the row's
+    /// to say.
+    private let meetingHotkey = MeetingHotkey()
+    @Published private(set) var meetingShortcutIsTaken = false
+
     /// a call is on and nothing is recording it (ADR 0047): the menu's first
     /// line, and what the menu bar icon shows. nil with no call, while one
     /// is being recorded, and on a mac that has no meeting model.
@@ -472,6 +478,7 @@ final class DictationCoordinator: ObservableObject {
         wirePillQuestions()
         installSystemLifecycleObservers()
         wireMeetings()
+        wireMeetingShortcut()
 
         permissions = SystemPermissions.snapshot()
         // the stored flag only knows the window was closed once. whether this
@@ -2218,6 +2225,43 @@ extension DictationCoordinator {
         meetings.stop()
     }
 
+    /// what the meeting shortcut does, and what the menu would: `record a
+    /// meeting`, or `stop recording` while one runs. one still writing its
+    /// file is not recording, so a press then starts the next.
+    func toggleMeeting() {
+        switch MeetingShortcut.press(whileRecording: meetings.isRecording) {
+        case .start:
+            startMeeting()
+        case .stop:
+            stopMeeting()
+        }
+    }
+
+    /// registered at launch and again whenever settings change it. a sink
+    /// on a `@Published` runs before the new value is stored, so it uses
+    /// the one it is handed.
+    private func wireMeetingShortcut() {
+        meetingHotkey.onPress = { [weak self] in
+            self?.toggleMeeting()
+        }
+        settings.$meetingShortcut
+            .removeDuplicates()
+            .sink { [weak self] shortcut in
+                guard let self else {
+                    return
+                }
+                self.meetingHotkey.shortcut = shortcut
+                self.meetingShortcutIsTaken = self.meetingHotkey.isTaken
+            }
+            .store(in: &settingsCancellables)
+    }
+
+    /// while the settings row listens for a new combination, the old one
+    /// is let go, so pressing it again does not start a meeting.
+    func holdMeetingShortcut(_ held: Bool) {
+        meetingHotkey.isHeld = held
+    }
+
     #if DEBUG
     /// Development only, compiled out of release like the lamp lab: a
     /// meeting a script can start and stop without the mouse, so a check of
@@ -2230,16 +2274,8 @@ extension DictationCoordinator {
             "\(AppIdentity.bundleID).meeting.toggle", &token, .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.toggleMeetingForDevelopment()
+                self?.toggleMeeting()
             }
-        }
-    }
-
-    private func toggleMeetingForDevelopment() {
-        if meetings.isRecording {
-            stopMeeting()
-        } else {
-            startMeeting()
         }
     }
 
