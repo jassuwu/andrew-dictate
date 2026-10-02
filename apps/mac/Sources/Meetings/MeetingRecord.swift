@@ -173,6 +173,10 @@ extension MeetingRecord {
         /// the tap did not hear a tone of ours: the quiet probe, or the
         /// start sound of a rebuilt tap.
         static let probeUnheard = Label(rawValue: "probe-unheard")
+        /// a tone of ours could not be played at all — no output device, a
+        /// player that would not start — so the tap was not asked, and
+        /// nothing was concluded about it.
+        static let probeUnplayable = Label(rawValue: "probe-unplayable")
     }
 
     struct Event: Equatable, Sendable, Codable {

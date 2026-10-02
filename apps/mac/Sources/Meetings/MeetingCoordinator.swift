@@ -658,9 +658,22 @@ final class MeetingCoordinator: ObservableObject {
         // proof the tap works, not the room speaking, so it must not buy
         // the quiet hour back.
         probeUntil = max(probeUntil, elapsed + thresholds.quietProbeWindow)
-        Task { [source] in
-            try? await source.playQuietProbe()
+        Task { [weak self, source] in
+            do {
+                try await source.playQuietProbe()
+            } catch {
+                self?.quietProbeCouldNotPlay(meeting, error)
+            }
         }
+    }
+
+    /// No output to play it on, or a player that would not start: the tap
+    /// was asked nothing, and is neither cleared nor called dead for it.
+    private func quietProbeCouldNotPlay(_ meeting: Meeting, _ error: any Error) {
+        logger.error("the quiet probe could not play: \(error.localizedDescription, privacy: .public)")
+        guard current === meeting, health.verdict == .waitingForQuietProbe else { return }
+        health.quietProbeCouldNotPlay(at: elapsed)
+        meeting.notes.note(.probeUnplayable, at: elapsed)
     }
 
     /// The tap is dead: the gap begins at `lost`, and the tap is rebuilt.

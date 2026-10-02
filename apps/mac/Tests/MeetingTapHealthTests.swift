@@ -189,6 +189,41 @@ final class MeetingTapHealthTests: XCTestCase {
         ])
     }
 
+    /// No output to play the tone on: the tap was asked nothing, so the
+    /// meeting learns nothing — no gap, no rebuild, nothing on the lamp —
+    /// and asks again a full timeout later. The record says it could not.
+    func testAQuietProbeThatCannotPlayIsNoEvidenceEitherWay() async throws {
+        source.anythingIsPlaying = true
+        source.quietProbeCannotPlay = true
+        let c = coordinator()
+        c.start()
+        await source.awaitStart()
+        await play(loud(at: .zero))
+        for s in 2...6 {
+            await play(quiet(at: .seconds(s)))
+        }
+        await until { source.quietProbes == 1 }
+
+        for s in 7...11 {
+            await play(quiet(at: .seconds(s)))
+        }
+        XCTAssertEqual(source.quietProbes, 1, "a full timeout from the try")
+        XCTAssertEqual(source.rebuilds, 0, "never played, so never missed")
+
+        await play(quiet(at: .seconds(12)))
+        await until { source.quietProbes == 2 }
+        XCTAssertEqual(source.quietProbes, 2)
+        XCTAssertEqual(events, [.started])
+
+        c.stop()
+        await c.untilWrittenOut()
+        XCTAssertTrue(try savedFile().complete)
+        XCTAssertEqual(records.first?.events, [
+            .init(.probeUnplayable, atS: 6.1),
+            .init(.probeUnplayable, atS: 12.1),
+        ])
+    }
+
     /// The quiet probe is our own tone, not anyone speaking. Heard every
     /// few seconds through a long silence, it must not buy the meeting
     /// another quiet hour: the nudge still comes once, on time.
@@ -595,11 +630,19 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     }
     private var _hearsTheQuietProbe = false
 
+    /// While set, the quiet probe cannot be played at all: no output.
+    var quietProbeCannotPlay: Bool {
+        get { lock.withLock { _quietProbeCannotPlay } }
+        set { lock.withLock { _quietProbeCannotPlay = newValue } }
+    }
+    private var _quietProbeCannotPlay = false
+
     func playQuietProbe() async throws {
-        let (hears, at) = lock.withLock { () -> (Bool, Duration) in
+        let (hears, cannotPlay, at) = lock.withLock { () -> (Bool, Bool, Duration) in
             _quietProbes += 1
-            return (_hearsTheQuietProbe, nextAt)
+            return (_hearsTheQuietProbe, _quietProbeCannotPlay, nextAt)
         }
+        if cannotPlay { throw NoOutput() }
         guard hears else { return }
         let n = 4_800
         send(.init(you: Array(repeating: 0, count: n),
@@ -639,6 +682,7 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
 }
 
 private struct DeviceGone: Error {}
+private struct NoOutput: Error {}
 
 /// Counts what it is fed; says nothing.
 private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
