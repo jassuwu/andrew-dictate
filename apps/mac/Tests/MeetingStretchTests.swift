@@ -162,6 +162,36 @@ final class MeetingStretchTests: XCTestCase {
         ])
     }
 
+    /// Twice is not a hiccup. That stretch is let go, and the queue behind
+    /// it carries on to the end of the meeting.
+    func testAStretchTheEngineFailsOnTwiceIsSkippedAndTheRestIsSaved() async throws {
+        engine.failing("the deploy is blocked", times: 2)
+        let c = coordinator(stretches())
+        c.start(tapping: zoom)
+        await source.awaitStart()
+
+        await play([
+            you("the deploy is blocked", from: 1.3, to: 2.5),
+            them("since when", from: 3.3, to: 4.0),
+            you("since this morning", from: 5.3, to: 6.0),
+        ], through: 7.0, on: c)
+        await waitFor { c.liveLines.count == 2 }
+
+        XCTAssertEqual(handed(), [
+            "the deploy is blocked 24000",
+            "the deploy is blocked 24000",
+            "since when 16000",
+            "since this morning 16000",
+        ])
+        XCTAssertEqual(live(c), ["them 3.0 since when", "you 5.0 since this morning"])
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, [
+            "[00:00:03] them: since when",
+            "[00:00:05] you: since this morning",
+        ])
+    }
+
     // MARK: - building a meeting
 
     private func stretches(
