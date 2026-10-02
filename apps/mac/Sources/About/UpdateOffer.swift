@@ -57,6 +57,26 @@ enum UpdateOffer {
         }
     }
 
+    static let checkInterval: TimeInterval = 24 * 60 * 60
+
+    /// once a day, and never while a dictation or a meeting is running:
+    /// the check waits for the next idle moment instead. a last check dated
+    /// in the future means the clock moved back, so it does not count.
+    static func shouldCheck(
+        now: Date,
+        lastChecked: Date?,
+        enabled: Bool,
+        dictating: Bool
+    ) -> Bool {
+        guard enabled, !dictating else {
+            return false
+        }
+        guard let lastChecked, lastChecked <= now else {
+            return true
+        }
+        return now.timeIntervalSince(lastChecked) >= checkInterval
+    }
+
     /// `latest` is what dictate.jass.gg answered; nil, or anything that is
     /// not a version, is no line. `onDisk` is the bundle in /Applications,
     /// which brew may already have replaced under this process — the newer

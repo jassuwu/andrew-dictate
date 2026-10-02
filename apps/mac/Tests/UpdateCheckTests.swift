@@ -214,6 +214,79 @@ final class UpdateCheckTests: XCTestCase {
         )
     }
 
+    // MARK: - the update check: when it may ask
+
+    private let noon = Date(timeIntervalSince1970: 1_790_000_000)
+
+    private func hours(_ count: Double) -> TimeInterval {
+        count * 60 * 60
+    }
+
+    func testANeverCheckedInstallIsDue() {
+        XCTAssertTrue(
+            UpdateOffer.shouldCheck(
+                now: noon,
+                lastChecked: nil,
+                enabled: true,
+                dictating: false
+            )
+        )
+    }
+
+    /// once a day: not at 23 hours, yes at 24.
+    func testItIsDueOnceADay() {
+        XCTAssertFalse(
+            UpdateOffer.shouldCheck(
+                now: noon,
+                lastChecked: noon.addingTimeInterval(-hours(23)),
+                enabled: true,
+                dictating: false
+            )
+        )
+        XCTAssertTrue(
+            UpdateOffer.shouldCheck(
+                now: noon,
+                lastChecked: noon.addingTimeInterval(-hours(24)),
+                enabled: true,
+                dictating: false
+            )
+        )
+    }
+
+    /// a clock set back would otherwise silence it until the date catches up.
+    func testALastCheckInTheFutureIsDue() {
+        XCTAssertTrue(
+            UpdateOffer.shouldCheck(
+                now: noon,
+                lastChecked: noon.addingTimeInterval(hours(48)),
+                enabled: true,
+                dictating: false
+            )
+        )
+    }
+
+    func testItNeverAsksWhileDictating() {
+        XCTAssertFalse(
+            UpdateOffer.shouldCheck(
+                now: noon,
+                lastChecked: nil,
+                enabled: true,
+                dictating: true
+            )
+        )
+    }
+
+    func testTheSwitchOffMeansItNeverAsks() {
+        XCTAssertFalse(
+            UpdateOffer.shouldCheck(
+                now: noon,
+                lastChecked: nil,
+                enabled: false,
+                dictating: false
+            )
+        )
+    }
+
     /// a throwaway `Andrew Dictate.app`, with or without a readable plist.
     private func makeBundle(
         version: String?,
