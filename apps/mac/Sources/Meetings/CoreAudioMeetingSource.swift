@@ -14,14 +14,24 @@ import os
 /// Everything arrives here at the device rate (48 kHz on this mac) and leaves
 /// as 16 kHz mono pairs, in ~100 ms chunks, on the IO queue.
 ///
+/// The mic is the default input, and it follows the default input: when that
+/// changes, or the rig's mic goes away, a whole new rig is brought up on the
+/// new mic beside the old one (`MicHandoff` decides when, and on which), and
+/// takes over on its first buffer. Its chunks carry on the same clock. That
+/// move is silent: the probe tone is for a tap nobody has heard yet, and if
+/// the new tap stops being heard the coordinator's own checks find out.
+///
 /// `@unchecked Sendable` because Core Audio hands us raw object ids and an
-/// IOProc on its own queue; every field they touch is behind `lock`, and the
-/// ids themselves are plain integers the HAL owns.
+/// IOProc on its own queue; every field they touch is behind `lock`, the
+/// ids themselves are plain integers the HAL owns, and what the handoff
+/// keeps is only ever touched on `following`.
 final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     enum Failure: Error, LocalizedError {
         case coreAudio(String, OSStatus)
         case noMicrophone
         case noStartSound
+        /// The mic a rig was to be built on is no longer there.
+        case micGone(String)
         /// A native call that did not come back in time, and what it was.
         case noAnswer(Stage)
 
@@ -30,6 +40,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             case .coreAudio(let call, let status): "\(call) failed (\(status))"
             case .noMicrophone: "no microphone"
             case .noStartSound: "the start sound is missing from the app"
+            case .micGone(let mic): "the mic (\(mic)) is not there any more"
             case .noAnswer(let stage): stage.description
             }
         }
@@ -66,7 +77,9 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     /// session. A uid made fresh each time left a setting behind in the
     /// audio server for every session that did not stop cleanly. The
     /// release and development builds each have their own (`AppIdentity`),
-    /// so neither can clear away the other's.
+    /// so neither can clear away the other's. A rig brought up beside the
+    /// live one takes the same with `.b` on the end, and the next one the
+    /// first again (`uid(for:)`).
     static var meetingDeviceUID: String {
         "\(AppIdentity.bundleID).meeting"
     }
@@ -84,30 +97,60 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     /// playing. One serial queue, so the sweep can never land on a device
     /// just built — and never the main thread, which only reads answers.
     private let hal = DispatchQueue(label: "gg.jass.dictate.meeting-hal", qos: .userInitiated)
+    /// Where the mic is followed: the device listeners call back here, and
+    /// the handoff's decisions, its timer and its answers all happen here.
+    /// Not the HAL queue, which a build can hold for seconds, or for good.
+    private let following = DispatchQueue(label: "gg.jass.dictate.meeting-mic", qos: .userInitiated)
     private let lock = NSLock()
     private let deviceUID: String
 
-    // All guarded by `lock`, touched from the caller and the IO queue.
+    // All guarded by `lock`, touched from the caller, the IO queue and
+    // `following`.
     /// The rig whose buffers become chunks.
     private var live: Rig?
+    /// A rig brought up beside the live one, until its first buffer makes
+    /// it the live one or it is given up.
+    private var standby: Rig?
     private var rigsBuilt = 0
+    /// Counts starts, rebuilds and stops: a handoff begun under one count
+    /// is not adopted under another.
+    private var epoch = 0
     private var continuation: AsyncStream<MeetingAudioChunk>.Continuation?
+    private var events = AsyncStream<MeetingSourceEvent> { $0.finish() }
+    private var told: AsyncStream<MeetingSourceEvent>.Continuation?
     private var framesDelivered: Int64 = 0
     private var lastDelivery: ContinuousClock.Instant?
     private var player: AVAudioPlayer?
     private var playingTimer: DispatchSourceTimer?
     private var playing: Bool?
-    /// The device the last teardown destroyed. The HAL's answer to a uid
-    /// lags a destroy, so for a moment it still names this one, which is
-    /// gone rather than stale.
-    private var lastDestroyed: AudioObjectID?
+    /// The device the last teardown under each uid destroyed. The HAL's
+    /// answer to a uid lags a destroy, so for a moment it still names this
+    /// one, which is gone rather than stale.
+    private var lastDestroyed: [String: AudioObjectID] = [:]
+
+    // Only ever touched on `following`.
+    private var handoff = MicHandoff()
+    /// The epoch `handoff` belongs to.
+    private var handoffEpoch = 0
+    private var lookTimer: DispatchSourceTimer?
+    private var listeners: [Listener] = []
 
     /// Built with the rest of the meeting machinery, and that is when a
-    /// device an earlier session left under this uid is swept away.
+    /// device an earlier session left under either uid is swept away.
     init(deviceUID: String = CoreAudioMeetingSource.meetingDeviceUID) {
         self.deviceUID = deviceUID
         hal.async { [weak self] in
-            self?.destroyStaleAggregate()
+            guard let self else { return }
+            destroyStaleAggregate(uid(for: .first))
+            destroyStaleAggregate(uid(for: .second))
+        }
+    }
+
+    /// The uid a rig in `slot` is built under.
+    private func uid(for slot: MicHandoff.Slot) -> String {
+        switch slot {
+        case .first: deviceUID
+        case .second: "\(deviceUID).b"
         }
     }
 
@@ -116,29 +159,60 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     func start() async throws -> AsyncStream<MeetingAudioChunk> {
         let (stream, continuation) = AsyncStream<MeetingAudioChunk>.makeStream(
             bufferingPolicy: .unbounded)
-        lock.withLock {
+        let (events, told) = AsyncStream<MeetingSourceEvent>.makeStream(
+            bufferingPolicy: .unbounded)
+        let epoch = lock.withLock { () -> Int in
             self.continuation = continuation
+            self.events = events
+            self.told = told
             self.framesDelivered = 0
             self.lastDelivery = ContinuousClock.now
+            self.epoch += 1
+            return self.epoch
         }
-        let rig = try await bringUp()
-        lock.withLock { live = rig }
+        let rig = try await bringUp(.first, on: nil)
+        try await adopt(rig, epoch: epoch)
         keepAskingWhatIsPlaying()
         playProbeTone()
         return stream
     }
 
     func rebuild() async throws {
-        let old = lock.withLock { () -> Rig? in
-            defer { live = nil }
-            return live
+        let (old, epoch) = lock.withLock { () -> ([Rig], Int) in
+            defer {
+                live = nil
+                standby = nil
+            }
+            self.epoch += 1
+            return ([live, standby].compactMap { $0 }, self.epoch)
         }
-        if let old { await retire([old]) }
-        let rig = try await bringUp()
-        lock.withLock { live = rig }
+        await retire(old)
+        // The live rig's uid, which it has just let go of: the other may
+        // still be closing a standby that never delivered.
+        let rig = try await bringUp(old.first?.slot ?? .first, on: nil)
+        try await adopt(rig, epoch: epoch)
         skipTheTimeNothingWasDelivered()
         // The tone again: a rebuilt tap must prove itself like a new one.
         playProbeTone()
+    }
+
+    /// `rig` is the live one, and the mic is followed from it — unless the
+    /// source was stopped while it was building, when it goes again.
+    private func adopt(_ rig: Rig, epoch: Int) async throws {
+        let adopted = lock.withLock { () -> Bool in
+            guard self.epoch == epoch else { return false }
+            live = rig
+            return true
+        }
+        guard adopted else {
+            await retire([rig])
+            throw CancellationError()
+        }
+        follow(rig, epoch: epoch)
+    }
+
+    var sourceEvents: AsyncStream<MeetingSourceEvent> {
+        lock.withLock { events }
     }
 
     /// A chunk's `at` is a frame count, and frames only exist while the tap
@@ -148,14 +222,24 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     /// outage keeps the whole meeting on one clock. Small outages are the
     /// teardown itself and are left alone.
     private func skipTheTimeNothingWasDelivered() {
-        lock.withLock {
-            guard let last = lastDelivery else { return }
-            let now = ContinuousClock.now
-            let outage = now - last
-            guard outage > .seconds(1) else { return }
-            framesDelivered += Int64(outage.totalSeconds * MeetingAudioChunk.sampleRate)
-            lastDelivery = now
-        }
+        lock.withLock { skipOutage(until: ContinuousClock.now) }
+    }
+
+    /// `skipTheTimeNothingWasDelivered`, with `lock` already held: a rig
+    /// taking over from one whose mic went away carries on from where that
+    /// one stopped, plus the time nothing came.
+    private func skipOutage(until now: ContinuousClock.Instant) {
+        guard let last = lastDelivery else { return }
+        let outage = now - last
+        guard outage > .seconds(1) else { return }
+        framesDelivered += Int64(outage.totalSeconds * MeetingAudioChunk.sampleRate)
+        lastDelivery = now
+    }
+
+    /// Where the meeting's clock is: the `at` the next chunk will carry.
+    /// With `lock` held.
+    private var nextStamp: Duration {
+        .seconds(Double(framesDelivered) / MeetingAudioChunk.sampleRate)
     }
 
     var anythingIsPlaying: Bool? {
@@ -194,16 +278,218 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
     func stop() async {
         stopAskingWhatIsPlaying()
-        let rig = lock.withLock { () -> Rig? in
-            defer { live = nil }
-            return live
+        let rigs = lock.withLock { () -> [Rig] in
+            defer {
+                live = nil
+                standby = nil
+            }
+            epoch += 1
+            return [live, standby].compactMap { $0 }
         }
-        if let rig { await retire([rig]) }
-        let continuation = lock.withLock { () -> AsyncStream<MeetingAudioChunk>.Continuation? in
-            defer { self.continuation = nil }
-            return self.continuation
+        unfollow()
+        await retire(rigs)
+        let (continuation, told) = lock.withLock {
+            () -> (AsyncStream<MeetingAudioChunk>.Continuation?, AsyncStream<MeetingSourceEvent>.Continuation?) in
+            defer {
+                self.continuation = nil
+                self.told = nil
+            }
+            return (self.continuation, self.told)
         }
         continuation?.finish()
+        told?.finish()
+    }
+
+    // MARK: - following the default input
+
+    /// From now on `rig` is the meeting's, and the mic is followed from it.
+    /// Whatever the last handoff was in the middle of is forgotten: it
+    /// belonged to an epoch that has ended.
+    private func follow(_ rig: Rig, epoch: Int) {
+        following.async { [self] in
+            handoff = MicHandoff()
+            handoff.began(on: rig.mic, slot: rig.slot)
+            handoffEpoch = epoch
+            listen()
+            scheduleLook()
+        }
+    }
+
+    private func unfollow() {
+        following.async { [self] in
+            stopListening()
+            lookTimer?.cancel()
+            lookTimer = nil
+            handoff = MicHandoff()
+        }
+    }
+
+    /// The handoff here is the meeting's own, not one left over from
+    /// before a stop or a rebuild.
+    private var isFollowing: Bool {
+        handoff.mic != nil && lock.withLock { epoch } == handoffEpoch
+    }
+
+    /// The default input and the list of devices: between them, every way
+    /// the meeting's mic can change or go.
+    private func listen() {
+        guard listeners.isEmpty else { return }
+        let watched: [(AudioObjectPropertySelector, String)] = [
+            (kAudioHardwarePropertyDefaultInputDevice, "the default input"),
+            (kAudioHardwarePropertyDevices, "the device list"),
+        ]
+        for (selector, what) in watched {
+            var listener = Listener(
+                address: CoreAudioProperties.address(selector),
+                block: { [weak self] _, _ in self?.somethingMoved(what) })
+            let status = AudioObjectAddPropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject), &listener.address, following, listener.block)
+            if status == noErr {
+                listeners.append(listener)
+            } else {
+                logger.error("couldn't watch \(what, privacy: .public) (\(status, privacy: .public)); the meeting stays on its mic")
+            }
+        }
+    }
+
+    /// On the queue the blocks were added with, which is how Core Audio
+    /// knows them again.
+    private func stopListening() {
+        for var listener in listeners {
+            AudioObjectRemovePropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject), &listener.address, following, listener.block)
+        }
+        listeners = []
+    }
+
+    private func somethingMoved(_ what: String) {
+        guard isFollowing else { return }
+        logger.info("mic: \(what, privacy: .public) changed")
+        handoff.changed(at: ContinuousClock.now)
+        scheduleLook()
+    }
+
+    /// One timer, set for whenever the handoff next has something to decide.
+    private func scheduleLook() {
+        lookTimer?.cancel()
+        lookTimer = nil
+        guard let next = handoff.nextLook else { return }
+        let wait = max(.zero, ContinuousClock.now.duration(to: next))
+        // Rounded up: a look a millisecond early finds nothing settled.
+        let milliseconds = Int((wait.totalSeconds * 1_000).rounded(.up))
+        let timer = DispatchSource.makeTimerSource(queue: following)
+        timer.schedule(deadline: .now() + .milliseconds(milliseconds), leeway: .milliseconds(10))
+        timer.setEventHandler { [weak self] in self?.lookNow() }
+        timer.resume()
+        lookTimer = timer
+    }
+
+    private func lookNow() {
+        lookTimer?.cancel()
+        lookTimer = nil
+        guard isFollowing else { return }
+        let now = ContinuousClock.now
+        var dropped: Rig?
+        if handoff.standbyIsOverdue(at: now) {
+            // Taken off the IO queue's hands first, so it cannot take over
+            // in the instant it is given up.
+            dropped = lock.withLock { () -> Rig? in
+                defer { standby = nil }
+                return standby
+            }
+            // It delivered just now after all: its takeover is queued
+            // behind this, and settles the handoff.
+            guard dropped != nil else { return }
+        }
+        let steps = handoff.look(at: now, mics: CoreAudioProperties.mics())
+        if steps.isEmpty, let mic = handoff.mic {
+            logger.info("mic: settled; still on \(mic.name, privacy: .public)")
+        }
+        perform(steps, dropping: dropped)
+    }
+
+    /// What the handoff decided, done. `dropped` is the standby taken back
+    /// from the IO queue, for `.dropStandby`. `stamp` is when what is told
+    /// happened, for a takeover, whose time is its first chunk's.
+    private func perform(
+        _ steps: [MicHandoff.Step], dropping dropped: Rig? = nil, at stamp: Duration? = nil
+    ) {
+        for step in steps {
+            switch step {
+            case .bringUp(let mic, let slot):
+                bringUpStandby(on: mic, slot: slot)
+            case .dropStandby:
+                guard let dropped else { continue }
+                logger.error("mic: \(dropped.mic.name, privacy: .public) came up and never delivered; tearing it down")
+                hal.async { self.teardown(dropped) }
+            case .tell(let kind, let mic):
+                tell(kind, mic: mic, at: stamp)
+            }
+        }
+        scheduleLook()
+    }
+
+    /// Built beside the live rig, which keeps delivering meanwhile. No
+    /// tone: this tap is heard the moment anything plays.
+    private func bringUpStandby(on mic: MicHandoff.Mic, slot: MicHandoff.Slot) {
+        let epoch = handoffEpoch
+        logger.notice("mic: bringing up \(mic.name, privacy: .public) beside the live rig, through \(self.uid(for: slot), privacy: .public)")
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let rig = try await bringUp(slot, on: mic)
+                following.async { self.standbyBuilt(rig, epoch: epoch) }
+            } catch {
+                following.async { self.standbyFailed(error, epoch: epoch) }
+            }
+        }
+    }
+
+    /// The standby is up. It is the IO queue's to make the live rig from
+    /// here, on its first buffer, unless the meeting moved on meanwhile.
+    private func standbyBuilt(_ rig: Rig, epoch: Int) {
+        let adopted = lock.withLock { () -> Bool in
+            guard self.epoch == epoch else { return false }
+            standby = rig
+            return true
+        }
+        guard adopted else {
+            hal.async { self.teardown(rig) }
+            return
+        }
+        handoff.standbyUp(at: ContinuousClock.now)
+        scheduleLook()
+    }
+
+    private func standbyFailed(_ error: any Error, epoch: Int) {
+        guard epoch == handoffEpoch, isFollowing else { return }
+        logger.error("mic: the next rig would not come up: \(error.localizedDescription, privacy: .public)")
+        perform(handoff.standbyFailed(mics: CoreAudioProperties.mics()))
+    }
+
+    /// The old rig goes whatever else has happened: nothing else holds it.
+    private func tookOver(_ takeover: Takeover) {
+        if let old = takeover.old {
+            hal.async { self.teardown(old) }
+        }
+        guard takeover.epoch == handoffEpoch, isFollowing else { return }
+        perform(handoff.standbyDelivered(), at: takeover.at)
+    }
+
+    /// For the meeting's record, and the log.
+    private func tell(_ kind: MeetingSourceEvent.Kind, mic: MicHandoff.Mic?, at stamp: Duration?) {
+        let (told, at) = lock.withLock { (self.told, stamp ?? nextStamp) }
+        let name = mic?.name ?? "no mic"
+        let seconds = String(format: "%.2f", at.totalSeconds)
+        switch kind {
+        case .micChanged:
+            logger.notice("mic: moved to \(name, privacy: .public) at \(seconds, privacy: .public) s")
+        case .micHandoffFailed:
+            logger.error("mic: couldn't move to \(name, privacy: .public) at \(seconds, privacy: .public) s")
+        case .micFellBack:
+            logger.notice("mic: fell back to \(name, privacy: .public) at \(seconds, privacy: .public) s")
+        }
+        told?.yield(MeetingSourceEvent(kind: kind, mic: mic?.name, at: at))
     }
 
     // MARK: - the onboarding proof
@@ -242,10 +528,11 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
     // MARK: - building the rig
 
-    /// A rig on the default input, built and started on the HAL queue with
+    /// A rig on `mic` — or, with none named, on the mic a meeting should use
+    /// now — under `slot`'s uid, built and started on the HAL queue with
     /// eight seconds to do it. One that comes back later is nobody's, and
     /// is torn down where it lands.
-    private func bringUp() async throws -> Rig {
+    private func bringUp(_ slot: MicHandoff.Slot, on mic: MicHandoff.Mic?) async throws -> Rig {
         let progress = BuildProgress()
         return try await onHAL(
             within: Self.buildDeadline,
@@ -254,7 +541,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
                 self?.logger.notice("a rig came up after its deadline; tearing it down")
                 self?.teardown(rig)
             },
-            { try self.build(progress) })
+            { try self.build(slot, on: mic, progress) })
     }
 
     /// Tears `rigs` down on the HAL queue, and waits five seconds for it at
@@ -302,25 +589,28 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         }
     }
 
-    /// The aggregate device under this source's uid, destroyed if there is
-    /// one. There is one only when a session before this did not get to
-    /// destroy its own, and the HAL refuses a second device under a uid
-    /// that is taken. Only ever on the HAL queue.
-    private func destroyStaleAggregate() {
-        guard let stale = CoreAudioProperties.device(uid: deviceUID),
-              stale != lock.withLock({ lastDestroyed })
+    /// The aggregate device under `uid`, destroyed if there is one. There is
+    /// one only when a session before this did not get to destroy its own,
+    /// and the HAL refuses a second device under a uid that is taken. Only
+    /// ever on the HAL queue.
+    private func destroyStaleAggregate(_ uid: String) {
+        guard let stale = CoreAudioProperties.device(uid: uid),
+              stale != lock.withLock({ lastDestroyed[uid] })
         else { return }
         let status = AudioHardwareDestroyAggregateDevice(stale)
         if status == noErr {
-            logger.notice("cleared a stale aggregate device: \(self.deviceUID, privacy: .public)")
+            logger.notice("cleared a stale aggregate device: \(uid, privacy: .public)")
         } else {
-            logger.error("could not clear a stale aggregate device \(self.deviceUID, privacy: .public) (\(status, privacy: .public))")
+            logger.error("could not clear a stale aggregate device \(uid, privacy: .public) (\(status, privacy: .public))")
         }
     }
 
-    /// A rig on the default input, started. Only ever on the HAL queue.
-    /// `progress` is told how far it got.
-    private func build(_ progress: BuildProgress) throws -> Rig {
+    /// A rig on `wanted`, or on the default input — the built-in mic when
+    /// the default is none a meeting can use — under `slot`'s uid, started.
+    /// Only ever on the HAL queue. `progress` is told how far it got.
+    private func build(
+        _ slot: MicHandoff.Slot, on wanted: MicHandoff.Mic?, _ progress: BuildProgress
+    ) throws -> Rig {
         progress.stage = .openingTheTap
         // Everything, ours included: the probe tone (ADR 0021) is played by
         // *this* process, and a tap that left us out could never hear it.
@@ -335,24 +625,27 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         try check(AudioHardwareCreateProcessTap(description, &tapID), "AudioHardwareCreateProcessTap")
         let tapUID = description.uuid.uuidString
 
-        let micDevice = CoreAudioProperties.defaultInputDevice()
-        guard micDevice != 0, let micUID = CoreAudioProperties.deviceUID(micDevice) else {
+        guard let mic = wanted ?? CoreAudioProperties.micToUse() else {
             AudioHardwareDestroyProcessTap(tapID)
             throw Failure.noMicrophone
         }
-        let mic = MicHandoff.Mic(uid: micUID, name: CoreAudioProperties.name(micDevice) ?? micUID)
+        guard let micDevice = CoreAudioProperties.device(uid: mic.uid) else {
+            AudioHardwareDestroyProcessTap(tapID)
+            throw Failure.micGone(mic.name)
+        }
         let micChannels = CoreAudioProperties.inputChannels(micDevice).reduce(0, +)
         progress.stage = .startingTheMic(mic.name)
 
-        destroyStaleAggregate()
+        let uid = uid(for: slot)
+        destroyStaleAggregate(uid)
         let aggregate: [String: Any] = [
             kAudioAggregateDeviceNameKey: "andrew dictate meeting",
-            kAudioAggregateDeviceUIDKey: deviceUID,
-            kAudioAggregateDeviceMainSubDeviceKey: micUID,
+            kAudioAggregateDeviceUIDKey: uid,
+            kAudioAggregateDeviceMainSubDeviceKey: mic.uid,
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceIsStackedKey: false,
             kAudioAggregateDeviceTapAutoStartKey: false,
-            kAudioAggregateDeviceSubDeviceListKey: [[kAudioSubDeviceUIDKey: micUID]],
+            kAudioAggregateDeviceSubDeviceListKey: [[kAudioSubDeviceUIDKey: mic.uid]],
             kAudioAggregateDeviceTapListKey: [[
                 kAudioSubTapDriftCompensationKey: true,
                 kAudioSubTapUIDKey: tapUID,
@@ -389,15 +682,15 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         }
 
         let rig = Rig(
-            id: id, uid: deviceUID, mic: mic, tapID: tapID, aggregateID: aggregateID,
-            procID: procID, micChannels: micChannels, rate: rate)
+            id: id, slot: slot, uid: uid, mic: mic, tapID: tapID,
+            aggregateID: aggregateID, procID: procID, micChannels: micChannels, rate: rate)
         do {
             try check(AudioDeviceStart(aggregateID, procID), "AudioDeviceStart")
         } catch {
             teardown(rig)
             throw error
         }
-        logger.info("tap up: the whole mac and \(mic.name, privacy: .public), at \(rate, privacy: .public) Hz, through \(self.deviceUID, privacy: .public)")
+        logger.notice("tap up: the whole mac and \(mic.name, privacy: .public) (\(micChannels, privacy: .public) ch), at \(rate, privacy: .public) Hz, through \(uid, privacy: .public)")
         return rig
     }
 
@@ -408,7 +701,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         AudioDeviceDestroyIOProcID(rig.aggregateID, rig.procID)
         AudioHardwareDestroyAggregateDevice(rig.aggregateID)
         AudioHardwareDestroyProcessTap(rig.tapID)
-        lock.withLock { lastDestroyed = rig.aggregateID }
+        lock.withLock { lastDestroyed[rig.uid] = rig.aggregateID }
+        logger.info("tap down: \(rig.mic.name, privacy: .public), through \(rig.uid, privacy: .public)")
     }
 
     /// The start sound, played whether or not sound feedback is on: it is the
@@ -428,8 +722,10 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
     // MARK: - the IO proc
 
-    /// A buffer from rig `id`. Read only if it is the live rig's: one being
-    /// torn down may still call back once more.
+    /// A buffer from rig `id`. Read if it is the live rig's. The standby's
+    /// first makes it the live one, there and then, so not a buffer of it
+    /// is lost to the handoff; the old rig's are dropped from that moment,
+    /// as is the one last callback of any rig being torn down.
     private func ingest(_ inputData: UnsafePointer<AudioBufferList>, from id: Int) {
         let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
         guard let first = list.first, first.mData != nil, first.mNumberChannels > 0 else { return }
@@ -437,10 +733,24 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         guard frames > 0 else { return }
         let layout = list.reduce(0) { $0 + Int($1.mNumberChannels) }
 
-        let (rig, continuation) = lock.withLock {
-            () -> (Rig?, AsyncStream<MeetingAudioChunk>.Continuation?) in
-            guard let live, live.id == id else { return (nil, nil) }
-            return (live, self.continuation)
+        let (rig, continuation, takeover) = lock.withLock {
+            () -> (Rig?, AsyncStream<MeetingAudioChunk>.Continuation?, Takeover?) in
+            if let live, live.id == id {
+                return (live, self.continuation, nil)
+            }
+            guard let standby, standby.id == id else { return (nil, nil, nil) }
+            let old = live
+            live = standby
+            self.standby = nil
+            // An old rig still delivering left off a moment ago, and the
+            // clock carries straight on; one whose mic went stopped
+            // seconds back, and the clock skips the time nothing came.
+            skipOutage(until: ContinuousClock.now)
+            let takeover = Takeover(old: old, new: standby, at: nextStamp, epoch: epoch)
+            return (standby, self.continuation, takeover)
+        }
+        if let takeover {
+            following.async { self.tookOver(takeover) }
         }
         guard let rig, let continuation else { return }
         // A rig whose mic went from under it can keep calling back with the
@@ -481,7 +791,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
         for (you, them) in rig.assembler.push(you: mic, them: tap) {
             let at = lock.withLock { () -> Duration in
-                let at = Duration.seconds(Double(framesDelivered) / MeetingAudioChunk.sampleRate)
+                let at = nextStamp
                 framesDelivered += Int64(them.count)
                 lastDelivery = ContinuousClock.now
                 return at
@@ -502,6 +812,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     /// the assembler and the layout are only ever touched on the IO queue.
     private final class Rig: @unchecked Sendable {
         let id: Int
+        let slot: MicHandoff.Slot
         let uid: String
         let mic: MicHandoff.Mic
         let tapID: AudioObjectID
@@ -516,11 +827,12 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         var layout: Int?
 
         init(
-            id: Int, uid: String, mic: MicHandoff.Mic, tapID: AudioObjectID,
-            aggregateID: AudioObjectID, procID: AudioDeviceIOProcID,
+            id: Int, slot: MicHandoff.Slot, uid: String, mic: MicHandoff.Mic,
+            tapID: AudioObjectID, aggregateID: AudioObjectID, procID: AudioDeviceIOProcID,
             micChannels: Int, rate: Double
         ) {
             self.id = id
+            self.slot = slot
             self.uid = uid
             self.mic = mic
             self.tapID = tapID
@@ -530,6 +842,23 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             self.rate = rate
             assembler = ChunkAssembler(inputRate: rate)
         }
+    }
+
+    /// The standby's first buffer made it the live rig. Handed from the IO
+    /// queue to `following`, which tears the old one down and tells.
+    private struct Takeover: @unchecked Sendable {
+        let old: Rig?
+        let new: Rig
+        /// The `at` of the new rig's first chunk.
+        let at: Duration
+        let epoch: Int
+    }
+
+    /// A Core Audio listener and the property it listens to, kept so the
+    /// same block can be removed again.
+    private struct Listener {
+        var address: AudioObjectPropertyAddress
+        let block: AudioObjectPropertyListenerBlock
     }
 }
 
@@ -632,6 +961,67 @@ private enum CoreAudioProperties {
         scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal
     ) -> AudioObjectPropertyAddress {
         AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+    }
+
+    /// What the mac says about its inputs right now: the default, the
+    /// built-in mic, and every one there is. A default that is not among
+    /// them, or has no input, is none a meeting can use.
+    static func mics() -> MicHandoff.Mics {
+        var present: Set<String> = []
+        var builtIn: MicHandoff.Mic?
+        for device in devices() where inputChannels(device).reduce(0, +) > 0 && isAlive(device) {
+            guard let uid = deviceUID(device) else { continue }
+            present.insert(uid)
+            if builtIn == nil, transportType(device) == kAudioDeviceTransportTypeBuiltIn {
+                builtIn = MicHandoff.Mic(uid: uid, name: name(device) ?? uid)
+            }
+        }
+        let device = defaultInputDevice()
+        let defaultInput = deviceUID(device).flatMap { uid in
+            present.contains(uid) ? MicHandoff.Mic(uid: uid, name: name(device) ?? uid) : nil
+        }
+        return MicHandoff.Mics(defaultInput: defaultInput, builtIn: builtIn, present: present)
+    }
+
+    /// The mic a meeting starts on: the default input, or the built-in mic
+    /// when the default is none a meeting can use.
+    static func micToUse() -> MicHandoff.Mic? {
+        let mics = mics()
+        return mics.defaultInput ?? mics.builtIn
+    }
+
+    private static func devices() -> [AudioObjectID] {
+        var address = address(kAudioHardwarePropertyDevices)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size
+        ) == noErr, size > 0 else { return [] }
+        var devices = [AudioObjectID](
+            repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &devices
+        ) == noErr else { return [] }
+        return devices
+    }
+
+    /// True unless the HAL says otherwise: one it cannot be asked about is
+    /// still in its own device list.
+    private static func isAlive(_ device: AudioObjectID) -> Bool {
+        uint32(kAudioDevicePropertyDeviceIsAlive, of: device).map { $0 != 0 } ?? true
+    }
+
+    private static func transportType(_ device: AudioObjectID) -> UInt32? {
+        uint32(kAudioDevicePropertyTransportType, of: device)
+    }
+
+    private static func uint32(
+        _ selector: AudioObjectPropertySelector, of device: AudioObjectID
+    ) -> UInt32? {
+        var address = address(selector)
+        var value = UInt32(0)
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value)
+        return status == noErr ? value : nil
     }
 
     static func defaultInputDevice() -> AudioObjectID {
