@@ -231,6 +231,34 @@ final class PressLogTests: XCTestCase {
         )
     }
 
+    /// a shortcut taken during a hold is its own ending, not a brush: the
+    /// line names it, and the file reads it back.
+    func testAChordThatCancelledIsItsOwnOutcome() throws {
+        let record = PressRecord(
+            outcome: .chordCancelled,
+            startedAt: noonish,
+            mic: nil,
+            samples: nil,
+            peak: nil,
+            words: nil,
+            stages: PressRecord.Stages(firstBuffer: 12, ended: 180),
+            engine: "v2",
+            capped: false,
+            retry: false,
+            mainStallMs: nil
+        )
+
+        XCTAssertEqual(
+            record.line(in: kolkata),
+            "at=2026-10-02T12:22:31+05:30 outcome=chord-cancelled first_buffer_ms=12 end_ms=180 engine=v2"
+        )
+        let file = try JSONEncoder().encode(record)
+        XCTAssertEqual(
+            try JSONDecoder().decode(PressRecord.self, from: file).outcome,
+            .chordCancelled
+        )
+    }
+
     /// a mic that sent almost nothing must not read as one that sent
     /// exactly nothing, and a quote in a device's name stays inside it.
     func testTheLineKeepsAFaintPeakAndAnAwkwardMicName() {

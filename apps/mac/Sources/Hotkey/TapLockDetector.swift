@@ -6,6 +6,10 @@ struct TapLockDetector {
         case provisionalEnd
         case end
         case cancel
+        /// another key went down during a hold: a shortcut, or someone
+        /// who was talking reaching for the keyboard. the machine knows
+        /// how long the hold has run, so it decides which.
+        case chord
         case lockBegin
         case lockEnd
         case lockCancel
@@ -115,7 +119,7 @@ struct TapLockDetector {
         switch state {
         case .holding:
             state = .cancelledHold
-            return [.cancel]
+            return [.chord]
 
         case .locked, .endingLock:
             guard isEscape else {

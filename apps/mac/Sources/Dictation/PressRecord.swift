@@ -18,6 +18,10 @@ struct PressRecord: Equatable, Sendable, Codable {
         /// a brush of the key: too short to be a hold, or the first tap of
         /// a double tap, whose take the lock replaces.
         case brushed
+        /// another key went down inside the first second of a hold: a
+        /// shortcut like fn+arrow, thrown away without a sound. a chord
+        /// later than that ends the utterance and keeps it.
+        case chordCancelled
         /// the engine threw; the samples are kept and a retry is offered.
         case couldNotTranscribe
         /// `esc`, the only way you throw an utterance away.
@@ -215,6 +219,7 @@ extension PressRecord.Outcome {
         case .leftOnPasteboard: "left-on-pasteboard"
         case .heardNothing: "heard-nothing"
         case .brushed: "brushed"
+        case .chordCancelled: "chord-cancelled"
         case .couldNotTranscribe: "couldnt-transcribe"
         case .cancelled: "cancelled"
         case .interrupted: "interrupted"
@@ -240,9 +245,10 @@ extension PressRecord.Outcome {
             }
         case let .refused(refusal):
             refusal.rawValue
-        case .delivered, .heardNothing, .brushed, .couldNotTranscribe,
-             .cancelled, .couldNotStartRecording, .micNotResponding,
-             .recordingLost, .abandoned, .droppedAsHung, .noAudio:
+        case .delivered, .heardNothing, .brushed, .chordCancelled,
+             .couldNotTranscribe, .cancelled, .couldNotStartRecording,
+             .micNotResponding, .recordingLost, .abandoned, .droppedAsHung,
+             .noAudio:
             nil
         }
     }
@@ -252,6 +258,7 @@ extension PressRecord.Outcome {
         case ("delivered", nil): self = .delivered
         case ("heard-nothing", nil): self = .heardNothing
         case ("brushed", nil): self = .brushed
+        case ("chord-cancelled", nil): self = .chordCancelled
         case ("couldnt-transcribe", nil): self = .couldNotTranscribe
         case ("cancelled", nil): self = .cancelled
         case ("couldnt-start-recording", nil): self = .couldNotStartRecording

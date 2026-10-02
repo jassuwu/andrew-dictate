@@ -266,6 +266,64 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(outcomes, [.brushed])
     }
 
+    /// fn+arrow, fn+delete: another key inside the first second of a hold
+    /// is a shortcut, not a sentence. thrown away without a sound — and
+    /// written down as a chord, not a brush.
+    func testAChordEarlyInAHoldIsAShortcutAndEndsSilently() async {
+        let m = machine()
+
+        m.keyDown()
+        await pass(.milliseconds(50))
+        m.chordPressed()
+        await pass(.milliseconds(200))
+
+        XCTAssertEqual(chimes, [])
+        XCTAssertEqual(mic.cancels, 1)
+        XCTAssertEqual(engine.heard, [])
+        XCTAssertEqual(pills, [])
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(states.last, .init(.idle, fast: true))
+        XCTAssertEqual(outcomes, [.chordCancelled])
+    }
+
+    /// a key pressed a second or more into a hold is someone who was
+    /// talking reaching for the keyboard. only you throw an utterance away,
+    /// so it ends the way a release would, and is pasted.
+    func testAChordLateInAHoldEndsTheUtteranceAndKeepsIt() async {
+        let m = machine()
+        engine.reply = .success("i was talking")
+
+        m.keyDown()
+        await pass(.seconds(1))
+        m.chordPressed(eventAge: .milliseconds(20))
+        XCTAssertEqual(m.state, .transcribing)
+        await settle { self.inserter.inserted.count == 1 }
+
+        XCTAssertEqual(mic.cancels, 0)
+        XCTAssertEqual(mic.stops, 1)
+        XCTAssertEqual(inserter.inserted, ["I was talking."])
+        XCTAssertEqual(chimes, [.start, .end])
+        XCTAssertEqual(outcomes, [.delivered])
+        XCTAssertEqual(presses.first?.stages.keyUp, 980)
+    }
+
+    /// a locked recording is hands-free talking however young it is: a
+    /// chord ends it and keeps it.
+    func testAChordDuringALockedRecordingKeepsIt() async {
+        let m = machine()
+        engine.reply = .success("hands free")
+
+        m.doubleTapped()
+        await pass(.milliseconds(500))
+        m.chordPressed()
+        await settle { self.inserter.inserted.count == 1 }
+
+        XCTAssertEqual(lockFlags, [true, false])
+        XCTAssertEqual(mic.cancels, 0)
+        XCTAssertEqual(inserter.inserted, ["Hands free."])
+        XCTAssertEqual(outcomes, [.delivered])
+    }
+
     // MARK: - couldn't transcribe
 
     /// the samples are kept, and a press while the pill still says so means

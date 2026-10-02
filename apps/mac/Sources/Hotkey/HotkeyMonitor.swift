@@ -8,6 +8,8 @@ final class HotkeyMonitor {
     /// than when the main thread got round to hearing it.
     var onEnd: ((TimeInterval?) -> Void)?
     var onCancel: (() -> Void)?
+    /// another key during a hold, with that key's own timestamp.
+    var onChord: ((TimeInterval?) -> Void)?
     var onLockBegin: (() -> Void)?
     var onLockEnd: ((TimeInterval?) -> Void)?
     var onLockCancel: (() -> Void)?
@@ -166,7 +168,10 @@ final class HotkeyMonitor {
             _ = detector.reset()
             return
         }
-        perform(detector.keyDown(isEscape: isEscape))
+        perform(
+            detector.keyDown(isEscape: isEscape),
+            at: event.timestamp
+        )
     }
 
     private func modifierFlag(
@@ -209,6 +214,10 @@ final class HotkeyMonitor {
                 provisionalEndTask?.cancel()
                 provisionalEndTask = nil
                 onCancel?()
+            case .chord:
+                provisionalEndTask?.cancel()
+                provisionalEndTask = nil
+                onChord?(timestamp)
             case .lockBegin:
                 provisionalEndTask?.cancel()
                 provisionalEndTask = nil

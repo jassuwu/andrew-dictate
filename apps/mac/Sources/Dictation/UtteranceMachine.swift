@@ -852,6 +852,34 @@ final class UtteranceMachine {
         endPressEarly(.brushed)
     }
 
+    /// another key went down while the dictation key was held. a hold
+    /// younger than this is a shortcut — fn+arrow, fn+delete — not a
+    /// sentence.
+    static let chordKeepsAfter = Duration.seconds(1)
+
+    /// a chord during a hold. a young one is thrown away as quietly as a
+    /// brush; one a second or more into the hold, or over a locked
+    /// recording, is someone who was talking reaching for the keyboard —
+    /// only you throw an utterance away, so it ends the way a release
+    /// would and is written out. `eventAge` is the chord key's, as a
+    /// release's is.
+    func chordPressed(eventAge: Duration = .zero) {
+        guard state == .recording,
+              let micTurn,
+              !micTurn.isEnding else {
+            return
+        }
+        let held = press.map { $0.keyDown.duration(to: clock.now) } ?? .zero
+        if isRecordingLocked || held >= Self.chordKeepsAfter {
+            keyUp(eventAge: eventAge)
+            return
+        }
+        // a discarded capture must not leave a chime in flight behind it
+        startCueTask?.cancel()
+        cancelMicTurn()
+        endPressEarly(.chordCancelled)
+    }
+
     /// whether `esc` was ours to take: only while there is something to
     /// throw away.
     func escape() -> Bool {
