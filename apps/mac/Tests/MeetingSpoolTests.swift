@@ -50,15 +50,54 @@ final class MeetingSpoolTests: XCTestCase {
         XCTAssertEqual(spool.orphans().count, 0)
     }
 
-    func testJunkFoldersAreSweptWhenLookingForOrphans() throws {
+    /// Neither audio nor a manifest that reads: there is nothing in it to
+    /// lose, and it is swept.
+    func testAFolderWithNeitherAudioNorAReadableManifestIsJunkAndIsSwept() throws {
         let junk = root.appendingPathComponent("leftover")
         try FileManager.default.createDirectory(
             at: junk, withIntermediateDirectories: true)
         try "not a manifest".write(
             to: junk.appendingPathComponent("manifest.json"),
             atomically: true, encoding: .utf8)
+        let empty = root.appendingPathComponent("nothing")
+        try FileManager.default.createDirectory(
+            at: empty, withIntermediateDirectories: true)
+
         XCTAssertEqual(spool.orphans().count, 0)
+
         XCTAssertFalse(FileManager.default.fileExists(atPath: junk.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: empty.path))
+        XCTAssertEqual(spool.unreadableCount(), 0)
+    }
+
+    /// A meeting's audio is never deleted for want of a manifest that
+    /// reads: the manifest says what app and when, and the audio is the
+    /// meeting.
+    func testAManifestThatDoesNotDecodeIsSetAsideWithItsAudio() throws {
+        let handle = try spool.begin(manifest())
+        try Data([0, 1, 2]).write(to: handle.audioURL)
+        try "not a manifest".write(to: handle.manifestURL, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(spool.orphans().count, 0)
+
+        XCTAssertEqual(spool.unreadableCount(), 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: handle.folder.path))
+        XCTAssertEqual(
+            try Data(contentsOf: setAsideFolder(of: handle).appendingPathComponent("audio.caf")),
+            Data([0, 1, 2]))
+    }
+
+    func testAFolderWithAudioAndNoManifestIsSetAsideWithItsAudio() throws {
+        let handle = try spool.begin(manifest())
+        try Data([0, 1, 2]).write(to: handle.audioURL)
+        try FileManager.default.removeItem(at: handle.manifestURL)
+
+        XCTAssertEqual(spool.orphans().count, 0)
+
+        XCTAssertEqual(spool.unreadableCount(), 1)
+        XCTAssertEqual(
+            try Data(contentsOf: setAsideFolder(of: handle).appendingPathComponent("audio.caf")),
+            Data([0, 1, 2]))
     }
 
     // MARK: - the look launch takes first
@@ -99,8 +138,9 @@ final class MeetingSpoolTests: XCTestCase {
     }
 
     /// A manifest written before the ledger existed has no `attempts` key.
-    /// Reading it must not fail — a spool that fails to decode is swept, and
-    /// sweeping one would be losing an hour of someone else's words.
+    /// Reading it must not fail — a spool whose manifest does not decode is
+    /// set aside, and one that only lacked a key would send a meeting that
+    /// could have been written out there.
     func testAManifestWithoutTheLedgerStillReads() throws {
         let handle = try spool.begin(manifest())
         try Data([0]).write(to: handle.audioURL)
@@ -131,6 +171,11 @@ final class MeetingSpoolTests: XCTestCase {
     }
 
     // MARK: -
+
+    /// Where a set-aside spool's folder ends up.
+    private func setAsideFolder(of handle: MeetingSpool.Handle) -> URL {
+        spool.unreadableFolder.appendingPathComponent(handle.folder.lastPathComponent)
+    }
 
     private func manifest(started: Date = Date(timeIntervalSince1970: 1_787_000_000)) -> MeetingSpool.Manifest {
         .init(app: "zoom", started: started, engine: "whisper-large-v3-turbo", model: .whisperLargeV3Turbo)

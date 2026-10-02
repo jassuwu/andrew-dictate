@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// The audio of a meeting while it is being recorded. It lives in
 /// application support, not in your meetings folder, at 0600. Once the
@@ -32,6 +33,8 @@ struct MeetingSpool: Sendable {
     }
 
     let root: URL
+
+    private static let logger = Logger(subsystem: AppIdentity.loggingSubsystem, category: "meeting-spool")
 
     init(root: URL = Self.defaultRoot) {
         self.root = root
@@ -70,8 +73,9 @@ struct MeetingSpool: Sendable {
         try? FileManager.default.removeItem(at: handle.folder)
     }
 
-    /// Where a spool goes when the app has tried twice and cannot read it. A
-    /// meeting recording is never deleted, only set aside (ADR 0022).
+    /// Where a spool goes when the app has tried twice and cannot read it,
+    /// or cannot read its audio or its manifest at all. A meeting recording
+    /// is never deleted, only set aside (ADR 0022).
     static let unreadableFolderName = "unreadable"
 
     /// Two failed launches is enough: the third would be another quarter of
@@ -160,11 +164,13 @@ struct MeetingSpool: Sendable {
         }
     }
 
-    /// Spools with a manifest and audio, oldest first. A folder whose manifest
-    /// cannot be read is junk and is swept; a manifest without audio is a
-    /// meeting that has just begun and is left alone; one set aside as
-    /// unreadable is never offered again, and nor is one whose meeting is
-    /// already written out.
+    /// Spools with a manifest and audio, oldest first. A folder with audio
+    /// whose manifest cannot be read is set aside, audio and all: the
+    /// manifest is only what app and when, and the audio is the meeting. A
+    /// folder with neither is junk and is swept; a manifest without audio is
+    /// a meeting that has just begun and is left alone; one set aside is
+    /// never offered again, and nor is one whose meeting is already written
+    /// out.
     func orphans() -> [(handle: Handle, manifest: Manifest)] {
         let fm = FileManager.default
         // Names, not URLs: `contentsOfDirectory(at:)` hands back resolved
@@ -182,7 +188,12 @@ struct MeetingSpool: Sendable {
             guard let data = try? Data(contentsOf: handle.manifestURL),
                   let manifest = try? Self.decoder.decode(Manifest.self, from: data)
             else {
-                try? fm.removeItem(at: folder)
+                if fm.fileExists(atPath: handle.audioURL.path) {
+                    Self.logger.error("a spool's manifest could not be read, so its audio is set aside")
+                    setAside(handle)
+                } else {
+                    try? fm.removeItem(at: folder)
+                }
                 continue
             }
             guard fm.fileExists(atPath: handle.audioURL.path),
