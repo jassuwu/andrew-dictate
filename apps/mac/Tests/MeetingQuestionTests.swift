@@ -6,13 +6,15 @@ import XCTest
 final class MeetingQuestionTests: XCTestCase {
     // MARK: - what each says
 
+    /// the call is in an app, not of one: a call in arc is a meet call, and
+    /// "arc call" reads as nothing.
     func testACallThatBeganIsOfferedForFifteenSeconds() {
         let question = MeetingQuestion(.record("zoom"))
 
         XCTAssertEqual(question, .record(app: "zoom"))
-        XCTAssertEqual(question.text, "zoom call — record it?")
+        XCTAssertEqual(question.text, "call in zoom — record it?")
         XCTAssertEqual(question.button, "record")
-        XCTAssertEqual(question.buttonLabel, "record the zoom call")
+        XCTAssertEqual(question.buttonLabel, "record the call in zoom")
         XCTAssertEqual(question.lasts, .seconds(15))
     }
 

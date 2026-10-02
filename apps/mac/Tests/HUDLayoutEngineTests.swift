@@ -147,7 +147,7 @@ extension HUDLayoutEngineTests {
     /// smallest screen a mac ships with.
     func testTheQuestionsStayOnOneLineOnASmallScreen() {
         for (message, button) in [
-            ("facetime call — record it?", "record"),
+            ("call in facetime — record it?", "record"),
             ("call ended — stop recording?", "stop"),
             ("still recording?", "stop"),
         ] {

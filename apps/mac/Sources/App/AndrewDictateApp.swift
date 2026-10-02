@@ -90,7 +90,7 @@ struct AndrewDictateApp: App {
             return "Andrew Dictate — recording a meeting"
         }
         if let call = coordinator.unrecordedCall {
-            return "Andrew Dictate — \(call) call, not recording"
+            return "Andrew Dictate — call in \(call), not recording"
         }
         return "Andrew Dictate"
     }
@@ -165,7 +165,7 @@ struct AndrewDictateApp: App {
                 // with it for as long as the call lasts, the way it leads
                 // with a recording while one runs.
                 if let call = coordinator.unrecordedCall {
-                    Text("\(call) call · not recording")
+                    Text("call in \(call) · not recording")
                         .foregroundStyle(.secondary)
                         .disabled(true)
 

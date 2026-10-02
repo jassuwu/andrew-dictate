@@ -31,7 +31,7 @@ enum MeetingQuestion: Equatable, Sendable {
 
     var text: String {
         switch self {
-        case let .record(app): "\(app) call — record it?"
+        case let .record(app): "call in \(app) — record it?"
         case .stopAfterCall: "call ended — stop recording?"
         case .stillRecording: "still recording?"
         }
@@ -48,7 +48,7 @@ enum MeetingQuestion: Equatable, Sendable {
     /// What VoiceOver calls the button: the whole action, not one word.
     var buttonLabel: String {
         switch self {
-        case let .record(app): "record the \(app) call"
+        case let .record(app): "record the call in \(app)"
         case .stopAfterCall, .stillRecording: "stop recording"
         }
     }
