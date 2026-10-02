@@ -102,10 +102,10 @@ struct SpeakerPieces: Equatable, Sendable {
         count - heardPieces.count
     }
 
-    /// Whether the diarizer heard the audio at `frame`. A turn that starts
-    /// in audio it never heard keeps plain `them`: no number is better than
-    /// a neighbour's.
-    func wasHeard(at frame: Int) -> Bool {
-        heardPieces.contains { $0.contains(frame) }
+    /// Whether the audio at `frame` was cut into a piece the diarizer never
+    /// heard. A turn that starts there keeps plain `them`: no number is
+    /// better than a neighbour's.
+    func wasSkipped(at frame: Int) -> Bool {
+        (0..<cut).contains(frame) && !heardPieces.contains { $0.contains(frame) }
     }
 }

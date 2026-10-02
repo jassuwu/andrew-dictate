@@ -142,7 +142,7 @@ final class SpeakerSplit {
         guard found.count == turns.count else { return (turns, report) }
         let heard = zip(turns, found).map { turn, found in
             guard case .them = turn.speaker,
-                  pieces.wasHeard(at: StretchCutter.samples(in: turn.at))
+                  !pieces.wasSkipped(at: StretchCutter.samples(in: turn.at))
             else { return turn }
             return turn.said(by: found.speaker)
         }

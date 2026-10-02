@@ -80,7 +80,7 @@ final class SpeakerPiecesTests: XCTestCase {
 
     /// Audio in a piece the diarizer heard has speakers. Audio in one it
     /// never did — let go after failing, or still out when the stop gave up
-    /// waiting — has none, and the piece counts as skipped.
+    /// waiting — was skipped, and so was the piece.
     func testAPieceNeverHeardIsSkippedAndSoIsItsAudio() {
         var pieces = SpeakerPieces(length: 1_000)
         let due = pieces.spool(3_000)
@@ -92,9 +92,22 @@ final class SpeakerPiecesTests: XCTestCase {
         pieces.heard(last[0])
 
         XCTAssertEqual(pieces.skipped, 2)
-        XCTAssertTrue(pieces.wasHeard(at: 0))
-        XCTAssertTrue(pieces.wasHeard(at: 1_999))
-        XCTAssertFalse(pieces.wasHeard(at: 2_000))
-        XCTAssertFalse(pieces.wasHeard(at: 3_100))
+        XCTAssertFalse(pieces.wasSkipped(at: 0))
+        XCTAssertFalse(pieces.wasSkipped(at: 1_999))
+        XCTAssertTrue(pieces.wasSkipped(at: 2_000))
+        XCTAssertTrue(pieces.wasSkipped(at: 3_100))
+    }
+
+    /// A turn can start where the spool has no audio at all — its last
+    /// sample, or past it. That is not audio the diarizer missed: nothing
+    /// was skipped there.
+    func testPastTheEndOfTheSpoolNothingWasSkipped() {
+        var pieces = SpeakerPieces(length: 1_000)
+        _ = pieces.spool(1_500)
+        let last = pieces.close()
+        pieces.heard(last[0])
+
+        XCTAssertFalse(pieces.wasSkipped(at: 1_500))
+        XCTAssertFalse(pieces.wasSkipped(at: 9_000))
     }
 }
