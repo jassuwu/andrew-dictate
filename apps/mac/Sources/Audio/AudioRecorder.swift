@@ -1106,16 +1106,6 @@ private final class AudioCaptureStorage: @unchecked Sendable {
         preRollPrefixBuffer?.frameLength = 0
     }
 
-    func discardAndClearPreRoll() {
-        lock.lock()
-        defer { lock.unlock() }
-
-        isAcceptingAudio = false
-        resetUtterance()
-        preRollPrefixBuffer?.frameLength = 0
-        ringSplicer?.reset()
-    }
-
     /// the cap is a ceiling, not a failure: stop taking frames but keep what
     /// was already spoken so `finish` can still hand it to transcription.
     private func sealAtCap() {
