@@ -71,6 +71,13 @@ struct SettingsView: View {
                 countSetAside: { spool.unreadableCount() },
                 tryAgain: { await coordinator.meetings.coordinator.tryAgainSetAside() },
                 keptAudio: KeptAudio(),
+                installedModels: { MeetingEngines.installed() },
+                transcribeAgain: { transcript, model in
+                    Task { @MainActor in
+                        await coordinator.meetings.coordinator.transcribeAgain(
+                            transcript, with: model)
+                    }
+                },
                 load: meetingsLoader
             )
         )
@@ -139,7 +146,21 @@ struct SettingsView: View {
             archive.refresh()
             browser.reload()
             meetings.reload()
+            meetings.isRecording = coordinator.meetings.isRecording
+            meetings.transcribingAgain = coordinator.meetings.transcribingAgain
             timings = coordinator.timingsSummary()
+        }
+        // the rows say what the coordinator is doing: no rerun while a
+        // meeting is recorded, one at a time, and the one that is running.
+        // a rerun that has finished has changed its file and its audio.
+        .onChange(of: coordinator.meetings.isRecording) { _, recording in
+            meetings.isRecording = recording
+        }
+        .onChange(of: coordinator.meetings.transcribingAgain) { _, transcript in
+            meetings.transcribingAgain = transcript
+            if transcript == nil {
+                meetings.reload()
+            }
         }
         .onChange(of: selectedTab) { _, tab in
             if tab == .history {

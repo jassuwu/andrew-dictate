@@ -76,6 +76,12 @@ final class LazyMeetings {
         builtCoordinator?.recovering
     }
 
+    /// the transcript being made again, which only a built coordinator can
+    /// be doing.
+    var transcribingAgain: URL? {
+        builtCoordinator?.transcribingAgain
+    }
+
     var dictationResponse: MeetingSession.DictationResponse {
         builtCoordinator?.dictationResponse ?? .allow
     }

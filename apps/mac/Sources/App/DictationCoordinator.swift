@@ -2476,6 +2476,12 @@ extension DictationCoordinator {
             .removeDuplicates()
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &meetingCancellables)
+        // settings › history watches this object too, and its rows say which
+        // transcript is being made again.
+        built.$transcribingAgain
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &meetingCancellables)
     }
 
     /// how a meeting ended, the way a press's is kept: the line to the
