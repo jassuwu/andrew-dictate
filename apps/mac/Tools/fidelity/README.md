@@ -81,6 +81,41 @@ how the timings are taken:
   real mic they run while you are still talking. the count of windows that ran
   live is printed next to it.
 
+## 4. bench
+
+```
+.build/release/fidelity bench --make
+.build/release/fidelity bench
+```
+
+how long the engine takes to answer a take, by word count (1–5, 6–20, 21–60,
+61–150), p50 and p90. `--make` synthesizes 16 clips with `say` into
+`fidelity/bench/`, so no voice of yours is in them. three ways:
+
+- warm: the engine just ran.
+- cold: after `--idle` seconds of nothing (default 60), when the ANE has gone
+  to sleep.
+- woken at key-down: after the same idle, the app's wake (half a second of
+  silence), then the take `--gap` seconds later (default 1). this is what a
+  press does now.
+
+it also prints what the wake pass itself costs. `--decay` adds how fast the ANE
+forgets after a run. `--warm-only` skips the idle waits, which take about half
+an hour. close other heavy work first; a busy cpu moves the numbers.
+
+## 5. the app's own numbers
+
+```
+log show --last 1d --predicate 'subsystem == "gg.jass.dictate" AND category == "press"' \
+  | .build/release/fidelity presses
+```
+
+reads press-log lines on stdin (from `log show`, `log stream`, or `copy
+diagnostics`) and prints key-up → ⌘V for delivered presses by word count, the
+same under 15 s of audio split by stage, and key-down → first audio by how the
+mic is attached. `gg.jass.dictate` is the release build; the dev build logs
+under `gg.jass.dictate.dev`.
+
 ## where things are
 
 recordings and prompts are your voice and your own words. they live outside the
