@@ -233,6 +233,9 @@ final class DictationCoordinator: ObservableObject {
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
     /// between `com.apple.screenIsLocked` and its unlock.
     private var screenLockedByNotification = false
+    /// the mac went to sleep mid-take: the capture is suspended once that
+    /// take's mic has answered the stop (`suspendCaptureForSleep`).
+    private var suspendsCaptureAfterTheTake = false
     private var distributedNotificationObservers: [NSObjectProtocol] = []
 
     init(settings: AppSettings = .shared) {
@@ -1188,11 +1191,7 @@ final class DictationCoordinator: ObservableObject {
                         self?.handleCaptureInterruption(
                             reason: .systemPaused
                         )
-                        // nothing listens through a sleep, pre-roll
-                        // included: the capture goes, and waking (the
-                        // device watcher's) builds the next one once the
-                        // hardware has settled.
-                        self?.captureSlot.suspend()
+                        self?.suspendCaptureForSleep()
                     } else {
                         self?.handleSystemResume()
                         // woken onto the lock screen, the unlock is what
@@ -1391,6 +1390,19 @@ final class DictationCoordinator: ObservableObject {
     ) {
         machine.captureInterrupted(reason)
         hotkeyMonitor.reset()
+    }
+
+    /// nothing listens through a sleep, pre-roll included: the capture
+    /// goes, and waking (the device watcher's) builds the next one once
+    /// the hardware has settled. a take the sleep just ended is still
+    /// handing over what it heard, and throwing its capture away under the
+    /// stop would lose it: that capture goes once the take has let go.
+    private func suspendCaptureForSleep() {
+        guard machine.state == .recording else {
+            captureSlot.suspend()
+            return
+        }
+        suspendsCaptureAfterTheTake = true
     }
 
     /// the login window is over the session. the lock notification can
@@ -1760,6 +1772,10 @@ extension DictationCoordinator {
         switch event {
         case let .state(state, fastDismiss):
             apply(state, fastHUDDismiss: fastDismiss)
+            if suspendsCaptureAfterTheTake, state != .recording {
+                suspendsCaptureAfterTheTake = false
+                captureSlot.suspend()
+            }
         case let .chime(chime):
             guard !isOnboardingPresented else {
                 return
