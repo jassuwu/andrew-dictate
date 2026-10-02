@@ -145,6 +145,54 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertFalse(events.contains(.dictated("Ship it.")))
     }
 
+    // MARK: - nothing to say
+
+    /// silence must not wear the success afterglow — and silence is an
+    /// answer, not a failure, so there is nothing to try again.
+    func testSilenceSaysHeardNothing() async {
+        let m = machine()
+        engine.reply = .success("")
+
+        await hold(m, for: .seconds(1))
+        await settle { !self.pills.isEmpty }
+
+        XCTAssertEqual(pills, [Pill("heard nothing", 2.4)])
+        XCTAssertEqual(states.last, .init(.idle, fast: true))
+        XCTAssertEqual(inserter.inserted, [])
+        XCTAssertEqual(completions, [])
+        XCTAssertFalse(events.contains(.retryOffered(true)))
+    }
+
+    /// a key nobody meant to press asked no question, so it gets no answer.
+    func testABrushUnderThreeHundredMillisecondsEndsSilently() async {
+        let m = machine()
+        engine.reply = .success("")
+
+        await hold(m, for: .milliseconds(200))
+        await settle { m.state == .idle }
+        await settle()
+
+        XCTAssertEqual(pills, [])
+        XCTAssertEqual(states.last, .init(.idle, fast: true))
+        XCTAssertEqual(inserter.inserted, [])
+    }
+
+    /// the hotkey's own cancel, before the chime: no sound at all.
+    func testABrushTheHotkeyCancelsMakesNoSound() async {
+        let m = machine()
+
+        m.keyDown()
+        await pass(.milliseconds(50))
+        m.keyCancelled()
+        await pass(.milliseconds(200))
+
+        XCTAssertEqual(chimes, [])
+        XCTAssertEqual(mic.cancels, 1)
+        XCTAssertEqual(engine.heard, [])
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(states.last, .init(.idle, fast: true))
+    }
+
     // MARK: - helpers
 
     private var pills: [Pill] {
