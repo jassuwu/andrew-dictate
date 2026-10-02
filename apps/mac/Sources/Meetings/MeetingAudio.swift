@@ -98,6 +98,11 @@ protocol MeetingAudioSource: Sendable {
     /// which says nothing about the tap, and must never be read as a tone
     /// it did not hear.
     func playQuietProbe() async throws
+    /// Whether the start sound that the last `start()` or `rebuild()`
+    /// played could be played at all. `false` is no output device, or a
+    /// player that would not start: the tap was given nothing to hear, so
+    /// its silence is no verdict on it. `nil` when the source cannot say.
+    var startSoundPlayed: Bool? { get }
 }
 
 extension MeetingAudioSource {
@@ -106,6 +111,7 @@ extension MeetingAudioSource {
         AsyncStream { $0.finish() }
     }
     func playQuietProbe() async throws {}
+    var startSoundPlayed: Bool? { nil }
 }
 
 /// The engine listening to a meeting. Lines arrive as whisper decides them,

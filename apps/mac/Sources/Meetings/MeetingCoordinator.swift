@@ -359,6 +359,17 @@ final class MeetingCoordinator: ObservableObject {
                     meeting.notes.note(event.label, at: event.at)
                 }
             }
+            // No output to play the start sound on: the tap was given
+            // nothing to hear, so silence through the probe window would
+            // prove nothing. Could not check is not cannot hear — the
+            // meeting records, and the quiet probe asks the tap later.
+            if current === meeting, source.startSoundPlayed == false {
+                session.couldNotPlayTheProbe()
+                health.probeToneCouldNotPlay(at: elapsed)
+                meeting.notes.note(.probeUnplayable, at: elapsed)
+                publish()
+                onEvent?(.started)
+            }
             for await chunk in chunks {
                 // a chunk that lands after its meeting stopped is dropped,
                 // never handed to the next one.

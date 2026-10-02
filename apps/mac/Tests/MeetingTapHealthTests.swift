@@ -54,6 +54,30 @@ final class MeetingTapHealthTests: XCTestCase {
         return c
     }
 
+    // MARK: - a tone that cannot be played
+
+    /// The mac has no output to play the start sound on. The tap was given
+    /// nothing to hear, so silence through the probe window is not a tap
+    /// that cannot hear: the meeting records, no window opens, and the
+    /// record says the probe could not be played.
+    func testAStartSoundThatCannotPlayIsCouldNotCheckAndTheMeetingRecords() async throws {
+        source.startSoundPlays = false
+        let c = coordinator()
+        c.start()
+        await source.awaitStart()
+        await play(voice(at: .zero), voice(at: .seconds(1)), voice(at: .seconds(2)))
+
+        XCTAssertEqual(c.state, .recording)
+        XCTAssertEqual(events, [.started])
+        XCTAssertEqual(transcriber.fed.count, 3)
+
+        c.stop()
+        await c.untilWrittenOut()
+        XCTAssertTrue(try savedFile().complete)
+        XCTAssertEqual(records.first?.outcome, .saved)
+        XCTAssertEqual(records.first?.events, [.init(.probeUnplayable, atS: 0)])
+    }
+
     // MARK: - silence is not damage
 
     /// Presenting to a room that has nothing playing: five minutes of
@@ -560,6 +584,16 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
 
     var rebuilds: Int { lock.withLock { _rebuilds } }
     var quietProbes: Int { lock.withLock { _quietProbes } }
+
+    /// Whether the start sound can be played: false is a mac with no
+    /// output, where it never sounds and the tap has nothing to hear.
+    var startSoundPlays: Bool {
+        get { lock.withLock { _startSoundPlays } }
+        set { lock.withLock { _startSoundPlays = newValue } }
+    }
+    private var _startSoundPlays = true
+
+    var startSoundPlayed: Bool? { startSoundPlays }
 
     var anythingIsPlaying: Bool? {
         get { lock.withLock { _anythingIsPlaying } }
