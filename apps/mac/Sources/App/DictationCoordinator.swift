@@ -396,7 +396,6 @@ final class DictationCoordinator: ObservableObject {
                 self?.openLampLab()
             }
         }
-        #endif
         if Capabilities.current.hasLampLab {
             // `defaults write <bundle> hudRehearseNow -bool true` fires the
             // rehearsal on demand, so a screenshot run needs no clicking
@@ -411,6 +410,7 @@ final class DictationCoordinator: ObservableObject {
                 }
             }
         }
+        #endif
         // "fix a word…" is the menu's only time-sensitive action, and it used
         // to be grey until this session's first dictation — while the words
         // it wants sat in the archive the whole time. detached, because the
@@ -457,6 +457,7 @@ final class DictationCoordinator: ObservableObject {
         flashNotice(message, duration: 2)
     }
 
+    #if DEBUG
     /// Development only (`Capabilities.hasLampLab`): walk the real HUD
     /// through a dictation without a mic or a key — warm, record, cool,
     /// one line of feedback — so the lamp can be seen over a real desktop.
@@ -514,7 +515,6 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
-    #if DEBUG
     /// Development only (`Capabilities.hasLampLab`): the lamp audition.
     func openLampLab() {
         guard Capabilities.current.hasLampLab else {

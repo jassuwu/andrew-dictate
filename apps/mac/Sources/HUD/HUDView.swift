@@ -110,9 +110,11 @@ final class HUDViewModel: ObservableObject {
 
     private var audioRecorder: AudioRecorder?
     private var levelSamplingTask: Task<Void, Never>?
+    #if DEBUG
     /// development only: a voice for the rehearsal. when set, the sampler
     /// reads this instead of the recorder.
     var rehearsalLevel: Float?
+    #endif
 
     init(
         state: DictationCoordinator.State,
@@ -249,10 +251,18 @@ final class HUDViewModel: ObservableObject {
         }
     }
 
+    /// the mic, unless a debug build is rehearsing the lamp.
+    private var currentLevel: Float {
+        #if DEBUG
+        if let rehearsalLevel {
+            return rehearsalLevel
+        }
+        #endif
+        return audioRecorder?.currentLevel ?? 0
+    }
+
     private func sampleCurrentLevel(interval: Double) {
-        let shaped = WaveLevelShaper.shape(
-            rehearsalLevel ?? audioRecorder?.currentLevel ?? 0
-        )
+        let shaped = WaveLevelShaper.shape(currentLevel)
         let attack = 1 - exp(-interval / 0.040)
         let release = 1 - exp(-interval / 0.200)
         let gain = shaped > loudness ? attack : release
