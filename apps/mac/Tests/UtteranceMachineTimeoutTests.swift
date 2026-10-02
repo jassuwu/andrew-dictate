@@ -111,6 +111,85 @@ final class UtteranceMachineTimeoutTests: XCTestCase {
         XCTAssertEqual(engineEvents, [])
     }
 
+    // MARK: - twice in a row
+
+    /// a tap on the pill replays the samples, and an engine still wedged
+    /// doesn't answer those either: the second time is not a slow moment.
+    /// the pill says the engine is being restarted, and the samples stay.
+    func testARetryWhileStillHungTimesOutTooAndTheEngineIsRestarted() async {
+        let m = machine()
+        engine.holds = true
+        await timeOut(m)
+
+        m.keyDown()
+        XCTAssertEqual(m.state, .transcribing)
+        await settle { self.engine.heard.count == 2 }
+        await pass(.milliseconds(3_900))
+        XCTAssertEqual(m.state, .transcribing)
+        await pass(.milliseconds(100))
+        await settle { self.pills.count == 2 }
+
+        XCTAssertEqual(pills.last, Pill("speech model isn't responding — restarting it", 4))
+        XCTAssertEqual(states.last, .init(.idle, fast: true))
+        XCTAssertEqual(engineEvents, [.engineSuspect, .engineUnresponsive])
+        XCTAssertEqual(outcomes, [.couldNotTranscribe, .couldNotTranscribe])
+        XCTAssertEqual(presses.map(\.retry), [false, true])
+        XCTAssertEqual(presses.map(\.timedOut), [true, true])
+        XCTAssertEqual(retryOffers, [true, false, true])
+        XCTAssertEqual(mic.starts, 1)
+    }
+
+    /// two fresh takes in a row count the same as a take and its retry.
+    func testTwoTakesInARowUnansweredRestartTheEngine() async {
+        let m = machine()
+        engine.holds = true
+        await timeOut(m)
+        pillShowing = false
+
+        await timeOut(m)
+
+        XCTAssertEqual(mic.starts, 2)
+        XCTAssertEqual(pills.last, Pill("speech model isn't responding — restarting it", 4))
+        XCTAssertEqual(engineEvents, [.engineSuspect, .engineUnresponsive])
+    }
+
+    /// an answer in time, words or an error, says the engine is alive:
+    /// the next unanswered take is a first again.
+    func testAnAnswerInTimeStartsTheCountOver() async {
+        let m = machine()
+        engine.holds = true
+        await timeOut(m)
+        pillShowing = false
+
+        engine.holds = false
+        engine.reply = .failure(EngineThrew())
+        await hold(m, for: .seconds(1))
+        await settle { self.outcomes.count == 2 }
+        pillShowing = false
+
+        engine.holds = true
+        await timeOut(m)
+
+        XCTAssertEqual(engineEvents, [.engineSuspect, .engineSuspect])
+        XCTAssertEqual(pills.last, Pill("couldn't transcribe — tap to try again", 4))
+    }
+
+    /// once a restart is asked for, the engine after it starts with a
+    /// clean slate.
+    func testAfterARestartTheCountStartsOver() async {
+        let m = machine()
+        engine.holds = true
+        for _ in 0..<3 {
+            await timeOut(m)
+            pillShowing = false
+        }
+
+        XCTAssertEqual(
+            engineEvents,
+            [.engineSuspect, .engineUnresponsive, .engineSuspect]
+        )
+    }
+
     /// once the pill has gone, a press is a new sentence: the mic opens and
     /// the take is written out, while the hung call is still out there.
     func testTheNextPressRecordsWhileTheHungCallIsStillOut() async {
@@ -227,7 +306,7 @@ final class UtteranceMachineTimeoutTests: XCTestCase {
     private var engineEvents: [UtteranceEvent] {
         events.filter {
             switch $0 {
-            case .engineSuspect:
+            case .engineSuspect, .engineUnresponsive:
                 true
             default:
                 false

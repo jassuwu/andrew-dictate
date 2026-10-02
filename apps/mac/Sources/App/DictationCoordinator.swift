@@ -1853,6 +1853,8 @@ extension DictationCoordinator {
             captureSlot.drop()
         case .engineSuspect:
             checkEngineAnswers()
+        case .engineUnresponsive:
+            restartEngine()
         case let .pressEnded(record):
             keep(record)
         }

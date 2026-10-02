@@ -11,6 +11,9 @@
 /// a slow engine costs a tap; one never set costs every press after it.
 enum TranscriptionDeadline {
     static let floor = Duration.seconds(4)
+    /// takes in a row gone unanswered before the engine is restarted rather
+    /// than checked: a retry of the first that hangs too is not a slow day.
+    static let unansweredBeforeRestart = 2
     /// the engine's input: 16 kHz mono.
     private static let sampleRate = 16_000.0
 

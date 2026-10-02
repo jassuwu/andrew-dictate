@@ -38,6 +38,9 @@ enum UtteranceEvent: Equatable, Sendable {
     /// a take the engine never answered: a slow moment or a wedge, and
     /// only the engine's keeper can ask it which, without waiting on it.
     case engineSuspect
+    /// takes in a row the engine never answered: it has stopped, and only
+    /// a restart brings it back.
+    case engineUnresponsive
     /// how one press ended, whatever the ending: exactly one per press.
     case pressEnded(PressRecord)
 }
@@ -154,6 +157,9 @@ final class UtteranceMachine {
     /// how long the engine has left to answer the take in flight
     /// (`TranscriptionDeadline`).
     private var transcriptionDeadline: Task<Void, Never>?
+    /// takes in a row the engine never answered. one is worth a check; a
+    /// second, with nothing answered in between, is an engine that stopped.
+    private var unansweredTakes = 0
     /// the start chime, held back 120 ms so a discarded capture can cancel it
     private var startCueTask: Task<Void, Never>?
     private var retryBuffer = RetryBuffer()
@@ -889,6 +895,7 @@ final class UtteranceMachine {
         }
         transcriptionDeadline?.cancel()
         transcriptionDeadline = nil
+        unansweredTakes = 0
     }
 
     /// the engine never answered. the press ends now, out loud, with its
@@ -902,11 +909,22 @@ final class UtteranceMachine {
 
         transcriptionDeadline = nil
         pipelineLogger.error("the speech model didn't answer in time; giving up on it")
+        unansweredTakes += 1
+        // the engine after a restart starts with a clean slate.
+        let restart = unansweredTakes
+            >= TranscriptionDeadline.unansweredBeforeRestart
+        if restart {
+            unansweredTakes = 0
+        }
         activeTimeline = nil
         press?.timedOut = true
+        // kept either way: the sentence is no less theirs because the
+        // engine is the thing that broke.
         armRetry(samples)
         reportPipelineFailure(
-            "couldn't transcribe — tap to try again",
+            restart
+                ? "speech model isn't responding — restarting it"
+                : "couldn't transcribe — tap to try again",
             outcome: .couldNotTranscribe,
             generation: generation,
             duration: 4
@@ -915,7 +933,7 @@ final class UtteranceMachine {
         pipelineGeneration += 1
         pipelineTask?.cancel()
         pipelineTask = nil
-        emit(.engineSuspect)
+        emit(restart ? .engineUnresponsive : .engineSuspect)
     }
 
     private func transcribeAndInsert(
