@@ -339,8 +339,12 @@ final class MeetingCoordinator: ObservableObject {
     /// now is not its failure to end.
     private func abandonKeepingSpool(_ meeting: Meeting) {
         guard current === meeting else { return }
-        _ = letGo(of: meeting, at: elapsed)
+        let recording = letGo(of: meeting, at: elapsed)
         _ = closeTheTap(of: meeting)
+        keepMeetingRecord?(MeetingRecord(
+            .modelFailed, app: meeting.app, model: meeting.preferences.model,
+            startedAt: meeting.started, duration: elapsed,
+            gaps: recording?.gaps ?? []))
     }
 
     /// The meeting stops being the one recorded, before anything is

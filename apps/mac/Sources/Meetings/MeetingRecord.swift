@@ -14,6 +14,9 @@ struct MeetingRecord: Equatable, Sendable {
         case saved
         /// nothing was captured, so there was nothing to write.
         case nothingKept(NothingKept)
+        /// the model could not be made or would not load. the audio stays
+        /// for the next launch, which writes it out as a recovery.
+        case modelFailed
     }
 
     enum NothingKept: Equatable, Sendable {

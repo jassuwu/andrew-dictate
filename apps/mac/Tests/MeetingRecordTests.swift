@@ -40,7 +40,7 @@ final class MeetingRecordTests: XCTestCase {
         let dates = StartDates(dates)
         let c = MeetingCoordinator(
             source: source,
-            makeTranscriber: { [transcribers] _ in transcribers!.next() },
+            makeTranscriber: { [transcribers] _ in try transcribers!.next() },
             diarizer: FakeDiarizer(),
             spool: MeetingSpool(root: dir.appendingPathComponent("spool")),
             hookRunner: HookRunner(logURL: dir.appendingPathComponent("hooks.log")),
@@ -182,7 +182,57 @@ final class MeetingRecordTests: XCTestCase {
         XCTAssertEqual(records.first?.durationS, 1)
     }
 
+    // MARK: - the model
+
+    /// the engine failing is the app's fault: the recording stops, the audio
+    /// stays for the next launch, and the record says the model was why.
+    func testAModelThatCouldNotBeMadeLeavesARecordAndKeepsTheSpool() async throws {
+        transcribers.failure = Unreadable()
+        let c = coordinator(starting: [started])
+
+        c.start(tapping: zoom)
+        await awaitRecords(1)
+        await settle()
+
+        XCTAssertEqual(records.count, 1)
+        let record = try XCTUnwrap(records.first)
+        XCTAssertEqual(record.outcome, .modelFailed)
+        XCTAssertEqual(record.app, "zoom")
+        XCTAssertEqual(record.model, "whisperLargeV3Turbo")
+        XCTAssertEqual(record.startedAt, started)
+        XCTAssertEqual(record.durationS, 0)
+        XCTAssertEqual(c.state, .idle)
+        XCTAssertEqual(try spoolFolders(), 1)
+    }
+
+    func testAModelThatWillNotLoadLeavesARecordAndKeepsTheSpool() async throws {
+        transcriber.beginFailure = Unreadable()
+        let c = coordinator()
+
+        c.start(tapping: zoom)
+        await awaitRecords(1)
+        await settle()
+
+        XCTAssertEqual(records.map(\.outcome), [.modelFailed])
+        XCTAssertEqual(c.state, .idle)
+        XCTAssertEqual(try spoolFolders(), 1)
+    }
+
     // MARK: - helpers
+
+    private func spoolFolders() throws -> Int {
+        try FileManager.default.contentsOfDirectory(
+            atPath: dir.appendingPathComponent("spool").path
+        ).filter { !$0.hasPrefix(".") }.count
+    }
+
+    /// Until `count` records have arrived, or two seconds, so an ending that
+    /// never leaves one fails the test instead of hanging it.
+    private func awaitRecords(_ count: Int) async {
+        for _ in 0..<200 where records.count < count {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
 
     private func loud(at: Duration) -> MeetingAudioChunk {
         let n = 16_000
@@ -303,6 +353,9 @@ private final class FakeTranscribers: @unchecked Sendable {
     private let lock = NSLock()
     private var lined: [FakeTranscriber] = []
     private let otherwise: FakeTranscriber
+    /// what making the next transcriber does, while it is set: a model that
+    /// is not on this mac, or will not load.
+    var failure: (any Error)?
 
     init(otherwise: FakeTranscriber) {
         self.otherwise = otherwise
@@ -312,8 +365,9 @@ private final class FakeTranscribers: @unchecked Sendable {
         lock.withLock { lined.append(contentsOf: transcribers) }
     }
 
-    func next() -> FakeTranscriber {
-        lock.withLock { lined.isEmpty ? otherwise : lined.removeFirst() }
+    func next() throws -> FakeTranscriber {
+        if let failure { throw failure }
+        return lock.withLock { lined.isEmpty ? otherwise : lined.removeFirst() }
     }
 }
 
@@ -325,6 +379,8 @@ private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
     var batchTurns: [MeetingTurn] = []
     /// what a spool the engine cannot read does at every launch.
     var batchFailure: (any Error)?
+    /// what loading the model does, while it is set.
+    var beginFailure: (any Error)?
     let lines: AsyncStream<LiveLine>
     private let lock = NSLock()
     private var _holds = false
@@ -345,7 +401,9 @@ private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
         lock.withLock { !waiting.isEmpty }
     }
 
-    func begin() async throws {}
+    func begin() async throws {
+        if let beginFailure { throw beginFailure }
+    }
     func feed(_ chunk: MeetingAudioChunk) async {}
     func finish() async -> [MeetingTurn] {
         await heldUntilReleased()
