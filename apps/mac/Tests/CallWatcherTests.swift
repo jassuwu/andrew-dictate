@@ -141,6 +141,27 @@ final class CallWatcherTests: XCTestCase {
         XCTAssertEqual(watcher.currentCall, "zoom")
     }
 
+    // MARK: - a call ends
+
+    /// The watcher only asks. If nobody answers, the recording stays on and
+    /// nothing more is said about this call.
+    func testACallThatEndsWhileRecordingSuggestsStopOnce() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(0))
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(3))
+        _ = watcher.observe([zoom], isRecording: true, at: .seconds(100))
+
+        XCTAssertEqual(watcher.observe([], isRecording: true, at: .seconds(101)), [])
+        XCTAssertEqual(watcher.observe([], isRecording: true, at: .seconds(130)), [])
+        XCTAssertEqual(
+            watcher.observe([], isRecording: true, at: .seconds(131)),
+            [.stop("zoom")]
+        )
+        XCTAssertEqual(watcher.observe([], isRecording: true, at: .seconds(132)), [])
+        XCTAssertEqual(watcher.observe([], isRecording: true, at: .seconds(3_600)), [])
+    }
+
     /// A browser tab playing music is not a call, and neither is a podcast.
     func testAudioAloneIsNotACall() {
         var watcher = watcher()

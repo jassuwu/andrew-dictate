@@ -38,6 +38,7 @@ struct CallWatcher {
 
     private struct Call {
         let app: String
+        var quietSince: Duration?
     }
 
     private var call: Call?
@@ -59,7 +60,16 @@ struct CallWatcher {
         at now: Duration
     ) -> [Suggestion] {
         recording = isRecording
-        guard call == nil else {
+        if var current = call {
+            if !apps.contains(where: { $0.name == current.app }) {
+                let since = current.quietSince ?? now
+                current.quietSince = since
+                if now - since >= endAfter {
+                    call = nil
+                    return isRecording ? [.stop(current.app)] : []
+                }
+                call = current
+            }
             return []
         }
         guard let app = apps.first(where: \.looksLikeACall) else {
@@ -71,7 +81,7 @@ struct CallWatcher {
         guard now - since >= startAfter else {
             return []
         }
-        call = Call(app: app.name)
+        call = Call(app: app.name, quietSince: nil)
         return isRecording ? [] : [.record(app.name)]
     }
 }
