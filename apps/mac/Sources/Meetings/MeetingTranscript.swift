@@ -36,6 +36,8 @@ struct MeetingTranscript: Equatable, Sendable {
     /// SPEC §4 extended: a transcript with holes says so, in its front matter
     /// and in its body.
     var complete: Bool { gaps.isEmpty }
+
+    var ended: Date { started.addingTimeInterval(duration.totalSeconds) }
 }
 
 /// The transcript on disk: `<parent>/meetings/2026-08/2026-08-29-1402-zoom.md`,
@@ -104,6 +106,7 @@ enum MeetingTranscriptFile {
             "---",
             "app: \(transcript.app)",
             "started: \(iso8601(timeZone).string(from: transcript.started))",
+            "ended: \(iso8601(timeZone).string(from: transcript.ended))",
             "duration_s: \(seconds(transcript.duration))",
             "engine: \(transcript.engine)",
             "complete: \(transcript.complete)",

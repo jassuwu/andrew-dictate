@@ -65,6 +65,7 @@ final class MeetingTranscriptTests: XCTestCase {
         ---
         app: zoom
         started: 2026-08-29T14:02:11+05:30
+        ended: 2026-08-29T15:44:11+05:30
         duration_s: 6120
         engine: whisper-large-v3-turbo
         complete: true
@@ -96,6 +97,7 @@ final class MeetingTranscriptTests: XCTestCase {
         ---
         app: chrome
         started: 2026-08-29T14:02:11+05:30
+        ended: 2026-08-29T14:03:51+05:30
         duration_s: 100
         engine: whisper-large-v3-turbo
         complete: false
@@ -179,6 +181,17 @@ final class MeetingTranscriptTests: XCTestCase {
 
             [00:00:14] them: thanks.
             """)
+    }
+
+    // MARK: - front matter
+
+    func testTheFrontMatterSaysWhenTheMeetingEnded() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(duration: .seconds(6120), turns: []), in: parent, timeZone: tz)
+
+        let front = try frontMatter(of: url)
+        XCTAssertEqual(front["started"], "2026-08-29T14:02:11+05:30")
+        XCTAssertEqual(front["ended"], "2026-08-29T15:44:11+05:30")
     }
 
     // MARK: - round trip
@@ -292,6 +305,21 @@ final class MeetingTranscriptTests: XCTestCase {
         let text = try String(contentsOf: url, encoding: .utf8)
         let close = try XCTUnwrap(text.range(of: "\n---\n"))
         return text[close.upperBound...].trimmingCharacters(in: .newlines)
+    }
+
+    /// The `key: value` lines between the two `---`, by key. List items such
+    /// as the gaps have no key and are left out.
+    private func frontMatter(of url: URL) throws -> [String: String] {
+        let lines = try String(contentsOf: url, encoding: .utf8)
+            .components(separatedBy: "\n")
+        let close = try XCTUnwrap(lines.dropFirst().firstIndex(of: "---"))
+        var fields: [String: String] = [:]
+        for line in lines[1..<close] {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            fields[String(line[..<colon])] = line[line.index(after: colon)...]
+                .trimmingCharacters(in: .whitespaces)
+        }
+        return fields
     }
 
     private func permissions(of url: URL) -> Int? {
