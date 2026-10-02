@@ -118,6 +118,7 @@ targets:
       - Sources/Archive/ArchiveSettingsModel.swift
       - Sources/About/UpdateCheck.swift
       - Sources/About/UpdateOffer.swift
+      - Sources/About/DailyUpdateCheck.swift
       - path: Sources/Meetings
         excludes:
           - LiveTranscriptView.swift

@@ -329,6 +329,143 @@ final class UpdateCheckTests: XCTestCase {
         XCTAssertEqual(answers, [.noVersion, .noVersion, .noVersion])
     }
 
+    // MARK: - the daily check: the clock, the menu, the switch
+
+    @MainActor
+    func testTheFirstCheckSendsTheVersionAndOffersTheLine() async {
+        let world = CheckWorld(now: noon)
+        world.answer = .latest("0.9.5")
+
+        await world.check.tick()
+
+        XCTAssertEqual(
+            world.asked.map { $0.url?.absoluteString },
+            ["https://dictate.jass.gg/api/latest?version=0.9.4"]
+        )
+        XCTAssertEqual(world.check.line?.title, "update to 0.9.5")
+        XCTAssertEqual(world.settings.updateCheckedAt, noon)
+    }
+
+    @MainActor
+    func testTheClockAsksOnceADay() async {
+        let world = CheckWorld(now: noon)
+
+        await world.check.tick()
+        world.now = noon.addingTimeInterval(hours(1))
+        await world.check.tick()
+        world.now = noon.addingTimeInterval(hours(23))
+        await world.check.tick()
+        XCTAssertEqual(world.asked.count, 1)
+
+        world.now = noon.addingTimeInterval(hours(24))
+        await world.check.tick()
+        XCTAssertEqual(world.asked.count, 2)
+    }
+
+    /// a mac that slept through the timer catches up the moment you look.
+    @MainActor
+    func testOpeningTheMenuOnAStaleCheckAsks() async {
+        let world = CheckWorld(now: noon)
+        world.settings.updateCheckedAt = noon.addingTimeInterval(-hours(30))
+
+        await world.check.menuOpened()
+
+        XCTAssertEqual(world.asked.count, 1)
+    }
+
+    @MainActor
+    func testOpeningTheMenuOnAFreshCheckDoesNotAsk() async {
+        let world = CheckWorld(now: noon)
+        world.settings.updateCheckedAt = noon.addingTimeInterval(-hours(2))
+
+        await world.check.menuOpened()
+
+        XCTAssertTrue(world.asked.isEmpty)
+    }
+
+    @MainActor
+    func testSwitchedOffItMakesNoRequestAndShowsNoLine() async {
+        let world = CheckWorld(now: noon)
+        world.settings.newestVersionSeen = "0.9.5"
+        world.settings.checksForUpdates = false
+
+        await world.check.tick()
+        await world.check.menuOpened()
+
+        XCTAssertTrue(world.asked.isEmpty)
+        XCTAssertNil(world.check.line)
+    }
+
+    @MainActor
+    func testSwitchingItOffTakesTheLineAway() async {
+        let world = CheckWorld(now: noon)
+        world.answer = .latest("0.9.5")
+        await world.check.tick()
+        XCTAssertNotNil(world.check.line)
+
+        world.settings.checksForUpdates = false
+
+        XCTAssertNil(world.check.line)
+    }
+
+    /// dictating, it waits; the next tick after the take is the one.
+    @MainActor
+    func testItWaitsOutADictation() async {
+        let world = CheckWorld(now: noon)
+        world.dictating = true
+
+        await world.check.tick()
+        await world.check.menuOpened()
+        XCTAssertTrue(world.asked.isEmpty)
+
+        world.dictating = false
+        await world.check.tick()
+        XCTAssertEqual(world.asked.count, 1)
+    }
+
+    /// offline is not today's check: on wake the timer fires before the
+    /// wi-fi is back, and a day of silence would follow.
+    @MainActor
+    func testAnUnreachableSiteIsAskedAgainOnTheNextTick() async {
+        let world = CheckWorld(now: noon)
+        world.answer = .unreachable
+
+        await world.check.tick()
+        XCTAssertNil(world.settings.updateCheckedAt)
+        XCTAssertNil(world.check.line)
+
+        world.answer = .latest("0.9.5")
+        world.now = noon.addingTimeInterval(hours(0.5))
+        await world.check.tick()
+        XCTAssertEqual(world.asked.count, 2)
+        XCTAssertEqual(world.check.line?.title, "update to 0.9.5")
+    }
+
+    /// a site that answers without a version still used up today's check,
+    /// and the version it said before is still the newest we know of.
+    @MainActor
+    func testAnAnswerWithoutAVersionKeepsTheLastLine() async {
+        let world = CheckWorld(now: noon)
+        world.settings.newestVersionSeen = "0.9.5"
+        world.answer = .noVersion
+
+        await world.check.tick()
+
+        XCTAssertEqual(world.settings.updateCheckedAt, noon)
+        XCTAssertEqual(world.check.line?.title, "update to 0.9.5")
+    }
+
+    /// yesterday's answer is still on the menu after a relaunch.
+    @MainActor
+    func testTheLineSurvivesARelaunch() {
+        let world = CheckWorld(now: noon)
+        world.settings.newestVersionSeen = "0.9.5"
+
+        let relaunched = world.makeCheck()
+
+        XCTAssertEqual(relaunched.line?.title, "update to 0.9.5")
+    }
+
     /// a throwaway `Andrew Dictate.app`, with or without a readable plist.
     private func makeBundle(
         version: String?,
@@ -354,5 +491,45 @@ final class UpdateCheckTests: XCTestCase {
             try data.write(to: plist)
         }
         return bundle
+    }
+}
+
+/// a daily check with the clock, the network and dictation in the test's
+/// hands: running 0.9.4 from a dmg, nothing newer on disk, and a site that
+/// answers 0.9.4 until told otherwise.
+@MainActor
+private final class CheckWorld {
+    let settings: AppSettings
+    var now: Date
+    var dictating = false
+    var answer: UpdateOffer.Answer = .latest("0.9.4")
+    private(set) var asked: [URLRequest] = []
+    private(set) lazy var check: DailyUpdateCheck = makeCheck()
+    private let suiteName = "AndrewDictateTests.UpdateCheck.\(UUID().uuidString)"
+
+    init(now: Date) {
+        settings = AppSettings(
+            userDefaults: UserDefaults(suiteName: suiteName)!
+        )
+        self.now = now
+    }
+
+    deinit {
+        UserDefaults.standard.removePersistentDomain(forName: suiteName)
+    }
+
+    func makeCheck() -> DailyUpdateCheck {
+        DailyUpdateCheck(
+            settings: settings,
+            runningVersion: "0.9.4",
+            onDiskVersion: { nil },
+            install: .dmg,
+            now: { [unowned self] in now },
+            isDictating: { [unowned self] in dictating },
+            ask: { [unowned self] request in
+                asked.append(request)
+                return answer
+            }
+        )
     }
 }
