@@ -203,9 +203,6 @@ private final class CaptureEngine: @unchecked Sendable {
     private let firstBufferNotifier = AudioFirstBufferNotifier()
     private let bound = OSAllocatedUnfairLock<MicDescription?>(initialState: nil)
     private let discarded = OSAllocatedUnfairLock(initialState: false)
-    /// the engine reconfigured itself, so it has stopped and is not asked
-    /// to pause again: only what it already heard is taken from it.
-    private let reconfigured = OSAllocatedUnfairLock(initialState: false)
 
     // on `queue` only.
     /// the system default input when the engine was built, which is the
@@ -215,6 +212,11 @@ private final class CaptureEngine: @unchecked Sendable {
     private var inputFormat: AVAudioFormat?
     private var captureStorage: AudioCaptureStorage?
     private var isRecording = false
+    /// started and not paused since: pre-roll listening, or a take.
+    private var isListening = false
+    /// the engine reconfigured itself for real, so it is not asked to
+    /// pause again: only what it already heard is taken from it.
+    private var reconfigured = false
     private var configurationObserver: NSObjectProtocol?
 
     init(preRollEnabled: Bool) {
@@ -299,6 +301,7 @@ private final class CaptureEngine: @unchecked Sendable {
                 try engine.start()
             }
             isRecording = true
+            isListening = true
         } catch {
             firstBufferNotifier.disarm()
             storage.discard()
@@ -316,8 +319,11 @@ private final class CaptureEngine: @unchecked Sendable {
             throw AudioRecorderError.notRecording
         }
 
-        if !preRollEnabled, !reconfigured.withLock({ $0 }) {
-            engine.pause()
+        if !preRollEnabled {
+            if !reconfigured {
+                engine.pause()
+            }
+            isListening = false
         }
         firstBufferNotifier.disarm()
         isRecording = false
@@ -335,8 +341,11 @@ private final class CaptureEngine: @unchecked Sendable {
             return
         }
 
-        if !preRollEnabled, !reconfigured.withLock({ $0 }) {
-            engine?.pause()
+        if !preRollEnabled {
+            if !reconfigured {
+                engine?.pause()
+            }
+            isListening = false
         }
         firstBufferNotifier.disarm()
         isRecording = false
@@ -354,6 +363,7 @@ private final class CaptureEngine: @unchecked Sendable {
                 return
             }
             try engine.start()
+            isListening = true
             noteBoundDevice()
         } catch {
             recorderLogger.error(
@@ -459,23 +469,33 @@ private final class CaptureEngine: @unchecked Sendable {
         }
     }
 
-    /// posted on whatever thread the engine likes. the engine has already
-    /// stopped itself; the main actor decides what that means for a take.
+    /// posted on whatever thread the engine likes, and looked at on the
+    /// queue. binding the input to a device by name makes the engine let go
+    /// of its own default-device aggregate, and it says so once, just after
+    /// it first starts, still running on the mic it was given: that is the
+    /// binding's echo, not news. an engine that stopped under a take, or
+    /// moved to another device, is — and the main actor decides what that
+    /// means for a take.
     private func engineReconfigured() {
-        guard !isDiscarded else {
-            return
+        queue.async { [self] in
+            guard !isDiscarded, let engine else {
+                return
+            }
+            if engine.isRunning == isListening,
+               let requestedDevice,
+               boundDeviceID() == requestedDevice {
+                recorderLogger.info("audio capture's engine settled on the bound mic")
+                return
+            }
+            reconfigured = true
+            recorderLogger.notice("audio capture's engine reconfigured itself")
+            configurationChangeNotifier.notify()
         }
-        reconfigured.withLock { $0 = true }
-        recorderLogger.notice("audio capture's engine reconfigured itself")
-        configurationChangeNotifier.notify()
     }
 
-    /// the device the engine's input unit actually opened, read back once
-    /// it is running. one that is not the device it was told to open is
-    /// the evidence of a race the binding lost.
-    private func noteBoundDevice() {
+    private func boundDeviceID() -> AudioObjectID? {
         guard let unit = engine?.inputNode.audioUnit else {
-            return
+            return nil
         }
         var device = AudioObjectID(kAudioObjectUnknown)
         var size = UInt32(MemoryLayout<AudioObjectID>.size)
@@ -487,6 +507,16 @@ private final class CaptureEngine: @unchecked Sendable {
             &device,
             &size
         ) == noErr else {
+            return nil
+        }
+        return device
+    }
+
+    /// the device the engine's input unit actually opened, read back once
+    /// it is running. one that is not the device it was told to open is
+    /// the evidence of a race the binding lost.
+    private func noteBoundDevice() {
+        guard let device = boundDeviceID() else {
             return
         }
         let description = MicDescription(device: device)
@@ -507,6 +537,7 @@ private final class CaptureEngine: @unchecked Sendable {
         firstBufferNotifier.disarm()
         levelStorage.reset()
         isRecording = false
+        isListening = false
         if let configurationObserver {
             NotificationCenter.default.removeObserver(configurationObserver)
             self.configurationObserver = nil
