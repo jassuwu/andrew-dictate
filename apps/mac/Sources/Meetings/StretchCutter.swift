@@ -13,6 +13,19 @@ struct Stretch: Sendable {
     let at: Duration
     /// Meeting time just past the last sample.
     let end: Duration
+    /// Where the detector heard the speech end: `end` without the post-roll
+    /// the cutter added after it. A stretch is judged for bleed up to here,
+    /// as it was before there was a post-roll — the quiet after a voice is
+    /// not evidence of whose it was.
+    let speechEnd: Duration
+
+    init(side: Side, samples: [Float], at: Duration, end: Duration, speechEnd: Duration? = nil) {
+        self.side = side
+        self.samples = samples
+        self.at = at
+        self.end = end
+        self.speechEnd = min(end, max(at, speechEnd ?? end))
+    }
 }
 
 /// One side of a meeting, cut into stretches as it arrives.
@@ -41,6 +54,12 @@ struct StretchCutter {
     /// Speech is cut from a little before the detector heard it begin, so
     /// the first word keeps its first consonant.
     static let preRoll = samples(in: .milliseconds(300))
+    /// And to a little after it heard it end, so the last word keeps its
+    /// last syllable: Silero says speech ended where the first quarter
+    /// second it judged quiet began, and a syllable fading out inside that
+    /// quarter is quiet to it. Never past what has been heard, and never
+    /// into the next stretch.
+    static let postRoll = samples(in: .milliseconds(150))
     /// Quiet kept while nobody is speaking: the pre-roll, and room for a
     /// detector that says speech began a little after it did.
     static let keptWhileQuiet = samples(in: .seconds(2))
@@ -87,17 +106,19 @@ struct StretchCutter {
         }
         held.append(contentsOf: samples)
 
-        for edge in edges {
+        for (index, edge) in edges.enumerated() {
             switch edge {
             case .began(let start):
                 guard openFrom == nil else { continue }
                 openFrom = max(heldFrom, min(start, heard) - Self.preRoll)
             case .ended(let end):
                 guard openFrom != nil else { continue }
-                let end = min(end, heard)
+                let said = min(end, heard)
+                let next = Self.nextStart(after: index, in: edges)
+                let end = min(max(said, min(said + Self.postRoll, next)), heard)
                 done += cutAtTheCeiling(before: end)
                 if let from = openFrom, end > from {
-                    done.append(cut(from, end))
+                    done.append(cut(from, end, said: said))
                 }
                 openFrom = nil
             }
@@ -121,6 +142,19 @@ struct StretchCutter {
     }
 
     // MARK: -
+
+    /// Where speech begins again after edge `index`, or `.max` when these
+    /// edges do not say: the post-roll stops there. A start the detector
+    /// has not found yet comes after the quiet it needs to end a stretch,
+    /// which for Silero is longer than the post-roll; and the next stretch
+    /// never begins before the sample this one was cut at, so the two never
+    /// share one either way.
+    private static func nextStart(after index: Int, in edges: [SpeechEdge]) -> Int {
+        for edge in edges[(index + 1)...] {
+            if case .began(let start) = edge { return start }
+        }
+        return .max
+    }
 
     /// Talk that runs past the ceiling is cut at a quiet moment shortly
     /// before it, and carries on in a new stretch from the very next sample:
@@ -173,12 +207,15 @@ struct StretchCutter {
         return sum
     }
 
-    private mutating func cut(_ from: Int, _ end: Int) -> Stretch {
+    /// `said` is where the detector heard the speech end, when the stretch
+    /// goes on past it.
+    private mutating func cut(_ from: Int, _ end: Int, said: Int? = nil) -> Stretch {
         let stretch = Stretch(
             side: side,
             samples: Array(held[(from - heldFrom)..<(end - heldFrom)]),
             at: time(of: from),
-            end: time(of: end))
+            end: time(of: end),
+            speechEnd: said.map { time(of: $0) })
         drop(before: end)
         return stretch
     }

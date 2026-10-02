@@ -7,7 +7,8 @@ import XCTest
 ///
 /// Speech is a tone, silence is zeros, chunks are 100 ms, and the loudness
 /// detector has a 0.5 s hangover: a phrase said from 1.3 s to 2.5 s is cut
-/// from 1.0 s, with its pre-roll, to 2.5 s — a stretch of 1.5 s.
+/// from 1.0 s, with its pre-roll, to 2.65 s, with its post-roll — a
+/// stretch of 1.65 s.
 final class StretchCoverageTests: XCTestCase {
     func testTheSpeechCutAndReadIsCountedPerSide() async throws {
         let engine = WordsEngine()
@@ -21,10 +22,10 @@ final class StretchCoverageTests: XCTestCase {
         _ = await transcriber.finish()
 
         let tally = await transcriber.tally
-        XCTAssertEqual(tally.speechYou, .seconds(1.5))
-        XCTAssertEqual(tally.readYou, .seconds(1.5))
-        XCTAssertEqual(tally.speechThem, .seconds(1))
-        XCTAssertEqual(tally.readThem, .seconds(1))
+        XCTAssertEqual(tally.speechYou, .milliseconds(1_650))
+        XCTAssertEqual(tally.readYou, .milliseconds(1_650))
+        XCTAssertEqual(tally.speechThem, .milliseconds(1_150))
+        XCTAssertEqual(tally.readThem, .milliseconds(1_150))
     }
 
     /// The engine threw on your stretch twice and let it go: it was speech,
@@ -42,10 +43,10 @@ final class StretchCoverageTests: XCTestCase {
         _ = await transcriber.finish()
 
         let tally = await transcriber.tally
-        XCTAssertEqual(tally.speechYou, .seconds(1.5))
+        XCTAssertEqual(tally.speechYou, .milliseconds(1_650))
         XCTAssertEqual(tally.readYou, .zero)
-        XCTAssertEqual(tally.speechThem, .seconds(1))
-        XCTAssertEqual(tally.readThem, .seconds(1))
+        XCTAssertEqual(tally.speechThem, .milliseconds(1_150))
+        XCTAssertEqual(tally.readThem, .milliseconds(1_150))
     }
 
     /// The model never loaded, and the meeting stopped with its speech still
@@ -64,9 +65,9 @@ final class StretchCoverageTests: XCTestCase {
 
         XCTAssertEqual(turns, [])
         let tally = await transcriber.tally
-        XCTAssertEqual(tally.speechYou, .seconds(1.5))
+        XCTAssertEqual(tally.speechYou, .milliseconds(1_650))
         XCTAssertEqual(tally.readYou, .zero)
-        XCTAssertEqual(tally.speechThem, .seconds(1))
+        XCTAssertEqual(tally.speechThem, .milliseconds(1_150))
         XCTAssertEqual(tally.readThem, .zero)
     }
 
@@ -83,10 +84,10 @@ final class StretchCoverageTests: XCTestCase {
         _ = try await transcriber.transcribe(you: you, them: them)
 
         let tally = await transcriber.tally
-        XCTAssertEqual(tally.speechYou, .seconds(1.5))
-        XCTAssertEqual(tally.readYou, .seconds(1.5))
-        XCTAssertEqual(tally.speechThem, .seconds(1))
-        XCTAssertEqual(tally.readThem, .seconds(1))
+        XCTAssertEqual(tally.speechYou, .milliseconds(1_650))
+        XCTAssertEqual(tally.readYou, .milliseconds(1_650))
+        XCTAssertEqual(tally.speechThem, .milliseconds(1_150))
+        XCTAssertEqual(tally.readThem, .milliseconds(1_150))
     }
 
     // MARK: - building a meeting

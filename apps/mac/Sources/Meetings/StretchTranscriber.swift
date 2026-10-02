@@ -252,7 +252,7 @@ actor StretchTranscriber: MeetingTranscriber {
         var kept: [Stretch] = []
         for stretch in stretches {
             if stretch.side == .you,
-               BleedJudge.verdict(mic: mic, far: far, from: stretch.at, to: stretch.end) == .drop
+               BleedJudge.verdict(mic: mic, far: far, from: stretch.at, to: stretch.speechEnd) == .drop
             {
                 tally.bleed += 1
             } else {

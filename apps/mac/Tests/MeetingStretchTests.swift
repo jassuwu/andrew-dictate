@@ -9,9 +9,10 @@ import XCTest
 /// handed is, so a stretch cut in the wrong place comes back as the wrong
 /// words, or none.
 ///
-/// The numbers in here follow from three settings: chunks of 100 ms, a
+/// The numbers in here follow from four settings: chunks of 100 ms, a
 /// loudness detector with a 0.5 s hangover, and the cutter's 0.3 s of
-/// pre-roll. A phrase said from 1.3 s is stamped 1.0 s.
+/// pre-roll and 0.15 s of post-roll. A phrase said from 1.3 s to 2.5 s is
+/// stamped 1.0 s and cut to 2.65.
 ///
 /// A tone that never changes has no pattern to follow, so where one side has
 /// to be told from a copy of the other, speech is a tone in bursts — a few
@@ -135,8 +136,9 @@ final class MeetingStretchTests: XCTestCase {
 
     /// Every stretch is handed to the engine once, and no sample is in two
     /// of them. With a hangover shorter than the pre-roll, "two" begins
-    /// 0.2 s after "one" ended: its pre-roll would reach back into "one",
-    /// and stops where "one" did instead.
+    /// 0.2 s after "one" ended, and "one" goes on 0.15 s past its end: the
+    /// pre-roll of "two" would reach back into "one", and stops where "one"
+    /// did instead, at 2.15.
     func testEachStretchReachesTheEngineOnceAndNoAudioTwice() async throws {
         let c = coordinator(stretches(hangover: .milliseconds(200)))
         c.start()
@@ -149,8 +151,8 @@ final class MeetingStretchTests: XCTestCase {
         ], through: 5.5, on: c)
         await waitFor { c.liveLines.count == 3 }
 
-        XCTAssertEqual(handed(), ["one 16000", "two 16000", "three 24000"])
-        XCTAssertEqual(live(c), ["you 1.0 one", "you 2.0 two", "them 3.0 three"])
+        XCTAssertEqual(handed(), ["one 18400", "two 16000", "three 26400"])
+        XCTAssertEqual(live(c), ["you 1.0 one", "you 2.1 two", "them 3.0 three"])
         c.stop()
         let lines = try await savedLines()
         // one speaker carrying on is one paragraph in the file; the live
@@ -162,9 +164,49 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(handed().count, 3, "stopping decodes nothing again")
     }
 
+    /// A detector says speech ended where it first heard quiet — Silero, at
+    /// the start of the first quarter second it judged quiet — and the last
+    /// syllable, fading under that, is quiet to it. The stretch goes on
+    /// 150 ms past that end: said from 1.3 s, fading out from 2.5 to 2.6, it
+    /// is heard to end at 2.5 and cut from 1.0 to 2.65.
+    func testAStretchGoesOnALittlePastWhereTheDetectorHeardItEnd() async throws {
+        let c = coordinator(stretches())
+        c.start()
+        await source.awaitStart()
+
+        await play([
+            you("the deploy is blocked", from: 1.3, to: 2.5),
+            you("the deploy is blocked", from: 2.5, to: 2.6).fading(),
+        ], through: 3.5, on: c)
+        await waitFor { c.liveLines.count == 1 }
+
+        XCTAssertEqual(handed(), ["the deploy is blocked 26400"])
+        XCTAssertEqual(live(c), ["you 1.0 the deploy is blocked"])
+    }
+
+    /// The little past the end is never another stretch's: a detector that
+    /// hears speech again sooner than that has the next one begin where
+    /// this one ends, with no sample in both. With a 100 ms hangover "one"
+    /// is heard to end at 2.0 s once 2.1 has been heard, and is cut there,
+    /// at what has been heard; "two" begins on the next sample.
+    func testWhatAStretchGoesOnForIsNeverInTheNext() async throws {
+        let c = coordinator(stretches(hangover: .milliseconds(100)))
+        c.start()
+        await source.awaitStart()
+
+        await play([
+            you("one", from: 1.3, to: 2.0),
+            you("two", from: 2.1, to: 3.0),
+        ], through: 4.0, on: c)
+        await waitFor { c.liveLines.count == 2 }
+
+        XCTAssertEqual(handed(), ["one 17600", "two 16000"])
+        XCTAssertEqual(live(c), ["you 1.0 one", "you 2.1 two"])
+    }
+
     /// Talk past the ceiling is cut at it, and the next stretch starts on
-    /// the very next sample: 1.0 to 3.0, 3.0 to 5.0, 5.0 to 6.4 — 5.4 s
-    /// handed over for 5.4 s said, pre-roll included.
+    /// the very next sample: 1.0 to 3.0, 3.0 to 5.0, 5.0 to 6.55 — 5.55 s
+    /// handed over for 5.1 s said, pre-roll and post-roll included.
     func testSpeechLongerThanTheCeilingIsCutIntoStretchesWithNothingLostBetween() async throws {
         let c = coordinator(stretches(ceiling: .seconds(2)))
         c.start()
@@ -176,7 +218,7 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(handed(), [
             "and another thing 32000",
             "and another thing 32000",
-            "and another thing 22400",
+            "and another thing 24800",
         ])
         XCTAssertEqual(live(c), [
             "you 1.0 and another thing",
@@ -194,9 +236,9 @@ final class MeetingStretchTests: XCTestCase {
     /// is made in the breath, not at the ceiling in the middle of a word.
     /// Said from 1.3 s with 0.1 s of quiet at 10.0, it is cut 1.0 to 10.075
     /// — the middle of the later 50 ms of the quiet, the one nearer the
-    /// ceiling — and goes on from the very next sample to 14.0: 13 s handed
-    /// over for 13 s said. Cut at the ceiling, at 11.0, the first stretch
-    /// would hold both phrases and be heard as the louder one.
+    /// ceiling — and goes on from the very next sample to 14.15: nothing
+    /// said is left out between the two. Cut at the ceiling, at 11.0, the
+    /// first stretch would hold both phrases and be heard as the louder one.
     func testTalkPastTheCeilingIsCutInAQuietMomentBeforeIt() async throws {
         let c = coordinator(stretches(ceiling: .seconds(10)))
         c.start()
@@ -208,7 +250,7 @@ final class MeetingStretchTests: XCTestCase {
         ], through: 15.0, on: c)
         await waitFor { c.liveLines.count == 2 }
 
-        XCTAssertEqual(handed(), ["i think the deploy 145200", "is blocked 62800"])
+        XCTAssertEqual(handed(), ["i think the deploy 145200", "is blocked 65200"])
         XCTAssertEqual(live(c), ["you 1.0 i think the deploy", "you 10.1 is blocked"])
         c.stop()
         let lines = try await savedLines()
@@ -217,7 +259,7 @@ final class MeetingStretchTests: XCTestCase {
 
     /// No moment in the four seconds before the ceiling is quieter than the
     /// ceiling itself, so that is where it is cut: 1.0 to 11.0, then on from
-    /// the next sample to 14.0. A tone is never exactly as loud from one
+    /// the next sample to 14.15. A tone is never exactly as loud from one
     /// 50 ms to the next; being a little quieter is not a breath.
     func testTalkWithNoQuietMomentBeforeTheCeilingIsCutAtIt() async throws {
         let c = coordinator(stretches(ceiling: .seconds(10)))
@@ -227,7 +269,7 @@ final class MeetingStretchTests: XCTestCase {
         await play([you("and another thing", from: 1.3, to: 14.0)], through: 15.0, on: c)
         await waitFor { c.liveLines.count == 2 }
 
-        XCTAssertEqual(handed(), ["and another thing 160000", "and another thing 48000"])
+        XCTAssertEqual(handed(), ["and another thing 160000", "and another thing 50400"])
         XCTAssertEqual(live(c), ["you 1.0 and another thing", "you 11.0 and another thing"])
         c.stop()
         let lines = try await savedLines()
@@ -381,9 +423,9 @@ final class MeetingStretchTests: XCTestCase {
         await waitFor { c.liveLines.count == 2 }
 
         XCTAssertEqual(handed(), [
-            "the deploy is blocked 24000",
-            "the deploy is blocked 24000",
-            "since when 16000",
+            "the deploy is blocked 26400",
+            "the deploy is blocked 26400",
+            "since when 18400",
         ])
         XCTAssertEqual(live(c), ["you 1.0 the deploy is blocked", "them 3.0 since when"])
         c.stop()
@@ -410,10 +452,10 @@ final class MeetingStretchTests: XCTestCase {
         await waitFor { c.liveLines.count == 2 }
 
         XCTAssertEqual(handed(), [
-            "the deploy is blocked 24000",
-            "the deploy is blocked 24000",
-            "since when 16000",
-            "since this morning 16000",
+            "the deploy is blocked 26400",
+            "the deploy is blocked 26400",
+            "since when 18400",
+            "since this morning 18400",
         ])
         XCTAssertEqual(live(c), ["them 3.0 since when", "you 5.0 since this morning"])
         c.stop()
@@ -446,7 +488,7 @@ final class MeetingStretchTests: XCTestCase {
         // engine silent: the one stretch is the room noise.
         XCTAssertEqual(tally, StretchTally(
             decodedYou: 1, quietDropped: 1,
-            speechYou: .milliseconds(2_300), readYou: .milliseconds(2_300)))
+            speechYou: .milliseconds(2_450), readYou: .milliseconds(2_450)))
         c.stop()
         let lines = try await savedLines()
         XCTAssertEqual(lines, [])
@@ -607,10 +649,10 @@ final class MeetingStretchTests: XCTestCase {
 
         XCTAssertEqual(spool.orphans().map(\.manifest.attempts), [1])
         XCTAssertEqual(handed(), [
-            "are you recording this 24000",
-            "are you recording this 24000",
-            "i am now 16000",
-            "i am now 16000",
+            "are you recording this 26400",
+            "are you recording this 26400",
+            "i am now 18400",
+            "i am now 18400",
         ])
         XCTAssertEqual(
             MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).count, 0)
@@ -643,10 +685,10 @@ final class MeetingStretchTests: XCTestCase {
 
         let lines = try await savedLines()
         XCTAssertEqual(lines, ["[00:00:01] them: are we all here"])
-        XCTAssertEqual(handed(), ["are we all here 52800"])
+        XCTAssertEqual(handed(), ["are we all here 55200"])
         let tally = await transcriber.tally
         XCTAssertEqual(tally, StretchTally(
-            decodedThem: 1, bleed: 1, speechThem: .milliseconds(3_300), readThem: .milliseconds(3_300)))
+            decodedThem: 1, bleed: 1, speechThem: .milliseconds(3_450), readThem: .milliseconds(3_450)))
     }
 
     // MARK: - the numbers
@@ -685,8 +727,8 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(tally, StretchTally(
             decodedYou: 2, decodedThem: 0, failed: 1,
             mostBehind: .seconds(13), lastBehind: .seconds(1),
-            speechYou: .seconds(2.5), speechThem: .seconds(1),
-            readYou: .seconds(2.5), readThem: .zero))
+            speechYou: .milliseconds(2_800), speechThem: .milliseconds(1_150),
+            readYou: .milliseconds(2_800), readThem: .zero))
     }
 
     // MARK: - the far side coming back through the mic
@@ -697,7 +739,9 @@ final class MeetingStretchTests: XCTestCase {
     /// copy is let go before it is decoded; they keep their one line.
     ///
     /// The far side says it from 1.3 to 4.3 s, the mic has it from 1.38 to
-    /// 4.38: a stretch 1.08 to 4.38 that is only theirs.
+    /// 4.38: a stretch 1.08 to 4.38 that is only theirs. It is judged up to
+    /// there, where the mic was heard to stop, and not over the quiet the
+    /// post-roll adds after it.
     func testTheFarSideComingBackThroughTheMicIsNotYou() async throws {
         let transcriber = stretches(threshold: Self.keen)
         let c = coordinator(transcriber)
@@ -710,11 +754,11 @@ final class MeetingStretchTests: XCTestCase {
         await waitFor { c.liveLines.count == 1 }
 
         XCTAssertEqual(live(c), ["them 1.0 are we all here"])
-        XCTAssertEqual(handed(), ["are we all here 52800"])
+        XCTAssertEqual(handed(), ["are we all here 55200"])
         let tally = await transcriber.tally
         // the copy let go is not speech of yours.
         XCTAssertEqual(tally, StretchTally(
-            decodedThem: 1, bleed: 1, speechThem: .milliseconds(3_300), readThem: .milliseconds(3_300)))
+            decodedThem: 1, bleed: 1, speechThem: .milliseconds(3_450), readThem: .milliseconds(3_450)))
         c.stop()
         let lines = try await savedLines()
         XCTAssertEqual(lines, ["[00:00:01] them: are we all here"])
@@ -742,12 +786,12 @@ final class MeetingStretchTests: XCTestCase {
             "them 1.0 are we all here",
             "you 1.1 no wait that is wrong",
         ])
-        XCTAssertEqual(handed(), ["are we all here 52800", "no wait that is wrong 52800"])
+        XCTAssertEqual(handed(), ["are we all here 55200", "no wait that is wrong 55200"])
         let tally = await transcriber.tally
         XCTAssertEqual(tally, StretchTally(
             decodedYou: 1, decodedThem: 1,
-            speechYou: .milliseconds(3_300), speechThem: .milliseconds(3_300),
-            readYou: .milliseconds(3_300), readThem: .milliseconds(3_300)))
+            speechYou: .milliseconds(3_450), speechThem: .milliseconds(3_450),
+            readYou: .milliseconds(3_450), readThem: .milliseconds(3_450)))
         c.stop()
         let lines = try await savedLines()
         XCTAssertEqual(lines, [
@@ -774,12 +818,12 @@ final class MeetingStretchTests: XCTestCase {
         await waitFor { c.liveLines.count == 2 }
 
         XCTAssertEqual(live(c), ["them 1.0 are we all here", "you 3.0 wait one second"])
-        XCTAssertEqual(handed(), ["are we all here 24000", "wait one second 20800"])
+        XCTAssertEqual(handed(), ["are we all here 26400", "wait one second 23200"])
         let tally = await transcriber.tally
         XCTAssertEqual(tally, StretchTally(
             decodedYou: 1, decodedThem: 1, bleed: 1,
-            speechYou: .milliseconds(1_300), speechThem: .seconds(1.5),
-            readYou: .milliseconds(1_300), readThem: .seconds(1.5)))
+            speechYou: .milliseconds(1_450), speechThem: .milliseconds(1_650),
+            readYou: .milliseconds(1_450), readThem: .milliseconds(1_650)))
         c.stop()
         let lines = try await savedLines()
         XCTAssertEqual(lines, [
@@ -789,10 +833,10 @@ final class MeetingStretchTests: XCTestCase {
     }
 
     /// "Yes", said over the far side: 0.16 s of tone and 0.3 s of pre-roll,
-    /// 0.46 s in all, nine frames to compare. Nine frames of loudness agree
-    /// by chance as easily as by being a copy — this one agrees at 0.84 with
-    /// what they were saying — so a stretch this short is kept, whatever the
-    /// comparison says.
+    /// 0.46 s to where it was heard to end, nine frames to compare. Nine
+    /// frames of loudness agree by chance as easily as by being a copy —
+    /// this one agrees at 0.84 with what they were saying — so a stretch
+    /// this short is kept, whatever the comparison says.
     func testAMicStretchTooShortToJudgeIsKept() async throws {
         let transcriber = stretches()
         let c = coordinator(transcriber)
@@ -805,12 +849,12 @@ final class MeetingStretchTests: XCTestCase {
         await waitFor { c.liveLines.count == 2 }
 
         XCTAssertEqual(live(c), ["you 1.9 yes", "them 1.0 are we all here"])
-        XCTAssertEqual(handed(), ["yes 7360", "are we all here 68800"])
+        XCTAssertEqual(handed(), ["yes 9760", "are we all here 71200"])
         let tally = await transcriber.tally
         XCTAssertEqual(tally, StretchTally(
             decodedYou: 1, decodedThem: 1,
-            speechYou: .milliseconds(460), speechThem: .milliseconds(4_300),
-            readYou: .milliseconds(460), readThem: .milliseconds(4_300)))
+            speechYou: .milliseconds(610), speechThem: .milliseconds(4_450),
+            readYou: .milliseconds(610), readThem: .milliseconds(4_450)))
         c.stop()
         let lines = try await savedLines()
         XCTAssertEqual(lines, ["[00:00:01] them: are we all here", "[00:00:01] you: yes"])
@@ -1030,6 +1074,12 @@ final class MeetingStretchTests: XCTestCase {
             Said(
                 side: .you, phrase: phrase, from: from + delay, to: to + delay,
                 voice: voice, scale: scale)
+        }
+
+        /// The end of a word trailing off: a tenth as loud, under any
+        /// detector's threshold but the faint one.
+        func fading() -> Said {
+            Said(side: side, phrase: phrase, from: from, to: to, voice: voice, scale: 0.1)
         }
     }
 

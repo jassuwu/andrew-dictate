@@ -92,7 +92,10 @@ actor SileroDetector: SpeechDetector {
     private var judged = 0
 
     /// No padding of its own: the cutter already reaches 300 ms back before
-    /// speech begins, and Silero's padding would come on top of it.
+    /// speech begins and 150 ms on past where it ends, and Silero's padding
+    /// would come on top of both. Its end is the start of the first frame
+    /// it judged quiet, so a last syllable fading out inside that frame is
+    /// the cutter's post-roll to keep.
     ///
     /// A pause between two sentences should end a stretch: about 0.6 s.
     /// Silero counts quiet from the end of the first quiet frame, a frame
