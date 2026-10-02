@@ -3,6 +3,9 @@ import OSLog
 import Foundation
 import AppKit
 import AVFoundation
+#if DEBUG
+import notify
+#endif
 
 struct HotkeyDetection: Equatable, Sendable {
     let sequence: Int
@@ -481,6 +484,7 @@ final class DictationCoordinator: ObservableObject {
                 }
             }
         }
+        listenForTheMeetingToggle()
         #endif
         // "fix a word…" is the menu's only time-sensitive action, and it used
         // to be grey until this session's first dictation — while the words
@@ -2096,6 +2100,32 @@ extension DictationCoordinator {
         meetings.withdrawNudge()
         meetings.stop()
     }
+
+    #if DEBUG
+    /// Development only, compiled out of release like the lamp lab: a
+    /// meeting a script can start and stop without the mouse, so a check of
+    /// the real tap can run end to end. `notifyutil -p
+    /// gg.jass.dictate.dev.meeting.toggle` does what the menu would —
+    /// `record a meeting`, or `stop recording` while one runs.
+    private func listenForTheMeetingToggle() {
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "\(AppIdentity.bundleID).meeting.toggle", &token, .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.toggleMeetingForDevelopment()
+            }
+        }
+    }
+
+    private func toggleMeetingForDevelopment() {
+        if meetings.isRecording {
+            stopMeeting()
+        } else {
+            startMeeting()
+        }
+    }
+    #endif
 
     /// A quit can arrive from the menu, from ⌘Q, or from brew asking the app
     /// to go so it can replace the bundle under it (the cask's
