@@ -328,6 +328,9 @@ final class MeetingCoordinator: ObservableObject {
     /// The loudest far-side chunk since the probe sweep last looked, while
     /// one runs.
     private var sweepPeak: Float?
+    /// While the tap is lost: each side's energy and the samples since the
+    /// last line about them, and the meeting time that line was at.
+    private var whileLost: (you: Float, them: Float, samples: Int, since: Duration)?
     #endif
 
     /// A system event has already proven something happened, so this may be
@@ -846,6 +849,9 @@ final class MeetingCoordinator: ObservableObject {
         if let next = nextDiskLook, elapsed >= next {
             lookAtTheDisk(meeting)
         }
+        #if DEBUG
+        sayWhatArrivesWhileTheTapIsLost(chunk)
+        #endif
 
         if session.state == .recording || session.state == .rebuilding {
             await meeting.transcriber?.feed(withoutOurTones(chunk))
@@ -961,6 +967,8 @@ final class MeetingCoordinator: ObservableObject {
         if !stood {
             meeting.notes.note(label, at: at ?? elapsed)
         }
+        let said = MeetingEvent.problemBegan(problem).hudText ?? ""
+        logger.notice("problem: \(said, privacy: .public)")
         publish()
         onEvent?(.problemBegan(problem))
     }
@@ -972,6 +980,8 @@ final class MeetingCoordinator: ObservableObject {
     ) {
         guard let problem = session.problemCleared(kind) else { return }
         meeting.notes.note(label, at: at ?? elapsed)
+        let said = MeetingEvent.problemCleared(problem).hudText ?? ""
+        logger.notice("problem over: \(said, privacy: .public)")
         publish()
         onEvent?(.problemCleared(problem))
     }
@@ -1669,6 +1679,30 @@ extension MeetingCoordinator {
         guard let meeting = current, session.state == .recording else { return }
         logger.notice("development: the tap is taken for dead")
         loseTheTap(meeting, at: elapsed)
+    }
+
+    /// Development only: while the tap is lost, a line every five seconds
+    /// of meeting time with how loud each side was, so a check on a real
+    /// mac can see your side still arriving and the far side silent.
+    fileprivate func sayWhatArrivesWhileTheTapIsLost(_ chunk: MeetingAudioChunk) {
+        guard session.state == .rebuilding else {
+            whileLost = nil
+            return
+        }
+        var lost = whileLost ?? (0, 0, 0, chunk.at)
+        lost.you += chunk.you.reduce(0) { $0 + $1 * $1 }
+        lost.them += chunk.them.reduce(0) { $0 + $1 * $1 }
+        lost.samples += chunk.them.count
+        guard elapsed - lost.since >= .seconds(5), lost.samples > 0 else {
+            whileLost = lost
+            return
+        }
+        let n = Float(lost.samples)
+        let you = (lost.you / n).squareRoot()
+        let them = (lost.them / n).squareRoot()
+        let at = elapsed.totalSeconds
+        logger.notice("development: tap lost, at \(at, format: .fixed(precision: 1), privacy: .public) s: your side rms \(you, format: .fixed(precision: 5), privacy: .public), theirs \(them, format: .fixed(precision: 5), privacy: .public), over the last \(n / 16_000, format: .fixed(precision: 1), privacy: .public) s")
+        whileLost = nil
     }
 }
 #endif
