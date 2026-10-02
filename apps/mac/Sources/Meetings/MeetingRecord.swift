@@ -35,6 +35,9 @@ struct MeetingRecord: Equatable, Sendable {
     var gapsLostS: Double = 0
     var you = Side()
     var them = Side()
+    /// seconds from the stop to the transcript being on disk. nil when it
+    /// never got there, and for a recovery, which has no stop of its own.
+    var toDiskS: Double?
 }
 
 // MARK: - from a meeting
@@ -49,7 +52,8 @@ extension MeetingRecord {
         startedAt: Date,
         duration: Duration,
         gaps: [MeetingSession.Gap] = [],
-        turns: [MeetingTurn] = []
+        turns: [MeetingTurn] = [],
+        toDisk: Duration? = nil
     ) {
         self.init(
             outcome: outcome,
@@ -60,7 +64,8 @@ extension MeetingRecord {
             gaps: gaps.count,
             gapsLostS: Self.seconds(gaps.reduce(.zero) { $0 + $1.duration }),
             you: Self.side(.you, in: turns),
-            them: Self.side(.them, in: turns)
+            them: Self.side(.them, in: turns),
+            toDiskS: toDisk.map(Self.seconds)
         )
     }
 

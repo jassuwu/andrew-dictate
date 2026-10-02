@@ -119,6 +119,30 @@ final class MeetingRecordTests: XCTestCase {
         XCTAssertEqual(record.them, .init(turns: 2, words: 3))
     }
 
+    /// a long meeting's last decode is the wait that matters: how long the
+    /// file took after the stop is the number a "where did my transcript
+    /// go" is answered with.
+    func testTheRecordSaysHowLongTheFileTookAfterTheStop() async throws {
+        transcriber.finalTurns = [.init(speaker: .you, at: .seconds(1), text: "hello")]
+        transcriber.holds = true
+        let clock = FakeClock()
+        let c = coordinator(clock: clock)
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        source.send(loud(at: .seconds(1)))
+        await settle()
+
+        c.stop()
+        await held(transcriber)
+        clock.advance(by: .seconds(42))
+        transcriber.release()
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records.first?.toDiskS, 42)
+    }
+
     // MARK: - helpers
 
     private func loud(at: Duration) -> MeetingAudioChunk {
@@ -129,6 +153,14 @@ final class MeetingRecordTests: XCTestCase {
 
     private func settle(for seconds: Double = 0.3) async {
         try? await Task.sleep(for: .seconds(seconds))
+    }
+
+    /// Until the transcriber is parked in its hold, or two seconds, so a
+    /// test against code that never gets there fails instead of hanging.
+    private func held(_ transcriber: FakeTranscriber) async {
+        for _ in 0..<200 where !transcriber.isWaiting {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
     }
 }
 
