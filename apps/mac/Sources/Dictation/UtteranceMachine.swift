@@ -136,6 +136,9 @@ final class UtteranceMachine {
     /// how long a mic that answered gets to send its first audio. a
     /// healthy one is heard within a tap buffer, about a tenth of that.
     static let firstAudioDeadline = Duration.seconds(1)
+    /// the least a take must hand back to be one: a tenth of a second at
+    /// 16 kHz.
+    static let usableSamples = 1_600
     private let dictionary: @MainActor () -> [DictionaryEntry]
     private let ownBundleIdentifier: String?
     /// how long the lamp's afterglow runs (`HUDWaveMotion.coolDuration`).
@@ -390,10 +393,13 @@ final class UtteranceMachine {
         endPress(.noAudio)
     }
 
-    /// a working mic hands back at least a hiss: a take of exact zeros is
-    /// the mic failing, not you being quiet.
+    /// a working mic hands back at least a hiss, and a key held past a
+    /// brush gives it a few tenths of a second to: a take of exact zeros,
+    /// or of less than `usableSamples`, is the mic failing, not you being
+    /// quiet.
     private static func sentNoSound(_ samples: [Float]) -> Bool {
-        !samples.isEmpty && vDSP.maximumMagnitude(samples) == 0
+        samples.count < usableSamples
+            || vDSP.maximumMagnitude(samples) == 0
     }
 
     /// the mic as it names itself, which is what you would look for in

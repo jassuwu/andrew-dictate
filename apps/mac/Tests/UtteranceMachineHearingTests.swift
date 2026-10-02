@@ -237,6 +237,42 @@ final class UtteranceMachineHearingTests: XCTestCase {
         XCTAssertEqual(outcomes, [.noAudio, .delivered])
     }
 
+    /// a key held well past a brush gives a working mic seconds of hiss.
+    /// a sliver of it, or none, is the mic too.
+    func testASliverOfATakeIsTheMicToo() async {
+        let m = machine()
+        mic.samples = (0..<800).map { Float($0 % 7) * 0.01 }
+
+        m.keyDown()
+        mic.hear()
+        await pass(.milliseconds(600))
+        m.keyUp()
+        await settle { !self.pills.isEmpty }
+
+        XCTAssertEqual(pills, [Pill("no sound from AirPods Pro", 2.4)])
+        XCTAssertEqual(engine.heard.count, 0)
+        XCTAssertEqual(retryOffers, [])
+        XCTAssertEqual(outcomes, [.noAudio])
+    }
+
+    /// let go before its second was up, having sent nothing at all: the
+    /// stop answers for it.
+    func testAMicLetGoOfBeforeItWasEverHeardIsNamed() async {
+        let m = machine()
+        mic.samples = []
+
+        m.keyDown()
+        await pass(.milliseconds(600))
+        m.keyUp()
+        await settle { !self.pills.isEmpty }
+        await pass(.seconds(1))
+
+        XCTAssertEqual(pills, [Pill("no sound from AirPods Pro", 2.4)])
+        XCTAssertEqual(mic.cancels, 0)
+        XCTAssertEqual(chimes, [])
+        XCTAssertEqual(outcomes, [.noAudio])
+    }
+
     // MARK: - helpers
 
     private var presses: [PressRecord] {
