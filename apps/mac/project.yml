@@ -158,6 +158,7 @@ targets:
       # Paster holds one.
       - Sources/Insertion/Paster.swift
       - Sources/Insertion/PasteKeyCodeResolver.swift
+      - Sources/Insertion/Inserter.swift
       - Sources/Instrumentation/UtteranceTimeline.swift
       - Sources/Instrumentation/TimelineSummary.swift
       # the protocol only; ParakeetEngine is the FluidAudio half.
