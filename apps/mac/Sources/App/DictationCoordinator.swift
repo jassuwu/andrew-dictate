@@ -321,7 +321,7 @@ final class DictationCoordinator: ObservableObject {
             self?.keyReleased(at: timestamp)
         }
         monitor.onCancel = { [weak self] in
-            self?.machine.keyCancelled()
+            self?.keyCancelledOrLost()
         }
         monitor.onChord = { [weak self] timestamp in
             self?.machine.chordPressed(eventAge: Self.age(of: timestamp))
@@ -333,7 +333,7 @@ final class DictationCoordinator: ObservableObject {
             self?.keyReleased(at: timestamp)
         }
         monitor.onLockCancel = { [weak self] in
-            self?.machine.keyCancelled()
+            self?.keyCancelledOrLost()
         }
         monitor.onKeyDetected = { [weak self] in
             guard let self else {
@@ -424,7 +424,7 @@ final class DictationCoordinator: ObservableObject {
         }
 
         if isOnboardingPresented {
-            hotkeyMonitor.setDetectionOnly(true)
+            resettingHotkey { hotkeyMonitor.setDetectionOnly(true) }
         }
 
         if enginePreparationRequested {
@@ -503,7 +503,7 @@ final class DictationCoordinator: ObservableObject {
 
     @discardableResult
     func rebindHotkey(to binding: HotkeyBinding) -> Bool {
-        hotkeyMonitor.rebind(to: binding)
+        resettingHotkey { hotkeyMonitor.rebind(to: binding) }
     }
 
 
@@ -804,7 +804,7 @@ final class DictationCoordinator: ObservableObject {
     /// does any more is claim the setup succeeded — that claim belongs to the
     /// permissions, and they are asked again every time it matters.
     private func dismissOnboarding() {
-        hotkeyMonitor.setDetectionOnly(false)
+        resettingHotkey { hotkeyMonitor.setDetectionOnly(false) }
         settings.onboardingDismissed = true
         onboardingWindowController?.close()
     }
@@ -839,7 +839,7 @@ final class DictationCoordinator: ObservableObject {
         }
         onboardingWindowController = nil
         isOnboardingPresented = false
-        hotkeyMonitor.setDetectionOnly(false)
+        resettingHotkey { hotkeyMonitor.setDetectionOnly(false) }
         // anything granted in there was granted to onboarding's own
         // checklist, not to us, so this is the moment to ask the system
         // again — and it is what rebuilds the key monitors under a grant
@@ -945,7 +945,7 @@ final class DictationCoordinator: ObservableObject {
             )
         }
         isOnboardingPresented = true
-        hotkeyMonitor.setDetectionOnly(true)
+        resettingHotkey { hotkeyMonitor.setDetectionOnly(true) }
         withHUDPanel { $0.dismiss() }
 
         // a cached window keeps the scope it was built with, and the screen
@@ -1363,7 +1363,7 @@ final class DictationCoordinator: ObservableObject {
             was: hadAccessibility,
             now: snapshot.accessibilityGranted
         ) {
-            hotkeyMonitor.reinstall()
+            resettingHotkey { hotkeyMonitor.reinstall() }
             permissionLogger.notice(
                 "hotkey monitors reinstalled after trust change"
             )
@@ -1455,20 +1455,39 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
+    /// the detector says "cancel" for two different things: a key you let
+    /// go of too soon, and the app resetting it underneath you. the second
+    /// is not yours to lose a recording over (`keyLost`).
+    private var isResettingHotkey = false
+
+    private func resettingHotkey<T>(_ reset: () -> T) -> T {
+        isResettingHotkey = true
+        defer { isResettingHotkey = false }
+        return reset()
+    }
+
+    private func keyCancelledOrLost() {
+        if isResettingHotkey {
+            machine.keyLost()
+        } else {
+            machine.keyCancelled()
+        }
+    }
+
     private func handleCaptureCapReached() {
         guard machine.capReached() else {
             return
         }
         // the key was never released. without this a hands-free lock reads
         // the next press as the end of a take that is already finished.
-        hotkeyMonitor.reset()
+        resettingHotkey { hotkeyMonitor.reset() }
     }
 
     private func handleCaptureInterruption(
         reason: CaptureInterruption
     ) {
         machine.captureInterrupted(reason)
-        hotkeyMonitor.reset()
+        resettingHotkey { hotkeyMonitor.reset() }
     }
 
     /// nothing listens through a sleep, pre-roll included: the capture
@@ -1496,7 +1515,7 @@ final class DictationCoordinator: ObservableObject {
     }
 
     private func handleSystemResume() {
-        hotkeyMonitor.reset()
+        resettingHotkey { hotkeyMonitor.reset() }
         verifyEngineHealth()
         // a meeting is meant to survive the sleep, not be cancelled by it —
         // but the tap rarely does, and a frozen clock reads as a meeting
