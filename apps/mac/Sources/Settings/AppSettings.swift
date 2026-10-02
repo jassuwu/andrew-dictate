@@ -157,6 +157,22 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// the global shortcut that starts a meeting and stops it, or nil. unset
+    /// until somebody sets one.
+    @Published private(set) var meetingShortcut: MeetingShortcut? {
+        didSet {
+            guard meetingShortcut != oldValue else {
+                return
+            }
+            if let meetingShortcut,
+               let data = try? JSONEncoder().encode(meetingShortcut) {
+                userDefaults.set(data, forKey: Self.meetingShortcutKey)
+            } else {
+                userDefaults.removeObject(forKey: Self.meetingShortcutKey)
+            }
+        }
+    }
+
     /// the parent folder meetings are written under; the app makes
     /// `meetings/<year-month>/` inside it. a real folder you can open in
     /// finder, because the file *is* the artifact (SPEC §11).
@@ -320,6 +336,7 @@ final class AppSettings: ObservableObject {
 
     private static let dictationWantedKey = "AndrewDictate.dictationWanted"
     private static let meetingModelKey = "AndrewDictate.meetingModel"
+    private static let meetingShortcutKey = "AndrewDictate.meetingShortcut"
     private static let meetingsFolderKey = "AndrewDictate.meetingsFolder"
     private static let meetingHookKey = "AndrewDictate.meetingHook"
     private static let keepMeetingAudioKey = "AndrewDictate.keepMeetingAudio"
@@ -428,6 +445,10 @@ final class AppSettings: ObservableObject {
         meetingModel = userDefaults
             .string(forKey: Self.meetingModelKey)
             .flatMap(MeetingModel.init(rawValue:)) ?? .default
+        // a value this build cannot read is no shortcut, never a crash.
+        meetingShortcut = userDefaults
+            .data(forKey: Self.meetingShortcutKey)
+            .flatMap { try? JSONDecoder().decode(MeetingShortcut.self, from: $0) }
         let pickedMeetingsFolder = userDefaults
             .string(forKey: Self.meetingsFolderKey)
             .map { URL(fileURLWithPath: $0, isDirectory: true) }
@@ -470,6 +491,10 @@ final class AppSettings: ObservableObject {
 
         dictationHotkey = binding
         return true
+    }
+
+    func setMeetingShortcut(_ shortcut: MeetingShortcut?) {
+        meetingShortcut = shortcut
     }
 
     /// "not a mistake", and it never comes back.

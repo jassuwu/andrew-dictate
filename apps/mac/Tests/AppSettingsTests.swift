@@ -249,6 +249,58 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertNil(AppSettings(userDefaults: userDefaults).meetingHook)
     }
 
+    /// ⌃⌥M, stored the way settings keep it, so a mac can be set up from the
+    /// command line and the hotkey comes back at launch.
+    func testTheMeetingShortcutSurvivesARelaunch() throws {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let shortcut = MeetingShortcut(
+            keyCode: 46, modifiers: [.control, .option], keyName: "M")
+
+        let settings = AppSettings(userDefaults: userDefaults)
+        settings.setMeetingShortcut(shortcut)
+
+        XCTAssertEqual(AppSettings(userDefaults: userDefaults).meetingShortcut, shortcut)
+        let stored = try XCTUnwrap(userDefaults.data(forKey: "AndrewDictate.meetingShortcut"))
+        XCTAssertEqual(
+            try JSONDecoder().decode(MeetingShortcut.self, from: stored), shortcut)
+    }
+
+    /// the shape `defaults write … -data` can write by hand.
+    func testAMeetingShortcutWrittenByHandLoadsAtLaunch() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        userDefaults.set(
+            Data(#"{"keyCode":46,"keyName":"M","modifiers":3}"#.utf8),
+            forKey: "AndrewDictate.meetingShortcut")
+
+        XCTAssertEqual(
+            AppSettings(userDefaults: userDefaults).meetingShortcut,
+            MeetingShortcut(keyCode: 46, modifiers: [.control, .option], keyName: "M"))
+    }
+
+    func testThereIsNoMeetingShortcutUntilOneIsSet() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertNil(AppSettings(userDefaults: userDefaults).meetingShortcut)
+    }
+
+    /// clearing it has to erase the stored value, not leave the old one
+    /// behind for the next launch to register again.
+    func testClearingTheMeetingShortcutForgetsIt() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppSettings(userDefaults: userDefaults)
+        settings.setMeetingShortcut(
+            MeetingShortcut(keyCode: 46, modifiers: [.control, .option], keyName: "M"))
+        settings.setMeetingShortcut(nil)
+
+        XCTAssertNil(AppSettings(userDefaults: userDefaults).meetingShortcut)
+        XCTAssertNil(userDefaults.data(forKey: "AndrewDictate.meetingShortcut"))
+    }
+
     /// a meeting model is stored by name in two places: settings, and the
     /// manifest of every spool a crash leaves behind. both names from
     /// before parakeet could listen to meetings still read back as what

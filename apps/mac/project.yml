@@ -175,6 +175,7 @@ targets:
       - Sources/Permissions/EnginePrewarmGate.swift
       - Sources/Settings/SetupHealth.swift
       - Sources/Hotkey/HotkeyBinding.swift
+      - Sources/Hotkey/MeetingShortcut.swift
       - Sources/Hotkey/TapLockDetector.swift
       - Sources/Hotkey/TranscribingRepress.swift
       - Sources/Dictation
