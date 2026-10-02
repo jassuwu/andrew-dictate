@@ -610,6 +610,8 @@ final class MeetingCoordinator: ObservableObject {
             meeting.awake = nil
         }
         let recording = session.finish(at: end)
+        // a gap still open runs to the end, as the session's does.
+        meeting.gapEnded(at: end)
         startedOn = nil
         publish()
         return recording
@@ -780,6 +782,8 @@ final class MeetingCoordinator: ObservableObject {
             do {
                 try await audioFile.append(chunk)
                 written = true
+                // as many frames as both sides have: what `append` wrote.
+                meeting.spooled += min(chunk.you.count, chunk.them.count)
                 // what the spool kept, the speaker split hears, as it goes.
                 speakers(of: meeting).hear(chunk)
             } catch {
@@ -1029,6 +1033,7 @@ final class MeetingCoordinator: ObservableObject {
     /// The tap is dead: the gap begins at `lost`, and the tap is rebuilt.
     private func loseTheTap(_ meeting: Meeting, at lost: Duration) {
         session.tapWentSilent(at: lost)
+        meeting.gapBegan(at: lost)
         meeting.notes.note(.gapBegan, at: lost)
         publish()
         onEvent?(.gapBegan)
@@ -1040,6 +1045,7 @@ final class MeetingCoordinator: ObservableObject {
     /// the one thing the lamp says.
     private func tapIsBack(_ meeting: Meeting) {
         session.tapRecovered(at: elapsed)
+        meeting.gapEnded(at: elapsed)
         meeting.notes.note(.gapEnded, at: elapsed)
         guard session.problem(.cannotHearTheCall) != nil else {
             publish()
@@ -1208,7 +1214,7 @@ final class MeetingCoordinator: ObservableObject {
         // the settings as they were at the start: a folder, model or hook
         // changed since is for the next meeting.
         let prefs = meeting.preferences
-        let clock = SpoolClock(nothingSpooledDuring: recording.gaps)
+        let clock = meeting.clock
         let covered = await cover(
             live, handle: handle, model: prefs.model, clock: clock)
         let saved = await save(
@@ -1759,11 +1765,38 @@ extension MeetingCoordinator {
         var awake: (any NSObjectProtocol)?
         /// What its record will say besides what the file does.
         var notes = MeetingRecord.Notes()
+        /// Frames the spool has taken, both sides at once: where the spool's
+        /// clock is. It stops with the spool, not with the tap — the old tap
+        /// through the settle and the mic alone are spooled like any audio.
+        var spooled = 0
+        /// Its gaps as they began and ended, each with where the spool's
+        /// clock was then, so its turns can be found on the spool.
+        var gaps: [MeetingSpool.Gap] = []
 
         init(app: String, started: Date, preferences: MeetingPreferences) {
             self.app = app
             self.started = started
             self.preferences = preferences
+        }
+
+        var spooledSoFar: Duration {
+            StretchCutter.duration(of: spooled)
+        }
+
+        func gapBegan(at began: Duration) {
+            gaps.append(MeetingSpool.Gap(began: began, spooledAtBegan: spooledSoFar))
+        }
+
+        /// The gap still open, if one is, closed at `ended`.
+        func gapEnded(at ended: Duration) {
+            guard let last = gaps.indices.last, gaps[last].ended == nil else { return }
+            gaps[last].ended = ended
+            gaps[last].spooledAtEnded = spooledSoFar
+        }
+
+        /// The two clocks of its turns, from the gaps that have closed.
+        var clock: SpoolClock {
+            SpoolClock(gaps.compactMap(\.closed))
         }
     }
 

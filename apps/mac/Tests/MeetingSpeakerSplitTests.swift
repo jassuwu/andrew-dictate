@@ -28,16 +28,18 @@ final class MeetingSpeakerSplitTests: XCTestCase {
         try? FileManager.default.removeItem(at: dir)
     }
 
-    private func coordinator() -> MeetingCoordinator {
+    private func coordinator(
+        thresholds: MeetingThresholds = .init(
+            probeTimeout: .seconds(1), silenceTimeout: .seconds(60),
+            silenceFloor: 0.001, quietNudgeAfter: .seconds(3_600))
+    ) -> MeetingCoordinator {
         let c = MeetingCoordinator(
             source: source,
             makeTranscriber: { [transcriber] _ in transcriber! },
             diarizer: PieceDiarizer(ear: hearing),
             spool: MeetingSpool(root: dir.appendingPathComponent("spool")),
             hookRunner: HookRunner(logURL: dir.appendingPathComponent("hooks.log")),
-            thresholds: .init(
-                probeTimeout: .seconds(1), silenceTimeout: .seconds(60),
-                silenceFloor: 0.001, quietNudgeAfter: .seconds(3_600)),
+            thresholds: thresholds,
             preferences: { [unowned self] in
                 MeetingPreferences(
                     folder: dir.appendingPathComponent("docs"), hook: nil,
@@ -139,7 +141,61 @@ final class MeetingSpeakerSplitTests: XCTestCase {
         ])
     }
 
+    /// A tap that kept calling back with silence: the quiet probe went
+    /// unheard at 11 s and the gap ran to 21 s, where the far side was heard
+    /// again — and every chunk of it was spooled. A new voice speaks from
+    /// there. The turn at 23.5 s is at 23.5 s on the spool, in the new
+    /// voice, not ten seconds back in the first.
+    func testAfterAGapTheSpoolKeptRecordingThroughTheSpeakersAreTheOnesSpeakingThen() async throws {
+        hearing.speak([(from: .zero, number: 7), (from: .seconds(21), number: 3)])
+        transcriber.finalTurns = [
+            them("before the gap", at: 0.5),
+            them("after the gap", at: 23.5),
+        ]
+        source.anythingIsPlaying = true
+        let c = coordinator(thresholds: .init(
+            probeTimeout: .seconds(1), silenceTimeout: .seconds(5),
+            silenceFloor: 0.001, quietNudgeAfter: .seconds(3_600),
+            quietProbeWindow: .seconds(2)))
+        var events: [MeetingEvent] = []
+        c.onEvent = { events.append($0) }
+        c.start()
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        source.send(loud(at: .seconds(1)))
+        // silence while something plays: asked at 8 s, unheard by 11 s, and
+        // the tap goes on calling back with nothing in it.
+        for s in 2..<20 {
+            source.send(silence(at: .seconds(s)))
+        }
+        for s in 20..<25 {
+            source.send(loud(at: .seconds(s)))
+        }
+        await until { c.elapsed >= .seconds(25) }
+        XCTAssertEqual(events, [.started, .gapBegan, .gapEnded])
+
+        c.stop()
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(try lines(), [
+            "[00:00:00] them 1: before the gap",
+            "[00:00:23] them 2: after the gap",
+        ])
+    }
+
     // MARK: -
+
+    private func silence(at: Duration) -> MeetingAudioChunk {
+        .init(you: Array(repeating: 0, count: 16_000),
+              them: Array(repeating: 0, count: 16_000), at: at)
+    }
+
+    /// Until `done`, or two seconds.
+    private func until(_ done: () -> Bool) async {
+        for _ in 0..<200 where !done() {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
 
     private func loud(at: Duration, seconds: Double = 1) -> MeetingAudioChunk {
         let n = Int(16_000 * seconds)
@@ -241,6 +297,13 @@ private final class ChunkSource: MeetingAudioSource, @unchecked Sendable {
     private let lock = NSLock()
     private var chunks: AsyncStream<MeetingAudioChunk>.Continuation?
     private var starts = 0
+    private var _anythingIsPlaying: Bool?
+
+    /// What the source last heard of the mac playing anything.
+    var anythingIsPlaying: Bool? {
+        get { lock.withLock { _anythingIsPlaying } }
+        set { lock.withLock { _anythingIsPlaying = newValue } }
+    }
 
     func start() async throws -> AsyncStream<MeetingAudioChunk> {
         let (stream, chunks) = AsyncStream<MeetingAudioChunk>.makeStream()

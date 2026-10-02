@@ -25,6 +25,24 @@ struct MeetingSpool: Sendable {
         var transcript: URL?
     }
 
+    /// A gap as a meeting notes it while it runs: where it began on the
+    /// meeting's clock and how much audio the spool held then, and the same
+    /// for its end once it has one.
+    struct Gap: Equatable, Sendable {
+        var began: Duration
+        var spooledAtBegan: Duration
+        var ended: Duration?
+        var spooledAtEnded: Duration?
+
+        /// On both clocks, once it has closed.
+        var closed: SpoolClock.Gap? {
+            guard let ended, let spooledAtEnded else { return nil }
+            return SpoolClock.Gap(
+                began: began, ended: ended,
+                spooledAtBegan: spooledAtBegan, spooledAtEnded: spooledAtEnded)
+        }
+    }
+
     struct Handle: Equatable, Sendable {
         let folder: URL
 
