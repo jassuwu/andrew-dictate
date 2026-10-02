@@ -8,8 +8,8 @@ struct HotkeyDetection: Equatable, Sendable {
     let sequence: Int
 }
 
-/// file scope because the recorder is built during init, before there is a
-/// `self` to log through.
+/// the audio category: the recorder's and the machine's mic lines log
+/// under it too, so a device move or a grant reads beside them.
 private let audioLogger = Logger(
     subsystem: AppIdentity.loggingSubsystem,
     category: "audio"
@@ -510,8 +510,8 @@ final class DictationCoordinator: ObservableObject {
         controller.present()
     }
 
-    /// one sentence in the pill from outside dictation (the update line's
-    /// "copied"). idle only: it must never land on a take or a meeting.
+    /// one sentence in the pill from outside dictation (`learned: <word>`).
+    /// idle only: it must never land on a take or a meeting.
     func sayWhenIdle(_ message: String) {
         guard state == .idle, !meetings.isRecording else {
             return
