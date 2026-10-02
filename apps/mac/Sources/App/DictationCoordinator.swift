@@ -136,6 +136,9 @@ final class DictationCoordinator: ObservableObject {
         return learning
     }()
     private var undoableLearningExpiry: Task<Void, Never>?
+    /// `learned: <word>` not yet said: the pill had a take, a meeting or
+    /// another sentence when the entry was learned.
+    private var learnedAnnouncements = LearnedAnnouncements()
     /// the capture each press records with. a device change, a mic that
     /// wedged or the mac going to sleep is answered with a fresh one, never
     /// by rebuilding this one in place.
@@ -634,7 +637,8 @@ final class DictationCoordinator: ObservableObject {
     /// said once, in the pill, as you wrote it — and undoable from the menu
     /// for two minutes.
     private func announceLearned(_ entry: DictionaryEntry) {
-        sayWhenIdle("learned: \(entry.right)")
+        learnedAnnouncements.learned(entry)
+        sayLearnedIfQuiet()
         undoableLearning = entry
         undoableLearningExpiry?.cancel()
         undoableLearningExpiry = Task { @MainActor [weak self] in
@@ -645,6 +649,24 @@ final class DictationCoordinator: ObservableObject {
             }
             self?.undoableLearning = nil
         }
+    }
+
+    /// the pill says what was learned once it is free: idle, no meeting,
+    /// no other sentence up. asked again whenever one of those ends, so a
+    /// word learned mid-meeting is said after it — however long it ran.
+    private func sayLearnedIfQuiet() {
+        let entries = dictionaryStore.entries
+        guard let message = learnedAnnouncements.due(
+            canSay: state == .idle
+                && !meetings.isRecording
+                && activeFeedbackGeneration == nil,
+            stillThere: { learned in
+                entries.contains { $0.id == learned.id }
+            }
+        ) else {
+            return
+        }
+        flashNotice(message, duration: 2)
     }
 
     /// The dashboard's numbers, straight from the same store the copied
@@ -1849,6 +1871,7 @@ final class DictationCoordinator: ObservableObject {
         activeFeedbackGeneration = nil
         hudViewModel.clearFeedback()
         synchronizeHUD()
+        sayLearnedIfQuiet()
     }
 
     /// the machine's state, worn by the panel and mirrored for the menu.
@@ -1875,6 +1898,13 @@ final class DictationCoordinator: ObservableObject {
         }
 
         synchronizeHUD(fastDismiss: fastHUDDismiss)
+        if newState == .idle {
+            // a turn later: a pill the take owes lands with this change,
+            // and goes first.
+            Task { @MainActor [weak self] in
+                self?.sayLearnedIfQuiet()
+            }
+        }
     }
 
     private func synchronizeHUD(fastDismiss: Bool = false) {
@@ -2163,6 +2193,17 @@ extension DictationCoordinator {
         built.$state
             .removeDuplicates()
             .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &meetingCancellables)
+        // a word learned during the meeting is said once it is over. a
+        // turn later: @Published sinks run before the new state is stored.
+        built.$state
+            .removeDuplicates()
+            .filter { $0 == .idle }
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.sayLearnedIfQuiet()
+                }
+            }
             .store(in: &meetingCancellables)
         built.$elapsed
             .map { $0.components.seconds }
