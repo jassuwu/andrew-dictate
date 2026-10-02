@@ -4,7 +4,7 @@ the domain model. one term, one meaning. if a word isn't here, it doesn't get us
 
 | term | meaning |
 |---|---|
-| **utterance** | one press-to-release audio capture. the atomic unit of the whole app. only you throw one away (`esc`); sleep, the lock, and the capture ceiling end it but keep it. |
+| **utterance** | one press-to-release audio capture. the atomic unit of the whole app. only you throw one away (`esc`); sleep, the lock, the mic changing and the capture ceiling end it but keep it. |
 | **transcript** | raw text produced by the engine for one utterance. never mutated in place. |
 | **engine** | the ASR backend that turns audio into a transcript. parakeet via FluidAudio for dictation, whisper via WhisperKit for meetings. **code-only term** — every user-facing surface calls it the *speech model*. |
 | **cleaner** | the deterministic pass. eight staged transforms, always on, no model. renders speech as writing; never decides you meant something else. |
