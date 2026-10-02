@@ -456,6 +456,25 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(handed().count, 3)
     }
 
+    /// The spool is cut the same way, so its turns know where they ended too:
+    /// "okay so" ends at 0.5 s and "and the budget" begins at 4.0, a pause of
+    /// 3.5 s, though they begin only 4.0 s apart.
+    func testASpoolsSpeechAfterALongSilenceIsAParagraphOfItsOwn() async throws {
+        _ = try await spoolLeftBehind([
+            them("okay so", from: 0.3, to: 0.5),
+            them("and the budget", from: 4.3, to: 5.0),
+        ])
+
+        let c = coordinator(stretches())
+        c.recoverOrphans()
+
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, [
+            "[00:00:00] them: okay so",
+            "[00:00:04] them: and the budget",
+        ])
+    }
+
     /// Every stretch of the spool failed to decode, twice. Writing that out
     /// would save a meeting where nobody spoke and delete the only copy of
     /// what they did say: the spool stays for the next launch instead, with
