@@ -72,6 +72,14 @@ actor WhisperStretchEngine: StretchEngine {
 
     func text(of samples: [Float]) async throws -> String {
         guard let whisper else { throw Failure.notLoaded }
+        // WhisperKit's own guards are on, at its defaults, and are left
+        // there: a decode that repeats itself or is unsure of itself
+        // (compression ratio 2.4, average log probability -1.0, first token
+        // -1.5) is retried hotter, and the last try is used whatever it
+        // scored. Its drop of a stretch judged no-speech (0.6) is on but
+        // never fires in 1.1.0, which does not work out a no-speech
+        // probability. What whisper makes up over room noise is let go by
+        // the transcriber, which does not depend on any of this.
         var options = DecodingOptions()
         options.task = model.translatesToEnglish ? .translate : .transcribe
         options.language = nil
