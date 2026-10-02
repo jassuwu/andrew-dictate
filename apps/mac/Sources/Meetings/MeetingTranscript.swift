@@ -50,6 +50,8 @@ enum MeetingTranscriptFile {
 
     static let folderName = "meetings"
 
+    private static let paragraphSpan = Duration.seconds(60)
+
     // MARK: - naming
 
     static func slug(_ app: String) -> String {
@@ -271,11 +273,14 @@ enum MeetingTranscriptFile {
     // MARK: - formatting
 
     /// What one speaker said in a row, stamped with the first line's time —
-    /// the live pass hands over fragments, and a person reads turns.
+    /// the live pass hands over fragments, and a person reads turns. A
+    /// monologue starts a new paragraph a minute after the last one began, so
+    /// there is always a time within a minute of whatever you are looking for.
     private static func paragraphs(of turns: [MeetingTurn]) -> [MeetingTurn] {
         var out: [MeetingTurn] = []
         for turn in turns {
-            if let last = out.last, last.speaker == turn.speaker {
+            if let last = out.last, last.speaker == turn.speaker,
+               turn.at - last.at < paragraphSpan {
                 out[out.count - 1] = MeetingTurn(
                     speaker: last.speaker, at: last.at,
                     text: last.text + " " + turn.text)

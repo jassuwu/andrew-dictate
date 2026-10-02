@@ -135,6 +135,30 @@ final class MeetingTranscriptTests: XCTestCase {
             """)
     }
 
+    /// A monologue stays findable: a minute after a paragraph began, the same
+    /// speaker's next line opens a new one.
+    func testALongMonologueStartsANewParagraphEveryMinute() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(turns: [
+                .init(speaker: .you, at: .seconds(5), text: "one"),
+                .init(speaker: .you, at: .seconds(40), text: "two"),
+                .init(speaker: .you, at: .seconds(64), text: "three"),
+                .init(speaker: .you, at: .seconds(70), text: "four"),
+                .init(speaker: .you, at: .seconds(130), text: "five"),
+            ]),
+            in: parent, timeZone: tz)
+
+        XCTAssertEqual(
+            try body(of: url),
+            """
+            [00:00:05] you: one two three
+
+            [00:01:10] you: four
+
+            [00:02:10] you: five
+            """)
+    }
+
     // MARK: - round trip
 
     func testWriteThenSummaryReadsTheFrontMatterBack() throws {
