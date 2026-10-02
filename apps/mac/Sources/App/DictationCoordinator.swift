@@ -2277,7 +2277,10 @@ extension DictationCoordinator {
     /// the notifier's buttons. a nudge or a stop from a banner the last run
     /// left behind finds no meeting, and does nothing.
     private func wire(_ notifier: MeetingNudgeNotifier) {
+        // answered in the notification, the pill's copy of the nudge
+        // leaves without being acted on: exactly one answer counts.
         notifier.onKeepGoing = { [weak self] in
+            self?.withdrawQuestions { $0 == .stillRecording }
             self?.meetings.keepGoing()
         }
         notifier.onStop = { [weak self] in
@@ -2370,6 +2373,9 @@ extension DictationCoordinator {
             meetings.notifier.ask(
                 quietFor: meetings.coordinator.thresholds.quietNudgeAfter
             )
+            // and on the pill, for whoever has notifications off. whichever
+            // is answered first is the answer; the other is withdrawn.
+            ask(.stillRecording)
         case .saved(let summary):
             dismissLiveTranscriptUnlessRecording()
             // the file *is* the feature, and the pill that names it is gone
