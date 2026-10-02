@@ -108,6 +108,7 @@ enum MeetingTranscriptFile {
             "duration_s: \(seconds(transcript.duration))",
             "engine: \(transcript.engine)",
             "speakers: [\(speakers(of: transcript).joined(separator: ", "))]",
+            "words: \(wordCount(of: transcript))",
             "complete: \(transcript.complete)",
         ]
         if transcript.gaps.isEmpty {
@@ -281,6 +282,13 @@ enum MeetingTranscriptFile {
             labels.append(turn.speaker.label)
         }
         return labels
+    }
+
+    /// Whitespace-separated, over what was said: not the labels or the stamps.
+    private static func wordCount(of transcript: MeetingTranscript) -> Int {
+        transcript.turns.reduce(0) { count, turn in
+            count + turn.text.split(whereSeparator: \.isWhitespace).count
+        }
     }
 
     /// What one speaker said in a row, stamped with the first line's time —

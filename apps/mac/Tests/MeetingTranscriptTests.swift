@@ -69,6 +69,7 @@ final class MeetingTranscriptTests: XCTestCase {
         duration_s: 6120
         engine: whisper-large-v3-turbo
         speakers: [you, them 1, them]
+        words: 13
         complete: true
         gaps: []
         recovered: false
@@ -102,6 +103,7 @@ final class MeetingTranscriptTests: XCTestCase {
         duration_s: 100
         engine: whisper-large-v3-turbo
         speakers: [you]
+        words: 1
         complete: false
         gaps:
         - [41.2, 63.0]
@@ -232,6 +234,26 @@ final class MeetingTranscriptTests: XCTestCase {
             meeting(turns: []), in: parent, timeZone: tz)
 
         XCTAssertEqual(try frontMatter(of: url)["speakers"], "[]")
+    }
+
+    func testTheFrontMatterCountsTheWordsOfEveryTurn() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(turns: [
+                .init(speaker: .you, at: .seconds(4), text: "hi,  can you\thear me?"),
+                .init(speaker: .you, at: .seconds(9), text: ""),
+                .init(speaker: .them(1), at: .seconds(12), text: "yes. the deploy is blocked."),
+                .init(speaker: .them(1), at: .seconds(20), text: "let's move on."),
+            ]),
+            in: parent, timeZone: tz)
+
+        XCTAssertEqual(try frontMatter(of: url)["words"], "13")
+    }
+
+    func testAMeetingNobodySpokeInHasNoWords() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(turns: []), in: parent, timeZone: tz)
+
+        XCTAssertEqual(try frontMatter(of: url)["words"], "0")
     }
 
     // MARK: - round trip
