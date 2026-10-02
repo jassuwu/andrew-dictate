@@ -16,6 +16,8 @@ final class LazyMeetings {
     private let makeNotifier: () -> MeetingNudgeNotifier
     private var builtCoordinator: MeetingCoordinator?
     private var builtNotifier: MeetingNudgeNotifier?
+    /// The sweep of kept audio, every so often while the app runs.
+    private var sweeping: Task<Void, Never>?
 
     init(
         coordinator: @escaping () -> MeetingCoordinator,
@@ -104,13 +106,30 @@ final class LazyMeetings {
     /// launch, but only a spool folder with something in it builds the
     /// coordinator to do it. the returned task is that recovery, or nil
     /// when there is none.
+    ///
+    /// kept audio past its date is deleted now and once every `sweepEvery`
+    /// after, for as long as the app runs (ADR 0048): a look at one folder
+    /// off the main thread, so a mac that only dictates still builds
+    /// nothing.
     @discardableResult
     func launch(
         setUp: Bool,
         transcripts: URL,
         spool: MeetingSpool,
-        recoveryDelay: Duration
+        recoveryDelay: Duration,
+        keptAudio: KeptAudio? = nil,
+        sweepEvery: Duration = .seconds(86_400)
     ) -> Task<Void, Never>? {
+        if let keptAudio {
+            sweeping?.cancel()
+            // for as long as there is an app to sweep for, and no longer.
+            sweeping = Task.detached(priority: .utility) { [weak self] in
+                while !Task.isCancelled, self != nil {
+                    keptAudio.sweep()
+                    try? await Task.sleep(for: sweepEvery)
+                }
+            }
+        }
         if setUp {
             // the last run's "meeting saved" banner can still be clicked,
             // and the system hands that click only to a delegate that is
