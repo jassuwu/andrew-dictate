@@ -1495,3 +1495,33 @@ extension MeetingCoordinator {
         }
     }
 }
+
+// MARK: - transcribing again
+
+extension MeetingCoordinator {
+    func transcribeAgain(_ transcript: URL, with model: MeetingModel) async {
+        do {
+            let header = try MeetingTranscriptFile.header(of: transcript)
+            guard let entry = keptAudio.entry(for: transcript) else { return }
+            let url = entry.audio
+            let audio = try await Task.detached(priority: .utility) {
+                try SpoolAudioFile.read(url)
+            }.value
+            let transcriber = try await makeTranscriber(model)
+            let turns = try await transcriber.transcribe(you: audio.you, them: audio.them)
+            let reading = Reading(
+                turns: Self.onTheMeetingsClock(turns, gaps: header.gaps),
+                tally: await transcriber.decodeTally())
+            let split = audio.them.isEmpty
+                ? reading.turns
+                : await splitSpeakers(in: reading.turns, them: audio.them, gaps: header.gaps)
+            try MeetingTranscriptFile.replace(
+                at: transcript,
+                with: MeetingTranscript(
+                    app: header.app, started: header.started, duration: header.duration,
+                    engine: model.rawValue, gaps: header.gaps, recovered: header.recovered,
+                    turns: split),
+                timeZone: header.timeZone)
+        } catch {}
+    }
+}
