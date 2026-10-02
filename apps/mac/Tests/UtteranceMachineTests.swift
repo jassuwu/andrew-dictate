@@ -31,8 +31,9 @@ final class UtteranceMachineTests: XCTestCase {
     }
 
     override func tearDown() async throws {
-        // a held transcription must not outlive its test.
+        // a held transcription, start or stop must not outlive its test.
         engine.release()
+        mic.release()
     }
 
     private func machine() -> UtteranceMachine {
@@ -547,6 +548,53 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(events, [])
     }
 
+    // MARK: - a mic slow to answer
+
+    /// the lamp is up before the mic has answered: a device slow to open
+    /// must never make the press look dead. the chime waits for the mic.
+    func testTheLampIsUpBeforeTheMicAnswers() async {
+        let m = machine()
+        mic.holdsStart = true
+
+        m.keyDown()
+
+        XCTAssertEqual(m.state, .recording)
+        XCTAssertEqual(states, [.init(.recording, fast: false)])
+        XCTAssertTrue(mic.isStarting)
+        await pass(.milliseconds(200))
+        XCTAssertEqual(chimes, [])
+
+        mic.finishStart()
+        await settle()
+        XCTAssertEqual(chimes, [.start])
+        XCTAssertEqual(m.state, .recording)
+    }
+
+    /// let go before the mic answered: the take still counts. it is stopped
+    /// the moment it has started, and what it heard is pasted.
+    func testALetGoBeforeTheMicAnsweredStillCounts() async {
+        let m = machine()
+        engine.reply = .success("quick one")
+        mic.holdsStart = true
+
+        m.keyDown()
+        await pass(.milliseconds(400))
+        m.keyUp()
+        XCTAssertEqual(mic.stops, 0)
+        XCTAssertEqual(m.state, .recording)
+
+        mic.finishStart()
+        await settle { self.inserter.inserted.count == 1 }
+
+        XCTAssertEqual(mic.stops, 1)
+        XCTAssertEqual(inserter.inserted, ["Quick one."])
+        XCTAssertEqual(outcomes, [.delivered])
+        XCTAssertEqual(presses.first?.stages.keyUp, 400)
+        // the take was over before the mic answered: a start chime after
+        // the release would be noise.
+        XCTAssertEqual(chimes, [.end])
+    }
+
     // MARK: - the mac underneath
 
     /// today's behaviour, which ticket 06 reverses: sleep or the lock ends
@@ -1030,36 +1078,59 @@ private struct MicFailure: Error {}
 
 @MainActor
 private final class FakeMic: MicCapture {
-    let samples: [Float] = (0..<1_600).map { Float($0 % 7) * 0.01 }
+    var samples: [Float] = (0..<1_600).map { Float($0 % 7) * 0.01 }
     let deviceDescription: MicDescription? = MicDescription(
         name: "AirPods Pro",
         transport: .bluetooth
     )
     var failsToStart = false
     var failsToStop = false
+    /// while set, start waits for `finishStart()`: a device slow to open,
+    /// or, never finished, one that never does.
+    var holdsStart = false
+    /// the same for stop, finished by `finishStop()`.
+    var holdsStop = false
+    /// asked to start, whether or not it ever answered.
     private(set) var starts = 0
     private(set) var stops = 0
     private(set) var cancels = 0
+    private var heldStart: CheckedContinuation<Void, Never>?
+    private var heldStop: CheckedContinuation<Void, Never>?
     private let clock: FakeClock
 
     init(clock: FakeClock) {
         self.clock = clock
     }
 
-    /// the first buffer lands at once: a fake mic has nothing to warm up.
+    var isStarting: Bool {
+        heldStart != nil
+    }
+
+    var isStopping: Bool {
+        heldStop != nil
+    }
+
+    /// the first buffer lands the moment it answers: a fake mic has nothing
+    /// to warm up.
     func start(
         onFirstBuffer: @escaping @MainActor @Sendable (
             ContinuousClock.Instant
         ) -> Void
     ) async throws {
+        starts += 1
+        if holdsStart {
+            await withCheckedContinuation { heldStart = $0 }
+        }
         if failsToStart {
             throw MicFailure()
         }
-        starts += 1
         onFirstBuffer(clock.now)
     }
 
     func stop() async throws -> [Float] {
+        if holdsStop {
+            await withCheckedContinuation { heldStop = $0 }
+        }
         if failsToStop {
             throw MicFailure()
         }
@@ -1069,6 +1140,24 @@ private final class FakeMic: MicCapture {
 
     func cancel() {
         cancels += 1
+    }
+
+    func finishStart() {
+        let held = heldStart
+        heldStart = nil
+        held?.resume()
+    }
+
+    func finishStop() {
+        let held = heldStop
+        heldStop = nil
+        held?.resume()
+    }
+
+    /// a test must not leave a start or a stop hanging behind it.
+    func release() {
+        finishStart()
+        finishStop()
     }
 }
 

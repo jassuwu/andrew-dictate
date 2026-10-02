@@ -131,7 +131,10 @@ final class UtteranceMachine {
     /// how long the lamp's afterglow runs (`HUDWaveMotion.coolDuration`).
     private let coolDuration: TimeInterval
 
-    private var microphone: (any MicCapture)?
+    /// the mic of the press in flight, from key-down until it has been
+    /// told to stop or cancel.
+    private var capture: Capture?
+    private var captureSequence: UInt64 = 0
     /// a double-tapped key leaves nothing to hold, so nothing to feel. the
     /// HUD has to carry the difference for as long as the capture runs.
     private var isRecordingLocked = false
@@ -220,6 +223,12 @@ final class UtteranceMachine {
             }
         }
 
+        // a take already running is the same hold arriving twice, not a new
+        // press, and the mic it holds is not the app's to hand out again.
+        if state == .recording {
+            return
+        }
+
         let microphone: any MicCapture
         switch microphoneForPress?() ?? .refused(.modelNotReady) {
         case let .ready(answer):
@@ -229,8 +238,7 @@ final class UtteranceMachine {
             return
         }
         guard state == .idle else {
-            // a take already running is the same hold arriving twice, not
-            // a new press. a model still loading is the app's to answer.
+            // a model still loading is the app's to answer.
             if state == .prewarming {
                 refuse(.modelNotReady)
             }
@@ -251,10 +259,24 @@ final class UtteranceMachine {
         // the standby anchor. the one that decides the paste is taken at
         // key-up; this is what stands in if AX hands back nothing then, or
         // if by then the frontmost window is one of ours.
-        let focusAnchor = inserter.captureAnchor()
+        activeFocusAnchor = inserter.captureAnchor()
+        captureSequence &+= 1
+        let captureID = captureSequence
+        capture = Capture(id: captureID, microphone: microphone)
+        // the lamp before the mic: a device slow to open, or one still
+        // settling after a monitor or the lid, must never make the press
+        // look dead.
+        setState(.recording)
+        startMicrophone(microphone, id: captureID, timelineID: timelineID)
+    }
 
+    private func startMicrophone(
+        _ microphone: any MicCapture,
+        id: UInt64,
+        timelineID: UInt64
+    ) {
         // immediate: the start is asked for inside this key-down, not a
-        // run-loop turn later, and a mic that answers at once is recording
+        // run-loop turn later, and a mic that answers at once is live
         // before key-down returns.
         Task.immediate { @MainActor [weak self] in
             do {
@@ -264,55 +286,77 @@ final class UtteranceMachine {
                         timelineID: timelineID
                     )
                 }
-                self?.microphoneStarted(microphone, focusAnchor: focusAnchor)
+                self?.microphoneStarted(id)
             } catch {
-                self?.microphoneFailedToStart(microphone, error: error)
+                self?.microphoneFailedToStart(id, error: error)
             }
         }
     }
 
-    private func microphoneStarted(
-        _ microphone: any MicCapture,
-        focusAnchor: (any InsertionAnchor)?
-    ) {
-        self.microphone = microphone
-        press?.mic = microphone.deviceDescription
-        activeFocusAnchor = focusAnchor
-        // the mic and the lamp start at key-down; only the chime waits,
-        // long enough to know the key is being held rather than caught.
-        // a brush of fn should make no sound at all.
+    private func microphoneStarted(_ id: UInt64) {
+        // a press that ended while its mic was opening asked for the
+        // cancel after the start, so the cancel lands after it too.
+        guard var capture, capture.id == id else {
+            return
+        }
+
+        capture.phase = .live
+        self.capture = capture
+        press?.mic = capture.microphone.deviceDescription
+        guard !capture.stopRequested else {
+            // let go before the mic answered: the take still counts, and a
+            // start chime after the release would be noise.
+            stopMicrophone()
+            return
+        }
+        scheduleStartChime()
+    }
+
+    /// the mic and the lamp start at key-down; only the chime waits, long
+    /// enough to know the key is being held rather than caught. a brush of
+    /// fn should make no sound at all. a mic slow to answer has already
+    /// spent some of that wait.
+    private func scheduleStartChime() {
+        let held = press.map { $0.keyDown.duration(to: clock.now) } ?? .zero
+        let wait = Duration.milliseconds(120) - held
         startCueTask?.cancel()
+        guard wait > .zero else {
+            startCueTask = nil
+            emit(.chime(.start))
+            return
+        }
         startCueTask = Task { @MainActor [weak self, clock] in
-            try? await clock.sleep(for: .milliseconds(120))
+            try? await clock.sleep(for: wait)
             guard !Task.isCancelled,
                   let self else {
                 return
             }
             self.emit(.chime(.start))
         }
-        setState(.recording)
     }
 
-    private func microphoneFailedToStart(
-        _ microphone: any MicCapture,
-        error: any Error
-    ) {
+    private func microphoneFailedToStart(_ id: UInt64, error: any Error) {
+        guard let capture, capture.id == id else {
+            return
+        }
+
         audioLogger.error(
             """
             audio recording failed to start: \
             \(error.localizedDescription, privacy: .public)
             """
         )
+        setRecordingLocked(false)
         activeFocusAnchor = nil
         activeTimeline = nil
         // read before it is dropped: which mic refused is the evidence.
-        press?.mic = microphone.deviceDescription
+        press?.mic = capture.microphone.deviceDescription
         // the device may have been yanked between the check and the tap.
         // drop it so the next press rebuilds instead of retrying a corpse.
-        microphone.cancel()
-        self.microphone = nil
+        cancelCapture()
         emit(.microphoneDropped)
-        setState(.idle)
+        // the lamp was already up, so a failure takes it down fast.
+        setState(.idle, fastHUDDismiss: true)
         flashNotice("couldn't start recording")
         endPress(.couldNotStartRecording)
     }
@@ -342,7 +386,8 @@ final class UtteranceMachine {
     /// leave out of key-up → paste.
     func keyUp(eventAge: Duration = .zero) {
         guard state == .recording,
-              let microphone else {
+              var capture,
+              !capture.isEnding else {
             return
         }
 
@@ -356,17 +401,42 @@ final class UtteranceMachine {
         activeTimeline?.keyUp = keyUp
         press?.keyUp = keyUp
         press?.capped = capForcedEnd
+
+        guard capture.phase == .live else {
+            // the mic has not answered yet: stop it the moment it does.
+            capture.stopRequested = true
+            self.capture = capture
+            return
+        }
+        stopMicrophone()
+    }
+
+    private func stopMicrophone() {
+        guard var capture, capture.phase == .live else {
+            return
+        }
+
+        capture.phase = .stopping
+        self.capture = capture
+        let id = capture.id
+        let microphone = capture.microphone
         Task.immediate { @MainActor [weak self] in
             do {
                 let samples = try await microphone.stop()
-                self?.microphoneStopped(samples)
+                self?.microphoneStopped(id, samples: samples)
             } catch {
-                self?.microphoneFailedToStop(error: error)
+                self?.microphoneFailedToStop(id, error: error)
             }
         }
     }
 
-    private func microphoneStopped(_ samples: [Float]) {
+    private func microphoneStopped(_ id: UInt64, samples: [Float]) {
+        // thrown away while it stopped: what it heard goes nowhere.
+        guard capture?.id == id else {
+            return
+        }
+
+        capture = nil
         press?.samplesReady = clock.now
         press?.samples = samples
         // taken now rather than at key-down: the window worth protecting
@@ -384,7 +454,12 @@ final class UtteranceMachine {
         )
     }
 
-    private func microphoneFailedToStop(error: any Error) {
+    private func microphoneFailedToStop(_ id: UInt64, error: any Error) {
+        guard capture?.id == id else {
+            return
+        }
+
+        capture = nil
         audioLogger.error(
             """
             audio recording failed to stop: \
@@ -405,11 +480,12 @@ final class UtteranceMachine {
         // a discarded capture must not leave a chime in flight behind it
         startCueTask?.cancel()
         guard state == .recording,
-              let microphone else {
+              let capture,
+              !capture.isEnding else {
             return
         }
 
-        microphone.cancel()
+        cancelCapture()
         setRecordingLocked(false)
         activeFocusAnchor = nil
         activeTimeline = nil
@@ -440,7 +516,7 @@ final class UtteranceMachine {
     func captureInterrupted(_ reason: CaptureInterruption) {
         switch state {
         case .recording:
-            microphone?.cancel()
+            cancelCapture()
             setRecordingLocked(false)
             activeFocusAnchor = nil
             activeTimeline = nil
@@ -475,7 +551,8 @@ final class UtteranceMachine {
     /// the hotkey has to be told.
     @discardableResult
     func capReached() -> Bool {
-        guard state == .recording else {
+        guard state == .recording,
+              capture?.isEnding == false else {
             return false
         }
 
@@ -506,7 +583,7 @@ final class UtteranceMachine {
             return
         }
 
-        microphone?.cancel()
+        cancelCapture()
         setRecordingLocked(false)
         activeFocusAnchor = nil
         activeTimeline = nil
@@ -519,7 +596,7 @@ final class UtteranceMachine {
     func abandon() {
         invalidatePipeline()
         if state == .recording {
-            microphone?.cancel()
+            cancelCapture()
             setRecordingLocked(false)
             activeFocusAnchor = nil
             activeTimeline = nil
@@ -897,7 +974,7 @@ final class UtteranceMachine {
         let cancelRequested = clock.now
 
         if state == .recording {
-            microphone?.cancel()
+            cancelCapture()
             setRecordingLocked(false)
             activeFocusAnchor = nil
         }
@@ -916,6 +993,14 @@ final class UtteranceMachine {
         }
         activeTimeline = nil
         endPress(.cancelled)
+    }
+
+    // MARK: - the mic of the press in flight
+
+    /// the press is done with its mic and keeps nothing it heard.
+    private func cancelCapture() {
+        capture?.microphone.cancel()
+        capture = nil
     }
 
     // MARK: - effects
@@ -1000,5 +1085,31 @@ final class UtteranceMachine {
 
     private func seconds(_ duration: Duration) -> TimeInterval {
         duration.inMilliseconds / 1_000
+    }
+}
+
+extension UtteranceMachine {
+    /// one press's mic. its start and stop are awaited and can take a
+    /// moment, and the keys keep arriving meanwhile: the phase is what they
+    /// are answered against.
+    private struct Capture {
+        enum Phase {
+            /// asked to start; the lamp is up, the mic has not answered.
+            case starting
+            case live
+            /// asked to stop; what it heard is on its way.
+            case stopping
+        }
+
+        let id: UInt64
+        let microphone: any MicCapture
+        var phase = Phase.starting
+        /// let go before the mic answered: stopped the moment it does.
+        var stopRequested = false
+
+        /// the take is already over, whatever ended it.
+        var isEnding: Bool {
+            phase == .stopping || stopRequested
+        }
     }
 }
