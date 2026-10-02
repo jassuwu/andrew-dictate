@@ -20,6 +20,10 @@ struct MeetingTurn: Equatable, Sendable {
     let speaker: Speaker
     let at: Duration
     let text: String
+    /// Meeting time just past the last sample of what it says, known for a
+    /// turn read from a stretch of audio and nil when it is not. It only
+    /// decides where a paragraph breaks, and is never written out.
+    var end: Duration? = nil
 }
 
 /// A finished meeting, ready to become a file. The artifact is the transcript
