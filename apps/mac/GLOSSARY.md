@@ -8,7 +8,7 @@ the domain model. one term, one meaning. if a word isn't here, it doesn't get us
 | **transcript** | raw text produced by the engine for one utterance. never mutated in place. |
 | **engine** | the ASR backend that turns audio into a transcript. parakeet via FluidAudio for dictation, whisper via WhisperKit for meetings. **code-only term** — every user-facing surface calls it the *speech model*. |
 | **cleaner** | the deterministic pass. eight staged transforms, always on, no model. renders speech as writing; never decides you meant something else. |
-| **lamp** | the bare gold line the hud draws while prewarming, recording, and cooling. its afterglow is the success signal, which is why failure must cut it short. |
+| **lamp** | the bare gold line the hud draws while prewarming, recording, and cooling. it comes up dim at the press and lights, with the start chime, on the mic's first audio: lit means the mic is hearing you, not that a key went down. its afterglow is the success signal, which is why failure must cut it short. |
 | **pill** | the glass hud style. carries every exceptional message and nothing else — if the pill is showing, something needs saying. |
 | **inserter** | puts a transcript into the frontmost app (paste-based, transactional, clipboard-restoring). the sole consumer of a transcript. |
 | **delivered** | a dictation whose ⌘V was posted with focus still where we left it. the only completion that counts toward the published latency; the app does not claim the target app accepted the text. |
