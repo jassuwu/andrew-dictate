@@ -16,6 +16,8 @@ enum BadgeMarks {
         case liveDot
         /// a setup gap: the red dot, top right.
         case setupDot
+        /// a call nobody records: a viewfinder, you could catch this.
+        case brackets
         /// getting ready: the rim part of the way round.
         case partRim
         /// recording a meeting: the whole rim.
@@ -27,7 +29,7 @@ enum BadgeMarks {
         switch look {
         case .idle: nil
         case .dictating: .liveDot
-        case .callNotRecorded: nil
+        case .callNotRecorded: .brackets
         case .gettingReady: .partRim
         case .recordingMeeting: .rim
         case .meetingProblem: nil
@@ -82,6 +84,12 @@ enum BadgeMarks {
         static let trackOpacity: CGFloat = 0.2
     }
 
+    /// the rim at the four corners only.
+    enum Brackets {
+        /// from the badge's edge to the end of each arm.
+        static let reach: CGFloat = 5.5
+    }
+
     // MARK: - drawing
 
     private static let gold = BrandUI.nsColor(BrandUI.goldRGB)
@@ -110,6 +118,8 @@ enum BadgeMarks {
                 ),
                 color: red
             )
+        case .brackets:
+            drawBrackets(in: rect)
         case .partRim:
             drawPartRim(in: rect)
         case .rim:
@@ -139,6 +149,29 @@ enum BadgeMarks {
         )
         gold.setStroke()
         part.stroke()
+    }
+
+    /// the whole rim seen through four square windows, one per corner, so
+    /// the brackets are the rim exactly and each arm ends square on the
+    /// pixel grid.
+    private static func drawBrackets(in rect: NSRect) {
+        let scale = deviceScale()
+        let reach = snapped(Brackets.reach, scale: scale)
+        let corners = NSBezierPath()
+        for (x, y) in [
+            (rect.minX, rect.minY),
+            (rect.maxX - reach, rect.minY),
+            (rect.minX, rect.maxY - reach),
+            (rect.maxX - reach, rect.maxY - reach)
+        ] {
+            corners.appendRect(NSRect(x: x, y: y, width: reach, height: reach))
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        corners.addClip()
+        gold.setStroke()
+        rimPath(in: rect).stroke()
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     private static func rimPath(in rect: NSRect) -> NSBezierPath {

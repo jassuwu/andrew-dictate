@@ -55,6 +55,25 @@ final class BadgeMarksTests: XCTestCase {
         }
     }
 
+    func testACallIsGoldAtTheCornersAndNotBetween() {
+        for scale in scales {
+            let rendered = render(.callNotRecorded, scale: scale)
+
+            for corner in corners {
+                XCTAssertTrue(
+                    rendered.has(gold, in: corner),
+                    "corner \(corner) at \(scale)x"
+                )
+            }
+            for edge in Edge.allCases {
+                XCTAssertFalse(
+                    rendered.has(gold, in: edge.middle),
+                    "\(edge) at \(scale)x"
+                )
+            }
+        }
+    }
+
     // MARK: - what is looked for, and where
 
     private let gold = BrandUI.goldRGB
@@ -73,6 +92,15 @@ final class BadgeMarksTests: XCTestCase {
             }
         }
     }
+
+    /// five points square: the curve and the start of each arm, which is
+    /// where a 1x screen has whole pixels of it.
+    private let corners = [
+        NSRect(x: 0, y: 0, width: 5, height: 5),
+        NSRect(x: 13, y: 0, width: 5, height: 5),
+        NSRect(x: 0, y: 13, width: 5, height: 5),
+        NSRect(x: 13, y: 13, width: 5, height: 5)
+    ]
 
     // MARK: - rendering
 
