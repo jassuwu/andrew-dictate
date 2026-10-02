@@ -103,6 +103,19 @@ final class CallWatcherTests: XCTestCase {
         XCTAssertEqual(watcher.currentCall, "chrome")
     }
 
+    /// The menu bar icon's third state: a call is on and nothing is catching
+    /// it.
+    func testACallWithNothingRecordingIsReportedAsUnrecorded() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(0))
+        XCTAssertNil(watcher.unrecordedCall)
+
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(3))
+        XCTAssertEqual(watcher.unrecordedCall, "zoom")
+    }
+
     /// A browser tab playing music is not a call, and neither is a podcast.
     func testAudioAloneIsNotACall() {
         var watcher = watcher()

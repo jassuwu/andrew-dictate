@@ -47,6 +47,10 @@ struct CallWatcher {
     /// named after it.
     var currentCall: String? { call?.app }
 
+    /// The app whose call is on while nothing is recording it: what the menu
+    /// bar icon shows to say there is a call you could be keeping.
+    var unrecordedCall: String? { call?.app }
+
     mutating func observe(
         _ apps: [App],
         isRecording: Bool,
