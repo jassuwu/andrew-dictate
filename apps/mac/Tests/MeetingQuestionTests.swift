@@ -77,6 +77,15 @@ final class MeetingQuestionTests: XCTestCase {
         XCTAssertEqual(question.effect(of: .unanswered), .nothing)
     }
 
+    /// Starting a meeting answers the record question, and stopping one
+    /// answers the other two: either way, from the menu or the pill, those
+    /// questions are over.
+    func testWhichQuestionsAreAboutARecording() {
+        XCTAssertFalse(MeetingQuestion.record(app: "zoom").isAboutARecording)
+        XCTAssertTrue(MeetingQuestion.stopAfterCall(app: "zoom").isAboutARecording)
+        XCTAssertTrue(MeetingQuestion.stillRecording.isAboutARecording)
+    }
+
     /// The app never starts or stops a recording by itself: only the button
     /// does either.
     func testNothingButTheButtonStartsOrStopsARecording() {

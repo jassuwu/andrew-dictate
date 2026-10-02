@@ -20,6 +20,15 @@ enum MeetingQuestion: Equatable, Sendable {
         }
     }
 
+    /// About a recording that is running, rather than one that could be:
+    /// stopping the meeting, from anywhere, answers it.
+    var isAboutARecording: Bool {
+        switch self {
+        case .record: false
+        case .stopAfterCall, .stillRecording: true
+        }
+    }
+
     var text: String {
         switch self {
         case let .record(app): "\(app) call — record it?"
