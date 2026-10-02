@@ -241,6 +241,26 @@ final class UtteranceMachineHearingTests: XCTestCase {
         XCTAssertEqual(presses.count, 1)
     }
 
+    /// its second to be heard doesn't run out while the mac is away:
+    /// nobody was there to talk, and a wake is slow for everything. once
+    /// back, it gets a whole second of its own.
+    func testTheSecondToBeHeardWaitsWhileTheMacIsAway() async {
+        let m = machine()
+
+        m.keyDown()
+        m.isAway = true
+        await pass(.seconds(5))
+        XCTAssertEqual(outcomes, [])
+        XCTAssertEqual(m.state, .recording)
+
+        m.isAway = false
+        await pass(.seconds(1))
+        XCTAssertEqual(outcomes, [])
+        await pass(.seconds(1))
+        XCTAssertEqual(pills, [Pill("no sound from MacBook Pro Microphone", 2.4)])
+        XCTAssertEqual(outcomes, [.noAudio])
+    }
+
     /// a mic that will not say what it is still gets a sentence.
     func testAnUnnamedMicIsTheMicrophone() async {
         let m = machine()

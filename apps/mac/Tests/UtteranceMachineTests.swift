@@ -699,6 +699,31 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(outcomes, [.micNotResponding, .delivered])
     }
 
+    /// a mic still opening when the mac goes away is not given up on while
+    /// nobody is there: it answers once the mac is back, and the take is
+    /// a take.
+    func testAMicStillOpeningWhileTheMacIsAwayIsNotGivenUpOn() async {
+        let m = machine()
+        engine.reply = .success("after the wake")
+        mic.holdsStart = true
+        m.keyDown()
+        m.isAway = true
+
+        await pass(.seconds(5))
+        XCTAssertEqual(outcomes, [])
+        XCTAssertFalse(events.contains(.microphoneDropped))
+
+        m.isAway = false
+        mic.finishStart()
+        await settle()
+        XCTAssertEqual(m.state, .recording)
+        await pass(.seconds(1))
+        m.keyUp()
+        await settle { self.inserter.inserted.count == 1 }
+        XCTAssertEqual(inserter.inserted, ["After the wake."])
+        XCTAssertEqual(outcomes, [.delivered])
+    }
+
     /// a stop that never comes back loses the take, says so, and drops the
     /// mic; its late answer goes nowhere.
     func testARecordingThatNeverStopsIsLostAndDropped() async {

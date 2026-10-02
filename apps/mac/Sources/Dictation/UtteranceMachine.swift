@@ -388,12 +388,8 @@ final class UtteranceMachine {
     ) {
         pendingStart = id
         startDeadline?.cancel()
-        startDeadline = Task { @MainActor [weak self, clock] in
-            try? await clock.sleep(for: Self.microphoneDeadline)
-            guard !Task.isCancelled else {
-                return
-            }
-            self?.microphoneStartTimedOut(id)
+        startDeadline = armDeadline(after: Self.microphoneDeadline) { machine in
+            machine.microphoneStartTimedOut(id)
         }
         // immediate: the start is asked for inside this key-down, not a
         // run-loop turn later, and a mic that answers at once is live
@@ -445,12 +441,8 @@ final class UtteranceMachine {
         let deadline = Self.firstAudioDeadline(
             for: micTurn?.microphone.deviceDescription?.transport
         )
-        firstAudioWait = Task { @MainActor [weak self, clock] in
-            try? await clock.sleep(for: deadline)
-            guard !Task.isCancelled else {
-                return
-            }
-            self?.microphoneStayedSilent(id)
+        firstAudioWait = armDeadline(after: deadline) { machine in
+            machine.microphoneStayedSilent(id)
         }
     }
 
