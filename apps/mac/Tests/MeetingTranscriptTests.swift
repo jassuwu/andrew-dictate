@@ -159,6 +159,28 @@ final class MeetingTranscriptTests: XCTestCase {
             """)
     }
 
+    func testTwoFarSideVoicesAreNotMergedIntoOne() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(turns: [
+                .init(speaker: .them(1), at: .seconds(3), text: "can you hear me"),
+                .init(speaker: .them(1), at: .seconds(6), text: "okay good."),
+                .init(speaker: .them(2), at: .seconds(8), text: "i can."),
+                .init(speaker: .them(2), at: .seconds(11), text: "go ahead."),
+                .init(speaker: .them(nil), at: .seconds(14), text: "thanks."),
+            ]),
+            in: parent, timeZone: tz)
+
+        XCTAssertEqual(
+            try body(of: url),
+            """
+            [00:00:03] them 1: can you hear me okay good.
+
+            [00:00:08] them 2: i can. go ahead.
+
+            [00:00:14] them: thanks.
+            """)
+    }
+
     // MARK: - round trip
 
     func testWriteThenSummaryReadsTheFrontMatterBack() throws {
