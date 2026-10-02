@@ -499,9 +499,10 @@ private final class CaptureEngine: @unchecked Sendable {
     }
 
     /// called on the audio thread every I/O cycle while the engine runs,
-    /// so it does nothing but check a flag until a take is waiting to be
-    /// heard: no lock, no allocation, nothing that can make the audio
-    /// thread wait.
+    /// so it reads one atomic until an utterance is waiting to be heard,
+    /// and the cycle that hears it wins a compare-exchange and pokes a
+    /// dispatch source built ahead (`AudioFirstBufferNotifier`): no lock,
+    /// no allocation, nothing that can make the audio thread wait.
     private func attachFirstAudioSink(
         to engine: AVAudioEngine,
         format: AVAudioFormat
@@ -741,54 +742,112 @@ private final class CaptureEngine: @unchecked Sendable {
     }
 }
 
-/// one answer per take: the sink's or the tap's, whichever lands first.
-/// `notify` is called from the audio thread every I/O cycle, so until a
-/// take is armed it reads one atomic and returns; only the call that wins
-/// takes the lock, once.
+/// one answer per utterance: the sink's or the tap's, whichever lands
+/// first. `notify` is called from the audio thread every I/O cycle, so it
+/// takes no lock and allocates nothing. until an utterance is armed it
+/// reads one atomic and returns; the one call that wins a compare-exchange
+/// on the utterance's token stores the instant and pokes a dispatch source
+/// built ahead of time — once per utterance — and the main queue does the
+/// rest. the instant is handed over only if its token is still the armed
+/// one: a disarm and a re-arm between the audio thread and the main queue
+/// drop a stale instant instead of giving it to the next utterance.
 private final class AudioFirstBufferNotifier: @unchecked Sendable {
     typealias Callback = @MainActor @Sendable (
         ContinuousClock.Instant
     ) -> Void
 
+    /// instants cross the threads as nanoseconds past this one: a word an
+    /// atomic can hold, where an `Instant` is not.
+    private let origin = ContinuousClock.now
+    /// the token of the utterance waiting to be heard; zero when none is.
+    private let waiting = Atomic<UInt64>(0)
+    /// the token the audio thread heard, and when. written by the winner
+    /// only, the instant before the token, so a token read is never ahead
+    /// of its instant.
+    private let heardToken = Atomic<UInt64>(0)
+    private let heardAt = Atomic<Int64>(0)
+    private let delivery: any DispatchSourceUserDataAdd
+
+    // under `lock`: the capture's queue arms and disarms, the main queue
+    // delivers. the audio thread never touches either.
     private let lock = NSLock()
-    private var callback: Callback?
-    private let armed = Atomic<Bool>(false)
+    private var armed: (token: UInt64, callback: Callback)?
+    private var lastToken: UInt64 = 0
+
+    init() {
+        delivery = DispatchSource.makeUserDataAddSource(queue: .main)
+        delivery.setEventHandler { [weak self] in
+            self?.deliver()
+        }
+        delivery.activate()
+    }
+
+    deinit {
+        delivery.cancel()
+    }
 
     func arm(_ callback: @escaping Callback) {
-        lock.lock()
-        self.callback = callback
-        lock.unlock()
-        armed.store(true, ordering: .releasing)
+        let token = lock.withLock {
+            lastToken &+= 1
+            if lastToken == 0 {
+                lastToken = 1
+            }
+            armed = (lastToken, callback)
+            return lastToken
+        }
+        waiting.store(token, ordering: .releasing)
     }
 
     func disarm() {
-        armed.store(false, ordering: .releasing)
-        lock.lock()
-        callback = nil
-        lock.unlock()
+        waiting.store(0, ordering: .releasing)
+        lock.withLock {
+            armed = nil
+        }
     }
 
+    /// the audio thread's half: atomics and a poke, nothing that waits.
     func notify(at instant: ContinuousClock.Instant) {
-        guard armed.load(ordering: .relaxed),
-              armed.compareExchange(
-                  expected: true,
-                  desired: false,
+        let token = waiting.load(ordering: .relaxed)
+        guard token != 0,
+              waiting.compareExchange(
+                  expected: token,
+                  desired: 0,
                   ordering: .acquiringAndReleasing
               ).exchanged else {
             return
         }
-        lock.lock()
-        let callback = callback
-        self.callback = nil
-        lock.unlock()
+        heardAt.store(
+            Self.nanoseconds(origin.duration(to: instant)),
+            ordering: .relaxed
+        )
+        heardToken.store(token, ordering: .releasing)
+        delivery.add(data: 1)
+    }
 
+    /// the main queue's half. pokes that land together are one call, and
+    /// the newest token is the only one that can still be armed.
+    private func deliver() {
+        let token = heardToken.load(ordering: .acquiring)
+        let nanoseconds = heardAt.load(ordering: .relaxed)
+        let callback: Callback? = lock.withLock {
+            guard let armed, armed.token == token else {
+                return nil
+            }
+            self.armed = nil
+            return armed.callback
+        }
         guard let callback else {
             return
         }
-
-        Task { @MainActor in
+        let instant = origin + .nanoseconds(nanoseconds)
+        MainActor.assumeIsolated {
             callback(instant)
         }
+    }
+
+    private static func nanoseconds(_ duration: Duration) -> Int64 {
+        let (seconds, attoseconds) = duration.components
+        return seconds &* 1_000_000_000 &+ attoseconds / 1_000_000_000
     }
 }
 
