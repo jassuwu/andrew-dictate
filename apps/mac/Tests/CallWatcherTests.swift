@@ -36,4 +36,15 @@ final class CallWatcherTests: XCTestCase {
         XCTAssertEqual(watcher.observe([music], isRecording: false, at: .seconds(60)), [])
         XCTAssertEqual(watcher.observe([music], isRecording: false, at: .seconds(600)), [])
     }
+
+    /// Dictation, a screen recorder and a voice memo all hold the mic without
+    /// anyone being on a call.
+    func testTheMicAloneIsNotACall() {
+        var watcher = watcher()
+        let listening = app("chrome", mic: true, audio: false)
+
+        XCTAssertEqual(watcher.observe([listening], isRecording: false, at: .seconds(0)), [])
+        XCTAssertEqual(watcher.observe([listening], isRecording: false, at: .seconds(60)), [])
+        XCTAssertEqual(watcher.observe([listening], isRecording: false, at: .seconds(600)), [])
+    }
 }

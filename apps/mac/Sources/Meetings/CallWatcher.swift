@@ -17,6 +17,10 @@ struct CallWatcher {
         let name: String
         let holdsMic: Bool
         let playsAudio: Bool
+
+        /// Only both together look like a call. The mic alone is dictation, a
+        /// screen recorder, a voice memo; audio alone is a video or music.
+        var looksLikeACall: Bool { holdsMic && playsAudio }
     }
 
     enum Suggestion: Equatable, Sendable {
@@ -39,7 +43,7 @@ struct CallWatcher {
         isRecording: Bool,
         at now: Duration
     ) -> [Suggestion] {
-        guard let app = apps.first(where: { $0.holdsMic }) else {
+        guard let app = apps.first(where: \.looksLikeACall) else {
             qualifyingSince = nil
             return []
         }
