@@ -14,8 +14,17 @@ protocol StretchEngine: Sendable {
 struct StretchTally: Equatable, Sendable {
     var decodedYou = 0
     var decodedThem = 0
-    /// Stretches the engine threw on twice. Their words are not in the file.
+    /// Stretches the engine threw on, or did not answer in time, twice.
+    /// Their words are not in the file.
     var failed = 0
+    /// Tries the engine did not answer in time: a call wedged in CoreML,
+    /// most likely, rather than audio it could not read. Each is a try that
+    /// failed, so a stretch that timed out twice is in `failed` too.
+    var timedOut = 0
+    /// Stretches cut and never decoded, because `finish` stopped waiting for
+    /// them or the model never came: not decoded, and not failed. Their
+    /// speech is speech that was not read.
+    var unfinished = 0
     /// `you` stretches let go before they were decoded, because they were only
     /// the far side coming back through the mic. Not decoded, not failed.
     var bleed = 0
@@ -58,12 +67,39 @@ actor StretchTranscriber: MeetingTranscriber {
         }
     }
 
+    /// How long the engine is waited on before what it has not done is let
+    /// go. One call that never comes back would otherwise hold the only
+    /// worker for good: every stretch after it queued with its audio, the
+    /// panel stopped, and `finish` never returning, so the meeting sat on
+    /// `writing it out` until quit. Provisional, like every number a meeting
+    /// runs on.
+    struct Patience: Sendable {
+        /// One try at a stretch gets this…
+        var decode: Duration = .seconds(10)
+        /// …and this much more for every second of the stretch. Whisper
+        /// reads a stretch in a fraction of its length, so a try that runs
+        /// past both is a wedge, not a slow day.
+        var decodePerSecond: Double = 1
+        /// `finish` gets this, from when it is called, for the model still
+        /// loading and every stretch still to decode; after it, it returns
+        /// what it has.
+        var finish: Duration = .seconds(60)
+
+        static let provisional = Patience()
+
+        /// For one try at `stretch`.
+        func decoding(_ stretch: Stretch) -> Duration {
+            decode + (stretch.end - stretch.at) * decodePerSecond
+        }
+    }
+
     nonisolated let lines: AsyncStream<LiveLine>
 
     private let emit: AsyncStream<LiveLine>.Continuation
     private let engine: any StretchEngine
     private let makeDetector: @Sendable () -> any SpeechDetector
     private let ceiling: Duration
+    private let patience: Patience
     private let now: @Sendable () -> ContinuousClock.Instant
     private let logger = Logger(subsystem: AppIdentity.loggingSubsystem, category: "stretches")
 
@@ -91,6 +127,11 @@ actor StretchTranscriber: MeetingTranscriber {
     /// leaves this queue.
     private var waiting: [(stretch: Stretch, queued: ContinuousClock.Instant)] = []
     private var worker: Task<Void, Never>?
+    /// The worker has a stretch with the engine.
+    private var isDecoding = false
+    /// `finish` has stopped waiting: nothing decoded from here is kept or
+    /// counted.
+    private var gaveUp = false
     private var turns: [MeetingTurn] = []
     private(set) var tally = StretchTally()
 
@@ -118,15 +159,18 @@ actor StretchTranscriber: MeetingTranscriber {
 
     /// `ceiling` is the longest stretch the engine is handed — about 25 s
     /// for whisper, 15 s for parakeet. `detector` makes one detector per
-    /// side; `now` is the wall the decoding is timed against.
+    /// side; `now` is the wall the decoding is timed against, and
+    /// `patience` how long it is waited on, by the real clock.
     init(
         engine: any StretchEngine,
         ceiling: Duration,
         detector makeDetector: @escaping @Sendable () -> any SpeechDetector = { LoudnessDetector() },
-        now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now }
+        now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now },
+        patience: Patience = .provisional
     ) {
         self.engine = engine
         self.ceiling = ceiling
+        self.patience = patience
         self.makeDetector = makeDetector
         self.now = now
         youDetector = makeDetector()
@@ -158,20 +202,22 @@ actor StretchTranscriber: MeetingTranscriber {
         await this.value
     }
 
+    /// Waits for what is left to decode, as long as `patience` says and no
+    /// longer: past that, the meeting is written out with what was read,
+    /// and the stretches still waiting, or being decoded, are let go and
+    /// counted, their speech not read, for the coverage check to see.
     func finish() async -> [MeetingTurn] {
         await hearing?.value
         isFinished = true
         queue(withoutBleed(you.flush(), mic: micLoudness, far: farLoudness) + them.flush())
-        // A model still loading is waited for: a meeting stopped in its
-        // first seconds must not be written out with none of its words. One
-        // that failed, or was never asked to load, has nothing to wait for.
-        if let loading, (try? await loading.value) != nil {
-            isReady = true
-            startWorking()
+        let limit = patience.finish
+        let decoded = (try? await Deadline.race(limit) { [self] in
+            await self.decodeWhatIsLeft()
+        }) != nil
+        if !decoded {
+            logger.error("stopped waiting for the decoding after \(limit.totalSeconds, format: .fixed(precision: 0), privacy: .public) s")
         }
-        while let worker {
-            await worker.value
-        }
+        letGoOfWhatIsLeft()
         emit.finish()
         return Self.inOrder(turns)
     }
@@ -324,9 +370,12 @@ actor StretchTranscriber: MeetingTranscriber {
     /// The one worker. It runs until the queue is empty and then stops; the
     /// next stretch to end starts it again.
     private func work() async {
-        while !waiting.isEmpty {
+        while !waiting.isEmpty, !gaveUp {
             let (stretch, queued) = waiting.removeFirst()
-            let text = await decode(stretch)
+            isDecoding = true
+            let text = await decode(stretch, queued: true)
+            isDecoding = false
+            guard !gaveUp else { break }
             let behind = now() - queued
             tally.lastBehind = behind
             tally.mostBehind = max(tally.mostBehind, behind)
@@ -337,13 +386,48 @@ actor StretchTranscriber: MeetingTranscriber {
         worker = nil
     }
 
-    /// A stretch the engine throws on gets one more try: a decode that
-    /// failed once is often a hiccup, not the audio. Twice, and it is let
-    /// go and counted.
-    private func decode(_ stretch: Stretch) async -> String? {
+    /// What `finish` waits for: a model still loading — a meeting stopped
+    /// in its first seconds must not be written out with none of its words
+    /// — and then the worker, until the queue is empty. A model that failed,
+    /// or was never asked to load, has nothing to wait for.
+    private func decodeWhatIsLeft() async {
+        if let loading, (try? await loading.value) != nil {
+            isReady = true
+            startWorking()
+        }
+        while let worker {
+            await worker.value
+        }
+    }
+
+    /// The end of `finish`: whatever is still waiting, or still being
+    /// decoded, is not going to be read. A decode that comes back after
+    /// this is let go where it lands.
+    private func letGoOfWhatIsLeft() {
+        gaveUp = true
+        let left = waiting.count + (isDecoding ? 1 : 0)
+        guard left > 0 else { return }
+        tally.unfinished += left
+        waiting.removeAll()
+        logger.error("\(left, privacy: .public) stretches were never decoded")
+    }
+
+    /// A stretch the engine throws on, or does not answer in time, gets one
+    /// more try: a decode that failed once is often a hiccup, not the
+    /// audio. Twice, and it is let go and counted. A call that never comes
+    /// back is left where it is, and the worker goes on without it.
+    ///
+    /// `queued` is a stretch off the meeting's queue, which `finish` may
+    /// have stopped waiting for while the engine had it: then nothing is
+    /// counted, as it already has been.
+    private func decode(_ stretch: Stretch, queued: Bool = false) async -> String? {
+        let limit = patience.decoding(stretch)
         for attempt in 1...2 {
             do {
-                let text = try await engine.text(of: stretch.samples)
+                let text = try await Deadline.race(limit) { [engine, samples = stretch.samples] in
+                    try await engine.text(of: samples)
+                }
+                if queued, gaveUp { return nil }
                 switch stretch.side {
                 case .you:
                     tally.decodedYou += 1
@@ -353,7 +437,12 @@ actor StretchTranscriber: MeetingTranscriber {
                     tally.readThem += stretch.end - stretch.at
                 }
                 return text
+            } catch is Deadline.Passed {
+                if queued, gaveUp { return nil }
+                tally.timedOut += 1
+                logger.error("a stretch was not decoded in \(limit.totalSeconds, format: .fixed(precision: 1), privacy: .public) s, try \(attempt)")
             } catch {
+                if queued, gaveUp { return nil }
                 logger.error("a stretch failed to decode, try \(attempt): \(error.localizedDescription, privacy: .public)")
             }
         }

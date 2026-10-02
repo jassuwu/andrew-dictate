@@ -37,6 +37,7 @@ final class MeetingStretchTests: XCTestCase {
     }
 
     override func tearDown() async throws {
+        engine.letTheHungGo()
         try? FileManager.default.removeItem(at: dir)
     }
 
@@ -519,6 +520,69 @@ final class MeetingStretchTests: XCTestCase {
             "[00:00:03] them: since when",
             "[00:00:05] you: since this morning",
         ])
+    }
+
+    /// A decode that never comes back — a call wedged inside CoreML — is
+    /// given its time and no more, and that counts as a try that failed:
+    /// tried once more, and let go. The stretches behind it are decoded as
+    /// they would have been, and the meeting is saved with them.
+    func testAStretchTheEngineNeverAnswersIsLetGoAndTheRestIsSaved() async throws {
+        engine.hangs(on: "the deploy is blocked")
+        let transcriber = stretches(patience: .init(
+            decode: .milliseconds(200), decodePerSecond: 0, finish: .seconds(5)))
+        let c = coordinator(transcriber)
+        c.start()
+        await source.awaitStart()
+
+        await play([
+            you("the deploy is blocked", from: 1.3, to: 2.5),
+            them("since when", from: 3.3, to: 4.0),
+        ], through: 5.0, on: c)
+        await waitFor { c.liveLines.count == 1 }
+
+        XCTAssertEqual(live(c), ["them 3.0 since when"])
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, ["[00:00:03] them: since when"])
+        XCTAssertEqual(handed(), [
+            "the deploy is blocked 26400",
+            "the deploy is blocked 26400",
+            "since when 18400",
+        ])
+        let tally = await transcriber.tally
+        XCTAssertEqual(tally, StretchTally(
+            decodedThem: 1, failed: 1, timedOut: 2,
+            speechYou: .milliseconds(1_650), speechThem: .milliseconds(1_150),
+            readYou: .zero, readThem: .milliseconds(1_150)))
+    }
+
+    /// Stopped with one stretch in a decode that will not come back and
+    /// another waiting behind it, the meeting is written out once `finish`
+    /// has waited as long as it waits: with what was read, and the two it
+    /// gave up on counted, their speech not read, for the coverage check.
+    func testAFinishThatWouldWaitForeverReturnsWhatItHasOnTime() async throws {
+        engine.hangs(on: "the deploy is blocked")
+        let transcriber = stretches(patience: .init(
+            decode: .seconds(60), decodePerSecond: 0, finish: .milliseconds(500)))
+        let c = coordinator(transcriber)
+        c.start()
+        await source.awaitStart()
+
+        await play([
+            them("are we all here", from: 1.3, to: 2.0),
+            you("the deploy is blocked", from: 2.3, to: 3.5),
+            them("since when", from: 4.3, to: 5.0),
+        ], through: 6.0, on: c)
+        await waitFor { c.liveLines.count == 1 && handed().count == 2 }
+
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, ["[00:00:01] them: are we all here"])
+        let tally = await transcriber.tally
+        XCTAssertEqual(tally, StretchTally(
+            decodedThem: 1, unfinished: 2,
+            speechYou: .milliseconds(1_650), speechThem: .milliseconds(2_300),
+            readYou: .zero, readThem: .milliseconds(1_150)))
     }
 
     // MARK: - words made up for the quiet
@@ -1075,13 +1139,15 @@ final class MeetingStretchTests: XCTestCase {
         ceiling: Duration = .seconds(25),
         hangover: Duration = .milliseconds(500),
         threshold: Float = 0.02,
-        clock: FakeClock = FakeClock()
+        clock: FakeClock = FakeClock(),
+        patience: StretchTranscriber.Patience = .provisional
     ) -> StretchTranscriber {
         StretchTranscriber(
             engine: engine,
             ceiling: ceiling,
             detector: { LoudnessDetector(threshold: threshold, hangover: hangover) },
-            now: { clock.now })
+            now: { clock.now },
+            patience: patience)
     }
 
     /// A detector keen enough to hear the far side coming back through the
@@ -1403,6 +1469,8 @@ private final class PhraseEngine: StretchEngine, @unchecked Sendable {
     private var wall: FakeClock?
     private var eachDecode: Duration = .zero
     private var invented: [String] = []
+    private var hangsOn: Set<String> = []
+    private var hung: [CheckedContinuation<Void, Never>] = []
 
     func loudness(of phrase: String) -> Float {
         lock.withLock {
@@ -1433,6 +1501,23 @@ private final class PhraseEngine: StretchEngine, @unchecked Sendable {
         lock.withLock { failures[phrase] = times }
     }
 
+    /// Every stretch heard as `phrase` is a call that never comes back, the
+    /// way one wedged inside CoreML does: being cancelled does not end it.
+    func hangs(on phrase: String) {
+        lock.withLock { _ = hangsOn.insert(phrase) }
+    }
+
+    /// The calls still hung come back, empty, so a test leaves nothing
+    /// waiting behind it.
+    func letTheHungGo() {
+        let waiting = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            hangsOn = []
+            defer { hung = [] }
+            return hung
+        }
+        for call in waiting { call.resume() }
+    }
+
     /// Every stretch the engine was handed, failed or not, as the phrase it
     /// heard and its length in samples, in the order it was handed them.
     var handed: [(phrase: String, samples: Int)] {
@@ -1460,6 +1545,19 @@ private final class PhraseEngine: StretchEngine, @unchecked Sendable {
     }
 
     func text(of samples: [Float]) async throws -> String {
+        let phrase = try heard(samples)
+        await withCheckedContinuation { call in
+            let hangs = lock.withLock { () -> Bool in
+                guard hangsOn.contains(phrase) else { return false }
+                hung.append(call)
+                return true
+            }
+            if !hangs { call.resume() }
+        }
+        return phrase
+    }
+
+    private func heard(_ samples: [Float]) throws -> String {
         let peak = samples.reduce(Float(0)) { max($0, abs($1)) }
         return try lock.withLock {
             let index = Int((peak * 10).rounded()) - 1
