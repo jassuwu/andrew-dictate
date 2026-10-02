@@ -1953,8 +1953,10 @@ extension DictationCoordinator {
 }
 
 
+#if DEBUG
 /// development only: dump a window's layer tree with the properties that
 /// could carry an active/inactive look, to diff the panel against the lab.
+/// the lab is its only caller, so release carries neither.
 enum HUDHierarchyDump {
     static let keys = [
         "effect", "filters", "compositingFilter", "backgroundFilters",
@@ -2028,3 +2030,4 @@ enum HUDHierarchyDump {
         )
     }
 }
+#endif
