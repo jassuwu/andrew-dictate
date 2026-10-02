@@ -832,6 +832,7 @@ final class UtteranceMachine {
             emit(.timelineCompleted(timeline))
         }
         activeTimeline = nil
+        endPress(.cancelled)
     }
 
     // MARK: - effects

@@ -338,6 +338,7 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(mic.stops, 0)
         XCTAssertEqual(engine.heard, [])
         XCTAssertEqual(pills, [])
+        XCTAssertEqual(outcomes, [.cancelled])
     }
 
     /// the sentence on its way to the page is dropped, and the engine's
@@ -359,6 +360,8 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(inserter.inserted, [])
         XCTAssertEqual(pills, [])
         XCTAssertEqual(m.state, .idle)
+        // the engine's late answer ends nothing a second time.
+        XCTAssertEqual(outcomes, [.cancelled])
     }
 
     /// with nothing to throw away, esc belongs to whatever app is in front.
