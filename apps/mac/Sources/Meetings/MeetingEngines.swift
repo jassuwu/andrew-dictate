@@ -9,16 +9,6 @@ import os
 /// Parakeet *is* dictation's v3, in dictation's folder: on disk for one is
 /// on disk for both.
 enum MeetingEngines {
-    enum Failure: Error, LocalizedError {
-        case notInstalled(MeetingModel)
-
-        var errorDescription: String? {
-            switch self {
-            case .notInstalled(let model): "\(model.shortName) is not on this mac"
-            }
-        }
-    }
-
     private static let logger = Logger(subsystem: AppIdentity.loggingSubsystem, category: "meeting-models")
 
     static var modelDirectory: URL {
@@ -55,7 +45,7 @@ enum MeetingEngines {
     /// Silero hears speech begin and end, and each stretch decoded once.
     static func makeTranscriber(for model: MeetingModel) async throws -> any MeetingTranscriber {
         guard isInstalled(model) else {
-            throw Failure.notInstalled(model)
+            throw MeetingModel.NotInstalled(model: model)
         }
         // the speaker split is read at the end of the meeting; a mac that
         // was set up before its models came down with the meeting model

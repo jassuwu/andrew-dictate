@@ -69,3 +69,17 @@ enum MeetingModel: String, CaseIterable, Codable, Sendable {
         self == .whisperLargeV3
     }
 }
+
+extension MeetingModel {
+    /// What making a transcriber for a model that is not on this mac throws.
+    /// Its own type, in a file the coordinator can see, because recovery
+    /// answers it differently from every other failure: it reads the spool
+    /// with a model that is there, or waits, and counts nothing against it.
+    struct NotInstalled: Error, LocalizedError {
+        let model: MeetingModel
+
+        var errorDescription: String? {
+            "\(model.shortName) is not on this mac"
+        }
+    }
+}
