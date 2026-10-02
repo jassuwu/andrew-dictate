@@ -311,6 +311,11 @@ struct SettingsView: View {
                     Button(binding.displayName) {
                         _ = coordinator.rebindHotkey(to: binding)
                     }
+                    // a modifier the meeting shortcut holds would start a
+                    // take every time the shortcut is pressed.
+                    .disabled(
+                        settings.meetingShortcut?
+                            .refusal(againstDictationKey: binding) != nil)
                 }
             } label: {
                 HStack(spacing: 5) {
@@ -623,6 +628,8 @@ struct SettingsView: View {
     private var meetingsTab: some View {
         VStack(alignment: .leading, spacing: 13) {
             meetingModelEditor
+            rowDivider
+            MeetingShortcutRow(settings: settings, coordinator: coordinator)
             rowDivider
             meetingsFolderRow
             rowDivider
