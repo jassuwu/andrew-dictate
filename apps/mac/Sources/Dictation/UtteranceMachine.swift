@@ -292,8 +292,11 @@ final class UtteranceMachine {
         capForcedEnd = false
         // the pill still says the last one failed and the samples are still
         // here: this press means "that one", not "a new one". keyUp's state
-        // guard makes the eventual key release a no-op.
-        if isPillShowing?() == true, canRetryLastFailure {
+        // guard makes the eventual key release a no-op. a sentence still
+        // being written out is not the failed one, and is answered below.
+        if state != .transcribing,
+           isPillShowing?() == true,
+           canRetryLastFailure {
             if !retryLastFailure() {
                 // the pill still offered it, but the samples had lapsed
                 // under it: the press is spent and nothing answers it.
@@ -301,6 +304,8 @@ final class UtteranceMachine {
             }
             return
         }
+        // the sentence this press drops as hung, if it drops one.
+        var dropped: [Float]?
         if state == .transcribing {
             let elapsed = transcribingBeganAt.map {
                 seconds($0.duration(to: clock.now))
@@ -314,8 +319,16 @@ final class UtteranceMachine {
                 refuse(.stillFinishing)
                 return
             case .dropAndRestart:
+                // still yours, like any sentence the engine never
+                // answered: kept for the menu's `try that again`. no pill
+                // says so — it would sit over the recording this press is
+                // about to start.
+                dropped = press?.samples
                 invalidatePipeline()
                 endPressEarly(.droppedAsHung, fastHUDDismiss: false)
+                if let dropped {
+                    armRetry(dropped)
+                }
                 // the same evidence a timeout leaves.
                 emit(.engineSuspect)
             }
@@ -338,8 +351,10 @@ final class UtteranceMachine {
         }
 
         // a new take is the sentence you care about now; the lost one stops
-        // being offered.
-        clearRetry()
+        // being offered — unless it is the one this press just dropped.
+        if dropped == nil {
+            clearRetry()
+        }
         copiesInsteadOfPasting = false
         timelineSequence &+= 1
         let timelineID = timelineSequence
@@ -977,9 +992,13 @@ final class UtteranceMachine {
 
     /// re-runs the samples that were thrown on, delivered wherever the
     /// cursor is *now* — the failure may have sent them to another window.
-    /// false when there was nothing left to re-run.
+    /// false when there was nothing left to re-run, or when a take is in
+    /// flight: a retry would replace it, so the samples stay on offer.
     @discardableResult
     func retryLastFailure() -> Bool {
+        guard state != .recording, state != .transcribing else {
+            return false
+        }
         guard let samples = retryBuffer.take(at: Date()) else {
             clearRetry()
             return false

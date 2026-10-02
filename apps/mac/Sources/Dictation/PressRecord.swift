@@ -37,7 +37,8 @@ struct PressRecord: Equatable, Sendable, Codable {
         /// the speech model being switched or removed under it.
         case abandoned
         /// still transcribing so long after key-up that the next press
-        /// dropped it and recorded instead.
+        /// dropped it and recorded instead. its samples are kept and the
+        /// menu offers a retry; no pill, which would cover the recording.
         case droppedAsHung
         /// the mic answered but sent no sound: nothing, or frames of only
         /// exact zeros, within a second of starting (three for a headset),

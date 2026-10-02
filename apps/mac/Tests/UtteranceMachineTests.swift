@@ -457,6 +457,70 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(outcomes, [.droppedAsHung])
     }
 
+    /// the dropped sentence is still yours. no pill — it would sit over the
+    /// recording the press just started — but the menu offers to try it
+    /// again, and the new take ending doesn't take that away.
+    func testAHungSentenceDroppedByAPressIsKeptForTheMenu() async {
+        let m = machine()
+        let first = mic.samples
+        engine.holds = true
+        engine.reply = .success("first thought")
+        await hold(m, for: .seconds(1))
+        await settle { self.engine.isWaiting }
+        await pass(.seconds(3))
+
+        mic.samples = (0..<3_200).map { Float($0 % 5) * 0.02 }
+        m.keyDown()
+        XCTAssertEqual(m.state, .recording)
+        XCTAssertEqual(pills, [])
+        XCTAssertEqual(retryOffers, [true])
+        XCTAssertEqual(outcomes, [.droppedAsHung])
+
+        engine.reply = .success("second thought")
+        engine.release()
+        await pass(.seconds(1))
+        m.keyUp()
+        await settle { self.inserter.inserted.count == 1 }
+        await pass(.milliseconds(400))
+        XCTAssertEqual(inserter.inserted, ["Second thought."])
+        XCTAssertEqual(retryOffers, [true])
+
+        engine.reply = .success("first thought")
+        XCTAssertTrue(m.retryLastFailure())
+        await settle { self.inserter.inserted.count == 2 }
+        XCTAssertEqual(inserter.inserted, ["Second thought.", "First thought."])
+        XCTAssertEqual(engine.heard.last, first)
+        XCTAssertEqual(retryOffers, [true, false])
+        XCTAssertEqual(outcomes, [.droppedAsHung, .delivered, .delivered])
+        XCTAssertEqual(presses.map(\.retry), [false, false, true])
+    }
+
+    /// a retry would replace the take in flight: while one records or is
+    /// written out, the menu's row waits, and the samples stay on offer.
+    func testTheMenuRetryWaitsForTheTakeInFlight() async {
+        let m = machine()
+        engine.holds = true
+        await hold(m, for: .seconds(1))
+        await settle { self.engine.isWaiting }
+        await pass(.seconds(3))
+        m.keyDown()
+        XCTAssertEqual(retryOffers, [true])
+
+        XCTAssertFalse(m.retryLastFailure())
+        XCTAssertEqual(m.state, .recording)
+        XCTAssertEqual(retryOffers, [true])
+
+        engine.release()
+        engine.holds = true
+        await pass(.seconds(1))
+        m.keyUp()
+        await settle { self.engine.heard.count == 2 }
+        XCTAssertFalse(m.retryLastFailure())
+        XCTAssertEqual(m.state, .transcribing)
+        XCTAssertEqual(engine.heard.count, 2)
+        XCTAssertEqual(retryOffers, [true])
+    }
+
     // MARK: - locked recording
 
     /// nothing to hold means nothing to feel, so the lamp carries the lock
