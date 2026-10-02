@@ -188,6 +188,25 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(lines, ["[00:00:01] you: i think the deploy is blocked"])
     }
 
+    /// No moment in the four seconds before the ceiling is quieter than the
+    /// ceiling itself, so that is where it is cut: 1.0 to 11.0, then on from
+    /// the next sample to 14.0. A tone is never exactly as loud from one
+    /// 50 ms to the next; being a little quieter is not a breath.
+    func testTalkWithNoQuietMomentBeforeTheCeilingIsCutAtIt() async throws {
+        let c = coordinator(stretches(ceiling: .seconds(10)))
+        c.start(tapping: zoom)
+        await source.awaitStart()
+
+        await play([you("and another thing", from: 1.3, to: 14.0)], through: 15.0, on: c)
+        await waitFor { c.liveLines.count == 2 }
+
+        XCTAssertEqual(handed(), ["and another thing 160000", "and another thing 48000"])
+        XCTAssertEqual(live(c), ["you 1.0 and another thing", "you 11.0 and another thing"])
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, ["[00:00:01] you: and another thing and another thing"])
+    }
+
     /// Whisper names a stretch with no words in it rather than leaving it
     /// blank. A name is not a turn: the file and the panel only get words,
     /// and a marker in front of words is taken off them.
