@@ -366,6 +366,54 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(m.state, .recording)
     }
 
+    // MARK: - locked recording
+
+    /// nothing to hold means nothing to feel, so the lamp carries the lock
+    /// and a pill says how to end it. a tap ends it like a release.
+    func testADoubleTapLocksTheRecordingAndATapEndsIt() async {
+        let m = machine()
+        engine.reply = .success("hands free")
+
+        m.doubleTapped()
+        XCTAssertEqual(m.state, .recording)
+        XCTAssertEqual(lockFlags, [true])
+        await settle { !self.pills.isEmpty }
+        XCTAssertEqual(pills, [Pill("locked — tap to end", 1.6)])
+
+        await pass(.seconds(10))
+        m.keyUp()
+        XCTAssertEqual(lockFlags, [true, false])
+        XCTAssertEqual(m.state, .transcribing)
+        await settle { self.inserter.inserted.count == 1 }
+        XCTAssertEqual(inserter.inserted, ["Hands free."])
+        XCTAssertEqual(completions, [.delivered])
+    }
+
+    /// a lamp that says "locked" over nothing is a lie.
+    func testALockThatNeverStartedClaimsNothing() async {
+        let m = machine()
+        micForPress = nil
+
+        m.doubleTapped()
+        await settle()
+
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(lockFlags, [])
+        XCTAssertEqual(pills, [])
+    }
+
+    func testADoubleTapMidRecordingIsNotASecondRecording() async {
+        let m = machine()
+        m.keyDown()
+
+        m.doubleTapped()
+        await settle()
+
+        XCTAssertEqual(mic.starts, 1)
+        XCTAssertEqual(lockFlags, [])
+        XCTAssertEqual(pills, [])
+    }
+
     // MARK: - helpers
 
     private var pills: [Pill] {
@@ -399,6 +447,15 @@ final class UtteranceMachineTests: XCTestCase {
         events.compactMap {
             if case let .retryOffered(offered) = $0 {
                 return offered
+            }
+            return nil
+        }
+    }
+
+    private var lockFlags: [Bool] {
+        events.compactMap {
+            if case let .locked(locked) = $0 {
+                return locked
             }
             return nil
         }
