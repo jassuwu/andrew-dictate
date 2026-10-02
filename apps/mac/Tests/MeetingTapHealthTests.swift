@@ -258,6 +258,52 @@ final class MeetingTapHealthTests: XCTestCase {
         ])
     }
 
+    // MARK: - a rebuild that throws
+
+    /// The device is not back yet the first two times. The rebuild is tried
+    /// again, further apart each time, and the third works: one gap, closed
+    /// when the rebuilt tap hears its start sound, and nothing else to say.
+    func testARebuildThatThrowsTwiceThenWorksIsOneGap() async throws {
+        source.rebuildsThatFail = 2
+        let clock = FakeClock()
+        let c = coordinator(thresholds: retrying, clock: clock)
+        c.start()
+        await source.awaitStart()
+        await play(loud(at: .zero), loud(at: .seconds(1)))
+
+        clock.advance(by: .seconds(60))
+        source.skip(to: .seconds(60))
+        c.probeTapIsAlive()
+        await until { events.contains(.gapEnded) }
+
+        XCTAssertEqual(source.rebuilds, 3)
+        let at = source.rebuiltAt
+        XCTAssertGreaterThanOrEqual(at[1] - at[0], .milliseconds(100))
+        XCTAssertGreaterThanOrEqual(at[2] - at[1], .milliseconds(200))
+        XCTAssertEqual(events, [.started, .gapBegan, .gapEnded])
+        XCTAssertEqual(c.state, .recording)
+
+        c.stop()
+        await c.untilWrittenOut()
+        XCTAssertEqual(try savedFile().gapCount, 1)
+        XCTAssertEqual(records.first?.events, [
+            .init(.gapBegan, atS: 2),
+            .init(.rebuildFailed, atS: 60),
+            .init(.rebuildFailed, atS: 60),
+            .init(.gapEnded, atS: 60.3),
+        ])
+    }
+
+    /// A settle, then three tries in a row 100 ms and 200 ms apart.
+    private var retrying: MeetingThresholds {
+        .init(
+            probeTimeout: .seconds(1), silenceTimeout: .seconds(5),
+            silenceFloor: 0.001, quietNudgeAfter: .seconds(3_600),
+            quietProbeWindow: .seconds(2),
+            settleBeforeRebuild: .milliseconds(50),
+            rebuildSpacing: [.milliseconds(100), .milliseconds(200)])
+    }
+
     // MARK: - helpers
 
     private func savedFile() throws -> MeetingSummary {
@@ -363,12 +409,23 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
         lock.withLock { nextAt = max(nextAt, at) }
     }
 
+    /// How many rebuilds from now throw, the device not there yet.
+    var rebuildsThatFail: Int {
+        get { lock.withLock { _rebuildsThatFail } }
+        set { lock.withLock { _rebuildsThatFail = newValue } }
+    }
+    private var _rebuildsThatFail = 0
+
     /// A rebuilt tap plays the start sound, and hears it come back a moment
     /// later as far-side audio, the way the real one does.
     func rebuild() async throws {
-        let at = lock.withLock { () -> Duration in
+        let at = try lock.withLock { () throws -> Duration in
             _rebuilds += 1
             _rebuiltAt.append(ContinuousClock.now)
+            if _rebuildsThatFail > 0 {
+                _rebuildsThatFail -= 1
+                throw DeviceGone()
+            }
             return nextAt
         }
         let n = 4_800
@@ -426,6 +483,8 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
         }
     }
 }
+
+private struct DeviceGone: Error {}
 
 /// Counts what it is fed; says nothing.
 private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {

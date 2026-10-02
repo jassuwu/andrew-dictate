@@ -45,7 +45,9 @@ final class MeetingRecordTests: XCTestCase {
             hookRunner: HookRunner(logURL: dir.appendingPathComponent("hooks.log")),
             thresholds: .init(
                 probeTimeout: .seconds(1), silenceTimeout: .seconds(5),
-                silenceFloor: 0.001, quietNudgeAfter: .seconds(30)),
+                silenceFloor: 0.001, quietNudgeAfter: .seconds(30),
+                settleBeforeRebuild: .milliseconds(20),
+                rebuildSpacing: [.milliseconds(20), .milliseconds(20)]),
             now: { clock.now },
             date: { dates.next() },
             preferences: { [unowned self] in
@@ -504,6 +506,8 @@ final class MeetingRecordTests: XCTestCase {
         XCTAssertEqual(record.outcome, .saved)
         XCTAssertEqual(record.events, [
             .init(.gapBegan, atS: 1_083),
+            .init(.rebuildFailed, atS: 3_498),
+            .init(.rebuildFailed, atS: 3_498),
             .init(.rebuildFailed, atS: 3_498),
         ])
         XCTAssertEqual(record.gaps, 1)

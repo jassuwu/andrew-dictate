@@ -21,6 +21,12 @@ struct MeetingThresholds: Sendable {
     /// How long a dead tap is left before it is rebuilt, so a rebuild at
     /// wake does not race the hardware coming back. Provisional.
     var settleBeforeRebuild: Duration = .seconds(1.5)
+    /// A rebuild that throws is tried again after each of these: three
+    /// tries in a row, two seconds then five apart. Provisional.
+    var rebuildSpacing: [Duration] = [.seconds(2), .seconds(5)]
+
+    /// Tries in a row before the meeting stops waiting on the tap.
+    var rebuildAttempts: Int { rebuildSpacing.count + 1 }
 
     static let provisional = MeetingThresholds()
 }
@@ -653,14 +659,19 @@ final class MeetingCoordinator: ObservableObject {
         guard meeting.rebuild == nil else { return }
         meeting.rebuild = Task { [weak self] in
             defer { meeting.rebuild = nil }
-            guard let self else { return }
-            // The hardware gets a moment first: a rebuild that races a
-            // waking device comes back as dead as the tap it replaced.
-            // Stopped meanwhile, or heard again, and there is nothing of
-            // its own left to rebuild.
-            guard await pause(thresholds.settleBeforeRebuild),
-                  isRebuilding(meeting)
-            else { return }
+            await self?.keepRebuilding(meeting)
+        }
+    }
+
+    /// 002 §6's answer to a dead tap, made patient and bounded. The
+    /// hardware gets a moment first: a rebuild that races a waking device
+    /// comes back as dead as the tap it replaced. One that throws is tried
+    /// again, a little further apart each time. Stopped meanwhile, or heard
+    /// again, and there is nothing of its own left to rebuild.
+    private func keepRebuilding(_ meeting: Meeting) async {
+        var wait = thresholds.settleBeforeRebuild
+        var failures = 0
+        while await pause(wait), isRebuilding(meeting) {
             do {
                 // Set before the rebuild, not after: the tone can be heard
                 // the instant the tap is back.
@@ -668,15 +679,22 @@ final class MeetingCoordinator: ObservableObject {
                 try await source.rebuild()
                 // A rebuilt tap must hear something before it is trusted
                 // again; a rebuild that produces silence is just a new gap.
+                return
             } catch {
                 logger.error("tap rebuild failed: \(error.localizedDescription, privacy: .public)")
-                guard current === meeting else { return }
-                session.rebuildFailed()
+                guard isRebuilding(meeting) else { return }
                 meeting.notes.note(.rebuildFailed, at: elapsed)
+                failures += 1
+                if failures < thresholds.rebuildAttempts {
+                    wait = thresholds.rebuildSpacing[failures - 1]
+                    continue
+                }
+                session.rebuildFailed()
                 publish()
                 onEvent?(.cannotHear)
                 // Most of a meeting is on the spool; write what there is.
                 stop(announcingNothingKept: false)
+                return
             }
         }
     }
