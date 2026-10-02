@@ -135,6 +135,7 @@ targets:
           - FluidDiarizer.swift
           - MeetingEngines.swift
           - WhisperMeetingTranscriber.swift
+          - ParakeetStretchEngine.swift
       - Sources/Settings/MeetingsListModel.swift
       - Sources/Onboarding/OnboardingMeetingSetup.swift
       - Sources/App/AppIdentity.swift
