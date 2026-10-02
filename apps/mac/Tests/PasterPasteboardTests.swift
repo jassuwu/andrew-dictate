@@ -55,4 +55,47 @@ final class PasterPasteboardTests: XCTestCase {
             "correct horse battery staple"
         )
     }
+
+    // MARK: - the clipboard read ahead
+
+    /// nothing copied since key-up: the clipboard read while the engine
+    /// worked is the one put back.
+    func testAReadAheadStillCurrentIsTheOneRestored() throws {
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setString("what you had", forType: .string)
+        let early = try XCTUnwrap(Paster.snapshot(of: pasteboard))
+
+        let restored = Paster.snapshotToRestore(early: early, on: pasteboard)
+
+        XCTAssertEqual(restored?.changeCount, early.changeCount)
+        XCTAssertEqual(text(in: restored), ["what you had"])
+    }
+
+    /// a ⌘C while the engine worked — or the menu's copy timings — moved
+    /// the change count: the read ahead is stale, and the clipboard is read
+    /// again at the paste.
+    func testAReadAheadIsDroppedOnceAnythingIsCopiedOverIt() throws {
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setString("what you had", forType: .string)
+        let early = try XCTUnwrap(Paster.snapshot(of: pasteboard))
+
+        pasteboard.clearContents()
+        pasteboard.setString("copied since", forType: .string)
+        let restored = Paster.snapshotToRestore(early: early, on: pasteboard)
+
+        XCTAssertEqual(restored?.changeCount, pasteboard.changeCount)
+        XCTAssertEqual(text(in: restored), ["copied since"])
+    }
+
+    private func text(in snapshot: Paster.Snapshot?) -> [String] {
+        (snapshot?.items ?? []).flatMap { item in
+            item.representations
+                .filter { $0.type == NSPasteboard.PasteboardType.string.rawValue }
+                .compactMap { String(data: $0.data, encoding: .utf8) }
+        }
+    }
 }
