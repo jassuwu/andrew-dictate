@@ -22,8 +22,10 @@ struct PressRecord: Equatable, Sendable, Codable {
         case couldNotTranscribe
         /// `esc`, the only way you throw an utterance away.
         case cancelled
-        /// sleep or the lock. a mic change ended takes here too until it
-        /// started keeping them (`micChanged`); records from then still read.
+        /// a take thrown away from underneath. nothing ends here any more:
+        /// a mic change keeps the take (`micChanged`), and sleep or the
+        /// lock keeps it on the clipboard (`leftOnPasteboard(.locked)`).
+        /// records from before either still read.
         case interrupted(CaptureInterruption)
         /// the press was answered with a pill and never recorded.
         case refused(Refusal)
@@ -269,6 +271,7 @@ extension PressRecord.Outcome {
         .shortcutUnavailable,
         .cancelled,
         .pasteboardUnavailable,
+        .locked,
     ]
 
     private static func name(of reason: LeftOnPasteboardReason) -> String {
@@ -279,6 +282,7 @@ extension PressRecord.Outcome {
         case .shortcutUnavailable: "no-paste-shortcut"
         case .cancelled: "paste-cancelled"
         case .pasteboardUnavailable: "clipboard-busy"
+        case .locked: "locked"
         }
     }
 }

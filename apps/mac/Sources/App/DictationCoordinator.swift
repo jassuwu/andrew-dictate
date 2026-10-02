@@ -193,6 +193,8 @@ final class DictationCoordinator: ObservableObject {
         at: Date
     )?
     private let timelineStore = UtteranceTimelineStore()
+    /// held while the mic is live (`keepDisplayAwake`).
+    private var displayAwakeActivity: (any NSObjectProtocol)?
     private var aboutWindowController: AboutWindowController?
     #if DEBUG
     private var lampLabWindowController: LampLabWindowController?
@@ -229,6 +231,11 @@ final class DictationCoordinator: ObservableObject {
     /// A quit is waiting on a meeting's transcript to be written.
     private var quitWaitingOnMeeting = false
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
+    /// between `com.apple.screenIsLocked` and its unlock.
+    private var screenLockedByNotification = false
+    /// the mac went to sleep mid-take: the capture is suspended once that
+    /// take's mic has answered the stop (`suspendCaptureForSleep`).
+    private var suspendsCaptureAfterTheTake = false
     private var distributedNotificationObservers: [NSObjectProtocol] = []
 
     init(settings: AppSettings = .shared) {
@@ -1184,13 +1191,14 @@ final class DictationCoordinator: ObservableObject {
                         self?.handleCaptureInterruption(
                             reason: .systemPaused
                         )
-                        // nothing listens through a sleep, pre-roll
-                        // included: the capture goes, and waking (the
-                        // device watcher's) builds the next one once the
-                        // hardware has settled.
-                        self?.captureSlot.suspend()
+                        self?.suspendCaptureForSleep()
                     } else {
                         self?.handleSystemResume()
+                        // woken onto the lock screen, the unlock is what
+                        // brings you back, not the wake.
+                        if self?.isScreenLocked == false {
+                            self?.machine.systemResumed()
+                        }
                     }
                 }
             }
@@ -1208,12 +1216,14 @@ final class DictationCoordinator: ObservableObject {
             ) { [weak self] notification in
                 let isLock = notification.name == lockedName
                 Task { @MainActor [weak self] in
+                    self?.screenLockedByNotification = isLock
                     if isLock {
                         self?.handleCaptureInterruption(
                             reason: .systemPaused
                         )
                     } else {
                         self?.handleSystemResume()
+                        self?.machine.systemResumed()
                     }
                 }
             }
@@ -1380,6 +1390,30 @@ final class DictationCoordinator: ObservableObject {
     ) {
         machine.captureInterrupted(reason)
         hotkeyMonitor.reset()
+    }
+
+    /// nothing listens through a sleep, pre-roll included: the capture
+    /// goes, and waking (the device watcher's) builds the next one once
+    /// the hardware has settled. a take the sleep just ended is still
+    /// handing over what it heard, and throwing its capture away under the
+    /// stop would lose it: that capture goes once the take has let go.
+    private func suspendCaptureForSleep() {
+        guard machine.state == .recording else {
+            captureSlot.suspend()
+            return
+        }
+        suspendsCaptureAfterTheTake = true
+    }
+
+    /// the login window is over the session. the lock notification can
+    /// land after the wake it came with, so the window server is asked as
+    /// well: `CGSSessionScreenIsLocked` is only there while it is up.
+    private var isScreenLocked: Bool {
+        guard !screenLockedByNotification else {
+            return true
+        }
+        let session = CGSessionCopyCurrentDictionary() as? [String: Any]
+        return session?["CGSSessionScreenIsLocked"] as? Bool ?? false
     }
 
     private func handleSystemResume() {
@@ -1738,6 +1772,10 @@ extension DictationCoordinator {
         switch event {
         case let .state(state, fastDismiss):
             apply(state, fastHUDDismiss: fastDismiss)
+            if suspendsCaptureAfterTheTake, state != .recording {
+                suspendsCaptureAfterTheTake = false
+                captureSlot.suspend()
+            }
         case let .chime(chime):
             guard !isOnboardingPresented else {
                 return
@@ -1752,6 +1790,8 @@ extension DictationCoordinator {
             }
         case let .locked(locked):
             hudViewModel.setRecordingLocked(locked)
+        case let .keepAwake(awake):
+            keepDisplayAwake(awake)
         case let .timelineCompleted(timeline):
             timelineStore.append(timeline)
         case let .archiveRecord(timeline, heard, inserted):
@@ -1767,6 +1807,27 @@ extension DictationCoordinator {
             captureSlot.drop()
         case let .pressEnded(record):
             keep(record)
+        }
+    }
+
+    /// an idle-display-sleep assertion, the one `pmset -g assertions` lists
+    /// as "dictating". ProcessInfo's activity rather than IOKit's call: the
+    /// same assertion underneath, with a token instead of an id and a
+    /// return code to check, and the system drops it if the app dies.
+    /// display only — keeping the system awake too is the display's doing,
+    /// and nothing here should outlive the mic.
+    private func keepDisplayAwake(_ awake: Bool) {
+        if awake {
+            guard displayAwakeActivity == nil else {
+                return
+            }
+            displayAwakeActivity = ProcessInfo.processInfo.beginActivity(
+                options: .idleDisplaySleepDisabled,
+                reason: "dictating"
+            )
+        } else if let activity = displayAwakeActivity {
+            ProcessInfo.processInfo.endActivity(activity)
+            displayAwakeActivity = nil
         }
     }
 

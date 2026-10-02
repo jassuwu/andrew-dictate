@@ -757,24 +757,25 @@ final class UtteranceMachineTests: XCTestCase {
 
     // MARK: - the mac underneath
 
-    /// today's behaviour, which ticket 06 reverses: sleep or the lock ends
-    /// the take and throws it away, saying nothing — the pill would be gone
-    /// before the screen came back.
-    func testSleepOrTheLockMidRecordingDiscardsItSilently() async {
+    /// only you throw an utterance away: sleep or the lock ends the take
+    /// and keeps it, copied rather than pasted. the rest of that path is
+    /// `UtteranceMachineInterruptionTests`.
+    func testSleepOrTheLockMidRecordingKeepsIt() async {
         let m = machine()
         m.keyDown()
         await pass(.seconds(1))
 
         m.captureInterrupted(.systemPaused)
-        await settle()
+        await settle { !self.outcomes.isEmpty }
 
         XCTAssertEqual(m.state, .idle)
-        XCTAssertEqual(states.last, .init(.idle, fast: true))
-        XCTAssertEqual(mic.cancels, 1)
-        XCTAssertEqual(pills, [])
-        XCTAssertEqual(engine.heard, [])
-        XCTAssertEqual(completions, [])
-        XCTAssertEqual(outcomes, [.interrupted(.systemPaused)])
+        XCTAssertEqual(mic.stops, 1)
+        XCTAssertEqual(mic.cancels, 0)
+        XCTAssertEqual(engine.heard, [mic.samples])
+        XCTAssertEqual(inserter.inserted, [])
+        XCTAssertEqual(inserter.copied, ["Hello."])
+        XCTAssertEqual(completions, [.leftOnPasteboard])
+        XCTAssertEqual(outcomes, [.leftOnPasteboard(.locked)])
     }
 
     /// the mic changing mid-sentence ends the take but keeps it: what was
@@ -873,7 +874,7 @@ final class UtteranceMachineTests: XCTestCase {
         await hold(m, for: .seconds(1))
         await settle { self.engine.isWaiting }
 
-        m.captureInterrupted(.systemPaused)
+        m.captureInterrupted(.deviceChanged)
         XCTAssertEqual(m.state, .transcribing)
 
         engine.release()
@@ -1239,7 +1240,7 @@ final class UtteranceMachineTests: XCTestCase {
 
 // MARK: - what the tests read
 
-private struct Pill: Equatable, CustomStringConvertible {
+struct Pill: Equatable, CustomStringConvertible {
     let message: String
     let duration: TimeInterval
 
@@ -1251,7 +1252,7 @@ private struct Pill: Equatable, CustomStringConvertible {
     var description: String { "\(message) (\(duration)s)" }
 }
 
-private struct StateChange: Equatable {
+struct StateChange: Equatable {
     let state: UtteranceMachine.State
     let fast: Bool
 
@@ -1261,7 +1262,7 @@ private struct StateChange: Equatable {
     }
 }
 
-private struct Kept: Equatable {
+struct Kept: Equatable {
     let heard: String
     let inserted: String
 }
@@ -1271,7 +1272,7 @@ private struct Kept: Equatable {
 private struct MicFailure: Error {}
 
 @MainActor
-private final class FakeMic: MicCapture {
+final class FakeMic: MicCapture {
     var samples: [Float] = (0..<1_600).map { Float($0 % 7) * 0.01 }
     let deviceDescription: MicDescription? = MicDescription(
         name: "AirPods Pro",
@@ -1364,7 +1365,7 @@ private struct EngineFailure: Error {}
 
 /// answers with `reply`, or — while `holds` is set — waits for the test to
 /// `release()` it, the way a slow or hung engine would.
-private final class FakeEngine: TranscriptionEngine, @unchecked Sendable {
+final class FakeEngine: TranscriptionEngine, @unchecked Sendable {
     private let lock = NSLock()
     private var _reply: Result<String, any Error> = .success("hello")
     private var _holds = false
@@ -1420,7 +1421,7 @@ private final class FakeEngine: TranscriptionEngine, @unchecked Sendable {
 }
 
 @MainActor
-private struct FakeAnchor: InsertionAnchor {
+struct FakeAnchor: InsertionAnchor {
     var targetBundleIdentifier: String?
     var before: String?
 
@@ -1438,7 +1439,7 @@ private struct FakeAnchor: InsertionAnchor {
 }
 
 @MainActor
-private final class FakeInserter: Inserter {
+final class FakeInserter: Inserter {
     var anchor: FakeAnchor? = FakeAnchor(
         targetBundleIdentifier: "com.apple.TextEdit"
     )
@@ -1464,5 +1465,19 @@ private final class FakeInserter: Inserter {
     ) async -> PasteOutcome {
         inserted.append(text)
         return PasteOutcome(result: result, insertedAt: clock.now)
+    }
+
+    /// what was left on the clipboard without a paste being tried.
+    private(set) var copied: [String] = []
+
+    func copy(
+        _ text: String,
+        because reason: LeftOnPasteboardReason
+    ) async -> PasteOutcome {
+        copied.append(text)
+        return PasteOutcome(
+            result: .leftOnPasteboard(reason),
+            insertedAt: clock.now
+        )
     }
 }
