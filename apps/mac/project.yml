@@ -161,6 +161,9 @@ targets:
       - Sources/Hotkey/TapLockDetector.swift
       - Sources/Hotkey/TranscribingRepress.swift
       - Sources/Dictation
+      # the learner, the locator and the watch are pure; the AX half of the
+      # watcher compiles here and is never driven.
+      - Sources/Learning
       - Sources/Insertion/FocusAnchor.swift
       # the pasteboard write is asserted on a private pasteboard; no test
       # here posts a keystroke. the key-code resolver comes along because
