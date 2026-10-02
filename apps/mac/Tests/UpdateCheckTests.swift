@@ -817,6 +817,35 @@ final class UpdateCheckTests: XCTestCase {
         XCTAssertEqual(world.relaunches, 1)
     }
 
+    /// the command waits on the clipboard for the terminal, and the log
+    /// keeps brew's reason, which is about a cask and never the user.
+    @MainActor
+    func testAFailedUpgradeCopiesTheCommandAndLogsBrewsReason() async {
+        let world = HandOffWorld()
+        world.runner.result = CommandResult(
+            ending: .exited(1),
+            stdout: "==> Upgrading 1 outdated package:\n",
+            stderr: "==> Downloading\n"
+                + "Error: Download failed on Cask 'andrew-dictate'\n\n"
+        )
+
+        await world.handOff.click(offering: brewLine)?.value
+
+        XCTAssertEqual(
+            world.handOff.state(offering: brewLine)?.title,
+            "couldn't update — command copied"
+        )
+        XCTAssertEqual(
+            world.pasteboard.string(forType: .string),
+            "brew upgrade --cask jassuwu/tap/andrew-dictate"
+        )
+        XCTAssertEqual(
+            world.logged,
+            ["brew upgrade exited 1: Error: Download failed on Cask 'andrew-dictate'"]
+        )
+        XCTAssertEqual(world.relaunches, 0)
+    }
+
     /// the browser opening is the confirmation; the clipboard is left
     /// alone and the line stays as it was.
     @MainActor

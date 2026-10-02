@@ -114,12 +114,29 @@ final class UpdateHandOff: ObservableObject {
         let result = await runner.run(
             BrewUpgrade.command(brew: brew, environment: environment)
         )
-        progress = UpdateOffer.finished(
+        let onDisk = onDiskVersion()
+        let finished = UpdateOffer.finished(
             .updating,
             ending: result.ending,
-            onDisk: onDiskVersion(),
+            onDisk: onDisk,
             running: runningVersion
         )
+        if finished == .failedCopied {
+            logFailure(why(result))
+            copy(UpdateCheck.upgradeCommand)
+        }
+        progress = finished
+    }
+
+    private func why(_ result: CommandResult) -> String {
+        let reason = BrewUpgrade.reason(inStderr: result.stderr)
+            ?? "nothing on stderr"
+        switch result.ending {
+        case let .exited(status):
+            return "brew upgrade exited \(status): \(reason)"
+        default:
+            return "brew upgrade failed: \(reason)"
+        }
     }
 
     private func copy(_ command: String) {
