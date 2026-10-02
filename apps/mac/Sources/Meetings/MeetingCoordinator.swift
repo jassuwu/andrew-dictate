@@ -1045,14 +1045,12 @@ final class MeetingCoordinator: ObservableObject {
     private func tapIsBack(_ meeting: Meeting) {
         session.tapRecovered(at: elapsed)
         meeting.notes.note(.gapEnded, at: elapsed)
-        guard let problem = session.problemCleared(.cannotHearTheCall) else {
+        guard session.problem(.cannotHearTheCall) != nil else {
             publish()
             onEvent?(.gapEnded)
             return
         }
-        meeting.notes.note(.problemCleared, at: elapsed)
-        publish()
-        onEvent?(.problemCleared(problem))
+        clear(.cannotHearTheCall, noting: .problemCleared, in: meeting)
     }
 
     private func rebuildTap(_ meeting: Meeting) {
