@@ -63,6 +63,55 @@ export async function tagFromGitHub(
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+const TAG_TTL_MS = 60 * 60 * 1000;
+const TAG_RETRY_MS = 60 * 1000;
+
+/**
+ * remembers github's answer in this instance's memory: an hour when it is a
+ * tag, a minute when it is not. requests that arrive mid-lookup share it.
+ * when a lookup fails after a good one, the last good tag keeps being served
+ * and github is asked again in a minute, so an outage is not an error here.
+ *
+ * every function instance has its own memory, so github hears from each
+ * warm instance about once an hour. at a few dozen installs that is a handful
+ * of instances, so a shared cache in the datastore would save almost nothing
+ * and would be a second thing to store.
+ */
+export function cachedTag(
+  lookup: () => Promise<string | null>,
+  now: () => number = Date.now,
+  ttlMs: number = TAG_TTL_MS,
+  retryMs: number = TAG_RETRY_MS,
+): () => Promise<string | null> {
+  let good: string | null = null;
+  let validUntil = 0;
+  let pending: Promise<string | null> | null = null;
+
+  async function refresh(): Promise<string | null> {
+    let tag: string | null = null;
+    try {
+      tag = await lookup();
+    } catch {
+      tag = null;
+    }
+    if (tag) {
+      good = tag;
+      validUntil = now() + ttlMs;
+    } else {
+      validUntil = now() + retryMs;
+    }
+    return good;
+  }
+
+  return () => {
+    if (now() < validUntil) return Promise.resolve(good);
+    pending ??= refresh().finally(() => {
+      pending = null;
+    });
+    return pending;
+  };
+}
+
 export function GET(request: Request): Promise<Response> {
   return answer(new URL(request.url), {
     latestTag: () => tagFromGitHub(),
