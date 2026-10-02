@@ -646,6 +646,9 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(m.state, .idle)
         await pass(.milliseconds(200))
         XCTAssertEqual(chimes, [])
+        // which mic refused is the whole point of the record.
+        XCTAssertEqual(outcomes, [.couldNotStartRecording])
+        XCTAssertEqual(presses.first?.mic, MicDescription(name: "AirPods Pro", transport: .bluetooth))
     }
 
     /// they spoke and there is nothing to show for it, so it says so.
@@ -661,6 +664,8 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(chimes, [.start])
         XCTAssertEqual(engine.heard, [])
         XCTAssertEqual(completions, [])
+        XCTAssertEqual(outcomes, [.recordingLost])
+        XCTAssertEqual(presses.first?.stages.keyUp, 1_000)
     }
 
     /// a press the app answered itself — a model still loading, a missing

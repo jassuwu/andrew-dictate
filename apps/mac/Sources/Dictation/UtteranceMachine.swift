@@ -266,6 +266,8 @@ final class UtteranceMachine {
             )
             activeFocusAnchor = nil
             activeTimeline = nil
+            // read before it is dropped: which mic refused is the evidence.
+            press?.mic = microphone.deviceDescription
             // the device may have been yanked between the check and the tap.
             // drop it so the next press rebuilds instead of retrying a corpse.
             microphone.cancel()
@@ -273,6 +275,7 @@ final class UtteranceMachine {
             emit(.microphoneDropped)
             setState(.idle)
             flashNotice("couldn't start recording")
+            endPress(.couldNotStartRecording)
         }
     }
 
@@ -337,6 +340,7 @@ final class UtteranceMachine {
             setState(.idle, fastHUDDismiss: true)
             // they spoke and there is nothing to show for it. say so.
             flashNotice("recording was lost")
+            endPress(.recordingLost)
         }
     }
 
