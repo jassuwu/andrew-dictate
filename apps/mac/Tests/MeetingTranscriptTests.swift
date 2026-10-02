@@ -186,6 +186,27 @@ final class MeetingTranscriptTests: XCTestCase {
             """)
     }
 
+    /// A turn that says where it ended is judged by the quiet after it, not
+    /// by where the next began: this one ran 4 s, and talk that begins 5 s
+    /// after that is a new paragraph, though it began only 9 s after the
+    /// first did.
+    func testTalkThatBeginsFiveSecondsAfterTheLastTurnEndedIsANewParagraph() throws {
+        let url = try MeetingTranscriptFile.write(
+            meeting(turns: [
+                .init(speaker: .them(nil), at: .seconds(10), text: "hello", end: .seconds(14)),
+                .init(speaker: .them(nil), at: .seconds(19), text: "can we start", end: .seconds(22)),
+            ]),
+            in: parent, timeZone: tz)
+
+        XCTAssertEqual(
+            try body(of: url),
+            """
+            [00:00:10] them: hello
+
+            [00:00:19] them: can we start
+            """)
+    }
+
     func testTwoFarSideVoicesAreNotMergedIntoOne() throws {
         let url = try MeetingTranscriptFile.write(
             meeting(turns: [

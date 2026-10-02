@@ -66,8 +66,16 @@ enum MeetingTranscriptFile {
 
     private static let paragraphSpan = Duration.seconds(60)
     /// The longest stretch a model is handed is about 25 s, so talk that
-    /// carries on has its turns begin closer together than this.
+    /// carries on has its turns begin closer together than this. For a turn
+    /// that does not say where it ended; one that does is held to
+    /// `longestPause`.
     private static let sameBreath = Duration.seconds(30)
+    /// The longest quiet inside a paragraph: talk that begins this long
+    /// after the turn before it ended is still the same talk, and any later
+    /// is a new paragraph with its own time. A detector keeps a turn open
+    /// through a breath, so a pause that outlasts a breath is a real one.
+    /// Provisional, to be tuned against real meetings.
+    private static let longestPause = Duration.seconds(3)
 
     /// Sits in `meetings/` beside the month folders. Never a meeting: it has
     /// no front matter, so `listAll` passes over it.
@@ -371,16 +379,20 @@ enum MeetingTranscriptFile {
     /// the live pass hands over fragments, and a person reads turns. A
     /// monologue starts a new paragraph a minute after the last one began, so
     /// there is always a time within a minute of whatever you are looking for.
-    /// So does talk that picks up again after a silence: a turn only has the
-    /// time it began, and one that begins more than `sameBreath` after the
-    /// one before it began was not said in the same breath.
+    /// So does talk that picks up again after a silence: one that begins
+    /// more than `longestPause` after the turn before it ended was not said
+    /// in the same breath. A turn that does not say where it ended can only
+    /// be judged by where it began, against `sameBreath`.
     private static func paragraphs(of turns: [MeetingTurn]) -> [MeetingTurn] {
         var out: [MeetingTurn] = []
         var lastBegan: Duration = .zero
+        var lastEnded: Duration?
         for turn in turns {
+            let isSameBreath = lastEnded.map { turn.at - $0 <= longestPause }
+                ?? (turn.at - lastBegan <= sameBreath)
             if let last = out.last, last.speaker == turn.speaker,
                turn.at - last.at < paragraphSpan,
-               turn.at - lastBegan <= sameBreath {
+               isSameBreath {
                 out[out.count - 1] = MeetingTurn(
                     speaker: last.speaker, at: last.at,
                     text: last.text + " " + turn.text)
@@ -388,6 +400,7 @@ enum MeetingTranscriptFile {
                 out.append(turn)
             }
             lastBegan = turn.at
+            lastEnded = turn.end
         }
         return out
     }
