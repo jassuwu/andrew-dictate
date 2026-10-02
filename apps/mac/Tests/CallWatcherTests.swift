@@ -273,6 +273,60 @@ final class CallWatcherTests: XCTestCase {
         )
     }
 
+    // MARK: - stopping mid-call
+
+    /// You pressed stop on purpose. Asking whether to record the same call
+    /// you just stopped recording would be the app disagreeing with you.
+    func testStoppingTheRecordingMidCallDoesNotSuggestRecordingAgain() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(0))
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(3))
+        _ = watcher.observe([zoom], isRecording: true, at: .seconds(10))
+
+        XCTAssertEqual(watcher.observe([zoom], isRecording: false, at: .seconds(900)), [])
+        XCTAssertEqual(watcher.observe([zoom], isRecording: false, at: .seconds(901)), [])
+        XCTAssertEqual(watcher.observe([zoom], isRecording: false, at: .seconds(3_600)), [])
+    }
+
+    /// The same, for a call that began inside a recording and so was never
+    /// asked about in the first place.
+    func testStoppingARecordingThatHadTheCallInsideItDoesNotSuggestRecordingEither() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+        _ = watcher.observe([zoom], isRecording: true, at: .seconds(0))
+        _ = watcher.observe([zoom], isRecording: true, at: .seconds(3))
+
+        XCTAssertEqual(watcher.observe([zoom], isRecording: false, at: .seconds(900)), [])
+        XCTAssertEqual(watcher.observe([zoom], isRecording: false, at: .seconds(3_600)), [])
+    }
+
+    /// The icon is where the call shows up again: it is on, and nothing is
+    /// recording it.
+    func testACallWhoseRecordingStoppedIsReportedAsUnrecorded() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+        _ = watcher.observe([zoom], isRecording: true, at: .seconds(0))
+        _ = watcher.observe([zoom], isRecording: true, at: .seconds(3))
+        XCTAssertNil(watcher.unrecordedCall)
+
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(900))
+        XCTAssertEqual(watcher.unrecordedCall, "zoom")
+        XCTAssertEqual(watcher.currentCall, "zoom")
+    }
+
+    /// There is nothing left to stop when the call finally ends.
+    func testACallThatEndsAfterItsRecordingStoppedSuggestsNothing() {
+        var watcher = watcher()
+        let zoom = app("zoom")
+        _ = watcher.observe([zoom], isRecording: true, at: .seconds(0))
+        _ = watcher.observe([zoom], isRecording: true, at: .seconds(3))
+        _ = watcher.observe([zoom], isRecording: false, at: .seconds(900))
+
+        XCTAssertEqual(watcher.observe([], isRecording: false, at: .seconds(1_000)), [])
+        XCTAssertEqual(watcher.observe([], isRecording: false, at: .seconds(1_030)), [])
+    }
+
     // MARK: - saying no
 
     /// No is an answer. The call is still on, and the icon still says so,
