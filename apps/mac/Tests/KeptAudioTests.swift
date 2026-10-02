@@ -200,6 +200,45 @@ final class KeptAudioTests: XCTestCase {
         XCTAssertEqual(failing.all().count, 1)
     }
 
+    // MARK: - from history
+
+    /// `delete audio now` on the meeting's row: the audio and its label go,
+    /// the transcript stays.
+    func testDeleteAudioNowFromHistoryLeavesOnlyTheTranscript() async throws {
+        transcribers.lineUp(healthy())
+        try await meeting(seconds: 2)
+        let history = MeetingsListModel(keptAudio: kept) { [docs] in
+            MeetingTranscriptFile.listAll(in: docs)
+        }
+        let row = try XCTUnwrap(history.items.first)
+        XCTAssertEqual(history.audioNote(for: row)?.hasPrefix("audio until "), true)
+
+        history.deleteAudio(of: row)
+
+        XCTAssertEqual(try keptFiles(), [])
+        XCTAssertNil(history.audioNote(for: row))
+        XCTAssertEqual(MeetingTranscriptFile.listAll(in: docs).count, 1)
+    }
+
+    /// deleting the transcript from history takes its audio with it.
+    func testDeletingTheTranscriptFromHistoryDeletesItsAudio() async throws {
+        transcribers.lineUp(thin(), thin())
+        try await meeting(seconds: 2)
+        let history = MeetingsListModel(
+            keptAudio: kept,
+            trash: { try FileManager.default.removeItem(at: $0) }
+        ) { [docs] in
+            MeetingTranscriptFile.listAll(in: docs)
+        }
+        let row = try XCTUnwrap(history.items.first)
+        XCTAssertEqual(history.audioNote(for: row), "audio kept")
+
+        history.delete(row)
+
+        XCTAssertEqual(history.items, [])
+        XCTAssertEqual(try keptFiles(), [])
+    }
+
     // MARK: - the app stopped while it was keeping
 
     /// The file was written and the app quit while the audio was being
