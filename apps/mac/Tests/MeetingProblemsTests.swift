@@ -314,6 +314,39 @@ final class MeetingProblemsTests: XCTestCase {
         XCTAssertEqual(c.state, .rebuilding)
     }
 
+    /// Your side kept coming from the mic alone while a later try built the
+    /// whole rig again, slowly. The rebuilt tap's start sound is ours, not
+    /// the call: its window runs from the first chunk with the far side in
+    /// it again, not from one of the mic's own while the tap was still being
+    /// built — so the chirp never reaches the transcriber as somebody
+    /// speaking, and it ends the problem.
+    func testTheStartSoundAfterTheMicWasAloneIsNotTheCall() async throws {
+        source.rebuildsFail = true
+        source.capturing = .yourSideAlone
+        let clock = FakeClock()
+        let c = coordinator(thresholds: retrying, clock: clock)
+        c.start()
+        await source.awaitStart()
+        await play(both(at: .zero), both(at: .seconds(1)))
+        clock.advance(by: .seconds(60))
+        c.probeTapIsAlive()
+        await until { c.problem != nil }
+        await play(you(at: .seconds(60)))
+
+        source.rebuildTakes = .milliseconds(600)
+        source.rebuildsFail = false
+        var s = 61
+        while !events.contains(.problemCleared(.cannotHearTheCall)), s < 200 {
+            await play(you(at: .seconds(s)))
+            s += 1
+        }
+
+        XCTAssertEqual(events.last, .problemCleared(.cannotHearTheCall))
+        XCTAssertGreaterThan(s, 64, "the mic alone went on for longer than the start window")
+        let fed = transcriber.fed.filter { $0.at >= .seconds(60) }
+        XCTAssertEqual(fed.filter { $0.themRMS > 0 }.count, 0, "the start sound is ours")
+    }
+
     /// A settle, then three tries in a row 100 ms and 200 ms apart, then
     /// one every 300 ms with the problem standing.
     private var retrying: MeetingThresholds {
@@ -549,8 +582,25 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     }
     private var _rebuildsFail = false
 
+    /// How long a rebuild that works takes, on the real clock.
+    var rebuildTakes: Duration {
+        get { lock.withLock { _rebuildTakes } }
+        set { lock.withLock { _rebuildTakes = newValue } }
+    }
+    private var _rebuildTakes: Duration = .zero
+
+    /// One that works brings both sides back and plays the start sound,
+    /// which the tap hears a moment later as far-side audio.
     func rebuild() async throws {
         if rebuildsFail { throw DeviceGone() }
+        try? await Task.sleep(for: rebuildTakes)
+        let at = lock.withLock { () -> Duration in
+            _capturing = .bothSides
+            return nextAt
+        }
+        let n = 4_800
+        send(.init(you: Array(repeating: 0, count: n),
+                   them: (0..<n).map { sin(Float($0) * 0.05) * 0.3 }, at: at))
     }
 
     /// What it says it is delivering: after a rebuild that threw, the mic
@@ -574,8 +624,13 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     }
 
     func send(_ chunk: MeetingAudioChunk) {
-        _ = lock.withLock { chunks }?.yield(chunk)
+        let chunks = lock.withLock { () -> AsyncStream<MeetingAudioChunk>.Continuation? in
+            nextAt = chunk.at + chunk.duration
+            return self.chunks
+        }
+        chunks?.yield(chunk)
     }
+    private var nextAt: Duration = .zero
 
     func tell(_ event: MeetingSourceEvent) {
         _ = lock.withLock { told }?.yield(event)

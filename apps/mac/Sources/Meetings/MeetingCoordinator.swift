@@ -751,7 +751,10 @@ final class MeetingCoordinator: ObservableObject {
     private func ingest(_ chunk: MeetingAudioChunk, into meeting: Meeting) async {
         elapsed = chunk.at + chunk.duration
         lastChunkArrived = now()
-        if probeOpensAtNextChunk {
+        // Not on a chunk from the mic alone, still coming while the whole
+        // rig is built again: the start sound is on its way through a tap
+        // that is not delivering yet.
+        if probeOpensAtNextChunk, source.capturing != .yourSideAlone {
             probeOpensAtNextChunk = false
             probeUntil = max(probeUntil, chunk.at + thresholds.probeTimeout)
         }
