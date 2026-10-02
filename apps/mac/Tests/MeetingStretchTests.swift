@@ -126,9 +126,10 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(live(c), ["you 1.0 one", "you 2.0 two", "them 3.0 three"])
         c.stop()
         let lines = try await savedLines()
+        // one speaker carrying on is one paragraph in the file; the live
+        // lines above are where the two stretches show apart.
         XCTAssertEqual(lines, [
-            "[00:00:01] you: one",
-            "[00:00:02] you: two",
+            "[00:00:01] you: one two",
             "[00:00:03] them: three",
         ])
         XCTAssertEqual(handed().count, 3, "stopping decodes nothing again")
@@ -158,9 +159,7 @@ final class MeetingStretchTests: XCTestCase {
         c.stop()
         let lines = try await savedLines()
         XCTAssertEqual(lines, [
-            "[00:00:01] you: and another thing",
-            "[00:00:03] you: and another thing",
-            "[00:00:05] you: and another thing",
+            "[00:00:01] you: and another thing and another thing and another thing",
         ])
     }
 
@@ -188,7 +187,7 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(live(c), ["you 10.0 right", "you 11.5 so anyway"])
         c.stop()
         let lines = try await savedLines()
-        XCTAssertEqual(lines, ["[00:00:10] you: right", "[00:00:11] you: so anyway"])
+        XCTAssertEqual(lines, ["[00:00:10] you: right so anyway"])
     }
 
     // MARK: - a gap
