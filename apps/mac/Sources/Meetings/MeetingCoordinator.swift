@@ -214,14 +214,18 @@ final class MeetingCoordinator: ObservableObject {
 
     // MARK: - the user's two buttons
 
-    /// What a meeting is called in its file's name, its front matter and the
-    /// hook's payload. Nothing picks an app any more (ADR 0049).
+    /// What a meeting nobody named is called in its file's name, its front
+    /// matter and the hook's payload. Nothing picks an app any more (ADR
+    /// 0049).
     static let unnamed = "meeting"
 
-    func start() {
+    /// `name` is the call app's, once something can tell which one held the
+    /// mic at the start (ADR 0047); without one the meeting is `unnamed`.
+    /// It is a name and nothing more: the tap hears the whole mac either way.
+    func start(name: String? = nil) {
         guard session.state == .idle else { return }
         let meeting = Meeting(
-            app: Self.unnamed, started: date(),
+            app: name ?? Self.unnamed, started: date(),
             preferences: preferences())
         current = meeting
 
@@ -783,7 +787,8 @@ extension MeetingCoordinator {
     /// own, so the two have nothing to reach into each other for.
     @MainActor
     private final class Meeting {
-        /// What the meeting is called in its file and the hook: `meeting`.
+        /// What the meeting is called in its file and the hook: the name it
+        /// was started with, or `meeting`.
         let app: String
         let started: Date
         /// Read once, at the start: the folder, the model and the hook this

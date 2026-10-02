@@ -435,6 +435,28 @@ final class MeetingCoordinatorTests: XCTestCase {
         XCTAssertEqual(try told(beside: saved)["app"] as? String, "meeting")
     }
 
+    /// The call app, when something can tell which one held the mic at the
+    /// start (ADR 0047), names the meeting in all three places instead.
+    func testAMeetingStartedWithANameIsSavedUnderIt() async throws {
+        hook = try script("#!/bin/sh\ncat > \"$ANDREW_FOLDER/seen.json\"\nexit 0\n")
+        let c = coordinator()
+        c.start(name: "zoom")
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+        c.stop()
+        await settle(for: 1.5)
+
+        let saved = try XCTUnwrap(
+            MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).first)
+        XCTAssertTrue(
+            saved.fileURL.lastPathComponent.hasSuffix("-zoom.md"),
+            saved.fileURL.lastPathComponent)
+        let body = try String(contentsOf: saved.fileURL, encoding: .utf8)
+        XCTAssertTrue(body.contains("\napp: zoom\n"), body)
+        XCTAssertEqual(try told(beside: saved)["app"] as? String, "zoom")
+    }
+
     // MARK: - one meeting, one file
 
     /// Stop, then start again while the first is still being written out:
