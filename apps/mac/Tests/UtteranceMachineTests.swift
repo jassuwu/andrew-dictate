@@ -757,24 +757,25 @@ final class UtteranceMachineTests: XCTestCase {
 
     // MARK: - the mac underneath
 
-    /// today's behaviour, which ticket 06 reverses: sleep or the lock ends
-    /// the take and throws it away, saying nothing — the pill would be gone
-    /// before the screen came back.
-    func testSleepOrTheLockMidRecordingDiscardsItSilently() async {
+    /// only you throw an utterance away: sleep or the lock ends the take
+    /// and keeps it, copied rather than pasted. the rest of that path is
+    /// `UtteranceMachineInterruptionTests`.
+    func testSleepOrTheLockMidRecordingKeepsIt() async {
         let m = machine()
         m.keyDown()
         await pass(.seconds(1))
 
         m.captureInterrupted(.systemPaused)
-        await settle()
+        await settle { !self.outcomes.isEmpty }
 
         XCTAssertEqual(m.state, .idle)
-        XCTAssertEqual(states.last, .init(.idle, fast: true))
-        XCTAssertEqual(mic.cancels, 1)
-        XCTAssertEqual(pills, [])
-        XCTAssertEqual(engine.heard, [])
-        XCTAssertEqual(completions, [])
-        XCTAssertEqual(outcomes, [.interrupted(.systemPaused)])
+        XCTAssertEqual(mic.stops, 1)
+        XCTAssertEqual(mic.cancels, 0)
+        XCTAssertEqual(engine.heard, [mic.samples])
+        XCTAssertEqual(inserter.inserted, [])
+        XCTAssertEqual(inserter.copied, ["Hello."])
+        XCTAssertEqual(completions, [.leftOnPasteboard])
+        XCTAssertEqual(outcomes, [.leftOnPasteboard(.locked)])
     }
 
     /// the mic changing mid-sentence ends the take but keeps it: what was
@@ -873,7 +874,7 @@ final class UtteranceMachineTests: XCTestCase {
         await hold(m, for: .seconds(1))
         await settle { self.engine.isWaiting }
 
-        m.captureInterrupted(.systemPaused)
+        m.captureInterrupted(.deviceChanged)
         XCTAssertEqual(m.state, .transcribing)
 
         engine.release()

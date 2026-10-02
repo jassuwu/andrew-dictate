@@ -171,6 +171,9 @@ final class UtteranceMachine {
     /// the cap ended this take, not the user's finger. the pill that says
     /// so has to ride the paste, so the fact outlives the stop.
     private var capForcedEnd = false
+    /// the lock came down on this take, recording or transcribing: what it
+    /// heard is copied when it is written out, never pasted.
+    private var copiesInsteadOfPasting = false
     private var timelineSequence: UInt64 = 0
     private var activeTimeline: UtteranceTimelineBuilder?
     /// Held between delivery and the timeline completing, because that is the
@@ -273,6 +276,7 @@ final class UtteranceMachine {
         // a new take is the sentence you care about now; the lost one stops
         // being offered.
         clearRetry()
+        copiesInsteadOfPasting = false
         timelineSequence &+= 1
         let timelineID = timelineSequence
         let keyDown = clock.now
@@ -683,13 +687,22 @@ final class UtteranceMachine {
             // and a pill after the paste says why it ended without them.
             endTake(releasedAt: clock.now, micChanged: true)
         case .systemPaused:
-            cancelCapture()
-            setRecordingLocked(false)
-            activeFocusAnchor = nil
-            activeTimeline = nil
-            setState(.idle, fastHUDDismiss: true)
-            endPress(.interrupted(reason))
+            systemPaused()
         }
+    }
+
+    /// the mac is going to sleep, or the screen locked: the lid, ⌃⌘Q, a
+    /// hot corner. only you throw an utterance away, so a take in flight
+    /// ends the way a release would and is written out — but the field it
+    /// was going to is behind the lock screen now, so it is copied, never
+    /// pasted. pasting on the way back in could land in whatever you are
+    /// typing by then.
+    private func systemPaused() {
+        guard state == .recording || state == .transcribing else {
+            return
+        }
+        copiesInsteadOfPasting = true
+        endTake(releasedAt: clock.now)
     }
 
     /// thirty seconds of runway. the wave comes back on its own when the
@@ -776,6 +789,7 @@ final class UtteranceMachine {
             return false
         }
         clearRetry()
+        copiesInsteadOfPasting = false
 
         let now = clock.now
         timelineSequence &+= 1
@@ -880,7 +894,11 @@ final class UtteranceMachine {
             // sentence there still running (so no capital), and do the words
             // need a space to stand apart from it. read off the held element,
             // the same one the paste decision revalidates.
-            let textAtCaret = focusAnchor?.textBeforeCursor()
+            // words going to the clipboard have no caret to join: they
+            // stand alone, wherever they are pasted later.
+            let textAtCaret = copiesInsteadOfPasting
+                ? nil
+                : focusAnchor?.textBeforeCursor()
             let continuingASentence = continuesSentence(after: textAtCaret)
 
             // a dictation aimed at our own window is a correction, not a
@@ -948,10 +966,11 @@ final class UtteranceMachine {
                 heard: transcript,
                 inserted: cleanedTranscript
             )
-            let outcome = await inserter.insert(
-                pasteTranscript,
-                at: focusAnchor
-            )
+            let outcome = if copiesInsteadOfPasting {
+                await inserter.copy(cleanedTranscript, because: .locked)
+            } else {
+                await inserter.insert(pasteTranscript, at: focusAnchor)
+            }
             if outcome.result != .leftOnPasteboard(
                 .pasteboardUnavailable
             ) {

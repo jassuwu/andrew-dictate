@@ -142,6 +142,37 @@ final class UtteranceMachineInterruptionTests: XCTestCase {
         }
     }
 
+    // MARK: - the lock ends the take and keeps it
+
+    /// the mic is stopped, not thrown away; what it heard is written out
+    /// and left on the clipboard — the field it was going to is behind the
+    /// lock screen — and kept in history like any copy.
+    func testTheLockMidRecordingKeepsTheTakeOnTheClipboard() async {
+        let m = machine()
+        engine.reply = .success("the whole paragraph")
+        m.keyDown()
+        await pass(.seconds(3))
+
+        m.captureInterrupted(.systemPaused)
+        await settle { !self.outcomes.isEmpty }
+
+        XCTAssertEqual(mic.stops, 1)
+        XCTAssertEqual(mic.cancels, 0)
+        XCTAssertEqual(engine.heard, [mic.samples])
+        XCTAssertEqual(inserter.inserted, [])
+        XCTAssertEqual(inserter.copied, ["The whole paragraph."])
+        XCTAssertEqual(outcomes, [.leftOnPasteboard(.locked)])
+        XCTAssertEqual(presses.first?.stages.keyUp, 3_000)
+        XCTAssertEqual(archived, [
+            .init(heard: "the whole paragraph", inserted: "The whole paragraph."),
+        ])
+        XCTAssertTrue(events.contains(.dictated("The whole paragraph.")))
+        XCTAssertEqual(m.state, .idle)
+        XCTAssertEqual(pills, [
+            Pill("copied — what you said before the lock · ⌘V to paste", 4),
+        ])
+    }
+
     // MARK: - helpers
 
     private var keepAwake: [Bool] {
