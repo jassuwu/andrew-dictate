@@ -159,7 +159,7 @@ final class UtteranceMachineHearingTests: XCTestCase {
         XCTAssertEqual(pills, [])
 
         await pass(.milliseconds(100))
-        XCTAssertEqual(pills, [Pill("no sound from AirPods Pro", 2.4)])
+        XCTAssertEqual(pills, [Pill("no sound from MacBook Pro Microphone", 2.4)])
         XCTAssertTrue(events.contains(.microphoneDropped))
         XCTAssertEqual(mic.cancels, 1)
         XCTAssertEqual(m.state, .idle)
@@ -170,7 +170,7 @@ final class UtteranceMachineHearingTests: XCTestCase {
         XCTAssertEqual(outcomes, [.noAudio])
         XCTAssertEqual(
             presses.first?.mic,
-            MicDescription(name: "AirPods Pro", transport: .bluetooth)
+            MicDescription(name: "MacBook Pro Microphone", transport: .builtIn)
         )
 
         let fresh = CuedMic(clock: clock)
@@ -191,7 +191,7 @@ final class UtteranceMachineHearingTests: XCTestCase {
         await pass(.seconds(1))
 
         XCTAssertEqual(lockFlags, [true, false])
-        XCTAssertEqual(pills.last, Pill("no sound from AirPods Pro", 2.4))
+        XCTAssertEqual(pills.last, Pill("no sound from MacBook Pro Microphone", 2.4))
         XCTAssertEqual(outcomes, [.noAudio])
 
         m.keyUp()
@@ -227,7 +227,7 @@ final class UtteranceMachineHearingTests: XCTestCase {
         m.keyUp()
         await settle { !self.pills.isEmpty }
 
-        XCTAssertEqual(pills, [Pill("no sound from AirPods Pro", 2.4)])
+        XCTAssertEqual(pills, [Pill("no sound from MacBook Pro Microphone", 2.4)])
         XCTAssertEqual(engine.heard.count, 0)
         XCTAssertEqual(retryOffers, [])
         XCTAssertTrue(events.contains(.microphoneDropped))
@@ -268,7 +268,7 @@ final class UtteranceMachineHearingTests: XCTestCase {
         m.keyUp()
         await settle { !self.pills.isEmpty }
 
-        XCTAssertEqual(pills, [Pill("no sound from AirPods Pro", 2.4)])
+        XCTAssertEqual(pills, [Pill("no sound from MacBook Pro Microphone", 2.4)])
         XCTAssertEqual(engine.heard.count, 0)
         XCTAssertEqual(retryOffers, [])
         XCTAssertEqual(outcomes, [.noAudio])
@@ -286,7 +286,7 @@ final class UtteranceMachineHearingTests: XCTestCase {
         await settle { !self.pills.isEmpty }
         await pass(.seconds(1))
 
-        XCTAssertEqual(pills, [Pill("no sound from AirPods Pro", 2.4)])
+        XCTAssertEqual(pills, [Pill("no sound from MacBook Pro Microphone", 2.4)])
         XCTAssertEqual(mic.cancels, 0)
         XCTAssertEqual(chimes, [])
         XCTAssertEqual(outcomes, [.noAudio])
@@ -465,8 +465,8 @@ final class CuedMic: MicCapture {
     /// a tenth of a second of speech at 16 kHz, peak 0.06.
     var samples: [Float] = (0..<1_600).map { Float($0 % 7) * 0.01 }
     var deviceDescription: MicDescription? = MicDescription(
-        name: "AirPods Pro",
-        transport: .bluetooth
+        name: "MacBook Pro Microphone",
+        transport: .builtIn
     )
     private(set) var starts = 0
     private(set) var stops = 0
