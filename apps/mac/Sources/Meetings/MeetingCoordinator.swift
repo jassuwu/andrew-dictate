@@ -295,6 +295,15 @@ final class MeetingCoordinator: ObservableObject {
                 stop(announcingNothingKept: false)
                 return
             }
+            // what the source does by itself, a mic it moved to, goes in the
+            // record at the meeting time it stamped. it ends with the tap.
+            let sourceEvents = source.sourceEvents
+            Task { [weak self] in
+                for await event in sourceEvents {
+                    guard let self, current === meeting else { return }
+                    meeting.notes.note(event.label, at: event.at)
+                }
+            }
             for await chunk in chunks {
                 // a chunk that lands after its meeting stopped is dropped,
                 // never handed to the next one.

@@ -45,6 +45,26 @@ struct MeetingSourceEvent: Equatable, Sendable {
     /// The mic's name as the mac shows it; nil when there was none to move to.
     let mic: String?
     let at: Duration
+
+    /// What the meeting's record keeps of it: the label, at its time. The
+    /// mic's name is for whoever tells the user, not for the record.
+    var label: MeetingRecord.Label {
+        switch kind {
+        case .micChanged: .micChanged
+        case .micHandoffFailed: .micHandoffFailed
+        case .micFellBack: .micFellBack
+        }
+    }
+}
+
+extension MeetingRecord.Label {
+    /// the meeting moved to another mic: the default input changed, or the
+    /// mic it was on went away.
+    static let micChanged = MeetingRecord.Label(rawValue: "mic-changed")
+    /// a move to another mic never delivered, or there was no mic to move to.
+    static let micHandoffFailed = MeetingRecord.Label(rawValue: "mic-handoff-failed")
+    /// no default input would do, so the meeting moved to the built-in mic.
+    static let micFellBack = MeetingRecord.Label(rawValue: "mic-fell-back")
 }
 
 /// The capture layer. Starting it plays the start sound — that is the probe
@@ -67,10 +87,17 @@ protocol MeetingAudioSource: Sendable {
     /// An answer kept, not a question asked: the source asks the HAL on its
     /// own queue, so reading this from the main actor costs nothing.
     var anythingIsPlaying: Bool? { get }
+    /// What the source did by itself while the meeting ran: the mic it
+    /// moved to, a move that failed. One stream per `start()`, read once it
+    /// has returned, and finished by `stop()`.
+    var sourceEvents: AsyncStream<MeetingSourceEvent> { get }
 }
 
 extension MeetingAudioSource {
     var anythingIsPlaying: Bool? { nil }
+    var sourceEvents: AsyncStream<MeetingSourceEvent> {
+        AsyncStream { $0.finish() }
+    }
 }
 
 /// The engine listening to a meeting. Lines arrive as whisper decides them,
