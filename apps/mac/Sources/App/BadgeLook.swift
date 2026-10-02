@@ -27,6 +27,13 @@ enum BadgeLook: Equatable, Sendable, CaseIterable {
     }
 
     init(needsSetup: Bool, isDictating: Bool, meeting: Meeting) {
+        // a setup gap outranks every other state: a missing grant or a
+        // speech model that never downloaded means the other states can
+        // never be reached anyway.
+        if needsSetup {
+            self = .needsSetup
+            return
+        }
         self = .idle
     }
 }
