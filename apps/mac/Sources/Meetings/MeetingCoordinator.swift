@@ -605,6 +605,7 @@ final class MeetingCoordinator: ObservableObject {
 
         onEvent?(.writingItOut)
         let turns = await meeting.transcriber?.finish() ?? []
+        let tally = await meeting.transcriber?.decodeTally()
         meeting.transcriber = nil
         meeting.audioFile = nil
         // the settings as they were at the start: a folder, model or hook
@@ -613,7 +614,8 @@ final class MeetingCoordinator: ObservableObject {
         let saved = await save(
             turns: turns, recording: recording, handle: handle,
             app: meeting.app, started: meeting.started, model: prefs.model,
-            folder: prefs.folder, recovered: false, notes: meeting.notes)
+            folder: prefs.folder, recovered: false, notes: meeting.notes,
+            tally: tally)
         // written out — or never will be, and the spool waits for the next
         // launch. the hook is not part of it: it can take minutes.
         writingOut.removeAll { $0 === meeting }
@@ -633,7 +635,8 @@ final class MeetingCoordinator: ObservableObject {
         model: MeetingModel,
         folder: URL,
         recovered: Bool,
-        notes: MeetingRecord.Notes = .init()
+        notes: MeetingRecord.Notes = .init(),
+        tally: StretchTally? = nil
     ) async -> MeetingSavedEvent? {
         let them = (try? SpoolAudioFile.read(handle.audioURL))?.them ?? []
         let split = them.isEmpty
@@ -653,7 +656,8 @@ final class MeetingCoordinator: ObservableObject {
             MeetingRecord(
                 outcome, app: app, model: model, startedAt: started,
                 duration: recording.duration, gaps: recording.gaps, turns: split,
-                toDisk: toDisk, recovered: recovered, events: notes.events)
+                toDisk: toDisk, recovered: recovered, events: notes.events,
+                tally: tally)
         }
 
         let url: URL
@@ -749,6 +753,7 @@ final class MeetingCoordinator: ObservableObject {
         do {
             let transcriber = try await makeTranscriber(manifest.model)
             let turns = try await transcriber.transcribe(you: audio.you, them: audio.them)
+            let tally = await transcriber.decodeTally()
             // a spool from a past run has no settings of its own; it goes
             // where meetings go now.
             let prefs = preferences()
@@ -760,7 +765,8 @@ final class MeetingCoordinator: ObservableObject {
                 started: manifest.started,
                 model: manifest.model,
                 folder: prefs.folder,
-                recovered: true)
+                recovered: true,
+                tally: tally)
             if let saved {
                 await runHook(prefs.hook, telling: saved)
             }

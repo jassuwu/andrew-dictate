@@ -198,6 +198,71 @@ final class MeetingRecordTests: XCTestCase {
         XCTAssertEqual(records.first?.durationS, 1)
     }
 
+    // MARK: - the decoding
+
+    /// the engine's own count of its work: how many stretches it read per
+    /// side, how many it gave up on, and how far behind the meeting it ran.
+    func testTheRecordHasTheDecodeNumbersOfAnEngineThatKeepsThem() async throws {
+        transcriber.finalTurns = [.init(speaker: .you, at: .seconds(1), text: "hello")]
+        transcriber.tally = StretchTally(
+            decodedYou: 7, decodedThem: 12, failed: 1,
+            mostBehind: .seconds(9.5), lastBehind: .seconds(2.5))
+        let c = coordinator()
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+
+        c.stop()
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records.first?.decoding, .init(
+            decodedYou: 7, decodedThem: 12, failed: 1, mostBehindS: 9.5, lastBehindS: 2.5))
+    }
+
+    /// an engine that keeps no count says nothing, and the record does not
+    /// make one up.
+    func testAnEngineThatKeepsNoCountLeavesNoDecodeNumbers() async throws {
+        let c = coordinator()
+        c.start(tapping: zoom)
+        await source.awaitStart()
+        source.send(loud(at: .zero))
+        await settle()
+
+        c.stop()
+        await c.untilWrittenOut()
+
+        XCTAssertEqual(records.count, 1)
+        XCTAssertNil(records.first?.decoding)
+    }
+
+    /// a recovery decodes too, and a spool is decoded the same way a
+    /// meeting is.
+    func testARecoveryHasTheDecodeNumbersToo() async throws {
+        try await orphan("teams", started: started)
+        transcriber.tally = StretchTally(decodedYou: 3, decodedThem: 4)
+        let c = coordinator()
+
+        c.recoverOrphans()
+        await awaitRecords(1)
+
+        XCTAssertEqual(records.first?.decoding, .init(
+            decodedYou: 3, decodedThem: 4, failed: 0, mostBehindS: 0, lastBehindS: 0))
+    }
+
+    /// the stretch transcriber is the one that keeps a count, and says so
+    /// through the protocol the coordinator holds it by.
+    func testTheStretchTranscriberReportsItsTallyThroughTheProtocol() async throws {
+        let engine = SilentEngine()
+        let transcriber: any MeetingTranscriber = StretchTranscriber(
+            engine: engine, ceiling: .seconds(15))
+
+        let tally = await transcriber.decodeTally()
+
+        XCTAssertEqual(tally, StretchTally())
+    }
+
     // MARK: - what happened on the way
 
     /// the mac sleeps through most of an hour and wakes: the record says
@@ -574,6 +639,11 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
 
 private struct Unreadable: Error {}
 
+private struct SilentEngine: StretchEngine {
+    func load() async throws {}
+    func text(of samples: [Float]) async throws -> String { "" }
+}
+
 /// One per meeting, the way the app builds them. The test lines up the ones
 /// it wants to hold or read; a meeting past those gets the shared one.
 private final class FakeTranscribers: @unchecked Sendable {
@@ -604,6 +674,8 @@ private final class FakeTranscribers: @unchecked Sendable {
 private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
     var finalTurns: [MeetingTurn] = []
     var batchTurns: [MeetingTurn] = []
+    /// what an engine that keeps count says about its decoding.
+    var tally: StretchTally?
     /// what a spool the engine cannot read does at every launch.
     var batchFailure: (any Error)?
     /// what loading the model does, while it is set.
@@ -632,6 +704,7 @@ private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
         if let beginFailure { throw beginFailure }
     }
     func feed(_ chunk: MeetingAudioChunk) async {}
+    func decodeTally() async -> StretchTally? { tally }
     func finish() async -> [MeetingTurn] {
         await heldUntilReleased()
         return finalTurns

@@ -54,6 +54,13 @@ protocol MeetingTranscriber: Sendable {
     func finish() async -> [MeetingTurn]
     /// The whole meeting at once — for a spool the app found after a crash.
     func transcribe(you: [Float], them: [Float]) async throws -> [MeetingTurn]
+    /// What its decoding came to, for the meeting's record: asked once the
+    /// meeting has been read. `nil` for an engine that keeps no count.
+    func decodeTally() async -> StretchTally?
+}
+
+extension MeetingTranscriber {
+    func decodeTally() async -> StretchTally? { nil }
 }
 
 /// Splits `them` into `them 1`, `them 2`… after the meeting. Given the far

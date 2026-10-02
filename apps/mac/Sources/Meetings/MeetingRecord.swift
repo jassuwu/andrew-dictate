@@ -69,6 +69,26 @@ struct MeetingRecord: Equatable, Sendable {
     /// what happened on the way, in order, each with the meeting time it
     /// happened at.
     var events: [Event] = []
+    /// the engine's own count of its work, for an engine that keeps one.
+    var decoding: Decoding?
+}
+
+// MARK: - decoding
+
+extension MeetingRecord {
+    /// what a stretch-by-stretch engine's decoding came to: counts and
+    /// seconds, never what any stretch said.
+    struct Decoding: Equatable, Sendable {
+        var decodedYou = 0
+        var decodedThem = 0
+        /// stretches the engine threw on twice. their words are not in the
+        /// transcript.
+        var failed = 0
+        /// how far behind the meeting the decoding ran: the worst of the
+        /// meeting, and the latest.
+        var mostBehindS: Double = 0
+        var lastBehindS: Double = 0
+    }
 }
 
 // MARK: - events
@@ -119,7 +139,8 @@ extension MeetingRecord {
         turns: [MeetingTurn] = [],
         toDisk: Duration? = nil,
         recovered: Bool = false,
-        events: [Event] = []
+        events: [Event] = [],
+        tally: StretchTally? = nil
     ) {
         self.init(
             outcome: outcome,
@@ -133,7 +154,15 @@ extension MeetingRecord {
             them: Self.side(.them, in: turns),
             toDiskS: toDisk.map(Self.seconds),
             recovered: recovered,
-            events: events
+            events: events,
+            decoding: tally.map {
+                Decoding(
+                    decodedYou: $0.decodedYou,
+                    decodedThem: $0.decodedThem,
+                    failed: $0.failed,
+                    mostBehindS: Self.seconds($0.mostBehind),
+                    lastBehindS: Self.seconds($0.lastBehind))
+            }
         )
     }
 

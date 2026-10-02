@@ -174,6 +174,10 @@ actor StretchTranscriber: MeetingTranscriber {
         return Self.inOrder(turns)
     }
 
+    func decodeTally() async -> StretchTally? {
+        tally
+    }
+
     // MARK: - hearing
 
     private func hear(_ chunk: MeetingAudioChunk) async {
