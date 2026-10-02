@@ -577,8 +577,9 @@ struct SettingsView: View {
         }
     }
 
-    /// no keep-or-not switch here: a meeting recording is kept until you
-    /// delete it, and the folder it lives in is the whole feature.
+    /// no keep-or-not switch here: a meeting's transcript is kept until you
+    /// delete it, and the folder it lives in is the whole feature. its audio
+    /// has a setting of its own, in the meetings tab.
     private var meetingsFooter: some View {
         HStack(spacing: 12) {
             Text(meetingsCount)
@@ -623,6 +624,8 @@ struct SettingsView: View {
             meetingModelEditor
             rowDivider
             meetingsFolderRow
+            rowDivider
+            meetingAudioRow
             rowDivider
             meetingHookRow
         }
@@ -687,6 +690,34 @@ struct SettingsView: View {
             .buttonStyle(.plain)
             .font(.caption)
             .foregroundStyle(BrandUI.textSecondary)
+        }
+    }
+
+    /// ADR 0048: the audio waits a while after the transcript, so a file
+    /// that looks wrong can be checked or read again, then goes by itself.
+    /// read when a meeting starts, like the folder and the model.
+    private var meetingAudioRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("keep meeting audio")
+                    .font(BrandUI.bodyFont.weight(.medium))
+
+                Text("it stays on this mac, never in the transcripts folder, and is deleted by itself after that. a transcript that comes out thin keeps its audio until you delete it.")
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 8)
+
+            Picker("keep meeting audio", selection: $settings.keepMeetingAudio) {
+                ForEach(KeepMeetingAudio.allCases) { choice in
+                    Text(choice.label).tag(choice)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .fixedSize()
         }
     }
 
