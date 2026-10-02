@@ -1543,6 +1543,7 @@ extension MeetingCoordinator {
 
     func transcribeAgain(_ transcript: URL, with model: MeetingModel) async {
         onEvent?(.transcribingAgain(model))
+        let asked = now()
         do {
             let header = try MeetingTranscriptFile.header(of: transcript)
             guard let entry = keptAudio.entry(for: transcript) else { return }
@@ -1586,9 +1587,19 @@ extension MeetingCoordinator {
             if wasThin, !thin {
                 until = keptAudio.now().addingTimeInterval(prefs.keepAudio.keptFor ?? 0)
             }
-            if !keptAudio.relabel(entry, model: model, until: until) {
+            let audioKept = keptAudio.relabel(entry, model: model, until: until)
+            if !audioKept {
                 logger.error("a meeting's audio could not be relabelled after its transcript was made again")
             }
+            keepMeetingRecord?(MeetingRecord(
+                thin ? .savedThin : .saved, app: header.app, model: model,
+                startedAt: header.started, duration: header.duration, gaps: header.gaps,
+                turns: split, toDisk: now() - asked, recovered: header.recovered,
+                tally: reading.tally,
+                coverage: .init(
+                    covered.result, reason: covered.reason, tally: reading.tally,
+                    farSideLoud: covered.farSideLoud),
+                audioKept: audioKept, audioKeptUntil: audioKept ? until : nil, again: true))
             onEvent?(.transcribedAgain(
                 (try? MeetingTranscriptFile.summary(of: transcript)) ?? MeetingSummary(
                     fileURL: transcript, app: header.app, started: header.started,

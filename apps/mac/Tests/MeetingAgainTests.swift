@@ -104,6 +104,47 @@ final class MeetingAgainTests: XCTestCase {
         XCTAssertEqual(transcribers.made, [.whisperLargeV3])
     }
 
+    // MARK: - the record
+
+    /// One record per rerun, marked as one: the model it read with, how the
+    /// check came out and on what numbers, the turns and words of each side,
+    /// and how long it took, from asking to the file being replaced.
+    func testARerunLeavesOneRecordMarkedAsOne() async throws {
+        let gap = MeetingSession.Gap(began: .seconds(5), ended: .seconds(8))
+        let file = try await existingMeeting(gaps: [gap], recovered: true, audioUntil: nil)
+        let again = FakeTranscriber()
+        again.batchTurns = [
+            .init(speaker: .you, at: .seconds(1), text: "namaste"),
+            .init(speaker: .them(nil), at: .seconds(2), text: "kaise ho aap theek"),
+            .init(speaker: .them(nil), at: .seconds(60), text: "dhanyavaad"),
+        ]
+        again.tally = passing
+        again.onTranscribe = { [clock] in clock!.advance(by: .seconds(83)) }
+        transcribers.lineUp(again)
+
+        await coordinator().transcribeAgain(file, with: .whisperLargeV3)
+
+        XCTAssertEqual(records.count, 1)
+        let record = try XCTUnwrap(records.first)
+        XCTAssertTrue(record.again)
+        XCTAssertEqual(record.outcome, .saved)
+        XCTAssertEqual(record.app, "zoom")
+        XCTAssertEqual(record.model, "whisperLargeV3")
+        XCTAssertEqual(record.startedAt, started)
+        XCTAssertEqual(record.durationS, 6_120)
+        XCTAssertEqual(record.gaps, 1)
+        XCTAssertEqual(record.gapsLostS, 3)
+        XCTAssertTrue(record.recovered)
+        XCTAssertEqual(record.you, .init(turns: 1, words: 1))
+        XCTAssertEqual(record.them, .init(turns: 2, words: 5))
+        XCTAssertEqual(record.toDiskS, 83)
+        XCTAssertEqual(record.coverage, .init(
+            result: .pass, speechYouS: 1, speechThemS: 1, unreadYouS: 0, unreadThemS: 0,
+            bleed: 0, farSideLoudS: 2))
+        XCTAssertEqual(record.audioKept, true)
+        XCTAssertEqual(record.audioKeptUntil, Date(timeIntervalSince1970: 1_790_086_400))
+    }
+
     // MARK: - the lamp
 
     /// It says it started, and that it finished, in the words a save uses.
@@ -573,6 +614,8 @@ private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
     /// What it says its decoding came to when it read the audio whole. nil
     /// keeps no count.
     var tally: StretchTally?
+    /// Runs when it is asked to read the audio whole, before it answers.
+    var onTranscribe: (@Sendable () -> Void)?
     let lines: AsyncStream<LiveLine>
 
     init() {
@@ -590,6 +633,7 @@ private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
     func decodeTally() async -> StretchTally? { tally }
     func transcribe(you: [Float], them: [Float]) async throws -> [MeetingTurn] {
         lock.withLock { _heard = [you.count, them.count] }
+        onTranscribe?()
         if let batchFailure { throw batchFailure }
         return batchTurns
     }
