@@ -528,6 +528,53 @@ final class UtteranceMachineTests: XCTestCase {
         XCTAssertEqual(inserter.inserted, ["Still here."])
     }
 
+    // MARK: - when the mic fails
+
+    /// the device may have been yanked between the check and the tap: the
+    /// recorder is dropped so the next press builds a fresh one.
+    func testAMicThatWillNotStartIsDroppedAndSaysSo() async {
+        let m = machine()
+        mic.failsToStart = true
+
+        m.keyDown()
+        await settle { !self.pills.isEmpty }
+
+        XCTAssertEqual(pills, [Pill("couldn't start recording", 1.6)])
+        XCTAssertTrue(events.contains(.microphoneDropped))
+        XCTAssertEqual(mic.cancels, 1)
+        XCTAssertEqual(m.state, .idle)
+        await pass(.milliseconds(200))
+        XCTAssertEqual(chimes, [])
+    }
+
+    /// they spoke and there is nothing to show for it, so it says so.
+    func testARecordingThatWillNotStopSaysItWasLost() async {
+        let m = machine()
+        mic.failsToStop = true
+
+        await hold(m, for: .seconds(1))
+        await settle { !self.pills.isEmpty }
+
+        XCTAssertEqual(pills, [Pill("recording was lost", 1.6)])
+        XCTAssertEqual(states.last, .init(.idle, fast: true))
+        XCTAssertEqual(chimes, [.start])
+        XCTAssertEqual(engine.heard, [])
+        XCTAssertEqual(completions, [])
+    }
+
+    /// a press the app answered itself — a model still loading, a missing
+    /// grant, no input device — leaves the machine where it was.
+    func testAPressTheAppAnsweredLeavesNoTrace() async {
+        let m = machine()
+        micForPress = nil
+
+        m.keyDown()
+        await settle()
+
+        XCTAssertEqual(events, [])
+        XCTAssertEqual(m.state, .idle)
+    }
+
     // MARK: - helpers
 
     private var pills: [Pill] {
