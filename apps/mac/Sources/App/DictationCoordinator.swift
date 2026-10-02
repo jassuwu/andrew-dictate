@@ -121,6 +121,9 @@ final class DictationCoordinator: ObservableObject {
 
     private let hotkeyMonitor: HotkeyMonitor
     private let transcriptionEngine: ParakeetEngine
+    /// the machine's, and the menu's copies go through it too, so they
+    /// take their turn with a paste.
+    private let inserter: PasteInserter
     /// key-down to outcome. this object wires it and wears what it says.
     private let machine: UtteranceMachine
     /// a minute of watching each delivered dictation for a word you
@@ -275,9 +278,11 @@ final class DictationCoordinator: ObservableObject {
             version: settings.engineVersion
         )
         self.transcriptionEngine = transcriptionEngine
+        let inserter = PasteInserter()
+        self.inserter = inserter
         machine = UtteranceMachine(
             engine: transcriptionEngine,
-            inserter: PasteInserter(),
+            inserter: inserter,
             dictionary: { dictionaryStore.entries },
             coolDuration: HUDWaveMotion.coolDuration
         )
@@ -696,16 +701,14 @@ final class DictationCoordinator: ObservableObject {
     /// is not a claim about the app anyone runs — and a number a reader can
     /// reproduce on their own mac is worth more than one in a README.
     func copyTimings() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(
-            timelineStore.formattedReport(
-                conditions: .current(
-                    engine: activeEngineVersion.displayName
-                )
-            ),
-            forType: .string
+        let report = timelineStore.formattedReport(
+            conditions: .current(
+                engine: activeEngineVersion.displayName
+            )
         )
+        Task { [inserter] in
+            await inserter.copy(report)
+        }
     }
 
     /// "copy diagnostics": who is running what, then the last fifty
@@ -733,9 +736,7 @@ final class DictationCoordinator: ObservableObject {
                 presses: try? store.recent(PressDiagnostics.pressCount)
             )
             Task { @MainActor [weak self] in
-                let pasteboard = NSPasteboard.general
-                pasteboard.clearContents()
-                pasteboard.setString(text, forType: .string)
+                await self?.inserter.copy(text)
                 // what makes it safe to send is worth saying out loud.
                 self?.sayWhenIdle("diagnostics copied — no words in it")
             }
