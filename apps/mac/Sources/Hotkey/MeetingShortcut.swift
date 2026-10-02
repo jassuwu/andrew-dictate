@@ -54,6 +54,10 @@ struct MeetingShortcut: Codable, Hashable, Sendable {
     /// Why settings will not take a shortcut, in the few words the row says.
     enum Refusal: Equatable, Sendable {
         case needsAModifier
+        /// macOS 15 and later will not register a hot key held with option
+        /// alone, or option and shift: it is how a mac types its other
+        /// characters.
+        case optionAlone
         case isEscape
         /// ⌘ or ⌘⇧ on a key every mac app answers.
         case everyAppUsesIt
@@ -64,7 +68,9 @@ struct MeetingShortcut: Codable, Hashable, Sendable {
         var message: String {
             switch self {
             case .needsAModifier:
-                "needs ⌃, ⌥ or ⌘ held with it"
+                "needs ⌃ or ⌘ held with it"
+            case .optionAlone:
+                "macos won't take ⌥ without ⌃ or ⌘"
             case .isEscape:
                 "esc cancels a dictation"
             case .everyAppUsesIt:
@@ -80,6 +86,9 @@ struct MeetingShortcut: Codable, Hashable, Sendable {
     func refusal(againstDictationKey key: HotkeyBinding) -> Refusal? {
         guard !modifiers.isDisjoint(with: [.control, .option, .command]) else {
             return .needsAModifier
+        }
+        guard !modifiers.isDisjoint(with: [.control, .command]) else {
+            return .optionAlone
         }
         guard keyCode != Self.escapeKeyCode else {
             return .isEscape

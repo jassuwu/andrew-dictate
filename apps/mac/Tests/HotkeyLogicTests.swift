@@ -253,8 +253,8 @@ final class HotkeyLogicTests: XCTestCase {
     }
 
     /// the key alone, or with only shift, would fire in the middle of
-    /// typing: one of control, option or command has to be held too.
-    func testAShortcutNeedsControlOptionOrCommand() {
+    /// typing: control or command has to be held too.
+    func testAShortcutNeedsControlOrCommand() {
         let bare = MeetingShortcut(keyCode: 46, modifiers: [], keyName: "M")
         let shifted = MeetingShortcut(keyCode: 46, modifiers: [.shift], keyName: "M")
 
@@ -262,7 +262,25 @@ final class HotkeyLogicTests: XCTestCase {
         XCTAssertEqual(shifted.refusal(againstDictationKey: .fn), .needsAModifier)
         XCTAssertEqual(
             bare.refusal(againstDictationKey: .fn)?.message,
-            "needs ⌃, ⌥ or ⌘ held with it")
+            "needs ⌃ or ⌘ held with it")
+    }
+
+    /// option is how a mac types its other characters, and since macOS 15
+    /// the system will not register a hot key held with option alone, or
+    /// option and shift: settings would keep a shortcut that never fires.
+    func testOptionAloneOrWithShiftIsRefused() {
+        let optionM = MeetingShortcut(keyCode: 46, modifiers: [.option], keyName: "M")
+        let optionShiftM = MeetingShortcut(
+            keyCode: 46, modifiers: [.option, .shift], keyName: "M")
+
+        XCTAssertEqual(optionM.refusal(againstDictationKey: .fn), .optionAlone)
+        XCTAssertEqual(optionShiftM.refusal(againstDictationKey: .fn), .optionAlone)
+        XCTAssertEqual(
+            optionM.refusal(againstDictationKey: .fn)?.message,
+            "macos won't take ⌥ without ⌃ or ⌘")
+        XCTAssertNil(
+            MeetingShortcut(keyCode: 46, modifiers: [.option, .command], keyName: "M")
+                .refusal(againstDictationKey: .fn))
     }
 
     /// ⌘W pressed to close settings would close nothing ever again: it

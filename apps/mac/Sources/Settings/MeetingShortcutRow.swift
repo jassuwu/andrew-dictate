@@ -18,7 +18,7 @@ struct MeetingShortcutRow: View {
             HStack(alignment: .top, spacing: 16) {
                 SettingsRowLabel(
                     "meeting shortcut",
-                    explanation: "starts a meeting, and stops the one that records. needs ⌃, ⌥ or ⌘."
+                    explanation: "starts a meeting, and stops the one that records. needs ⌃ or ⌘."
                 )
 
                 Spacer(minLength: 8)
