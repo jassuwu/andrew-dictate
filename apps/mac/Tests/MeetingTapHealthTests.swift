@@ -46,6 +46,10 @@ final class MeetingTapHealthTests: XCTestCase {
             diarizer: FakeDiarizer(),
             spool: MeetingSpool(root: dir.appendingPathComponent("spool")),
             hookRunner: HookRunner(logURL: dir.appendingPathComponent("hooks.log")),
+            // kept as the spool wrote it, so a test can read what it kept.
+            keptAudio: KeptAudio(
+                root: dir.appendingPathComponent("meeting-audio"),
+                compress: { _, _ in throw CocoaError(.featureUnsupported) }),
             thresholds: thresholds,
             now: { clock.now },
             keepAwake: .init(
@@ -61,6 +65,37 @@ final class MeetingTapHealthTests: XCTestCase {
         c.onEvent = { [weak self] in self?.events.append($0) }
         c.keepMeetingRecord = { [weak self] in self?.records.append($0) }
         return c
+    }
+
+    // MARK: - our own tones are not the call
+
+    /// The start sound comes back through the tap as far-side audio, and a
+    /// model given it writes it down as somebody speaking at 00:00. While
+    /// the start window is open the far side is handed over silent — the
+    /// spool keeps it as it was — and what you say meanwhile is still
+    /// heard, and so is the far side once the window has closed.
+    func testTheStartSoundIsNotTranscribedAndYourVoiceUnderItIs() async throws {
+        transcriber.transcribesWhatItIsFed = true
+        let c = coordinator()
+        c.start()
+        await source.awaitStart()
+        // the start window is the first second: the tone, with you talking
+        // over it, then a pause, then the far side speaking.
+        await play(
+            both(at: .zero), both(at: .milliseconds(500)),
+            silent(at: .seconds(1)), silent(at: .milliseconds(1_500)),
+            them(at: .seconds(2)))
+
+        c.stop()
+        await c.untilWrittenOut()
+        XCTAssertEqual(try savedLines(), [
+            "[00:00:00] you: you said something you said something",
+            "[00:00:02] them: they said something",
+        ])
+        XCTAssertEqual(
+            transcriber.fed.map { $0.themRMS > 0.001 }, [false, false, false, false, true])
+        let spooled = try XCTUnwrap(spooledThem())
+        XCTAssertGreaterThan(rms(spooled.prefix(8_000)), 0.1, "the spool keeps the tone")
     }
 
     // MARK: - the mac stays awake
@@ -592,6 +627,50 @@ final class MeetingTapHealthTests: XCTestCase {
             MeetingTranscriptFile.listAll(in: dir.appendingPathComponent("docs")).first)
     }
 
+    /// The turns of the saved file, as its body has them.
+    private func savedLines() throws -> [String] {
+        let body = try String(contentsOf: try savedFile().fileURL, encoding: .utf8)
+        return body.split(separator: "\n").filter { $0.hasPrefix("[") }.map(String.init)
+    }
+
+    /// The far side as the spool wrote it, read from the audio the meeting
+    /// kept once its file was written.
+    private func spooledThem() throws -> [Float]? {
+        let kept = try FileManager.default.contentsOfDirectory(
+            at: dir.appendingPathComponent("meeting-audio"), includingPropertiesForKeys: nil)
+        return try kept.first { $0.pathExtension == "caf" }.map { try SpoolAudioFile.read($0).them }
+    }
+
+    private func rms<S: Sequence>(_ samples: S) -> Float where S.Element == Float {
+        var sum: Float = 0
+        var n: Float = 0
+        for s in samples {
+            sum += s * s
+            n += 1
+        }
+        return n == 0 ? 0 : (sum / n).squareRoot()
+    }
+
+    /// Half a second of both sides talking.
+    private func both(at: Duration) -> MeetingAudioChunk {
+        let n = 8_000
+        return .init(you: Array(repeating: 0.05, count: n),
+                     them: (0..<n).map { sin(Float($0) * 0.05) * 0.3 }, at: at)
+    }
+
+    /// Half a second of the far side talking, and you not.
+    private func them(at: Duration) -> MeetingAudioChunk {
+        let n = 8_000
+        return .init(you: Array(repeating: 0, count: n),
+                     them: (0..<n).map { sin(Float($0) * 0.05) * 0.3 }, at: at)
+    }
+
+    /// Half a second of nothing on either side.
+    private func silent(at: Duration) -> MeetingAudioChunk {
+        .init(you: Array(repeating: 0, count: 8_000),
+              them: Array(repeating: 0, count: 8_000), at: at)
+    }
+
     /// The far side talking, and you.
     private func loud(at: Duration) -> MeetingAudioChunk {
         let n = 16_000
@@ -840,7 +919,28 @@ private final class FakeTranscriber: MeetingTranscriber, @unchecked Sendable {
     func feed(_ chunk: MeetingAudioChunk) async {
         lock.withLock { _fed.append(chunk) }
     }
-    func finish() async -> [MeetingTurn] { [] }
+    /// While set, it writes a turn for every side of every chunk it was fed
+    /// with sound in it, at the chunk's stamp: a model that transcribes
+    /// whatever it is given, our own tones included.
+    var transcribesWhatItIsFed: Bool {
+        get { lock.withLock { _transcribesWhatItIsFed } }
+        set { lock.withLock { _transcribesWhatItIsFed = newValue } }
+    }
+    private var _transcribesWhatItIsFed = false
+
+    func finish() async -> [MeetingTurn] {
+        guard transcribesWhatItIsFed else { return [] }
+        return fed.flatMap { chunk -> [MeetingTurn] in
+            var turns: [MeetingTurn] = []
+            if chunk.you.contains(where: { abs($0) > 0.001 }) {
+                turns.append(.init(speaker: .you, at: chunk.at, text: "you said something"))
+            }
+            if chunk.themRMS > 0.001 {
+                turns.append(.init(speaker: .them(nil), at: chunk.at, text: "they said something"))
+            }
+            return turns
+        }
+    }
     func transcribe(you: [Float], them: [Float]) async throws -> [MeetingTurn] { [] }
 }
 

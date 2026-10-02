@@ -670,7 +670,7 @@ final class MeetingCoordinator: ObservableObject {
         }
 
         if session.state == .recording || session.state == .rebuilding {
-            await meeting.transcriber?.feed(chunk)
+            await meeting.transcriber?.feed(withoutOurTones(chunk))
         }
         guard current === meeting else { return }
 
@@ -678,6 +678,21 @@ final class MeetingCoordinator: ObservableObject {
             nudgePending = true
             onEvent?(.nudge)
         }
+    }
+
+    /// The chunk as the transcriber gets it: while a probe window is open
+    /// the far side is ours — the start sound, or the quiet probe — and a
+    /// model given it writes it down as somebody speaking. So the far side
+    /// up to the end of the window is handed over as silence, the same
+    /// length; your side is handed over as it is, and the spool has
+    /// already kept both as they were.
+    private func withoutOurTones(_ chunk: MeetingAudioChunk) -> MeetingAudioChunk {
+        guard chunk.at < probeUntil else { return chunk }
+        let ours = Int(((probeUntil - chunk.at).totalSeconds * MeetingAudioChunk.sampleRate).rounded())
+        let silenced = min(ours, chunk.them.count)
+        var them = chunk.them
+        them.replaceSubrange(0..<silenced, with: repeatElement(0, count: silenced))
+        return MeetingAudioChunk(you: chunk.you, them: them, at: chunk.at)
     }
 
     /// The far side has been silent past the timeout while something
