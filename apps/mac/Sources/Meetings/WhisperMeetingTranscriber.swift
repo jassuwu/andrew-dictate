@@ -185,7 +185,7 @@ actor WhisperMeetingTranscriber: MeetingTranscriber {
         try await WhisperKit(WhisperKitConfig(
             model: model.whisperVariant,
             downloadBase: MeetingEngines.modelDirectory,
-            modelFolder: MeetingEngines.folder(for: model).path,
+            modelFolder: MeetingEngines.folder(for: model)?.path,
             verbose: false,
             logLevel: .error,
             prewarm: true,
