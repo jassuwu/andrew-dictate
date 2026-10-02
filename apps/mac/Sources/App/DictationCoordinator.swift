@@ -255,8 +255,8 @@ final class DictationCoordinator: ObservableObject {
         monitor.onBegin = { [weak self] in
             self?.beginRecording(locked: false)
         }
-        monitor.onEnd = { [weak self] in
-            self?.machine.keyUp()
+        monitor.onEnd = { [weak self] timestamp in
+            self?.keyReleased(at: timestamp)
         }
         monitor.onCancel = { [weak self] in
             self?.machine.keyCancelled()
@@ -264,8 +264,8 @@ final class DictationCoordinator: ObservableObject {
         monitor.onLockBegin = { [weak self] in
             self?.beginRecording(locked: true)
         }
-        monitor.onLockEnd = { [weak self] in
-            self?.machine.keyUp()
+        monitor.onLockEnd = { [weak self] timestamp in
+            self?.keyReleased(at: timestamp)
         }
         monitor.onLockCancel = { [weak self] in
             self?.machine.keyCancelled()
@@ -1402,6 +1402,16 @@ final class DictationCoordinator: ObservableObject {
         } else {
             machine.keyDown()
         }
+    }
+
+    /// the release, aged by its own event: `NSEvent.timestamp` and
+    /// `systemUptime` count the same seconds since boot, so the gap is how
+    /// long the key-up waited for the main thread. none means it is now.
+    private func keyReleased(at eventTimestamp: TimeInterval?) {
+        let age = eventTimestamp.map {
+            max(0, ProcessInfo.processInfo.systemUptime - $0)
+        } ?? 0
+        machine.keyUp(eventAge: .seconds(age))
     }
 
     /// the app's half of a press, asked by the machine once its own answers
