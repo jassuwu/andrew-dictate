@@ -91,6 +91,22 @@ enum SpanLocator {
         )
     }
 
+    /// a text from its first word to its last: the shape `locate` hands
+    /// back, so what we inserted and what you left it as compare like for
+    /// like.
+    static func core(of text: String) -> String {
+        let words = runs(in: text)
+        guard let first = words.first, let last = words.last else {
+            return text
+        }
+        return (text as NSString).substring(
+            with: NSRange(
+                location: first.range.location,
+                length: last.range.upperBound - first.range.location
+            )
+        )
+    }
+
     // MARK: - pieces
 
     private struct Run {

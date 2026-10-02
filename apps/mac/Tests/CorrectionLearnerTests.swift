@@ -228,6 +228,28 @@ final class CorrectionLearnerTests: XCTestCase {
         XCTAssertEqual(fixJaz(&learner, to: "jass.dev").map(\.right), ["jass.dev"])
     }
 
+    /// the watcher hands back our words first to last, without the stop
+    /// the cleaner put after the last one. that stop is not a change, and
+    /// must not glue the last word onto the fix beside it.
+    func testTheFinalStopTheWatcherLeavesOffIsNotPartOfTheFix() {
+        var learner = learner()
+        let heard = "send it to jaz dot dev now"
+        let inserted = "Send it to jaz.dev now."
+        var learned: [DictionaryEntry] = []
+
+        for _ in 0..<2 {
+            learner.watch(heard: heard, inserted: inserted)
+            learned = learner.settle(
+                edited: "Send it to jass.dev now",
+                dictionary: [],
+                neverLearn: [],
+                cleaner: plainCleaner
+            )
+        }
+
+        XCTAssertEqual(learned.map(\.wrong), ["jaz dot dev"])
+    }
+
     func testTwoDifferentFixesOfOneWordDoNotAddUp() {
         var learner = learner()
 

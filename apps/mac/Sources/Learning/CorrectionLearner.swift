@@ -53,7 +53,13 @@ struct CorrectionLearner {
         guard let watched else {
             return []
         }
-        let fixes = Self.swaps(inserted: watched.inserted, edited: edited)
+        // first word to last on both sides: the stop the cleaner put after
+        // our last word is not in what the watcher reads back, and a
+        // difference there would glue that word onto the fix beside it.
+        let fixes = Self.swaps(
+            inserted: SpanLocator.core(of: watched.inserted),
+            edited: SpanLocator.core(of: edited)
+        )
             .compactMap {
                 Self.entry(
                     for: $0,
