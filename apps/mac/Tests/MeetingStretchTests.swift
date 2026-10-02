@@ -676,11 +676,57 @@ final class MeetingStretchTests: XCTestCase {
         [Float](repeating: 0, count: quiet) + Self.theirFrames.dropFirst(quiet)
     }
 
-    /// The decision for a stretch of the mic from 0.5 s to 1.5 s: frames 10
-    /// up to 30, with the 6 before for the delay.
-    private func verdict(mic: [Float], far: [Float]) -> BleedJudge.Verdict {
-        BleedJudge.verdict(
-            mic: trail(mic), far: trail(far), from: .milliseconds(500), to: .milliseconds(1500))
+    /// The decision for a stretch of the mic, by default from 0.5 s to 1.5 s:
+    /// frames 10 up to 30, with the 6 before for the delay.
+    private func verdict(
+        mic: [Float], far: [Float],
+        from: Duration = .milliseconds(500), to: Duration = .milliseconds(1500)
+    ) -> BleedJudge.Verdict {
+        BleedJudge.verdict(mic: trail(mic), far: trail(far), from: from, to: to)
+    }
+
+    /// The mic is theirs when it rises and falls as they did, whatever its
+    /// loudness, and however long ago they did it — as long as that is no
+    /// more than 300 ms, which is six frames.
+    func testAMicThatFollowsTheFarSideAtAnyDelayUpToThreeHundredMillisecondsIsBleed() {
+        let theirs = Self.theirFrames
+        XCTAssertEqual(verdict(mic: theirs, far: theirs), .drop, "as loud, and no later")
+        for frames in 0...6 {
+            XCTAssertEqual(
+                verdict(mic: copy(of: theirs, late: frames), far: theirs), .drop,
+                "\(frames * 50) ms late")
+        }
+        for frames in 7...8 {
+            XCTAssertEqual(
+                verdict(mic: copy(of: theirs, late: frames), far: theirs), .keep,
+                "\(frames * 50) ms late is past what the room can do")
+        }
+    }
+
+    /// Two people say two things: what the mic does has nothing to do with
+    /// what the far side did.
+    func testAMicThatRisesAndFallsInItsOwnTimeIsKept() {
+        XCTAssertEqual(verdict(mic: Self.otherFrames, far: Self.theirFrames), .keep)
+    }
+
+    /// Nobody was talking at the far end, so there was nothing to hear again.
+    func testAMicWithAFarSideThatSaidNothingIsKept() {
+        XCTAssertEqual(
+            verdict(mic: Self.otherFrames, far: [Float](repeating: 0, count: 40)), .keep)
+        XCTAssertEqual(
+            verdict(mic: copy(of: Self.theirFrames), far: [Float](repeating: 0, count: 40)), .keep)
+    }
+
+    /// Half a second is the least that is judged: 0.5 s is ten frames, and
+    /// 0.45 s is nine.
+    func testHalfASecondIsTheLeastThatIsJudged() {
+        let theirs = Self.theirFrames
+        XCTAssertEqual(
+            verdict(mic: copy(of: theirs), far: theirs, from: .milliseconds(500), to: .milliseconds(1000)),
+            .drop)
+        XCTAssertEqual(
+            verdict(mic: copy(of: theirs), far: theirs, from: .milliseconds(500), to: .milliseconds(950)),
+            .keep)
     }
 
     /// Their loudness is the evidence, and only where they were talking. A mic
@@ -709,6 +755,26 @@ final class MeetingStretchTests: XCTestCase {
     func testALoudnessThatHardlyMovesIsNotAPatternToFollow() {
         let steady: [Float] = (0..<40).map { 0.05 + 0.0005 * Float($0 % 3) }
         XCTAssertEqual(verdict(mic: copy(of: steady), far: steady), .keep)
+    }
+
+    /// A stretch is judged on what the trails hold. A minute of it is held
+    /// and no more, so a stretch from further back than that, one that runs
+    /// past what has been heard, and one so near the start of the meeting
+    /// that the delay has nothing to look at, are all kept.
+    func testAStretchTheTrailsDoNotHoldInFullIsKept() {
+        // 70 s of the same bursts over and over, the mic a copy of them.
+        let theirs = (0..<1_400).map { Self.theirFrames[$0 % 40] }
+        let mic = trail(copy(of: theirs, late: 2))
+        let far = trail(theirs)
+        func judged(_ from: Duration, _ to: Duration) -> BleedJudge.Verdict {
+            BleedJudge.verdict(mic: mic, far: far, from: from, to: to)
+        }
+
+        XCTAssertEqual(judged(.seconds(60), .seconds(61)), .drop, "the same stretch, still held")
+        XCTAssertEqual(judged(.seconds(5), .seconds(6)), .keep, "more than a minute ago")
+        XCTAssertEqual(judged(.milliseconds(69_500), .milliseconds(70_500)), .keep, "not heard yet")
+        XCTAssertEqual(
+            judged(.milliseconds(100), .milliseconds(1_100)), .keep, "no room before it for the delay")
     }
 
     // MARK: - building a meeting
