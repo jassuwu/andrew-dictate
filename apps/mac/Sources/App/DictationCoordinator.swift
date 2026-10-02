@@ -556,6 +556,7 @@ final class DictationCoordinator: ObservableObject {
         listenForTheMeetingToggle()
         listenForTheCallChecks()
         listenForTheProbeSweep()
+        listenForTheTapLoss()
         #endif
         // "fix a word…" is the menu's only time-sensitive action, and it used
         // to be grey until this session's first dictation — while the words
@@ -2339,6 +2340,20 @@ extension DictationCoordinator {
             MainActor.assumeIsolated {
                 guard let self, self.meetings.isRecording else { return }
                 self.meetings.coordinator.sweepTheQuietProbe()
+            }
+        }
+    }
+
+    /// Development only: `notifyutil -p gg.jass.dictate.dev.meeting.lose-tap`
+    /// during a meeting takes its tap for dead and rebuilds it.
+    private func listenForTheTapLoss() {
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "\(AppIdentity.bundleID).meeting.lose-tap", &token, .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.meetings.isRecording else { return }
+                self.meetings.coordinator.loseTheTapForDevelopment()
             }
         }
     }

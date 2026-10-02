@@ -1660,6 +1660,16 @@ extension MeetingCoordinator {
             sweepPeak = nil
         }
     }
+
+    /// Development only, beside the sweep: during a meeting, the tap taken
+    /// for dead now, the way a quiet probe it did not hear takes it — a
+    /// gap, and the rebuild. With the source's `meetingTapRefused` default
+    /// set, the rebuild fails, and the meeting goes on with the mic alone.
+    func loseTheTapForDevelopment() {
+        guard let meeting = current, session.state == .recording else { return }
+        logger.notice("development: the tap is taken for dead")
+        loseTheTap(meeting, at: elapsed)
+    }
 }
 #endif
 
