@@ -1,10 +1,11 @@
 import Foundation
 
-/// learning from your fixes, wired: a delivered dictation starts a watch on
-/// the field it landed in, what you leave our words as goes to the learner,
-/// and an entry it hands back goes into your dictionary, marked learned.
+/// learning from your corrections, wired: a delivered dictation starts a
+/// watch on the field it landed in, what you leave our words as goes to the
+/// learner, and an entry it hands back goes into your dictionary, marked
+/// learned.
 @MainActor
-final class FixLearning {
+final class LearningFromCorrections {
     /// an entry was just learned and saved: say so, once.
     var onLearned: ((DictionaryEntry) -> Void)?
 

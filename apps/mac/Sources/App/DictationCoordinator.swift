@@ -123,10 +123,10 @@ final class DictationCoordinator: ObservableObject {
     private let transcriptionEngine: ParakeetEngine
     /// key-down to outcome. this object wires it and wears what it says.
     private let machine: UtteranceMachine
-    /// a minute of watching each delivered dictation for a word you fix
-    /// (ADR 0046). built on the first delivery.
-    private lazy var fixLearning: FixLearning = {
-        let learning = FixLearning(
+    /// a minute of watching each delivered dictation for a word you
+    /// correct (ADR 0046). built on the first delivery.
+    private lazy var learningFromCorrections: LearningFromCorrections = {
+        let learning = LearningFromCorrections(
             store: dictionaryStore,
             fullCleanup: { [settings] in settings.cleanupEnabled }
         )
@@ -1647,7 +1647,7 @@ final class DictationCoordinator: ObservableObject {
     private func beginRecording(locked: Bool) {
         // the last dictation's watch ends with this press, whatever the
         // press does next: only that dictation's span, only until the next.
-        fixLearning.stopWatching()
+        learningFromCorrections.stopWatching()
         // ADR 0023: refused during a meeting, and it says why. you started
         // the recording, so a dead hotkey is not a mystery — but a silent
         // one would still be spec §4's forbidden shape.
@@ -1989,7 +1989,7 @@ extension DictationCoordinator {
             lastTranscript = inserted
             lastHeard = heard
         case let .delivered(heard, inserted):
-            fixLearning.delivered(heard: heard, inserted: inserted)
+            learningFromCorrections.delivered(heard: heard, inserted: inserted)
         case let .retryOffered(offered):
             canRetryLastFailure = offered
         case .microphoneDropped:

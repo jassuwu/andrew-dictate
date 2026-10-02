@@ -1,11 +1,11 @@
 import Foundation
 
-/// what a fix you made to text we inserted can teach the dictionary.
+/// what a correction you made to text we inserted can teach the dictionary.
 ///
 /// four rules, decided with Jass (ADR 0046): only our span is read (the
 /// watcher's job, not this one's); only swaps — a few words the engine wrote
 /// replaced by a few others; only sound-alikes; and only on the second
-/// identical swap. one-off fixes teach nothing, and nothing here touches the
+/// identical swap. one-off corrections teach nothing, and nothing here touches the
 /// cleaner's rules (ADR 0020): what comes out is an ordinary dictionary
 /// entry, yours like any other.
 struct CorrectionLearner {
@@ -16,19 +16,19 @@ struct CorrectionLearner {
         let to: String
         /// what we inserted with this one swap made and nothing else: what
         /// an entry has to reproduce from the engine's words.
-        let fixed: String
+        let corrected: String
     }
 
     /// what the engine heard and what we inserted, for the dictation being
     /// watched. in memory only, and only while it is watched.
     private var watched: (heard: String, inserted: String)?
 
-    /// how many dictations ended with each fix. in memory only: a restart
+    /// how many dictations ended with each correction. in memory only: a restart
     /// forgets a one-off, so nothing taken from your text reaches the disk
     /// until it is an entry you can see.
     private var tally: [LearningKey: Int] = [:]
 
-    /// the fixes the watched dictation stands at right now — its one vote.
+    /// the corrections the watched dictation stands at right now — its one vote.
     private var votes: Set<LearningKey> = []
 
     /// a delivered dictation, watched from now. whatever it ends as is one
@@ -55,8 +55,8 @@ struct CorrectionLearner {
         }
         // first word to last on both sides: the stop the cleaner put after
         // our last word is not in what the watcher reads back, and a
-        // difference there would glue that word onto the fix beside it.
-        let fixes = Self.swaps(
+        // difference there would glue that word onto the swap beside it.
+        let corrections = Self.swaps(
             inserted: SpanLocator.core(of: watched.inserted),
             edited: SpanLocator.core(of: edited)
         )
@@ -69,9 +69,9 @@ struct CorrectionLearner {
                 )
             }
             .filter { !neverLearn.contains(LearningKey($0)) }
-        let now = Set(fixes.map(LearningKey.init))
+        let now = Set(corrections.map(LearningKey.init))
 
-        // a fix you have since changed or taken back is no longer this
+        // a correction you have since changed or taken back is no longer this
         // dictation's vote.
         for withdrawn in votes.subtracting(now) {
             let left = (tally[withdrawn] ?? 1) - 1
@@ -79,8 +79,8 @@ struct CorrectionLearner {
         }
 
         var learned: [DictionaryEntry] = []
-        for fix in fixes {
-            let key = LearningKey(fix)
+        for correction in corrections {
+            let key = LearningKey(correction)
             guard !votes.contains(key) else {
                 continue
             }
@@ -91,7 +91,7 @@ struct CorrectionLearner {
             }
             tally[key] = nil
             learned.append(
-                DictionaryEntry(wrong: fix.wrong, right: fix.right, learned: true)
+                DictionaryEntry(wrong: correction.wrong, right: correction.right, learned: true)
             )
         }
         votes = now
@@ -124,13 +124,13 @@ struct CorrectionLearner {
                   SoundAlike.soundsAlike(from, to) else {
                 return nil
             }
-            let fixed = insertedWords[..<region.start]
+            let corrected = insertedWords[..<region.start]
                 + region.added
                 + insertedWords[(region.start + region.removed.count)...]
             return Swap(
                 from: from,
                 to: to,
-                fixed: fixed.joined(separator: " ")
+                corrected: corrected.joined(separator: " ")
             )
         }
     }
@@ -140,7 +140,7 @@ struct CorrectionLearner {
     /// turn "jaz dot dev" into "jaz.dev". nil when no run of them does it.
     ///
     /// an entry is only offered if cleaning what was heard with it, beside
-    /// the rules you already have, gives back the text you fixed: the
+    /// the rules you already have, gives back the text you corrected: the
     /// guarantee fix-a-word makes (ADR 0024), that an entry built from a
     /// dictation fires on that dictation. a word one of your own entries
     /// wrote never matches, so the learner never writes over your rules.
@@ -154,7 +154,7 @@ struct CorrectionLearner {
             transcript: cleaner(dictionary).asHeard(heard)
         )
         let taught = Set(dictionary.map { DictionaryStore.matchKey($0.wrong) })
-        let wanted = spellingRuns(swap.fixed)
+        let wanted = spellingRuns(swap.corrected)
         let opening = spelling(swap.from).first
 
         // shortest first: "jaz" alone would leave "dot dev" behind, so the

@@ -21,7 +21,7 @@ protocol SpanReader: AnyObject {
 /// our words are found in it (`SpanLocator`). nothing outside them is kept
 /// from one read to the next — only where they start.
 struct SpanFollower {
-    /// enough to find our words again after a fix or a few words typed in
+    /// enough to find our words again after a correction or a few words typed in
     /// front of them; too little to read the document around them.
     static let margin = 40
 

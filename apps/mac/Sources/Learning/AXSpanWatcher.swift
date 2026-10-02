@@ -9,10 +9,10 @@ import AppKit
 /// words are gone, or when the next dictation starts — whichever is first.
 @MainActor
 final class AXSpanWatcher {
-    /// "~60 s" in the rule: long enough to read back what landed and fix a
-    /// word, short enough that it's still about this dictation.
+    /// "~60 s" in the rule: long enough to read back what landed and
+    /// correct a word, short enough that it's still about this dictation.
     static let lifetime: Duration = .seconds(60)
-    /// typing pauses longer than this are a fix, not a word half-typed.
+    /// typing pauses longer than this are a correction, not a word half-typed.
     static let quiet: Duration = .milliseconds(1500)
     /// the fallback for a field that never says it changed.
     static let pollInterval: Duration = .milliseconds(1500)
@@ -81,7 +81,7 @@ final class AXSpanWatcher {
     }
 
     /// the next dictation: whatever you were still typing isn't a finished
-    /// fix, and a pill about it would land on the take.
+    /// correction, and a pill about it would land on the take.
     func stop() {
         end(flushing: false)
     }

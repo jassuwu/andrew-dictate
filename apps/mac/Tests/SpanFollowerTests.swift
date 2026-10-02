@@ -28,8 +28,8 @@ final class SpanFollowerTests: XCTestCase {
         )
     }
 
-    /// the first and last words hold still while you fix one between them.
-    func testAWordFixedBetweenTheAnchorsIsReadBack() {
+    /// the first and last words hold still while you correct one between them.
+    func testAWordCorrectedBetweenTheAnchorsIsReadBack() {
         XCTAssertEqual(
             locate(
                 "I watched Android dictates on the train.",
@@ -40,7 +40,7 @@ final class SpanFollowerTests: XCTestCase {
         )
     }
 
-    /// a fix inside the last word leaves the word's other half as anchor.
+    /// a correction inside the last word leaves the word's other half as anchor.
     func testAFixInsideTheLastWordKeepsItsTailAsAnchor() {
         XCTAssertEqual(
             locate("Send it to jaz.gg.", in: "hi. Send it to jass.gg. bye", at: 4),
@@ -48,9 +48,9 @@ final class SpanFollowerTests: XCTestCase {
         )
     }
 
-    /// you fixed the last word itself, and nothing follows it: the field's
+    /// you corrected the last word itself, and nothing follows it: the field's
     /// end is where our words end.
-    func testTheLastWordFixedAtTheEndOfTheFieldRunsToTheEnd() {
+    func testTheLastWordCorrectedAtTheEndOfTheFieldRunsToTheEnd() {
         XCTAssertEqual(
             locate("Parse the jason", in: "hi. Parse the JSON", at: 4, reachesFieldEnd: true),
             "Parse the JSON"
@@ -59,12 +59,12 @@ final class SpanFollowerTests: XCTestCase {
 
     /// ...but with your own text after it there is no telling where ours
     /// stops, so the dictation is given up on.
-    func testTheLastWordFixedWithTextAfterItIsGivenUpOn() {
+    func testTheLastWordCorrectedWithTextAfterItIsGivenUpOn() {
         XCTAssertNil(locate("Parse the jason", in: "hi. Parse the JSON then ship", at: 4))
     }
 
-    /// you fixed the first word: we still know where we put it.
-    func testTheFirstWordFixedIsFoundWhereWePutIt() {
+    /// you corrected the first word: we still know where we put it.
+    func testTheFirstWordCorrectedIsFoundWhereWePutIt() {
         XCTAssertEqual(
             locate("Jason parse it.", in: "hi. JSON parse it. more", at: 4),
             "JSON parse it"
@@ -77,9 +77,9 @@ final class SpanFollowerTests: XCTestCase {
         XCTAssertNil(locate("Send it to jaz.dev", in: "something else entirely", at: 0))
     }
 
-    /// one word, fixed, is both anchors gone: there is nothing of ours left
+    /// one word, corrected, is both anchors gone: there is nothing of ours left
     /// to be sure the word in that spot is the one we wrote.
-    func testAOneWordDictationFixedIsGivenUpOn() {
+    func testAOneWordDictationCorrectedIsGivenUpOn() {
         XCTAssertNil(locate("jason", in: "JSON", at: 0, reachesFieldEnd: true))
         XCTAssertEqual(locate("jason", in: "jason", at: 0, reachesFieldEnd: true), "jason")
     }
@@ -112,7 +112,7 @@ final class SpanFollowerTests: XCTestCase {
         XCTAssertEqual(follower.read(field), .reads("Send it to jaz.dev"))
     }
 
-    func testAFixReadsBack() {
+    func testACorrectionReadsBack() {
         let field = FakeField("hi. Send it to jaz.dev")
         var follower = SpanFollower(inserted: "Send it to jaz.dev")
         _ = follower.read(field)
