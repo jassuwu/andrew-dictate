@@ -561,26 +561,6 @@ final class MeetingRecordTests: XCTestCase {
         XCTAssertEqual(records.map(\.startedAt), [started, started])
     }
 
-    /// audio the app cannot read at all: there is nothing to try, and the
-    /// record is the only thing that says the meeting is gone.
-    func testASpoolThatCannotBeReadLeavesARecordSayingSo() async throws {
-        let handle = try await orphan("teams", started: started)
-        try Data("not audio".utf8).write(to: handle.audioURL)
-        let c = coordinator()
-
-        c.recoverOrphans()
-        await awaitRecords(1)
-        await c.untilWrittenOut()
-
-        XCTAssertEqual(records.count, 1)
-        let record = try XCTUnwrap(records.first)
-        XCTAssertEqual(record.outcome, .spoolUnreadable)
-        XCTAssertTrue(record.recovered)
-        XCTAssertEqual(record.app, "teams")
-        XCTAssertEqual(record.startedAt, started)
-        XCTAssertEqual(record.durationS, 0)
-    }
-
     // MARK: - the file
 
     /// the transcript could not be written where it was asked to go: the

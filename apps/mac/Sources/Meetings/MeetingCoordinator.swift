@@ -935,9 +935,21 @@ final class MeetingCoordinator: ObservableObject {
     }
 
     private func recover(_ handle: MeetingSpool.Handle, manifest: MeetingSpool.Manifest) async {
-        guard let audio = try? SpoolAudioFile.read(handle.audioURL),
-              !audio.them.isEmpty || !audio.you.isEmpty
-        else {
+        let audio: (you: [Float], them: [Float])
+        do {
+            audio = try SpoolAudioFile.read(handle.audioURL)
+        } catch {
+            // audio the app cannot read is still the only copy of the
+            // meeting, and the next build or a person with another tool may
+            // be able to: it is kept, where settings says it is.
+            logger.error("could not read a spool, so it is set aside: \(error.localizedDescription, privacy: .public)")
+            spool.setAside(handle)
+            keepMeetingRecord?(MeetingRecord(
+                .setAsideUnreadable, app: manifest.app, model: manifest.model,
+                startedAt: manifest.started, duration: .zero, recovered: true))
+            return
+        }
+        guard !audio.them.isEmpty || !audio.you.isEmpty else {
             spool.discard(handle)
             keepMeetingRecord?(MeetingRecord(
                 .spoolUnreadable, app: manifest.app, model: manifest.model,
