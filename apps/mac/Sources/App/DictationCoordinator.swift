@@ -389,6 +389,12 @@ final class DictationCoordinator: ObservableObject {
                 entries: entries,
                 fullCleanup: fullCleanup
             )
+            // a learned row removed from the dictionary tab has nothing
+            // left for the menu to undo.
+            if let learned = self?.undoableLearning,
+               !entries.contains(where: { $0.id == learned.id }) {
+                self?.undoableLearning = nil
+            }
         }
         .store(in: &settingsCancellables)
 
