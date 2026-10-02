@@ -126,7 +126,8 @@ struct MeetingSpool: Sendable {
     }
 
     /// Out of the way, not away: `orphans()` stops offering it and nothing
-    /// deletes it.
+    /// deletes it — not even a recording already set aside under the same
+    /// name, which this one then sits beside.
     func setAside(_ handle: Handle) {
         let fm = FileManager.default
         let folder = root.appendingPathComponent(
@@ -134,9 +135,13 @@ struct MeetingSpool: Sendable {
         try? fm.createDirectory(
             at: folder, withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700])
-        let destination = folder.appendingPathComponent(
-            handle.folder.lastPathComponent, isDirectory: true)
-        try? fm.removeItem(at: destination)
+        let name = handle.folder.lastPathComponent
+        var destination = folder.appendingPathComponent(name, isDirectory: true)
+        var copy = 2
+        while fm.fileExists(atPath: destination.path) {
+            destination = folder.appendingPathComponent("\(name)-\(copy)", isDirectory: true)
+            copy += 1
+        }
         try? fm.moveItem(at: handle.folder, to: destination)
     }
 

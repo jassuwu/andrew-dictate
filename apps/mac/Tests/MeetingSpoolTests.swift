@@ -170,6 +170,26 @@ final class MeetingSpoolTests: XCTestCase {
                 .appendingPathComponent("audio.caf").path))
     }
 
+    /// A folder with the name of one already set aside — two meetings do not
+    /// share one, but a recording that came back and was set aside again
+    /// might meet its old self — takes nothing with it that was there.
+    func testSettingASpoolAsideNeverReplacesOneAlreadyThere() throws {
+        let first = try spool.begin(manifest())
+        try Data([1]).write(to: first.audioURL)
+        spool.setAside(first)
+
+        try FileManager.default.createDirectory(
+            at: first.folder, withIntermediateDirectories: true)
+        try Data([2]).write(to: first.audioURL)
+        spool.setAside(first)
+
+        XCTAssertEqual(spool.unreadableCount(), 2)
+        let audio = try FileManager.default.contentsOfDirectory(atPath: spool.unreadableFolder.path)
+            .map { try Data(contentsOf: spool.unreadableFolder
+                .appendingPathComponent($0).appendingPathComponent("audio.caf")) }
+        XCTAssertEqual(Set(audio), [Data([1]), Data([2])])
+    }
+
     // MARK: -
 
     /// Where a set-aside spool's folder ends up.
