@@ -245,11 +245,17 @@ final class MeetingCoordinator: ObservableObject {
     var problem: MeetingSession.Problem? {
         problems.first
     }
+    /// What the meeting is doing, worked out from the state, the model, the
+    /// problems and what is being written out: the one thing the menu, the
+    /// badge and the lamp read, so they never tell it differently.
+    @Published private(set) var phase: MeetingPhase = .idle
     @Published private(set) var elapsed: Duration = .zero
     @Published private(set) var liveLines: [LiveLine] = []
     /// The app of the spool being written out at launch, while it runs. The
     /// menu draws it; the pill only says it once.
-    @Published private(set) var recovering: String?
+    @Published private(set) var recovering: String? {
+        didSet { publishPhase() }
+    }
     /// The transcript being made again from its kept audio, while one is.
     /// One at a time; history's rows say which.
     @Published private(set) var transcribingAgain: URL?
@@ -282,8 +288,14 @@ final class MeetingCoordinator: ObservableObject {
     }
     /// Meetings that have stopped and are still being written out.
     private var writingOut: [Meeting] = [] {
-        didSet { wakeWhoeverIsWaiting() }
+        didSet {
+            wakeWhoeverIsWaiting()
+            publishPhase()
+        }
     }
+    /// The meeting being recorded has its model loaded: one of the two
+    /// things it gets ready for, the tap hearing its start sound the other.
+    private var modelLoaded = false
     /// Whoever is waiting on the meetings to move on — recovery between
     /// spools, a quit. Each looks again at what it waits for when woken.
     private var waiting: [CheckedContinuation<Void, Never>] = []
@@ -454,6 +466,7 @@ final class MeetingCoordinator: ObservableObject {
         probeUntil = thresholds.probeTimeout
         toneUntil = OurTones.silenced(for: OurTones.startSound)
         probeOpensAtNextChunk = false
+        modelLoaded = false
         startWatchdog(for: meeting)
         publish()
 
@@ -503,6 +516,11 @@ final class MeetingCoordinator: ObservableObject {
             Task { [weak self] in
                 do {
                     try await loading.value
+                    // in for this meeting only: one stopped meanwhile is
+                    // being written out, and the next loads its own.
+                    guard let self, current === meeting else { return }
+                    modelLoaded = true
+                    publishPhase()
                 } catch {
                     self?.modelFailed(meeting, error)
                 }
@@ -600,8 +618,13 @@ final class MeetingCoordinator: ObservableObject {
         let end = max(elapsed, wallElapsed)
         meeting.notes.stopped = now()
         meeting.notes.ran = end
-        let recording = letGo(of: meeting, at: end)
+        // counted as being written out before it is let go, so the phase
+        // goes from the meeting straight to writing it out, never idle for
+        // a moment between. one that never heard its start sound has no
+        // file to write, only a spool to let go, and the phase says idle.
+        meeting.hasAFile = session.state == .recording || session.state == .rebuilding
         writingOut.append(meeting)
+        let recording = letGo(of: meeting, at: end)
         let tapClosed = closeTheTap(of: meeting)
         Task { [weak self] in
             await tapClosed.value
@@ -1709,6 +1732,19 @@ final class MeetingCoordinator: ObservableObject {
     private func publish() {
         state = session.state
         problems = session.problems
+        publishPhase()
+    }
+
+    /// The phase, again from what is known now: set only when it moved,
+    /// and said in the log when it does.
+    private func publishPhase() {
+        let next = MeetingPhase(
+            state: session.state, modelLoaded: modelLoaded,
+            problems: session.problems, writingOut: writingOut.contains { $0.hasAFile },
+            recovering: recovering)
+        guard next != phase else { return }
+        phase = next
+        logger.notice("meeting phase: \(next.logged, privacy: .public)")
     }
 
     /// Returns once `done` is true, looking again each time a meeting starts,
@@ -1872,6 +1908,9 @@ extension MeetingCoordinator {
         /// Its gaps as they began and ended, each with where the spool's
         /// clock was then, so its turns can be found on the spool.
         var gaps: [MeetingSpool.Gap] = []
+        /// Stopped having heard its start sound, so a file is on its way:
+        /// what the phase calls writing it out.
+        var hasAFile = false
 
         init(app: String, started: Date, preferences: MeetingPreferences) {
             self.app = app
