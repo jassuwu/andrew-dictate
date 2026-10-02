@@ -50,8 +50,10 @@ enum MeetingEngines {
         // the speaker split is read at the end of the meeting; a mac that
         // was set up before its models came down with the meeting model
         // gets them now, in the background, so they are there by then.
+        // whisper's tokenizer is not fetched here: the load needs it before
+        // anything else, and fetches it itself.
         if !FluidDiarizer.isOnDisk {
-            Task.detached(priority: .utility) { await fetchWhatSetupOwes(model) }
+            Task.detached(priority: .utility) { await fetchSpeakerSplit() }
         }
         switch model {
         case .parakeetV3:
@@ -90,29 +92,56 @@ enum MeetingEngines {
 
     /// WhisperKit fetches the tokenizer from the Hugging Face Hub the first
     /// time it loads a model, which is a meeting waiting on the network at
-    /// its start. Setup fetches it instead, to the folder it looks in.
-    private static func fetchTokenizer(for model: MeetingModel) async throws {
-        guard model.whisperVariant != nil else { return }
+    /// its start. Setup fetches it instead, to the folder it looks in. One
+    /// download at a time, whoever asks — setup, and the load of a mac set
+    /// up before it came with the model — so two never write the folder at
+    /// once; both whisper models read the same one.
+    private static let tokenizer = OneDownload {
         _ = try await AutoTokenizerWrapper.from(
             pretrained: tokenizerRepo,
             hubApi: HubApiWrapper(downloadBase: modelDirectory))
     }
 
-    /// What `prepare` fetches after the model, for a mac whose model was
-    /// downloaded before these came with it: the tokenizer and the
-    /// speaker-split models, whichever is missing. The same two requests
-    /// setup makes, made late and once. Failing is logged and nothing more.
-    static func fetchWhatSetupOwes(_ model: MeetingModel) async {
+    /// The speaker-split models, one download at a time in the same way:
+    /// setup, and a meeting started on a mac that does not have them yet.
+    private static let speakerSplit = OneDownload { try await FluidDiarizer.fetch() }
+
+    /// Whisper's tokenizer, for a load that found it missing: waited on for
+    /// `limit` at most, so a meeting is not held at its start by a network
+    /// that does not answer. Past that, the download goes on in the
+    /// background for the next to find. Failing is logged and nothing more:
+    /// the load says whether the tokenizer can be read.
+    static func fetchTokenizer(within limit: Duration) async {
         do {
-            try await fetchTokenizer(for: model)
+            try await tokenizer.run(within: limit)
         } catch {
             logger.error("whisper's tokenizer did not download: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    /// The speaker-split models, for a mac that does not have them yet.
+    /// Failing is logged and nothing more: a meeting without them has
+    /// plain `them`.
+    static func fetchSpeakerSplit() async {
         do {
-            try await FluidDiarizer.fetch()
+            try await speakerSplit.run()
         } catch {
             logger.error("the speaker-split models did not download: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    /// What `prepare` fetches after the model: the tokenizer for a whisper
+    /// model, and the speaker-split models for every model. Failing is
+    /// logged and nothing more.
+    static func fetchWhatSetupOwes(_ model: MeetingModel) async {
+        if model.whisperVariant != nil {
+            do {
+                try await tokenizer.run()
+            } catch {
+                logger.error("whisper's tokenizer did not download: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        await fetchSpeakerSplit()
     }
 
     /// Downloads (or verifies) the model, reporting 0…1. False means it did

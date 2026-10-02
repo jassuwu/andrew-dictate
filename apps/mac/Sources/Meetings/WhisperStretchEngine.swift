@@ -27,6 +27,13 @@ actor WhisperStretchEngine: StretchEngine {
     /// whisper reads at once.
     static let ceiling = Duration.seconds(25)
 
+    /// How long a load waits for a tokenizer setup never fetched: a 2 mb
+    /// file, seconds on any network that answers. A meeting has started
+    /// recording by then and its words wait for the model, so this is how
+    /// long they wait before the meeting says the model failed and keeps
+    /// its spool. Provisional.
+    static let tokenizerPatience = Duration.seconds(30)
+
     private let model: MeetingModel
     private var whisper: WhisperKit?
 
@@ -46,12 +53,14 @@ actor WhisperStretchEngine: StretchEngine {
         // the Hugging Face Hub, in the middle of loading. Read here first.
         //
         // A mac set up before the tokenizer came down with the model has
-        // the model and no tokenizer. That is fetched once, here, the way
-        // setup would have: failing a meeting over a 2 mb file the download
-        // owed it would be the wrong thing to be strict about. Only when it
-        // still cannot be read does the load stop.
+        // the model and no tokenizer. That is fetched here, the way setup
+        // would have: failing a meeting over a 2 mb file the download owed
+        // it would be the wrong thing to be strict about. The tokenizer and
+        // nothing else — the speaker split is fetched beside the meeting,
+        // not in front of it — and for `tokenizerPatience` at most. Only
+        // when it still cannot be read does the load stop.
         if (try? await AutoTokenizerWrapper.from(modelFolder: tokenizerFolder)) == nil {
-            await MeetingEngines.fetchWhatSetupOwes(model)
+            await MeetingEngines.fetchTokenizer(within: Self.tokenizerPatience)
             do {
                 _ = try await AutoTokenizerWrapper.from(modelFolder: tokenizerFolder)
             } catch {
