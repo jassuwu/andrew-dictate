@@ -183,4 +183,51 @@ actor SpoolAudioFile {
             : []
         return (you, them)
     }
+
+    /// The spool a block of `frames` at a time, both sides, in order: for
+    /// whatever reads a whole meeting and must not hold an hour of it in
+    /// memory to do it. The last block may be short.
+    static func readBlocks(
+        _ url: URL,
+        frames: Int = 16_000,
+        _ body: (_ you: [Float], _ them: [Float]) throws -> Void
+    ) throws {
+        let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
+        let capacity = AVAudioFrameCount(max(1, frames))
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: capacity) else {
+            return
+        }
+        let stereo = file.processingFormat.channelCount > 1
+        while file.framePosition < file.length {
+            try file.read(into: buffer, frameCount: capacity)
+            let count = Int(buffer.frameLength)
+            guard count > 0, let channels = buffer.floatChannelData else { return }
+            try body(
+                Array(UnsafeBufferPointer(start: channels[0], count: count)),
+                stereo ? Array(UnsafeBufferPointer(start: channels[1], count: count)) : [])
+        }
+    }
+
+    /// How long the far side was louder than `floor`, judged 100 ms at a
+    /// time — the steps the tap hands over and the health check judges.
+    /// The spool's own word on whether anyone was heard, for the coverage
+    /// check: it never goes near the transcriber, so a transcriber that was
+    /// never fed cannot have it wrong.
+    static func farSideLoud(in url: URL, above floor: Float) throws -> Duration {
+        let window = 1_600
+        var loud = 0
+        try readBlocks(url, frames: window * 10) { _, them in
+            var start = 0
+            while start < them.count {
+                let end = min(start + window, them.count)
+                var sum: Float = 0
+                for sample in them[start..<end] { sum += sample * sample }
+                if (sum / Float(end - start)).squareRoot() > floor {
+                    loud += end - start
+                }
+                start = end
+            }
+        }
+        return StretchCutter.duration(of: loud)
+    }
 }
