@@ -9,11 +9,12 @@ enum HUDWaveMotion {
     static let amplitude: CGFloat = 7.5
     static let strokeWidth: CGFloat = 2.6
     static let coreStrokeWidth: CGFloat = 1.1
-    /// the lamp's heat while a meeting records (ticket 28), and the one
-    /// number to tune it by eye: 1 is a take's lit lamp before you speak,
-    /// and the ember breathes around 0.2. clearly on, and quieter than any
-    /// take you speak into.
-    static let meetingHeat = 0.75
+    /// how much light the lamp holds while a meeting records (ticket 28),
+    /// and the one number to tune it by eye. it is the light a voice puts
+    /// in the tube, held still and without the wave: 0 is a take's lamp
+    /// before you speak, which reads as a rod, not a light; 1 is a take you
+    /// are talking loudly into. clearly on, and quieter than any take.
+    static let meetingGlow = 0.2
     /// how long the meeting's light takes to come up from the ember. slow
     /// on purpose: nothing about it should pull the eye.
     static let meetingRiseDuration: TimeInterval = 0.8
@@ -492,19 +493,26 @@ struct HUDView: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("The meeting recording has a problem")
         case .coolingOut:
-            meetingLine(phase: .cool, palette: viewModel.meetingPalette)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Stopped recording the meeting")
+            // the cool-out dims a take's voice as it collapses; handed the
+            // glow, it goes out from where the meeting's light was.
+            meetingLine(
+                phase: .cool,
+                palette: viewModel.meetingPalette,
+                loudness: Float(HUDWaveMotion.meetingGlow)
+            )
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Stopped recording the meeting")
         }
     }
 
     private func meetingLine(
         phase: GoldRippleLine.Phase,
-        palette: LampPalette
+        palette: LampPalette,
+        loudness: Float = 0
     ) -> some View {
         LampLine(
             phase: phase,
-            loudness: 0,
+            loudness: loudness,
             startedAt: viewModel.meetingLightChangedAt,
             palette: palette,
             ground: LampGround.shipped,
@@ -804,6 +812,9 @@ struct LampPose {
     var extent = 1.0
     var dotFlash = 0.0
     var damp = 1.0
+    /// a steady light in the tube where a voice would be, without the
+    /// wave a voice makes. a meeting's, and nothing else's.
+    var glow = 0.0
 
     /// the ember's heat, around which it breathes.
     static let emberHeat = 0.20
@@ -824,10 +835,13 @@ struct LampPose {
             pose.presence = 1
             pose.damp = 0
         case .pilot:
-            // up from the ember's heat to the meeting's, and then it holds:
-            // no ignite, no breath, no voice.
-            let t = min(elapsed / HUDWaveMotion.meetingRiseDuration, 1)
-            pose.heat = lerp(emberHeat, HUDWaveMotion.meetingHeat, smoothstep(t))
+            // up from the ember to a take's lit heat with the meeting's
+            // glow in it, and then it holds: no ignite, no breath, no voice.
+            let t = smoothstep(
+                min(elapsed / HUDWaveMotion.meetingRiseDuration, 1)
+            )
+            pose.heat = lerp(emberHeat, 1, t)
+            pose.glow = HUDWaveMotion.meetingGlow * t
             pose.presence = 1
             pose.damp = 0
         case .burn:
@@ -1007,7 +1021,10 @@ struct GoldRippleLine: View {
         let dotFlash = pose.dotFlash
         let damp = pose.damp
 
-        let level = Double(loudness) * damp
+        // the voice moves the line and lights it; a meeting's glow only
+        // lights it.
+        let voice = Double(loudness) * damp
+        let level = voice + pose.glow
         let b = heat * (0.24 + 0.76 * level)
         let alpha = max(presence, heat)
         let half = (lineWidth / 2) * extent
@@ -1018,7 +1035,7 @@ struct GoldRippleLine: View {
                 cy: cy,
                 half: half,
                 amplitude: HUDWaveMotion.amplitude
-                    * level * heat,
+                    * voice * heat,
                 time: date.timeIntervalSinceReferenceDate
             )
 
@@ -1167,12 +1184,12 @@ struct GoldRippleLine: View {
         guard phase != .cool else {
             return
         }
-        let level = phase == .burn ? Double(loudness) : 0
-        let heat = switch phase {
-        case .ember: 0.24
-        case .pilot: HUDWaveMotion.meetingHeat
-        case .burn, .cool: 1.0
+        let level = switch phase {
+        case .burn: Double(loudness)
+        case .pilot: HUDWaveMotion.meetingGlow
+        case .ember, .cool: 0.0
         }
+        let heat = phase == .ember ? 0.24 : 1.0
         let b = heat * (0.24 + 0.76 * level)
         var path = Path()
         path.move(to: CGPoint(x: cx - lineWidth / 2, y: cy))
