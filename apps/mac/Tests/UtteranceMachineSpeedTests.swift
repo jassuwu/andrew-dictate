@@ -198,6 +198,53 @@ final class UtteranceMachineSpeedTests: XCTestCase {
         XCTAssertEqual(reading.copied, ["Kept for later."])
     }
 
+    // MARK: - nothing at key-down waits on another app
+
+    /// the standby anchor is AX — IPC to whatever app is in front — and an
+    /// app that has stopped answering must not hold up the press: the lamp
+    /// and the mic come first, the read is off the main actor, and a take
+    /// whose standby never came back is written out without it.
+    func testAStandbyAnchorThatNeverAnswersHoldsUpNothing() async {
+        let reading = TargetReadingInserter(clock: clock)
+        reading.holdsAnchor = true
+        let m = machine(inserter: reading)
+        engine.reply = .success("still here")
+
+        m.keyDown()
+        XCTAssertTrue(events.contains(.state(.recording, fastDismiss: false)))
+        XCTAssertEqual(mic.starts, 1)
+        await settle { reading.anchorReads == 1 }
+        XCTAssertEqual(m.state, .recording)
+
+        await pass(.seconds(1))
+        m.keyUp()
+        await settle { reading.inserted == ["Still here."] }
+        XCTAssertEqual(reading.standbys, [nil])
+
+        // its answer, long after the take, stands in for nothing.
+        reading.answerAnchor()
+        await settle()
+        XCTAssertEqual(reading.standbys, [nil])
+    }
+
+    /// key-up finds one of our own windows in front, so key-down's anchor
+    /// stands in, read while the key was held.
+    func testTheStandbyReadAtKeyDownStandsInAtKeyUp() async {
+        let reading = TargetReadingInserter(clock: clock)
+        reading.anchor = nil
+        reading.standby = FakeAnchor(targetBundleIdentifier: "com.apple.Notes")
+        let m = machine(inserter: reading)
+        engine.reply = .success("into notes")
+
+        m.keyDown()
+        await pass(.seconds(1))
+        m.keyUp()
+        await settle { reading.inserted == ["Into notes."] }
+
+        XCTAssertEqual(reading.anchorReads, 1)
+        XCTAssertEqual(reading.standbys, ["com.apple.Notes"])
+    }
+
     // MARK: - helpers
 
     /// waits on another thread's answer without letting the main thread
@@ -346,14 +393,35 @@ final class TargetReadingInserter: Inserter {
     private(set) var copied: [String] = []
     private(set) var targetReads = 0
     private(set) var pasteboardReadsAhead = 0
+    /// what key-down's read finds: the standby.
+    var standby: FakeAnchor? = FakeAnchor(
+        targetBundleIdentifier: "com.apple.TextEdit"
+    )
+    /// while set, that read waits for `answerAnchor()`: an app in front
+    /// that has stopped answering AX.
+    var holdsAnchor = false
+    private(set) var anchorReads = 0
+    /// the standby each key-up read was handed, by its app.
+    private(set) var standbys: [String?] = []
+    private var heldAnchor: CheckedContinuation<Void, Never>?
     private let clock: FakeUtteranceClock
 
     init(clock: FakeUtteranceClock) {
         self.clock = clock
     }
 
-    func captureAnchor() -> (any InsertionAnchor)? {
-        anchor
+    func readAnchor() async -> (any InsertionAnchor)? {
+        anchorReads += 1
+        if holdsAnchor {
+            await withCheckedContinuation { heldAnchor = $0 }
+        }
+        return standby
+    }
+
+    func answerAnchor() {
+        let held = heldAnchor
+        heldAnchor = nil
+        held?.resume()
     }
 
     func captureAnchorUnlessOurs() -> (any InsertionAnchor)? {
@@ -364,6 +432,7 @@ final class TargetReadingInserter: Inserter {
         standby: (any InsertionAnchor)?
     ) async -> InsertionTarget {
         targetReads += 1
+        standbys.append(standby?.targetBundleIdentifier)
         let target: (any InsertionAnchor)? = anchor ?? standby
         return InsertionTarget(
             anchor: target,

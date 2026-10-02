@@ -1608,7 +1608,7 @@ final class FakeInserter: Inserter {
         self.clock = clock
     }
 
-    func captureAnchor() -> (any InsertionAnchor)? {
+    func readAnchor() async -> (any InsertionAnchor)? {
         anchor
     }
 

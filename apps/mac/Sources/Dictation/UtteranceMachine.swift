@@ -364,10 +364,6 @@ final class UtteranceMachine {
             keyDown: keyDown
         )
         press = PressRecord.Draft(keyDown: keyDown, startedAt: Date())
-        // the standby anchor. the one that decides the paste is taken at
-        // key-up; this is what stands in if AX hands back nothing then, or
-        // if by then the frontmost window is one of ours.
-        activeFocusAnchor = inserter.captureAnchor()
         micTurnSequence &+= 1
         let turnID = micTurnSequence
         micTurn = MicTurn(id: turnID, microphone: microphone)
@@ -377,6 +373,24 @@ final class UtteranceMachine {
         setState(.recording)
         startMicrophone(microphone, id: turnID, timelineID: timelineID)
         wakeEngineIfIdle()
+        readStandbyAnchor(for: turnID)
+    }
+
+    /// the standby anchor. the one that decides the paste is taken at
+    /// key-up; this is what stands in if AX hands back nothing then, or if
+    /// by then the frontmost window is one of ours. read after the lamp
+    /// and the mic, and awaited, never blocked on: it is IPC to whatever
+    /// app is in front, and nothing at key-down waits on another app. one
+    /// that comes back after the mic has let go stands in for nothing.
+    private func readStandbyAnchor(for turnID: UInt64) {
+        let inserter = inserter
+        Task { @MainActor [weak self] in
+            let anchor = await inserter.readAnchor()
+            guard let self, self.micTurn?.id == turnID else {
+                return
+            }
+            self.activeFocusAnchor = anchor
+        }
     }
 
     /// the engine wakes while you talk, so the take finds it ready. after
@@ -1040,7 +1054,7 @@ final class UtteranceMachine {
         press?.samplesReady = now
         press?.samples = samples
         startPipeline(samples) { [inserter] in
-            let anchor = inserter.captureAnchor()
+            let anchor = await inserter.readAnchor()
             return InsertionTarget(
                 anchor: anchor,
                 textBeforeCursor: anchor?.textBeforeCursor()

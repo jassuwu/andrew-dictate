@@ -161,6 +161,40 @@ struct FocusAnchor: @unchecked Sendable {
         )
     }
 
+    /// how long the app in front gets to name its focused element for
+    /// key-down's standby: a healthy one answers in a few milliseconds.
+    static let standbyPatience: Float = 0.2
+
+    /// the same, with every AX message bounded by `timeout`. asked of the
+    /// app's own element rather than the system-wide one: a timeout set on
+    /// the system-wide element is set for every AX call this process makes.
+    static func capture(
+        in application: FocusApplicationIdentity,
+        answeringWithin timeout: Float
+    ) -> FocusAnchor {
+        let applicationElement = AXUIElementCreateApplication(
+            application.processIdentifier
+        )
+        _ = AXUIElementSetMessagingTimeout(applicationElement, timeout)
+        let focusedElement = focusedElement(of: applicationElement)
+        if let focusedElement {
+            _ = AXUIElementSetMessagingTimeout(focusedElement, timeout)
+        }
+        return FocusAnchor(
+            application: application,
+            focusedElement: focusedElement,
+            focusedElementWasSecure: isSecureTextField(focusedElement)
+        )
+    }
+
+    /// the frontmost app, ours included: the AppKit half of `capture`.
+    @MainActor
+    static func frontmost(
+        workspace: NSWorkspace = .shared
+    ) -> FocusApplicationIdentity? {
+        applicationIdentity(workspace: workspace)
+    }
+
     /// the frontmost app, unless it is one of ours: `captureUnlessOurs`
     /// without the AX half.
     @MainActor
@@ -346,11 +380,12 @@ struct FocusAnchor: @unchecked Sendable {
         )
     }
 
-    private static func focusedElement() -> AXUIElement? {
-        let systemWideElement = AXUIElementCreateSystemWide()
+    private static func focusedElement(
+        of element: AXUIElement = AXUIElementCreateSystemWide()
+    ) -> AXUIElement? {
         var value: CFTypeRef?
         let error = AXUIElementCopyAttributeValue(
-            systemWideElement,
+            element,
             kAXFocusedUIElementAttribute as CFString,
             &value
         )

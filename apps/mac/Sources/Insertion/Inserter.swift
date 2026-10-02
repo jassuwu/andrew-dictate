@@ -20,8 +20,10 @@ protocol InsertionAnchor {
 /// and every AX call and pasteboard write stays on this side of the seam.
 @MainActor
 protocol Inserter: AnyObject {
-    /// the anchor as of now: key-down's standby, and a retry's.
-    func captureAnchor() -> (any InsertionAnchor)?
+    /// the anchor as of now, ours included: key-down's standby, and a
+    /// retry's. awaited, never blocked on: the AX half is IPC to whatever
+    /// app is in front, and a press must not wait on another app.
+    func readAnchor() async -> (any InsertionAnchor)?
     /// key-up's anchor, or nil when one of our own windows is frontmost
     /// (`FocusAnchor.captureUnlessOurs`).
     func captureAnchorUnlessOurs() -> (any InsertionAnchor)?
@@ -81,8 +83,20 @@ extension Inserter {
 final class PasteInserter: Inserter {
     private let paster = Paster()
 
-    func captureAnchor() -> (any InsertionAnchor)? {
-        FocusAnchor.capture()
+    /// which app is in front is AppKit's, and free to ask here. the AX
+    /// half runs off the main thread and gets a fifth of a second of that
+    /// app's time (`FocusAnchor.capture(in:answeringWithin:)`): a standby
+    /// that has not come back by key-up stands in for nothing.
+    func readAnchor() async -> (any InsertionAnchor)? {
+        guard let application = FocusAnchor.frontmost() else {
+            return nil
+        }
+        return await Task.detached(priority: .userInitiated) {
+            FocusAnchor.capture(
+                in: application,
+                answeringWithin: FocusAnchor.standbyPatience
+            )
+        }.value
     }
 
     func captureAnchorUnlessOurs() -> (any InsertionAnchor)? {
