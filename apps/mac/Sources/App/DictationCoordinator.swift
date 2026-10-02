@@ -539,6 +539,7 @@ final class DictationCoordinator: ObservableObject {
         }
         listenForTheMeetingToggle()
         listenForTheCallChecks()
+        listenForTheProbeSweep()
         #endif
         // "fix a word…" is the menu's only time-sensitive action, and it used
         // to be grey until this session's first dictation — while the words
@@ -2223,6 +2224,22 @@ extension DictationCoordinator {
             stopMeeting()
         } else {
             startMeeting()
+        }
+    }
+
+    /// Development only, beside the toggle: `notifyutil -p
+    /// gg.jass.dictate.dev.meeting.probe-sweep` during a meeting plays the
+    /// quiet probe at five levels and logs what the tap heard of each
+    /// (measurement 02). Without a meeting it does nothing.
+    private func listenForTheProbeSweep() {
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "\(AppIdentity.bundleID).meeting.probe-sweep", &token, .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.meetings.isRecording else { return }
+                self.meetings.coordinator.sweepTheQuietProbe()
+            }
         }
     }
     #endif

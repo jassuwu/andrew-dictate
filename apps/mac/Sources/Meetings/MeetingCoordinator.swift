@@ -209,6 +209,11 @@ final class MeetingCoordinator: ObservableObject {
     /// matter. injected so two meetings in one test can start on two.
     private let date: @Sendable () -> Date
     private let keepAwake: KeepAwake
+    #if DEBUG
+    /// The loudest far-side chunk since the probe sweep last looked, while
+    /// one runs.
+    private var sweepPeak: Float?
+    #endif
 
     /// A system event has already proven something happened, so this may be
     /// short: five seconds of a tap that has not called back is a dead tap.
@@ -596,6 +601,11 @@ final class MeetingCoordinator: ObservableObject {
     private func ingest(_ chunk: MeetingAudioChunk, into meeting: Meeting) async {
         elapsed = chunk.at + chunk.duration
         lastChunkArrived = now()
+        #if DEBUG
+        if let peak = sweepPeak {
+            sweepPeak = max(peak, chunk.themRMS)
+        }
+        #endif
         if let audioFile = meeting.audioFile {
             try? await audioFile.append(chunk)
         }
@@ -1310,6 +1320,39 @@ final class MeetingCoordinator: ObservableObject {
             silenceFloor: t.silenceFloor)
     }
 }
+
+#if DEBUG
+extension MeetingCoordinator {
+    /// Development only, for measurement 02: during a meeting, the quiet
+    /// probe at five levels, two seconds apart, each logged with the
+    /// loudest far-side chunk the tap delivered in the second after it,
+    /// beside the silence floor. A second with no tone comes first: what
+    /// the tap delivers while we play nothing.
+    func sweepTheQuietProbe() {
+        guard current != nil, let tap = source as? CoreAudioMeetingSource else { return }
+        let floor = thresholds.silenceFloor
+        Task { [weak self] in
+            self?.sweepPeak = 0
+            try? await Task.sleep(for: .seconds(1))
+            guard let self, current != nil else { return }
+            let quiet = sweepPeak ?? 0
+            logger.notice("probe sweep: no tone, peak far-side rms \(quiet, format: .fixed(precision: 5), privacy: .public), floor \(floor, format: .fixed(precision: 5), privacy: .public)")
+            for level: Float in [-30, -40, -50, -60, -70] {
+                guard current != nil else { break }
+                sweepPeak = 0
+                let began = ContinuousClock.now
+                let tone = Task { try await tap.playQuietProbe(dBFS: level) }
+                try? await Task.sleep(until: began + .seconds(1))
+                let peak = sweepPeak ?? 0
+                let played = (try? await tone.value) != nil
+                logger.notice("probe sweep: \(level, format: .fixed(precision: 0), privacy: .public) dBFS, played \(played, privacy: .public), peak far-side rms \(peak, format: .fixed(precision: 5), privacy: .public), \(peak / floor, format: .fixed(precision: 1), privacy: .public)x the floor of \(floor, format: .fixed(precision: 5), privacy: .public)")
+                try? await Task.sleep(until: began + .seconds(2))
+            }
+            sweepPeak = nil
+        }
+    }
+}
+#endif
 
 extension MeetingCoordinator {
     /// The mac kept out of idle sleep while a meeting records: a quiet
