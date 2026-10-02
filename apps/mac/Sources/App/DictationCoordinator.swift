@@ -310,7 +310,8 @@ final class DictationCoordinator: ObservableObject {
                     MeetingPreferences(
                         folder: settings.meetingsFolder,
                         hook: settings.meetingHook,
-                        model: settings.meetingModel
+                        model: settings.meetingModel,
+                        keepAudio: settings.keepMeetingAudio
                     )
                 }
             )
