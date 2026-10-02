@@ -134,6 +134,36 @@ final class MeetingStretchTests: XCTestCase {
         XCTAssertEqual(handed().count, 3, "stopping decodes nothing again")
     }
 
+    /// Talk past the ceiling is cut at it, and the next stretch starts on
+    /// the very next sample: 1.0 to 3.0, 3.0 to 5.0, 5.0 to 6.4 — 5.4 s
+    /// handed over for 5.4 s said, pre-roll included.
+    func testSpeechLongerThanTheCeilingIsCutIntoStretchesWithNothingLostBetween() async throws {
+        let c = coordinator(stretches(ceiling: .seconds(2)))
+        c.start(tapping: zoom)
+        await source.awaitStart()
+
+        await play([you("and another thing", from: 1.3, to: 6.4)], through: 7.5, on: c)
+        await waitFor { c.liveLines.count == 3 }
+
+        XCTAssertEqual(handed(), [
+            "and another thing 32000",
+            "and another thing 32000",
+            "and another thing 22400",
+        ])
+        XCTAssertEqual(live(c), [
+            "you 1.0 and another thing",
+            "you 3.0 and another thing",
+            "you 5.0 and another thing",
+        ])
+        c.stop()
+        let lines = try await savedLines()
+        XCTAssertEqual(lines, [
+            "[00:00:01] you: and another thing",
+            "[00:00:03] you: and another thing",
+            "[00:00:05] you: and another thing",
+        ])
+    }
+
     // MARK: - an engine that fails
 
     func testAStretchTheEngineFailsOnOnceIsTriedAgain() async throws {

@@ -24,6 +24,10 @@ struct Stretch: Sendable {
 /// meeting.
 struct StretchCutter {
     let side: Stretch.Side
+    /// The longest stretch the engine is handed, in samples. Whisper reads
+    /// 30 s at a time and parakeet about 15; past that a model either drops
+    /// words or has to be fed in windows of its own.
+    let ceiling: Int
 
     /// Audio not yet in a stretch. `held[0]` is sample `heldFrom` of this side.
     private var held: [Float] = []
@@ -41,8 +45,10 @@ struct StretchCutter {
     /// detector that says speech began a little after it did.
     static let keptWhileQuiet = samples(in: .seconds(2))
 
-    init(side: Stretch.Side) {
+    init(side: Stretch.Side, ceiling: Duration) {
+        precondition(ceiling > .zero, "a stretch must be allowed some length")
         self.side = side
+        self.ceiling = max(1, Self.samples(in: ceiling))
     }
 
     /// Samples of this side heard so far.
@@ -66,14 +72,16 @@ struct StretchCutter {
                 guard openFrom == nil else { continue }
                 openFrom = max(heldFrom, min(start, heard) - Self.preRoll)
             case .ended(let end):
-                guard let from = openFrom else { continue }
-                openFrom = nil
+                guard openFrom != nil else { continue }
                 let end = min(end, heard)
-                if end > from {
+                done += cutAtTheCeiling(before: end)
+                if let from = openFrom, end > from {
                     done.append(cut(from, end))
                 }
+                openFrom = nil
             }
         }
+        done += cutAtTheCeiling(before: heard)
 
         if let openFrom {
             drop(before: openFrom)
@@ -92,6 +100,17 @@ struct StretchCutter {
     }
 
     // MARK: -
+
+    /// Talk that runs past the ceiling is cut there, and carries on in a new
+    /// stretch from the very next sample: no pre-roll, nothing between.
+    private mutating func cutAtTheCeiling(before limit: Int) -> [Stretch] {
+        var done: [Stretch] = []
+        while let from = openFrom, from + ceiling <= limit {
+            done.append(cut(from, from + ceiling))
+            openFrom = from + ceiling
+        }
+        return done
+    }
 
     private mutating func cut(_ from: Int, _ end: Int) -> Stretch {
         let stretch = Stretch(

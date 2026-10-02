@@ -30,8 +30,8 @@ actor StretchTranscriber: MeetingTranscriber {
     /// is speaking is the side the speech came from.
     private let youDetector: any SpeechDetector
     private let themDetector: any SpeechDetector
-    private var you = StretchCutter(side: .you)
-    private var them = StretchCutter(side: .them)
+    private var you: StretchCutter
+    private var them: StretchCutter
 
     /// Each chunk is heard after the one before it has been, whoever calls.
     /// The detector is awaited, so without this a chunk could overtake its
@@ -46,6 +46,9 @@ actor StretchTranscriber: MeetingTranscriber {
     private var worker: Task<Void, Never>?
     private var turns: [MeetingTurn] = []
 
+    /// `ceiling` is the longest stretch the engine is handed — about 25 s
+    /// for whisper, 15 s for parakeet. `detector` makes one detector per
+    /// side; `now` is the wall the decoding is timed against.
     init(
         engine: any StretchEngine,
         ceiling: Duration,
@@ -58,6 +61,8 @@ actor StretchTranscriber: MeetingTranscriber {
         self.now = now
         youDetector = makeDetector()
         themDetector = makeDetector()
+        you = StretchCutter(side: .you, ceiling: ceiling)
+        them = StretchCutter(side: .them, ceiling: ceiling)
         (lines, emit) = AsyncStream<LiveLine>.makeStream()
     }
 
