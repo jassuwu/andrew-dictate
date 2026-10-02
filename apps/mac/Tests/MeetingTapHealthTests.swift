@@ -98,6 +98,60 @@ final class MeetingTapHealthTests: XCTestCase {
         XCTAssertGreaterThan(rms(spooled.prefix(8_000)), 0.1, "the spool keeps the tone")
     }
 
+    /// The quiet probe lands in the far side too, and is not a turn.
+    func testTheQuietProbeIsNotTranscribed() async throws {
+        transcriber.transcribesWhatItIsFed = true
+        source.anythingIsPlaying = true
+        source.hearsTheQuietProbe = true
+        let c = coordinator()
+        c.start()
+        await source.awaitStart()
+        await play(silent(at: .zero), them(at: .milliseconds(1_500)))
+        for s in 2...8 {
+            await play(quiet(at: .seconds(s)))
+        }
+        await until { source.quietProbes == 1 }
+        // you, then them: a paragraph each, so a tone of ours between would
+        // show as a turn of its own.
+        await play(voice(at: .seconds(10)), them(at: .seconds(12)))
+
+        c.stop()
+        await c.untilWrittenOut()
+        XCTAssertEqual(source.quietProbes, 1)
+        XCTAssertEqual(records.first?.events.map(\.label), [.probeHeard])
+        XCTAssertEqual(try savedLines(), [
+            "[00:00:01] them: they said something",
+            "[00:00:10] you: you said something",
+            "[00:00:12] them: they said something",
+        ])
+    }
+
+    /// After a wake the rebuilt tap's first chunk is stamped past the wall
+    /// at the moment of the rebuild — the settle and the rebuild itself
+    /// took time the source counts. Its start sound is still ours.
+    func testTheStartSoundOfARebuiltTapIsNotTranscribed() async throws {
+        transcriber.transcribesWhatItIsFed = true
+        let clock = FakeClock()
+        let c = coordinator(clock: clock)
+        c.start()
+        await source.awaitStart()
+        await play(both(at: .zero), silent(at: .milliseconds(500)))
+
+        clock.advance(by: .seconds(60))
+        source.skip(to: .seconds(62))
+        c.probeTapIsAlive()
+        await until { events.contains(.gapEnded) }
+        XCTAssertEqual(events, [.started, .gapBegan, .gapEnded])
+        await play(them(at: .seconds(64)))
+
+        c.stop()
+        await c.untilWrittenOut()
+        XCTAssertEqual(try savedLines(), [
+            "[00:00:00] you: you said something",
+            "[00:01:04] them: they said something",
+        ])
+    }
+
     // MARK: - the mac stays awake
 
     /// A quiet meeting is still a meeting: the mac is kept from idle sleep

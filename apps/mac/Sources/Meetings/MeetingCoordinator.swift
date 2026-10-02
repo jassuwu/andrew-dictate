@@ -197,6 +197,9 @@ final class MeetingCoordinator: ObservableObject {
     /// counting our own chirp as the room speaking is what kept the quiet
     /// hour from ever coming round.
     private var probeUntil: Duration = .zero
+    /// A rebuilt tap's start sound is on its way: the window runs from the
+    /// first chunk the tap delivers, wherever the source stamps it.
+    private var probeOpensAtNextChunk = false
     /// Every health check in here is driven by a chunk arriving, so a tap
     /// that stops calling back altogether — the mac slept, the screen
     /// locked, the driver died — freezes the clock instead of failing. These
@@ -301,6 +304,7 @@ final class MeetingCoordinator: ObservableObject {
         lastChunkArrived = now()
         nudgePending = false
         probeUntil = thresholds.probeTimeout
+        probeOpensAtNextChunk = false
         startWatchdog(for: meeting)
         publish()
 
@@ -601,6 +605,10 @@ final class MeetingCoordinator: ObservableObject {
     private func ingest(_ chunk: MeetingAudioChunk, into meeting: Meeting) async {
         elapsed = chunk.at + chunk.duration
         lastChunkArrived = now()
+        if probeOpensAtNextChunk {
+            probeOpensAtNextChunk = false
+            probeUntil = max(probeUntil, chunk.at + thresholds.probeTimeout)
+        }
         #if DEBUG
         if let peak = sweepPeak {
             sweepPeak = max(peak, chunk.themRMS)
@@ -775,8 +783,10 @@ final class MeetingCoordinator: ObservableObject {
         while await pause(wait), isRebuilding(meeting) {
             let failed: MeetingRecord.Label
             // Set before the rebuild, not after: the tone can be heard the
-            // instant the tap is back.
-            probeUntil = elapsed + thresholds.probeTimeout
+            // instant the tap is back. Where the window ends is only known
+            // then, too: the source stamps the rebuilt tap past the outage,
+            // settle and rebuild included, so it runs from the first chunk.
+            probeOpensAtNextChunk = true
             do {
                 try await source.rebuild()
                 // No output to play its start sound on: the rebuilt tap was
