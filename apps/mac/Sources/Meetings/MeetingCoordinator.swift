@@ -988,13 +988,15 @@ final class MeetingCoordinator: ObservableObject {
         // does not take the menu's clock back.
         elapsed = max(elapsed, chunk.at + chunk.duration)
         lastChunkArrived = now()
-        // Not on a chunk from the mic alone, still coming while the whole
-        // rig is built again: the start sound is on its way through a tap
-        // that is not delivering yet.
+        // A start sound the source says it has played since the last chunk:
+        // its window opens where it was played.
         if let played = source.startSoundAt, played != startSoundSeen {
             startSoundSeen = played
             openTheStartSoundsWindow(at: played)
         }
+        // Not on a chunk from the mic alone, still coming while the whole
+        // rig is built again: the start sound is on its way through a tap
+        // that is not delivering yet.
         if probeOpensAtNextChunk, source.capturing != .yourSideAlone {
             probeOpensAtNextChunk = false
             openTheStartSoundsWindow(at: chunk.at)
