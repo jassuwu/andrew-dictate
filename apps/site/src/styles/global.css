@@ -124,72 +124,43 @@
     box-shadow: 0 0 0 1.5px var(--color-ink);
   }
 
-  .hero {
-    display: grid;
-    gap: 2.5rem;
+  /* one column for the whole page, the menu bar and the footer too. it
+     reads like a note, top to bottom. */
+  .column {
+    width: min(44rem, 100% - 3rem);
+    margin-inline: auto;
   }
 
-  @media (width >= 64rem) {
-    .hero {
-      grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
-      grid-template-rows: 1fr auto auto 1fr;
-      column-gap: 4rem;
-      row-gap: 2rem;
-    }
-
-    .hero-intro {
-      grid-area: 2 / 1;
-    }
-
-    .hero-why {
-      grid-area: 3 / 1;
-    }
-
-    .hero-demo {
-      grid-area: 1 / 2 / -1 / 2;
-      align-self: center;
+  @media (width >= 40rem) {
+    .column {
+      width: min(44rem, 100% - 5rem);
     }
   }
 
-  .meet {
-    display: grid;
-    gap: 2rem;
-  }
-
-  @media (width >= 64rem) {
-    .meet {
-      grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
-      grid-template-rows: auto 1fr;
-      column-gap: 4rem;
-    }
-
-    .meet-intro {
-      grid-area: 1 / 1;
-    }
-
-    .meet-facts {
-      grid-area: 2 / 1;
-    }
-
-    .meet-scene {
-      grid-area: 1 / 2 / -1 / 2;
-    }
-  }
-
-  /* the two lines that say what it is. dictation is said in gold, meetings
-     in a quieter cream: about sixty and forty. */
+  /* the two lines that say what it is. dictation is the big one, meetings
+     the smaller: about sixty and forty. */
   .pitch {
-    font-size: clamp(2.1rem, 1.15rem + 3.1vw, 3.4rem);
-    line-height: 1.07;
-    letter-spacing: -0.035em;
+    font-size: clamp(2rem, 1.3rem + 2.4vw, 2.9rem);
+    line-height: 1.1;
+    letter-spacing: -0.02em;
     font-weight: 600;
     text-wrap: balance;
+    color: var(--color-gold-pale);
+  }
+
+  .pitch-second {
+    font-size: clamp(1.25rem, 1rem + 0.9vw, 1.6rem);
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    font-weight: 500;
+    text-wrap: balance;
+    color: var(--color-cream);
   }
 
   .heading {
-    font-size: clamp(1.6rem, 1.1rem + 1.6vw, 2.2rem);
-    line-height: 1.12;
-    letter-spacing: -0.03em;
+    font-size: clamp(1.4rem, 1.1rem + 1vw, 1.75rem);
+    line-height: 1.2;
+    letter-spacing: -0.015em;
     font-weight: 600;
     text-wrap: balance;
   }

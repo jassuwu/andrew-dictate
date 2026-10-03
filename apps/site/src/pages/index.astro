@@ -11,10 +11,9 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
 
 <Page title="andrew dictate · escape the keyboard." description={description}>
   <main>
-    <!-- on a wide screen the words are on the left and the demo beside
-         them. on a phone the demo comes right after the pitch, before the
-         paragraphs, so the thing itself is never a long scroll away. -->
-    <section class="hero mx-auto max-w-[72rem] px-6 pb-16 pt-24 sm:px-10 lg:min-h-svh lg:pb-24 lg:pt-28">
+    <!-- one column on every screen: the pitch, then the demo right under
+         it, so the thing itself is never a long scroll away. -->
+    <section class="column pb-16 pt-24 lg:pt-28">
       <div class="hero-intro">
         <div class="flex items-start gap-4">
           <img src="/badge.png" alt="" width="52" height="52" class="rounded-[12px]" />
@@ -34,18 +33,16 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
           </div>
         </div>
 
-        <p class="pitch mt-8">
-          <span class="block text-gold-pale">{dictation}</span>
-          <span class="mt-2 block text-cream/55">{meetings}</span>
-        </p>
+        <p class="pitch mt-10">{dictation}</p>
+        <p class="pitch-second mt-3">{meetings}</p>
         <p class="mt-6 font-mono text-[1rem] tracking-[0.02em] text-gold">{freeFastLocal}</p>
       </div>
 
-      <div class="hero-demo">
+      <div class="mt-12">
         <Demo />
       </div>
 
-      <div class="hero-why space-y-4">
+      <div class="hero-why mt-14 space-y-4">
         {
           topBlock.why.map((line) => {
             // the claim links to where it is kept
@@ -62,9 +59,9 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
       </div>
     </section>
 
-    <section class="mx-auto grid max-w-[72rem] gap-x-16 gap-y-8 px-6 py-20 sm:px-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+    <section class="column py-16">
       <h2 class="heading text-cream">hold <kbd>fn</kbd>, talk, let go.</h2>
-      <div class="space-y-4">
+      <div class="mt-6 space-y-4">
         <p class="prose-line">
           the text lands where your cursor is, in any app. a terminal, a chat
           box, a commit message.
@@ -86,16 +83,16 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
       </div>
     </section>
 
-    <!-- meetings are the smaller half: a narrower scene, lower on the page.
-         on a phone the scene comes before the facts, as the demo does. -->
-    <section class="meet mx-auto max-w-[72rem] px-6 py-20 sm:px-10">
-      <h2 class="meet-intro heading text-cream">record a meeting.</h2>
+    <!-- meetings are the smaller half, lower on the page. the scene comes
+         before the facts, as the demo does. -->
+    <section class="column py-16">
+      <h2 class="heading text-cream">record a meeting.</h2>
 
-      <div class="meet-scene">
+      <div class="mt-6">
         <Meeting />
       </div>
 
-      <div class="meet-facts space-y-4">
+      <div class="mt-10 space-y-4">
         <p class="prose-line">
           press record in the menu bar. your mic is you, and whatever the mac
           plays is them.
@@ -114,8 +111,8 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
       </div>
     </section>
 
-    <section id="install" class="mx-auto max-w-[72rem] px-6 py-20 sm:px-10">
-      <div class="max-w-[44rem]">
+    <section id="install" class="column py-16">
+      <div>
         <h2 class="heading text-cream">install.</h2>
 
         <div class="mt-8">
