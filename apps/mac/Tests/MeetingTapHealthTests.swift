@@ -453,8 +453,10 @@ final class MeetingTapHealthTests: XCTestCase {
     }
 
     /// Asked, and the window passes with nothing: that is a dead tap. The
-    /// gap begins where the question went unanswered, the tap is rebuilt,
-    /// the rebuilt tap hears its start sound, and the gap ends there.
+    /// gap begins where the far side was last heard — every chunk since is
+    /// zeros nothing has proven anyone could hear — with where the spool
+    /// was then; the tap is rebuilt, the rebuilt tap hears its start sound,
+    /// and the gap ends there.
     func testAQuietProbeTheTapMissesIsAGapARebuildAndARecovery() async throws {
         source.anythingIsPlaying = true
         let c = coordinator()
@@ -480,11 +482,16 @@ final class MeetingTapHealthTests: XCTestCase {
         let saved = try savedFile()
         XCTAssertFalse(saved.complete)
         XCTAssertEqual(saved.gapCount, 1)
+        let body = try String(contentsOf: saved.fileURL, encoding: .utf8)
+        XCTAssertTrue(body.contains("- [1.0, 9.4]"), body)
         XCTAssertEqual(records.first?.events, [
             .init(.probeUnheard, atS: 9.1),
-            .init(.gapBegan, atS: 9.1),
+            .init(.gapBegan, atS: 1),
             .init(.gapEnded, atS: 9.4),
         ])
+        // a second of the far side, then eight tenths of nothing, then the
+        // rebuilt tap's three tenths.
+        XCTAssertEqual(try keptGaps(), [[1_000, 1_000, 9_400, 2_100]])
     }
 
     /// No output to play the tone on: the tap was asked nothing, so the
@@ -783,6 +790,17 @@ final class MeetingTapHealthTests: XCTestCase {
     private func savedLines() throws -> [String] {
         let body = try String(contentsOf: try savedFile().fileURL, encoding: .utf8)
         return body.split(separator: "\n").filter { $0.hasPrefix("[") }.map(String.init)
+    }
+
+    /// The gaps the kept audio's label noted, each where it began and the
+    /// spool then, and where it ended and the spool then, in milliseconds.
+    private func keptGaps() throws -> [[Int]] {
+        let kept = KeptAudio(root: dir.appendingPathComponent("meeting-audio"))
+        let gaps = try XCTUnwrap(kept.entry(for: try savedFile().fileURL)?.label.gaps)
+        return gaps.map { gap in
+            [gap.began, gap.spooledAtBegan, gap.ended ?? .zero, gap.spooledAtEnded ?? .zero]
+                .map { Int(($0.totalSeconds * 1_000).rounded()) }
+        }
     }
 
     /// The far side as the spool wrote it, read from the audio the meeting

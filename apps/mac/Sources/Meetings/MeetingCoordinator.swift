@@ -953,6 +953,10 @@ final class MeetingCoordinator: ObservableObject {
             break
         case .capturing:
             let heard = chunk.themRMS > thresholds.silenceFloor
+            if heard {
+                session.heardTheFarSide(at: elapsed)
+                meeting.spooledWhenLastHeard = meeting.spooledSoFar
+            }
             if asked {
                 meeting.notes.note(.probeHeard, at: elapsed)
             }
@@ -993,7 +997,12 @@ final class MeetingCoordinator: ObservableObject {
         case .missedTheQuietProbe:
             if session.state == .recording {
                 meeting.notes.note(.probeUnheard, at: elapsed)
-                loseTheTap(meeting, at: elapsed)
+                // the zeros since the far side was last heard are no more
+                // proven than the tap now: the gap begins there, and the
+                // spool where it was then.
+                loseTheTap(
+                    meeting, at: session.farSideLastHeard,
+                    spooled: meeting.spooledWhenLastHeard)
             }
         }
 
@@ -1172,10 +1181,11 @@ final class MeetingCoordinator: ObservableObject {
         meeting.notes.note(.probeUnplayable, at: elapsed)
     }
 
-    /// The tap is dead: the gap begins at `lost`, and the tap is rebuilt.
-    private func loseTheTap(_ meeting: Meeting, at lost: Duration) {
+    /// The tap is dead: the gap begins at `lost`, with the spool at
+    /// `spooled`, or where it is now, and the tap is rebuilt.
+    private func loseTheTap(_ meeting: Meeting, at lost: Duration, spooled: Duration? = nil) {
         session.tapWentSilent(at: lost)
-        meeting.gapBegan(at: lost)
+        meeting.gapBegan(at: lost, spooled: spooled)
         noteGaps(of: meeting)
         meeting.notes.note(.gapBegan, at: lost)
         publish()
@@ -1946,6 +1956,9 @@ extension MeetingCoordinator {
         /// Its gaps as they began and ended, each with where the spool's
         /// clock was then, so its turns can be found on the spool.
         var gaps: [MeetingSpool.Gap] = []
+        /// Where the spool was when the far side was last heard
+        /// (`MeetingSession.farSideLastHeard`).
+        var spooledWhenLastHeard: Duration = .zero
         /// Stopped having heard its start sound, so a file is on its way:
         /// what the phase calls writing it out.
         var hasAFile = false
@@ -1960,8 +1973,10 @@ extension MeetingCoordinator {
             StretchCutter.duration(of: spooled + spooling)
         }
 
-        func gapBegan(at began: Duration) {
-            gaps.append(MeetingSpool.Gap(began: began, spooledAtBegan: spooledSoFar))
+        /// A gap opens at `began`, with the spool at `spooled`, or where it
+        /// is now.
+        func gapBegan(at began: Duration, spooled: Duration? = nil) {
+            gaps.append(MeetingSpool.Gap(began: began, spooledAtBegan: spooled ?? spooledSoFar))
         }
 
         /// The gap still open, if one is, closed at `ended`.

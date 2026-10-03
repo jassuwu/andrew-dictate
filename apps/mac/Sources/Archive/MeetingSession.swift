@@ -115,6 +115,11 @@ struct MeetingSession {
     private var gaps: [Gap] = []
     private var silenceBegan: Duration?
     private var lastActivity: Duration = .zero
+    /// Where the far side was last heard above the floor: anyone at all,
+    /// our own tones included, which prove the tap heard then. Past it,
+    /// nothing has proven the tap hears, and a tap found dead later was
+    /// dead from here.
+    private(set) var farSideLastHeard: Duration = .zero
 
     init(quietNudgeAfter: Duration) {
         self.quietNudgeAfter = quietNudgeAfter
@@ -132,6 +137,7 @@ struct MeetingSession {
         gaps = []
         silenceBegan = nil
         lastActivity = .zero
+        farSideLastHeard = .zero
     }
 
     /// Returns what was captured, or nil if there was never anything to keep.
@@ -182,6 +188,11 @@ struct MeetingSession {
 
     mutating func heardAudio(at elapsed: Duration) {
         lastActivity = elapsed
+    }
+
+    /// The far side was heard, up to `elapsed`: somebody, or a tone of ours.
+    mutating func heardTheFarSide(at elapsed: Duration) {
+        farSideLastHeard = max(farSideLastHeard, elapsed)
     }
 
     mutating func tapWentSilent(at elapsed: Duration) {
