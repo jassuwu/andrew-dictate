@@ -2,7 +2,9 @@
 // hands into events and a view into dom, and decides nothing.
 
 import pairs from "./pairs.json";
-import { dictationDemo, type State, type View } from "./dictation";
+import { dictationDemo, timing, type State, type View } from "./dictation";
+import { hud } from "./hud";
+import { scriptedLoudness, type LampPhase } from "./lamp";
 
 const demo = dictationDemo(pairs.prompts);
 
@@ -16,8 +18,6 @@ function mount(root: HTMLElement) {
   const boxText = root.querySelector<HTMLElement>("[data-box-text]")!;
   const hint = root.querySelector<HTMLElement>("[data-hint]")!;
   const said = root.querySelector<HTMLElement>("[data-said]")!;
-  const lamp = document.querySelector<HTMLElement>("[data-lamp]");
-  const pill = document.querySelector<HTMLElement>("[data-pill]");
 
   let state: State = demo.initial();
   let frame = 0;
@@ -32,6 +32,7 @@ function mount(root: HTMLElement) {
   function tick(now: number) {
     const view = demo.view(state, now);
     render(view);
+    light(view, now);
     // nothing changes by itself once a take has played out, so stop asking
     frame = settled(view) ? 0 : requestAnimationFrame(tick);
   }
@@ -65,13 +66,33 @@ function mount(root: HTMLElement) {
     said.hidden = !talking;
     said.textContent = view.said.join(" ");
 
-    lamp?.setAttribute("data-state", view.lamp.state);
-    lamp?.toggleAttribute("data-speaking", view.speaking);
+    hud.pill(view.pill);
+    // a gold dot on the badge means the mic is live for a take
+    hud.badge(view.lamp.state === "lit" ? "dot" : "none");
+  }
 
-    if (pill) {
-      pill.hidden = view.pill === null;
-      pill.textContent = view.pill ?? "";
-    }
+  const phases: Record<View["lamp"]["state"], LampPhase> = {
+    off: "off",
+    ember: "ember",
+    lit: "burn",
+    cooling: "cool",
+  };
+
+  /** the lamp is drawn every frame it is on: it is the one thing that moves. */
+  function light(view: View, now: number) {
+    const elapsed = now - view.lamp.since;
+    const words = state.take ? pairs.prompts[state.take.prompt].cuts.length : 0;
+    hud.lamp({
+      phase: phases[view.lamp.state],
+      elapsed,
+      now,
+      loudness:
+        view.lamp.state === "lit"
+          ? scriptedLoudness(elapsed, timing.word, words)
+          : view.lamp.state === "cooling"
+            ? 0.5
+            : 0,
+    });
   }
 
   function line(kind: "sent" | "reply", text: string) {
