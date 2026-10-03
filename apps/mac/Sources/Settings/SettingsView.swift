@@ -69,6 +69,15 @@ struct SettingsView: View {
             wrappedValue: MeetingsListModel(
                 setAsideFolder: spool.unreadableFolder,
                 countSetAside: { spool.unreadableCount() },
+                tryAgain: { await coordinator.meetings.coordinator.tryAgainSetAside() },
+                keptAudio: KeptAudio(),
+                installedModels: { MeetingEngines.installed() },
+                transcribeAgain: { transcript, model in
+                    Task { @MainActor in
+                        await coordinator.meetings.coordinator.transcribeAgain(
+                            transcript, with: model)
+                    }
+                },
                 load: meetingsLoader
             )
         )
@@ -137,7 +146,21 @@ struct SettingsView: View {
             archive.refresh()
             browser.reload()
             meetings.reload()
+            meetings.isRecording = coordinator.meetings.isRecording
+            meetings.transcribingAgain = coordinator.meetings.transcribingAgain
             timings = coordinator.timingsSummary()
+        }
+        // the rows say what the coordinator is doing: no rerun while a
+        // meeting is recorded, one at a time, and the one that is running.
+        // a rerun that has finished has changed its file and its audio.
+        .onChange(of: coordinator.meetings.isRecording) { _, recording in
+            meetings.isRecording = recording
+        }
+        .onChange(of: coordinator.meetings.transcribingAgain) { _, transcript in
+            meetings.transcribingAgain = transcript
+            if transcript == nil {
+                meetings.reload()
+            }
         }
         .onChange(of: selectedTab) { _, tab in
             if tab == .history {
@@ -309,6 +332,11 @@ struct SettingsView: View {
                     Button(binding.displayName) {
                         _ = coordinator.rebindHotkey(to: binding)
                     }
+                    // a modifier the meeting shortcut holds would start a
+                    // take every time the shortcut is pressed.
+                    .disabled(
+                        settings.meetingShortcut?
+                            .refusal(againstDictationKey: binding) != nil)
                 }
             } label: {
                 HStack(spacing: 5) {
@@ -576,8 +604,9 @@ struct SettingsView: View {
         }
     }
 
-    /// no keep-or-not switch here: a meeting recording is kept until you
-    /// delete it, and the folder it lives in is the whole feature.
+    /// no keep-or-not switch here: a meeting's transcript is kept until you
+    /// delete it, and the folder it lives in is the whole feature. its audio
+    /// has a setting of its own, in the meetings tab.
     private var meetingsFooter: some View {
         HStack(spacing: 12) {
             Text(meetingsCount)
@@ -621,7 +650,11 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 13) {
             meetingModelEditor
             rowDivider
+            MeetingShortcutRow(settings: settings, coordinator: coordinator)
+            rowDivider
             meetingsFolderRow
+            rowDivider
+            meetingAudioRow
             rowDivider
             meetingHookRow
         }
@@ -686,6 +719,34 @@ struct SettingsView: View {
             .buttonStyle(.plain)
             .font(.caption)
             .foregroundStyle(BrandUI.textSecondary)
+        }
+    }
+
+    /// ADR 0048: the audio waits a while after the transcript, so a file
+    /// that looks wrong can be checked or read again, then goes by itself.
+    /// read when a meeting starts, like the folder and the model.
+    private var meetingAudioRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("keep meeting audio")
+                    .font(BrandUI.bodyFont.weight(.medium))
+
+                Text(settings.keepMeetingAudio.caption)
+                    .font(.caption)
+                    .foregroundStyle(BrandUI.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 8)
+
+            Picker("keep meeting audio", selection: $settings.keepMeetingAudio) {
+                ForEach(KeepMeetingAudio.allCases) { choice in
+                    Text(choice.label).tag(choice)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .fixedSize()
         }
     }
 

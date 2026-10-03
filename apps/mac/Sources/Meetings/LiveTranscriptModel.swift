@@ -15,17 +15,13 @@ import Foundation
 @MainActor
 final class LiveTranscriptModel: ObservableObject {
     @Published private(set) var lines: [LiveLine]
-    /// The app being tapped, as the header says it: "zoom", "chrome".
-    @Published var app: String
     /// How long this meeting has been running.
     @Published var elapsed: Duration
 
     init(
-        app: String = "",
         elapsed: Duration = .zero,
         lines: [LiveLine] = []
     ) {
-        self.app = app
         self.elapsed = elapsed
         self.lines = lines
     }

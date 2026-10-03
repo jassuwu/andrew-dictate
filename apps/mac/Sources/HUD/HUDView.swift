@@ -9,6 +9,38 @@ enum HUDWaveMotion {
     static let amplitude: CGFloat = 7.5
     static let strokeWidth: CGFloat = 2.6
     static let coreStrokeWidth: CGFloat = 1.1
+    /// how much light the lamp holds while a meeting records (ticket 28),
+    /// and the one number to tune it by eye. it is the light a voice puts
+    /// in the tube, held still and without the wave: 0 is a take's lamp
+    /// before you speak, which reads as a rod, not a light; 1 is a take you
+    /// are talking loudly into. clearly on, and quieter than any take.
+    static let meetingGlow = 0.2
+    /// how long the meeting's light takes to come up from the ember. slow
+    /// on purpose: nothing about it should pull the eye.
+    static let meetingRiseDuration: TimeInterval = 0.8
+}
+
+/// the colours the lamp burns in: a pale, a middle and a deep, mixed by its
+/// brightness. gold means working; the attention colour is a meeting with a
+/// problem, and never gold (BrandUI).
+struct LampPalette: Equatable, Sendable {
+    let pale: [Double]
+    let mid: [Double]
+    let deep: [Double]
+
+    // the lamp burns the brand's gold, not a second copy of it.
+    static let gold = LampPalette(
+        pale: BrandUI.goldPaleRGB,
+        mid: BrandUI.goldRGB,
+        deep: BrandUI.goldDeepRGB
+    )
+    /// the app's one attention colour in the middle, with a paler and a
+    /// deeper one either side of it, the way the gold has.
+    static let attention = LampPalette(
+        pale: [246, 184, 168],
+        mid: BrandUI.attentionRGB,
+        deep: [150, 50, 32]
+    )
 }
 
 /// what sits under the lamp line so it survives a light background. a bare
@@ -112,10 +144,24 @@ extension LampGround: Identifiable {
 }
 #endif
 
+/// the pill's one button (ADR 0047): the word on it, and the whole action
+/// for VoiceOver, which a word alone does not say.
+struct HUDPillButton: Equatable, Sendable {
+    let title: String
+    let accessibilityLabel: String
+}
+
 @MainActor
 final class HUDViewModel: ObservableObject {
     @Published private(set) var state: DictationCoordinator.State
     @Published private(set) var feedbackMessage: String?
+    /// set while the pill asks something rather than says it. every
+    /// sentence clears it, and so does every change of the lamp.
+    @Published private(set) var pillButton: HUDPillButton?
+    /// the two clicks a pill with a button can take: the button, and
+    /// anywhere else on the pill. whoever asked decides what each means.
+    var onPillButton: (@MainActor () -> Void)?
+    var onPillElsewhere: (@MainActor () -> Void)?
     @Published private(set) var layout: HUDLayout
     @Published private(set) var presentationGeneration = 0
     /// shaped + thermally smoothed loudness: fast attack, slow release —
@@ -129,6 +175,14 @@ final class HUDViewModel: ObservableObject {
     /// recording lamp wears the ember: the key is down, the mic is not
     /// hearing you yet.
     @Published private(set) var isHearing = false
+    /// the meeting's light, while the lamp is the meeting's
+    /// (`HUDPresentation.stage`): off while a take has it. kept under a
+    /// pill, so the pill leaving shows it again.
+    @Published private(set) var meetingLight: HUDMeetingLight = .off
+    /// when it last changed: its rise and its cool-out run from here.
+    @Published private(set) var meetingLightChangedAt = Date()
+    /// the colour it was last lit in, so a problem goes out in red.
+    @Published private(set) var meetingPalette: LampPalette = .gold
 
     private var audioRecorder: AudioRecorder?
     private var levelSamplingTask: Task<Void, Never>?
@@ -152,7 +206,7 @@ final class HUDViewModel: ObservableObject {
 
     var content: HUDContent {
         if let feedbackMessage {
-            return .text(feedbackMessage)
+            return .text(feedbackMessage, button: pillButton?.title)
         }
 
         switch state {
@@ -187,6 +241,7 @@ final class HUDViewModel: ObservableObject {
         withAnimation(Self.morph) {
             self.state = state
             feedbackMessage = nil
+            pillButton = nil
             presentationGeneration += 1
         }
     }
@@ -199,6 +254,25 @@ final class HUDViewModel: ObservableObject {
         }
         waveTransitionStartedAt = Date()
         isHearing = true
+    }
+
+    /// what a meeting shows on the lamp. a pill over it stays where it is.
+    func showMeetingLight(_ light: HUDMeetingLight) {
+        guard light != meetingLight else {
+            return
+        }
+        meetingLightChangedAt = Date()
+        switch light {
+        case .ember, .steady:
+            meetingPalette = .gold
+        case .problem:
+            meetingPalette = .attention
+        case .off, .coolingOut:
+            break
+        }
+        withAnimation(Self.morph) {
+            meetingLight = light
+        }
     }
 
     /// not folded into `update(state:)`: the lock is set a beat after the
@@ -219,6 +293,16 @@ final class HUDViewModel: ObservableObject {
     func showFeedback(_ message: String) {
         withAnimation(Self.morph) {
             feedbackMessage = message
+            pillButton = nil
+            presentationGeneration += 1
+        }
+    }
+
+    /// a pill that asks: the sentence and its one button.
+    func showQuestion(_ message: String, button: HUDPillButton) {
+        withAnimation(Self.morph) {
+            feedbackMessage = message
+            pillButton = button
             presentationGeneration += 1
         }
     }
@@ -226,6 +310,7 @@ final class HUDViewModel: ObservableObject {
     func clearFeedback() {
         withAnimation(Self.morph) {
             feedbackMessage = nil
+            pillButton = nil
             presentationGeneration += 1
         }
     }
@@ -321,9 +406,15 @@ struct HUDView: View {
                     HUDTextPill(
                         message: feedbackMessage,
                         lineCount: viewModel.layout.lineCount,
-                        size: viewModel.layout.size
+                        size: viewModel.layout.size,
+                        button: viewModel.pillButton,
+                        buttonSize: viewModel.layout.button,
+                        onButton: { viewModel.onPillButton?() },
+                        onElsewhere: { viewModel.onPillElsewhere?() }
                     )
                     .glassEffectID(Self.glassID, in: glassNamespace)
+                } else if viewModel.meetingLight != .off {
+                    meetingLamp(viewModel.meetingLight)
                 } else {
                     switch viewModel.state {
                     case .idle:
@@ -381,20 +472,94 @@ struct HUDView: View {
             height: HUDLayoutEngine.waveSize.height
         )
     }
+
+    /// a meeting's light: the same tube in the same place, its own looks.
+    /// nothing the room says reaches it.
+    @ViewBuilder
+    private func meetingLamp(_ light: HUDMeetingLight) -> some View {
+        switch light {
+        case .off:
+            EmptyView()
+        case .ember:
+            meetingLine(phase: .ember, palette: .gold)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Starting the meeting recording")
+        case .steady:
+            meetingLine(phase: .pilot, palette: .gold)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Recording a meeting")
+        case .problem:
+            meetingLine(phase: .pilot, palette: .attention)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("The meeting recording has a problem")
+        case .coolingOut:
+            // the cool-out dims a take's voice as it collapses; handed the
+            // glow, it goes out from where the meeting's light was.
+            meetingLine(
+                phase: .cool,
+                palette: viewModel.meetingPalette,
+                loudness: Float(HUDWaveMotion.meetingGlow)
+            )
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Stopped recording the meeting")
+        }
+    }
+
+    private func meetingLine(
+        phase: GoldRippleLine.Phase,
+        palette: LampPalette,
+        loudness: Float = 0
+    ) -> some View {
+        LampLine(
+            phase: phase,
+            loudness: loudness,
+            startedAt: viewModel.meetingLightChangedAt,
+            palette: palette,
+            ground: LampGround.shipped,
+            glassID: Self.glassID,
+            glassNamespace: glassNamespace
+        )
+        .frame(
+            width: HUDLayoutEngine.waveSize.width,
+            height: HUDLayoutEngine.waveSize.height
+        )
+    }
 }
 
-/// the lamp's one line of text, on real Liquid Glass.
+/// the lamp's one line of text, on real Liquid Glass, and at most one
+/// button beside it.
 struct HUDTextPill: View {
     let message: String
     let lineCount: Int
     let size: CGSize
+    /// a pill that asks (ADR 0047). without one it is the pill it always
+    /// was, drawn by the same code.
+    var button: HUDPillButton?
+    var buttonSize: CGSize?
+    var onButton: () -> Void = {}
+    var onElsewhere: () -> Void = {}
     /// dark glass: gold-tinted glass went light over a light page and took
     /// the pale gold text with it (lamp lab, 2026-09-21). the lab can still
     /// try the gold.
     static let darkTint = BrandUI.black.opacity(0.35)
     var glassTint: Color = HUDTextPill.darkTint
 
+    private var shape: RoundedRectangle {
+        RoundedRectangle(
+            cornerRadius: HUDLayoutEngine.pillCornerRadius,
+            style: .continuous
+        )
+    }
+
     var body: some View {
+        if let button, let buttonSize {
+            asking(button, buttonSize: buttonSize)
+        } else {
+            saying
+        }
+    }
+
+    private var saying: some View {
         Text(message)
             // the lamp phases already name themselves; the pill is the one
             // that carries the words, so it needs the same identity.
@@ -419,8 +584,62 @@ struct HUDTextPill: View {
             // sentence, and gold-on-gold vanished over a white document.
             .glassEffect(
                 .regular.tint(glassTint),
-                in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+                in: shape
             )
+    }
+
+    /// the sentence on the leading side, the button on the trailing one,
+    /// both on the same glass. a click beside the button is an answer too,
+    /// so the whole pill takes clicks.
+    private func asking(
+        _ button: HUDPillButton,
+        buttonSize: CGSize
+    ) -> some View {
+        HStack(spacing: HUDLayoutEngine.buttonGap) {
+            Text(message)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(message)
+                .font(Font(HUDLayoutEngine.primaryFont))
+                .foregroundStyle(BrandUI.goldPale)
+                .lineLimit(lineCount)
+                .lineSpacing(HUDLayoutEngine.wrappedLineSpacing)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button(button.title, action: onButton)
+                .buttonStyle(HUDPillButtonStyle())
+                .frame(width: buttonSize.width, height: buttonSize.height)
+                .accessibilityLabel(button.accessibilityLabel)
+        }
+        .padding(.leading, HUDLayoutEngine.horizontalPadding)
+        .padding(.trailing, HUDLayoutEngine.buttonInset)
+        .frame(width: size.width, height: size.height)
+        .contentShape(shape)
+        .onTapGesture(perform: onElsewhere)
+        .glassEffect(
+            .regular.tint(glassTint),
+            in: shape
+        )
+    }
+}
+
+/// the pill's one button: a capsule of the pill's own glass, set into it,
+/// its word in the pill's pale gold a step heavier. quiet on purpose, the
+/// way the owner wants every button on the hud: no system blue, no fill
+/// that shouts over the sentence it answers.
+struct HUDPillButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(Font(HUDLayoutEngine.buttonFont))
+            .foregroundStyle(BrandUI.goldPale)
+            .lineLimit(1)
+            .fixedSize()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Capsule())
+            .glassEffect(
+                .regular.tint(BrandUI.goldPale.opacity(0.10)).interactive(),
+                in: Capsule()
+            )
+            .opacity(configuration.isPressed ? 0.72 : 1)
     }
 }
 
@@ -433,6 +652,7 @@ struct LampLine: View {
     let loudness: Float
     let startedAt: Date
     var isLocked = false
+    var palette: LampPalette = .gold
     var ground: LampGround = .shipped
     /// set both to let the sliver morph into another glass shape in the
     /// same `GlassEffectContainer`
@@ -450,6 +670,7 @@ struct LampLine: View {
             loudness: loudness,
             startedAt: startedAt,
             isLocked: isLocked,
+            palette: palette,
             ground: ground.isRibbon ? .smoke : ground,
             filament: !ground.isRibbon,
             innerLight: ground.litInside,
@@ -591,6 +812,12 @@ struct LampPose {
     var extent = 1.0
     var dotFlash = 0.0
     var damp = 1.0
+    /// a steady light in the tube where a voice would be, without the
+    /// wave a voice makes. a meeting's, and nothing else's.
+    var glow = 0.0
+
+    /// the ember's heat, around which it breathes.
+    static let emberHeat = 0.20
 
     static func at(
         phase: GoldRippleLine.Phase,
@@ -604,7 +831,17 @@ struct LampPose {
                 date.timeIntervalSinceReferenceDate
                     * .pi * 2 / 2.8
             )
-            pose.heat = 0.20 + 0.08 * breathe
+            pose.heat = emberHeat + 0.08 * breathe
+            pose.presence = 1
+            pose.damp = 0
+        case .pilot:
+            // up from the ember to a take's lit heat with the meeting's
+            // glow in it, and then it holds: no ignite, no breath, no voice.
+            let t = smoothstep(
+                min(elapsed / HUDWaveMotion.meetingRiseDuration, 1)
+            )
+            pose.heat = lerp(emberHeat, 1, t)
+            pose.glow = HUDWaveMotion.meetingGlow * t
             pose.presence = 1
             pose.damp = 0
         case .burn:
@@ -675,6 +912,9 @@ struct GoldRippleLine: View {
         case burn
         /// transcribing: collapse to a dot, flash, afterglow — the goodbye
         case cool
+        /// a meeting recording: a low, flat light that holds, like a
+        /// boiler's pilot. deaf to the voice and never breathing.
+        case pilot
     }
 
     let phase: Phase
@@ -682,6 +922,7 @@ struct GoldRippleLine: View {
     let startedAt: Date
     /// double-tap lock: the key is no longer held, so the ends get pinned.
     var isLocked = false
+    var palette: LampPalette = .gold
     /// only `.smoke` is drawn here: the rest of a ground is `LampLine`'s.
     var ground: LampGround
     /// false when a glass ribbon is the lamp: no line and no hot core, only
@@ -711,27 +952,48 @@ struct GoldRippleLine: View {
     private static let lockDotGap =
         HUDWaveMotion.strokeWidth * 2.2
 
-    // the lamp burns the brand's gold, not a second copy of it.
-    private static let paleRGB = BrandUI.goldPaleRGB
-    private static let midRGB = BrandUI.goldRGB
-    private static let deepRGB = BrandUI.goldDeepRGB
+    #if DEBUG
+    // the lab's glass ribbons tint themselves in the gold.
+    private static let paleRGB = LampPalette.gold.pale
+    private static let deepRGB = LampPalette.gold.deep
+    #endif
 
     var body: some View {
-        TimelineView(
-            .animation(
-                minimumInterval: 1.0 / 60.0,
-                paused: reduceMotion
-            )
-        ) { timeline in
-            Canvas { context, size in
-                draw(
-                    in: &context,
-                    size: size,
-                    date: timeline.date
-                )
+        Group {
+            if phase == .pilot {
+                // a light that holds is drawn once it has risen, not sixty
+                // times a second for the length of a meeting.
+                TimelineView(
+                    LampRiseSchedule(
+                        until: startedAt.addingTimeInterval(
+                            HUDWaveMotion.meetingRiseDuration
+                        )
+                    )
+                ) { timeline in
+                    canvas(at: timeline.date)
+                }
+            } else {
+                TimelineView(
+                    .animation(
+                        minimumInterval: 1.0 / 60.0,
+                        paused: reduceMotion
+                    )
+                ) { timeline in
+                    canvas(at: timeline.date)
+                }
             }
         }
         .accessibilityHidden(true)
+    }
+
+    private func canvas(at date: Date) -> some View {
+        Canvas { context, size in
+            draw(
+                in: &context,
+                size: size,
+                date: date
+            )
+        }
     }
 
     private func draw(
@@ -759,7 +1021,10 @@ struct GoldRippleLine: View {
         let dotFlash = pose.dotFlash
         let damp = pose.damp
 
-        let level = Double(loudness) * damp
+        // the voice moves the line and lights it; a meeting's glow only
+        // lights it.
+        let voice = Double(loudness) * damp
+        let level = voice + pose.glow
         let b = heat * (0.24 + 0.76 * level)
         let alpha = max(presence, heat)
         let half = (lineWidth / 2) * extent
@@ -770,7 +1035,7 @@ struct GoldRippleLine: View {
                 cy: cy,
                 half: half,
                 amplitude: HUDWaveMotion.amplitude
-                    * level * heat,
+                    * voice * heat,
                 time: date.timeIntervalSinceReferenceDate
             )
 
@@ -788,7 +1053,7 @@ struct GoldRippleLine: View {
                     layer.addFilter(
                         .shadow(
                             color: color(
-                                Self.midRGB,
+                                palette.mid,
                                 0.65 * max(b, 0.35 * heat) * alpha
                             ),
                             radius: (8 + 22 * b) * 0.5
@@ -797,7 +1062,7 @@ struct GoldRippleLine: View {
                     layer.stroke(
                         path,
                         with: .color(color(
-                            goldMix(b),
+                            paletteMix(b),
                             (0.5 + 0.5 * min(b, 1)) * alpha
                         )),
                         style: StrokeStyle(
@@ -812,7 +1077,7 @@ struct GoldRippleLine: View {
                 context.stroke(
                     path,
                     with: .color(color(
-                        Self.paleRGB,
+                        palette.pale,
                         min(b, 1) * 0.85 * alpha
                     )),
                     style: StrokeStyle(
@@ -828,7 +1093,7 @@ struct GoldRippleLine: View {
                     layer.stroke(
                         path,
                         with: .color(color(
-                            goldMix(b),
+                            paletteMix(b),
                             (innerLight ? 0.40 : 0.55) * min(b, 1) * alpha
                         )),
                         style: StrokeStyle(
@@ -857,7 +1122,7 @@ struct GoldRippleLine: View {
                     context.stroke(
                         path,
                         with: .color(color(
-                            goldMix(0.35 + 0.65 * glow),
+                            paletteMix(0.35 + 0.65 * glow),
                             (0.45 + 0.55 * glow) * alpha
                         )),
                         style: StrokeStyle(
@@ -919,9 +1184,13 @@ struct GoldRippleLine: View {
         guard phase != .cool else {
             return
         }
-        let level = phase == .burn ? Double(loudness) : 0
-        let b = (phase == .ember ? 0.24 : 1.0)
-            * (0.24 + 0.76 * level)
+        let level = switch phase {
+        case .burn: Double(loudness)
+        case .pilot: HUDWaveMotion.meetingGlow
+        case .ember, .cool: 0.0
+        }
+        let heat = phase == .ember ? 0.24 : 1.0
+        let b = heat * (0.24 + 0.76 * level)
         var path = Path()
         path.move(to: CGPoint(x: cx - lineWidth / 2, y: cy))
         path.addLine(to: CGPoint(x: cx + lineWidth / 2, y: cy))
@@ -942,7 +1211,7 @@ struct GoldRippleLine: View {
         }
         context.stroke(
             path,
-            with: .color(color(goldMix(b), 0.6 + 0.4 * min(b, 1))),
+            with: .color(color(paletteMix(b), 0.6 + 0.4 * min(b, 1))),
             style: StrokeStyle(
                 lineWidth: HUDWaveMotion.strokeWidth,
                 lineCap: .round
@@ -986,7 +1255,7 @@ struct GoldRippleLine: View {
         // body: tan going pale as it lights
         context.stroke(
             path,
-            with: .color(color(goldMix(0.40 + 0.40 * lit), (0.42 + 0.28 * lit) * alpha)),
+            with: .color(color(paletteMix(0.40 + 0.40 * lit), (0.42 + 0.28 * lit) * alpha)),
             style: tube
         )
         // shade along the bottom, inside the tube
@@ -995,7 +1264,7 @@ struct GoldRippleLine: View {
             layer.addFilter(.blur(radius: 1.0))
             layer.stroke(
                 path.offsetBy(dx: 0, dy: t * 0.28),
-                with: .color(color(Self.deepRGB, 0.34 * alpha)),
+                with: .color(color(palette.deep, 0.34 * alpha)),
                 style: StrokeStyle(lineWidth: t * 0.62, lineCap: .round, lineJoin: .round)
             )
         }
@@ -1005,7 +1274,7 @@ struct GoldRippleLine: View {
             layer.addFilter(.blur(radius: 0.45))
             layer.stroke(
                 path.offsetBy(dx: 0, dy: -(t / 2 - 1.0)),
-                with: .color(color(Self.paleRGB, (0.50 + 0.40 * lit) * alpha)),
+                with: .color(color(palette.pale, (0.50 + 0.40 * lit) * alpha)),
                 style: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round)
             )
             layer.stroke(
@@ -1020,7 +1289,7 @@ struct GoldRippleLine: View {
             layer.addFilter(.blur(radius: 1.4))
             layer.stroke(
                 path,
-                with: .color(color(Self.paleRGB, (0.10 + 0.55 * min(level, 1)) * lit * alpha)),
+                with: .color(color(palette.pale, (0.10 + 0.55 * min(level, 1)) * lit * alpha)),
                 style: StrokeStyle(lineWidth: t * 0.5, lineCap: .round, lineJoin: .round)
             )
         }
@@ -1058,7 +1327,7 @@ struct GoldRippleLine: View {
         let radius = Self.lockDotRadius
         let inset = half + Self.lockDotGap
         let fill = color(
-            goldMix(brightness),
+            paletteMix(brightness),
             (0.55 + 0.35 * min(brightness, 1)) * alpha
         )
         for x in [cx - inset, cx + inset] {
@@ -1121,8 +1390,8 @@ struct GoldRippleLine: View {
             ),
             with: .radialGradient(
                 Gradient(colors: [
-                    color(Self.midRGB, 0.35 * strength),
-                    color(Self.midRGB, 0),
+                    color(palette.mid, 0.35 * strength),
+                    color(palette.mid, 0),
                 ]),
                 center: CGPoint(x: cx, y: cy),
                 startRadius: 0,
@@ -1134,7 +1403,7 @@ struct GoldRippleLine: View {
         context.drawLayer { layer in
             layer.addFilter(
                 .shadow(
-                    color: color(Self.paleRGB, 0.9 * strength),
+                    color: color(palette.pale, 0.9 * strength),
                     radius: 5
                 )
             )
@@ -1147,7 +1416,7 @@ struct GoldRippleLine: View {
                         height: core * 2
                     )
                 ),
-                with: .color(color(Self.paleRGB, 0.95 * strength))
+                with: .color(color(palette.pale, 0.95 * strength))
             )
         }
     }
@@ -1173,12 +1442,13 @@ struct GoldRippleLine: View {
     }
     #endif
 
-    private func goldMix(_ b: Double) -> [Double] {
+    /// deep when dim, pale when hot, in whichever colours it burns.
+    private func paletteMix(_ b: Double) -> [Double] {
         let t = min(max(b, 0), 1)
         return [
-            lerp(Self.deepRGB[0], Self.paleRGB[0], t),
-            lerp(Self.deepRGB[1], Self.paleRGB[1], t),
-            lerp(Self.deepRGB[2], Self.paleRGB[2], t),
+            lerp(palette.deep[0], palette.pale[0], t),
+            lerp(palette.deep[1], palette.pale[1], t),
+            lerp(palette.deep[2], palette.pale[2], t),
         ]
     }
 
@@ -1202,5 +1472,25 @@ struct GoldRippleLine: View {
     private func smoothstep(_ t: Double) -> Double {
         let clamped = min(max(t, 0), 1)
         return clamped * clamped * (3 - 2 * clamped)
+    }
+}
+
+/// a meeting's light moves only while it rises: a frame each display frame
+/// until then, and none after. one entry when it has already risen, so a
+/// lamp that comes back after a pill is drawn once, settled.
+private struct LampRiseSchedule: TimelineSchedule {
+    let until: Date
+
+    func entries(
+        from startDate: Date,
+        mode: TimelineScheduleMode
+    ) -> [Date] {
+        var dates = [startDate]
+        var next = startDate
+        while next < until {
+            next = min(next.addingTimeInterval(1.0 / 60.0), until)
+            dates.append(next)
+        }
+        return dates
     }
 }

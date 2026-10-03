@@ -1,3 +1,35 @@
+## 0.11.0
+
+the meetings release. i recorded my meetings with another tool because i did not trust this one with them. that is over.
+
+a meeting is never lost. two calls back to back each get their own file. stopping a few seconds after starting keeps the words you said. a quit, or a `brew upgrade`, waits for the transcript. a crash leaves the audio on disk and the next launch writes it out, with its gaps, instead of pretending it was whole. nothing is ever deleted on a hunch: audio the app cannot read is set aside, not thrown away, and `try again` in history brings it back.
+
+a transcript is never hollow. before any audio goes, the transcript is held against the speech that was heard. one that comes out thin is read again from the audio, and if it is still thin the file says `complete: false` and why, and keeps its audio until you delete it. a meeting where nobody spoke says so.
+
+the audio waits a day. after the file is written the recording is kept on your mac, compressed, for a day by default (a setting: at once, a day, a week), then deleted by itself. while it is there, `transcribe again with` on the row redoes the meeting with another model, and the file is replaced in place.
+
+it hears the whole mac. there is no app to pick: `record a meeting` records whatever the mac plays plus your mic. a call that moves from zoom to a slack huddle stays in one recording.
+
+it reminds you. when a call app has your mic and is playing audio, a pill offers `record`, once, for fifteen seconds. when the call ends it asks once whether to stop. nothing starts or stops by itself, ever. an optional hotkey starts and stops a meeting too.
+
+your mic follows you. airpods connecting, leaving or dying mid-call move the meeting to the mic you are on, without a tone, and without a gap while the old mic is still delivering; a mic that dies leaves only the second or two nothing came, marked in the file as a gap where the audio really stopped. a mic that comes up and delivers nothing at all is tried on the built-in mic before the start is called off. a mic that goes silent while the call talks is said by name, and stays said until it is heard again. a mic you muted is not a fault.
+
+silence is not damage. two minutes of a quiet far side used to rebuild the tap, chirp through your speakers and mark the file incomplete. now a quiet far side is asked with a quiet tone the tap can hear, and a tap that really died is rebuilt beside the mic still recording your side, with the gap marked from where the far side was last heard. the lid closed on a meeting is a gap by the audio's own clock, not a file that pretends the hour never happened. a tap that cannot be rebuilt is a problem the meeting records through, your side still being kept, and no window opens over your call.
+
+who said it is certain. your side and theirs are transcribed apart, each stretch of speech once, so `you` and `them` are the side that spoke, not a guess by loudness. on the mac's own speakers, their voice coming back through your mic is dropped before it is written down as yours; when it is not clear, the words are kept. a silence of a few seconds starts a new paragraph.
+
+three models. parakeet, the dictation model, with nothing to download, for english and european languages. whisper large, the default, for most languages written in english. whisper turbo, written as spoken. `record with` picks one for a single meeting. whisper no longer swallows a short "yes" or "okay", and no longer writes "thank you" over a silent mic.
+
+the end is quick. the speaker split works through the meeting a minute at a time, so a file lands seconds after stop whether the meeting ran ten minutes or three hours, and memory no longer grows with the meeting.
+
+you always know the state. the menu bar badge wears gold corner brackets when a call is on and not recorded, a partial rim while getting ready, a full rim while recording, and a red triangle when something is wrong; the first line of the menu says the same in words. the lamp holds a calm light during a meeting that only you can see: the hud and the live transcript are hidden from screen sharing.
+
+every meeting leaves a record, with no words in it: how it ended, speech and words per side, gaps, what the mic and the tap went through, the coverage result. `copy diagnostics` includes the last twenty.
+
+the transcript folder is for agents too. one paragraph per speaker turn; front matter with `ended`, `speakers`, `words` and a `reason` when a file is not complete; a `README.md` beside the month folders that explains the layout to whoever reads it cold.
+
+and the model's small parts come down with it at setup: the tokenizer, the speaker-split models, the voice model (now inside the app). a meeting never waits on the network.
+
 ## 0.10.0
 
 the trust release. two bugs made restarting the app the only fix. both are gone, along with everything shaped like them.

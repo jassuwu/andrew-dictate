@@ -1,0 +1,118 @@
+import Foundation
+
+/// Whether a meeting's transcript covers what was said in it, asked at the
+/// stop and before any of its audio is let go (ADR 0048). A transcript that
+/// says `complete` and is empty, thin or cut short is a hollow transcript,
+/// and the bar is zero of them.
+///
+/// It is told what the transcriber knows: per side, the speech it cut into
+/// stretches, how much of that it read, and the words the side came to.
+/// And one thing the audio says on its own, from the spool and not through
+/// the transcriber: how long the far side was louder than the silence
+/// floor. That one catches a transcriber that was never fed at all.
+enum CoverageCheck {
+    struct Side: Equatable, Sendable {
+        /// Speech the transcriber cut into stretches, the far side's copies
+        /// on the mic it let go not counted, and how much of that the engine
+        /// read. nil for a transcriber that keeps no count: the side is
+        /// judged on its words alone.
+        var speech: Duration?
+        var read: Duration?
+        /// What the side's turns came to, counted the way the file counts.
+        var words: Int
+    }
+
+    enum Verdict: Equatable, Sendable {
+        case pass
+        /// The reason is the front matter's, in plain words.
+        case thin(reason: String)
+    }
+
+    /// How a meeting came out of it, once any reading again is done: for the
+    /// meeting record.
+    enum Result: String, Equatable, Sendable, Codable {
+        case pass
+        /// Thin the first time, and read again from the spool into a
+        /// transcript that covers it.
+        case passAfterRerun = "pass-after-rerun"
+        /// Still thin: the file says `complete: false` and why, and the
+        /// audio is kept.
+        case thin
+    }
+
+    /// Whether the meeting had no speech in it at all, so its file can say
+    /// so rather than be an empty page. Only a count can tell: without one,
+    /// no words is as likely a transcriber that never got going as a quiet
+    /// room, and nobody is said not to have spoken.
+    static func nobodySpoke(you: Side, them: Side) -> Bool {
+        you.speech == .zero && them.speech == .zero
+    }
+
+    /// The two sides as a transcriber left them: its counts, when it keeps
+    /// them, and the words of each side's turns, counted the way the file
+    /// counts its `words:`.
+    static func sides(of turns: [MeetingTurn], tally: StretchTally?) -> (you: Side, them: Side) {
+        var you = Side(speech: tally?.speechYou, read: tally?.readYou, words: 0)
+        var them = Side(speech: tally?.speechThem, read: tally?.readThem, words: 0)
+        for turn in turns {
+            let words = turn.text.split(whereSeparator: \.isWhitespace).count
+            switch turn.speaker {
+            case .you: you.words += words
+            case .them: them.words += words
+            }
+        }
+        return (you, them)
+    }
+
+    // Provisional, all of them (ADR 0048): reasoned from how people talk,
+    // not tuned against a real meeting yet. Every result goes in the
+    // meeting record, with the numbers it was reached from, so they can be.
+
+    /// A side with less speech than this is a cough and a "yes": too little
+    /// to hold a share of it against the transcript.
+    static let enoughSpeechToJudge = Duration.seconds(10)
+    /// The most of a side's speech that may go unread — stretches the
+    /// engine failed twice, or that were still waiting when it was never
+    /// there to read them — before the transcript does not cover it.
+    static let mostUnread = 0.2
+    /// A side read for less than this is a few short answers, and a few
+    /// short answers can be "yeah", "mm", "right".
+    static let enoughReadToCount = Duration.seconds(30)
+    /// Talk runs at two or three words a second. Read speech that came to
+    /// under half a word a second was heard and mostly not written down.
+    static let fewestWordsPerSecond = 0.5
+    /// The far side louder than the silence floor in the spool for this
+    /// long, with nothing of it cut, is a call the transcriber never heard.
+    /// Shorter, and it can be a notification and a ringing tone.
+    static let farSideHeard = Duration.seconds(60)
+
+    static let couldNotBeRead = "some of what was said could not be read"
+    static let fewerWords = "far fewer words than the talk that was heard"
+    static let farSideNotRead = "the other side was heard and nothing of it was read"
+
+    /// The far side first: a transcriber that was never fed has nothing
+    /// unread and no words to count, and only the spool can tell.
+    static func verdict(you: Side, them: Side, farSideLoud: Duration) -> Verdict {
+        if farSideLoud >= farSideHeard {
+            let nothingOfThem = them.speech.map { $0 == .zero } ?? (them.words == 0)
+            if nothingOfThem {
+                return .thin(reason: farSideNotRead)
+            }
+        }
+        for side in [you, them] {
+            guard let speech = side.speech, let read = side.read,
+                  speech >= enoughSpeechToJudge
+            else { continue }
+            if (speech - read) / speech > mostUnread {
+                return .thin(reason: couldNotBeRead)
+            }
+        }
+        for side in [you, them] {
+            guard let read = side.read, read >= enoughReadToCount else { continue }
+            if Double(side.words) / read.totalSeconds < fewestWordsPerSecond {
+                return .thin(reason: fewerWords)
+            }
+        }
+        return .pass
+    }
+}

@@ -11,6 +11,8 @@ final class LazyMeetingsTests: XCTestCase {
     private var transcripts: URL!
     private var coordinatorsBuilt = 0
     private var notifiersBuilt = 0
+    private var callMonitorsBuilt = 0
+    private var mic: IdleMic!
 
     override func setUp() async throws {
         dir = FileManager.default.temporaryDirectory
@@ -21,6 +23,8 @@ final class LazyMeetingsTests: XCTestCase {
         transcripts = dir.appendingPathComponent("transcripts")
         coordinatorsBuilt = 0
         notifiersBuilt = 0
+        callMonitorsBuilt = 0
+        mic = IdleMic()
     }
 
     override func tearDown() {
@@ -32,25 +36,32 @@ final class LazyMeetingsTests: XCTestCase {
         let meetings = holder()
 
         let recovery = meetings.launch(
-            setUp: false, transcripts: transcripts, spool: spool,
-            recoveryDelay: .zero)
+            setUp: false, watchesForCalls: false, transcripts: transcripts,
+            spool: spool, recoveryDelay: .zero)
 
         XCTAssertNil(recovery)
         // everything the menu, the badge and the key read, and everything
         // a stray click can reach without a meeting running
         XCTAssertFalse(meetings.isRecording)
+        XCTAssertFalse(meetings.isWritingOut)
+        XCTAssertEqual(meetings.phase, .idle)
+        await meetings.untilWrittenOut()
         XCTAssertEqual(meetings.elapsed, .zero)
         XCTAssertNil(meetings.recovering)
-        XCTAssertNil(meetings.app)
         XCTAssertEqual(meetings.dictationResponse, .allow)
+        XCTAssertNil(meetings.currentCall)
+        XCTAssertNil(meetings.unrecordedCall)
         meetings.probeTapIsAlive()
         meetings.keepGoing()
         meetings.stop()
         meetings.withdrawNudge()
+        meetings.recordingChanged()
+        meetings.declineTheCall()
 
         try await Task.sleep(for: .milliseconds(200))
         XCTAssertEqual(coordinatorsBuilt, 0)
         XCTAssertEqual(notifiersBuilt, 0)
+        XCTAssertEqual(callMonitorsBuilt, 0)
         XCTAssertEqual(permissions(of: transcript), 0o644)
     }
 
@@ -61,8 +72,8 @@ final class LazyMeetingsTests: XCTestCase {
         let meetings = holder()
 
         let recovery = meetings.launch(
-            setUp: false, transcripts: transcripts, spool: spool,
-            recoveryDelay: .zero)
+            setUp: false, watchesForCalls: false, transcripts: transcripts,
+            spool: spool, recoveryDelay: .zero)
         await recovery?.value
 
         XCTAssertNotNil(recovery)
@@ -70,23 +81,70 @@ final class LazyMeetingsTests: XCTestCase {
         XCTAssertEqual(notifiersBuilt, 0)
     }
 
-    /// a model on disk or a chosen folder: the last run's banner still has
-    /// a delegate to click through to, and old transcripts get locked down.
+    /// the chosen meeting model on disk or a chosen folder: the last run's
+    /// banner still has a delegate to click through to, and old
+    /// transcripts get locked down.
     func testAMacSetUpForMeetingsGetsItsNotifierAndItsRepairAtLaunch() async throws {
         let transcript = try oldTranscript()
         let meetings = holder()
 
         let recovery = meetings.launch(
-            setUp: true, transcripts: transcripts, spool: spool,
-            recoveryDelay: .zero)
+            setUp: true, watchesForCalls: false, transcripts: transcripts,
+            spool: spool, recoveryDelay: .zero)
 
         XCTAssertNil(recovery)
         XCTAssertEqual(coordinatorsBuilt, 0)
         XCTAssertEqual(notifiersBuilt, 1)
+        // a chosen folder with no model is set up for transcripts, not for
+        // calls: there is nothing to record one with.
+        XCTAssertEqual(callMonitorsBuilt, 0)
         for _ in 0..<100 where permissions(of: transcript) != 0o600 {
             try await Task.sleep(for: .milliseconds(20))
         }
         XCTAssertEqual(permissions(of: transcript), 0o600)
+    }
+
+    /// the chosen meeting model on disk: the app listens for the mic being
+    /// taken, and builds nothing else to do it.
+    func testAMacWithAMeetingModelWatchesForCalls() {
+        let meetings = holder()
+        var wired = 0
+        meetings.onCallMonitorBuilt = { _ in wired += 1 }
+
+        _ = meetings.launch(
+            setUp: true, watchesForCalls: true, transcripts: transcripts,
+            spool: spool, recoveryDelay: .zero)
+        meetings.watchForCalls()
+
+        XCTAssertEqual(callMonitorsBuilt, 1)
+        XCTAssertEqual(wired, 1)
+        XCTAssertEqual(mic.starts, 1)
+        XCTAssertEqual(coordinatorsBuilt, 0)
+    }
+
+    /// the meeting model picked in settings is not on this mac any more:
+    /// the listener goes, and comes back when one is.
+    func testWatchingForCallsStopsAndStartsAgain() {
+        let meetings = holder()
+        meetings.watchForCalls()
+
+        meetings.stopWatchingForCalls()
+        XCTAssertEqual(mic.stops, 1)
+
+        meetings.watchForCalls()
+        XCTAssertEqual(mic.starts, 2)
+        XCTAssertEqual(callMonitorsBuilt, 1)
+    }
+
+    /// a mac that never watched has nothing to stop, and builds nothing to
+    /// stop it.
+    func testStoppingAWatchThatNeverStartedBuildsNothing() {
+        let meetings = holder()
+
+        meetings.stopWatchingForCalls()
+
+        XCTAssertEqual(callMonitorsBuilt, 0)
+        XCTAssertEqual(mic.stops, 0)
     }
 
     func testEachIsBuiltOnceAndWiredBeforeItIsHandedOut() {
@@ -128,6 +186,10 @@ final class LazyMeetingsTests: XCTestCase {
             notifier: { [weak self] in
                 self?.notifiersBuilt += 1
                 return MeetingNudgeNotifier()
+            },
+            callMonitor: { [weak self, mic = mic!] in
+                self?.callMonitorsBuilt += 1
+                return CallMonitor(mic: mic, read: { [] })
             }
         )
     }
@@ -155,8 +217,23 @@ final class LazyMeetingsTests: XCTestCase {
 
 private struct NoModel: Error {}
 
+/// a mic nobody takes: the monitor listens and is never told to read.
+private final class IdleMic: MicUseSignal, @unchecked Sendable {
+    private(set) var starts = 0
+    private(set) var stops = 0
+
+    func start(onChange: @escaping @Sendable (Bool) -> Void) {
+        starts += 1
+        onChange(false)
+    }
+
+    func stop() {
+        stops += 1
+    }
+}
+
 private struct SilentSource: MeetingAudioSource {
-    func start(tapping app: RunningApp) async throws -> AsyncStream<MeetingAudioChunk> {
+    func start() async throws -> AsyncStream<MeetingAudioChunk> {
         AsyncStream { $0.finish() }
     }
 

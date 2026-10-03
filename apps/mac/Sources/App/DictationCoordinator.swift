@@ -3,6 +3,9 @@ import OSLog
 import Foundation
 import AppKit
 import AVFoundation
+#if DEBUG
+import notify
+#endif
 
 struct HotkeyDetection: Equatable, Sendable {
     let sequence: Int
@@ -34,6 +37,11 @@ final class DictationCoordinator: ObservableObject {
     private let pressLogger = Logger(
         subsystem: AppIdentity.loggingSubsystem,
         category: "press"
+    )
+    /// the same for meetings: one line each, at notice, every field public.
+    private let meetingRecordLogger = Logger(
+        subsystem: AppIdentity.loggingSubsystem,
+        category: "meeting-record"
     )
     /// the machine owns the state; the menu, the HUD and the menu-bar icon
     /// still say `DictationCoordinator.State`.
@@ -95,6 +103,36 @@ final class DictationCoordinator: ObservableObject {
     /// dictation's. this is meetings' own, set when a tap would not open and
     /// cleared by the next meeting that starts.
     @Published private(set) var meetingsNeedAttention = false
+
+    /// the meeting shortcut, registered as a global hot key, which needs no
+    /// permission. whether another app holds its combination is the row's
+    /// to say.
+    private let meetingHotkey = MeetingHotkey()
+    @Published private(set) var meetingShortcutIsTaken = false
+
+    /// a call is on and nothing is recording it (ADR 0047): the menu's first
+    /// line, and what the menu bar icon shows. nil with no call, while one
+    /// is being recorded, and on a mac that has no meeting model.
+    @Published private(set) var unrecordedCall: String?
+
+    /// what the menu bar badge wears: the meeting's phase, which the menu
+    /// and the lamp read too — the partial rim while it gets ready or is
+    /// written out, the full rim while it records, the red corner while a
+    /// problem stands — and with no meeting, the "call on, not recorded"
+    /// look while a call is.
+    ///
+    /// transcribing is not dictating on purpose. the lamp's cool phase owns
+    /// the wait and the menu already says "writing it out…" (ADR 0017).
+    var badgeLook: BadgeLook {
+        BadgeLook(
+            needsSetup: needsAttention,
+            isDictating: state == .recording,
+            meeting: BadgeLook.Meeting(
+                meetings.phase,
+                callNotRecorded: unrecordedCall != nil
+            )
+        )
+    }
 
     /// the meeting that just ended, for as long as it is the thing you came
     /// back to the menu for.
@@ -183,6 +221,9 @@ final class DictationCoordinator: ObservableObject {
                 panel = existing
             } else {
                 panel = HUDPanel(viewModel: self.hudViewModel)
+                panel.onPointerOverPill = { [weak self] over in
+                    self?.pointerOverPill(over)
+                }
                 self.hudPanelStorage = panel
             }
             action(panel)
@@ -213,8 +254,18 @@ final class DictationCoordinator: ObservableObject {
     private var heldFeedback: (
         message: String,
         duration: TimeInterval,
-        at: Date
+        at: Date,
+        aboutAMeeting: Bool
     )?
+    /// the pill's questions about meetings (ADR 0047): the one up and the
+    /// one waiting for the pill. a question is the one pill that waits its
+    /// turn and gives way to everything else.
+    private var questions = HUDQuestionSlot<MeetingQuestion>()
+    /// the feedback generation the question went up under, and how long it
+    /// has left.
+    private var questionShown: (token: UInt64, countdown: PillCountdown)?
+    private var questionExpiry: Task<Void, Never>?
+    private let questionClockOrigin = ContinuousClock.now
     private let timelineStore = UtteranceTimelineStore()
     /// held while the mic is live (`keepDisplayAwake`).
     private var displayAwakeActivity: (any NSObjectProtocol)?
@@ -232,6 +283,10 @@ final class DictationCoordinator: ObservableObject {
         label: "\(AppIdentity.bundleID).press-log",
         qos: .utility
     )
+    /// the meeting records' file, beside it and on the same queue: one
+    /// disk, one order, so "copy diagnostics" reads both after whatever
+    /// was kept a moment ago.
+    private let meetingRecords = MeetingRecordStore()
     /// watches the main thread while a press is in flight. lazy, because
     /// its stalls are noted on the machine's press.
     private lazy var watchdog = MainThreadWatchdog { [weak self] milliseconds in
@@ -243,13 +298,22 @@ final class DictationCoordinator: ObservableObject {
     /// built on first use: a mac that only dictates never pays for meetings.
     let meetings: LazyMeetings
     /// made by the first meeting, like the panel that shows it.
-    private lazy var liveTranscript = LiveTranscriptModel(app: "", elapsed: .zero)
+    private lazy var liveTranscript = LiveTranscriptModel(elapsed: .zero)
     @Published private(set) var meetingModelDownloads: [MeetingModel: Double] = [:]
     @Published private(set) var isLiveTranscriptShown = false
-    /// the app `record a meeting ▸ zoom` named, held while setup runs. the
-    /// click already happened; setup is the detour, not a new question.
-    private var pendingMeetingApp: RunningApp?
+    /// `record a meeting` was pressed before its model was on disk, and is
+    /// held while setup runs. the click already happened; setup is the
+    /// detour, not a new question.
+    private(set) var meetingWaitsOnSetup = false
     private var liveTranscriptPanel: LiveTranscriptPanel?
+    /// what the meeting is doing, as the lamp reads it (ticket 28), and the
+    /// light that gives, its cool-out included.
+    private var meetingFacts = HUDMeetingFacts()
+    private var meetingLight: HUDMeetingLight = .off
+    private var meetingLightCooling: Task<Void, Never>?
+    /// the feedback generation of the sentence a meeting said, while it is
+    /// on the pill: that pill is hidden from screen capture.
+    private var meetingPillGeneration: UInt64?
     private var meetingCancellables: Set<AnyCancellable> = []
     /// A quit is waiting on a meeting's transcript to be written.
     private var quitWaitingOnMeeting = false
@@ -297,12 +361,15 @@ final class DictationCoordinator: ObservableObject {
                     MeetingPreferences(
                         folder: settings.meetingsFolder,
                         hook: settings.meetingHook,
-                        model: settings.meetingModel
+                        model: settings.meetingModel,
+                        keepAudio: settings.keepMeetingAudio
                     )
                 }
             )
         }, notifier: {
             MeetingNudgeNotifier()
+        }, callMonitor: {
+            CallMonitor()
         })
 
         let viewModel = HUDViewModel(
@@ -413,8 +480,10 @@ final class DictationCoordinator: ObservableObject {
         .store(in: &settingsCancellables)
 
         wireMachine()
+        wirePillQuestions()
         installSystemLifecycleObservers()
         wireMeetings()
+        wireMeetingShortcut()
 
         permissions = SystemPermissions.snapshot()
         // the stored flag only knows the window was closed once. whether this
@@ -480,6 +549,10 @@ final class DictationCoordinator: ObservableObject {
                 }
             }
         }
+        listenForTheMeetingToggle()
+        listenForTheCallChecks()
+        listenForTheProbeSweep()
+        listenForTheTapLoss()
         #endif
         // "fix a word…" is the menu's only time-sensitive action, and it used
         // to be grey until this session's first dictation — while the words
@@ -709,9 +782,10 @@ final class DictationCoordinator: ObservableObject {
     }
 
     /// "copy diagnostics": who is running what, then the last fifty
-    /// presses. read through the press log's own queue, so a press that
-    /// ended a moment ago is already in it — and so is the default mic,
-    /// since asking the audio server is never done on the main thread.
+    /// presses and the last twenty meetings. read through the press log's
+    /// own queue, so a press that ended a moment ago is already in it — and
+    /// so is the default mic, since asking the audio server is never done
+    /// on the main thread.
     func copyDiagnostics() {
         let info = Bundle.main.infoDictionary ?? [:]
         let system = ProcessInfo.processInfo.operatingSystemVersion
@@ -719,6 +793,7 @@ final class DictationCoordinator: ObservableObject {
         let build = info["CFBundleVersion"] as? String ?? "?"
         let engine = activeEngineVersion.rawValue
         let store = pressLog
+        let meetingStore = meetingRecords
         pressLogQueue.async {
             let setup = PressDiagnostics.Setup(
                 appVersion: appVersion,
@@ -730,7 +805,8 @@ final class DictationCoordinator: ObservableObject {
             )
             let text = PressDiagnostics.text(
                 setup: setup,
-                presses: try? store.recent(PressDiagnostics.pressCount)
+                presses: try? store.recent(PressDiagnostics.pressCount),
+                meetings: try? meetingStore.recent(PressDiagnostics.meetingCount)
             )
             // silent, like any copy: the pill is for what needs saying.
             // through the paster, so it can't land inside a dictation's
@@ -769,35 +845,31 @@ final class DictationCoordinator: ObservableObject {
     /// made on an earlier day.
     ///
     /// Last press of a meetings-only run: finish the errand that opened this
-    /// window. ADR 0023 says nothing starts a recording but the user naming
-    /// an app — they did that before the download, and honouring it is not
-    /// the app deciding on its own.
+    /// window. ADR 0023 says nothing starts a recording but the user — they
+    /// pressed `record a meeting` before the download, and honouring it is
+    /// not the app deciding on its own.
     func finishOnboarding(dictationWanted: Bool? = nil) {
         if let dictationWanted {
             settings.dictationWanted = dictationWanted
         }
         // captured and cleared before the close, because closing the window
         // is also how the errand is cancelled.
-        let errand = pendingMeetingApp
-        pendingMeetingApp = nil
+        let errand = meetingWaitsOnSetup
+        meetingWaitsOnSetup = false
         dismissOnboarding()
 
-        guard let errand else {
+        guard errand else {
             return
         }
         guard installedMeetingModels.contains(settings.meetingModel) else {
-            flashNotice("still downloading the meeting model", duration: 2)
-            return
-        }
-        guard MeetingApps.running().contains(where: { $0.pid == errand.pid })
-        else {
             flashNotice(
-                "\(MeetingApps.displayName(errand)) isn't running any more",
-                duration: 2
+                "still downloading the meeting model",
+                duration: 2,
+                aboutAMeeting: true
             )
             return
         }
-        startMeeting(errand)
+        startMeeting()
     }
 
     /// "skip for now" and "we're done" both close the window. what neither
@@ -849,7 +921,8 @@ final class DictationCoordinator: ObservableObject {
 
         // walking away cancels the errand: nothing starts later out of
         // nowhere.
-        pendingMeetingApp = nil
+        meetingWaitsOnSetup = false
+        watchForCallsIfSetUp()
         flushHeldFeedback()
     }
 
@@ -858,6 +931,7 @@ final class DictationCoordinator: ObservableObject {
     private func flushHeldFeedback() {
         guard let held = heldFeedback else {
             synchronizeHUD()
+            askTheWaitingQuestionIfFree()
             return
         }
 
@@ -867,12 +941,17 @@ final class DictationCoordinator: ObservableObject {
         ) {
         case .flashNow:
             heldFeedback = nil
-            flashNotice(held.message, duration: held.duration)
+            flashNotice(
+                held.message,
+                duration: held.duration,
+                aboutAMeeting: held.aboutAMeeting
+            )
         case .hold:
             synchronizeHUD()
         case .drop:
             heldFeedback = nil
             synchronizeHUD()
+            askTheWaitingQuestionIfFree()
         }
     }
 
@@ -932,6 +1011,14 @@ final class DictationCoordinator: ObservableObject {
         scope: OnboardingScope = .everything,
         openAt: OnboardingStep = .hello
     ) {
+        // a question is not held through setup, and must not come back as
+        // a sentence without its button: it goes, and the menu still has
+        // it.
+        if isQuestionUp {
+            questionTakenOffThePill()
+            activeFeedbackGeneration = nil
+            hudViewModel.clearFeedback()
+        }
         // whatever the pill is saying right now is about to be taken off
         // the screen mid-sentence. keep it rather than truncate it — it
         // gets a whole default reading when it comes back, since how much
@@ -941,7 +1028,8 @@ final class DictationCoordinator: ObservableObject {
             heldFeedback = (
                 message: message,
                 duration: 1.2,
-                at: Date()
+                at: Date(),
+                aboutAMeeting: isMeetingPillUp
             )
         }
         isOnboardingPresented = true
@@ -1413,12 +1501,19 @@ final class DictationCoordinator: ObservableObject {
         flashNotice(message, duration: duration)
     }
 
+    /// `aboutAMeeting`: the pill is hidden from screen capture, like the
+    /// meeting's light (`HUDPresentation.hidesFromCapture`).
     private func flashNotice(
         _ message: String,
-        duration: TimeInterval = 1.6
+        duration: TimeInterval = 1.6,
+        aboutAMeeting: Bool = false
     ) {
         Task { @MainActor [weak self] in
-            await self?.flashFeedback(message, duration: duration)
+            await self?.flashFeedback(
+                message,
+                duration: duration,
+                aboutAMeeting: aboutAMeeting
+            )
         }
     }
 
@@ -1818,9 +1913,14 @@ final class DictationCoordinator: ObservableObject {
 
     private func flashFeedback(
         _ message: String,
-        duration: TimeInterval
+        duration: TimeInterval,
+        aboutAMeeting: Bool = false
     ) async {
-        guard let shown = showFeedback(message, duration: duration) else {
+        guard let shown = showFeedback(
+            message,
+            duration: duration,
+            aboutAMeeting: aboutAMeeting
+        ) else {
             return
         }
         await expireFeedback(shown)
@@ -1831,7 +1931,8 @@ final class DictationCoordinator: ObservableObject {
     /// follows. nil when the setup window is holding it instead.
     private func showFeedback(
         _ message: String,
-        duration: TimeInterval
+        duration: TimeInterval,
+        aboutAMeeting: Bool = false
     ) -> ShownFeedback? {
         // the setup window force-dismissed the panel, so the sleep-then-
         // clear would run against something nobody can see and the
@@ -1843,27 +1944,23 @@ final class DictationCoordinator: ObservableObject {
             heldFeedback = (
                 message: message,
                 duration: duration,
-                at: Date()
+                at: Date(),
+                aboutAMeeting: aboutAMeeting
             )
             return nil
         }
 
+        // every sentence outranks a question: it is gone, unanswered.
+        if isQuestionUp {
+            questionTakenOffThePill()
+        }
         feedbackGeneration += 1
         let feedbackToken = feedbackGeneration
         let stateToken = stateGeneration
         activeFeedbackGeneration = feedbackToken
+        meetingPillGeneration = aboutAMeeting ? feedbackToken : nil
         hudViewModel.showFeedback(message)
-        // the pill is a non-key, click-through panel, so voiceover never
-        // visits it. without this, a failed dictation and a successful one
-        // are the same silence to someone who cannot look.
-        NSAccessibility.post(
-            element: NSApp as Any,
-            notification: .announcementRequested,
-            userInfo: [
-                .announcement: message,
-                .priority: NSAccessibilityPriorityLevel.high.rawValue,
-            ]
-        )
+        announce(message)
         synchronizeHUD()
 
         // a pill that wraps to two lines is two reads. measured here rather
@@ -1883,6 +1980,20 @@ final class DictationCoordinator: ObservableObject {
         )
     }
 
+    /// the pill is a non-key panel that voiceover never visits. without
+    /// this, a failed dictation and a successful one are the same silence
+    /// to someone who cannot look.
+    private func announce(_ message: String) {
+        NSAccessibility.post(
+            element: NSApp as Any,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: message,
+                .priority: NSAccessibilityPriorityLevel.high.rawValue,
+            ]
+        )
+    }
+
     private func expireFeedback(_ shown: ShownFeedback) async {
         try? await Task.sleep(for: .seconds(shown.lasts))
         guard shown.stateToken == stateGeneration,
@@ -1894,6 +2005,7 @@ final class DictationCoordinator: ObservableObject {
         activeFeedbackGeneration = nil
         hudViewModel.clearFeedback()
         synchronizeHUD()
+        askTheWaitingQuestionIfFree()
         sayLearnedIfQuiet()
     }
 
@@ -1902,6 +2014,13 @@ final class DictationCoordinator: ObservableObject {
         _ newState: State,
         fastHUDDismiss: Bool
     ) {
+        // dictation wins: a take takes the pill from a question, which is
+        // gone unanswered. the lamp settling at idle when it already was,
+        // as it does after an engine check, takes nothing.
+        let questionStays = isQuestionUp && state == .idle && newState == .idle
+        if isQuestionUp, !questionStays {
+            questionTakenOffThePill()
+        }
         if newState == .recording {
             // they have moved on and are talking again; a held sentence
             // about the last take would land on this one.
@@ -1912,6 +2031,9 @@ final class DictationCoordinator: ObservableObject {
         activeFeedbackGeneration = nil
         state = newState
         hudViewModel.update(state: newState)
+        // a take has the lamp from the press to the cool-out; the meeting's
+        // light is back the moment it lets go.
+        showTheMeetingLight()
         // nothing ticks at idle: the watchdog follows a press and lingers
         // a few seconds after it, then stops.
         switch newState {
@@ -1925,11 +2047,15 @@ final class DictationCoordinator: ObservableObject {
             watchdog.watch(.transcribing)
         }
 
+        if questionStays {
+            putTheQuestionBack()
+        }
         synchronizeHUD(fastDismiss: fastHUDDismiss)
         if newState == .idle {
             // a turn later: a pill the take owes lands with this change,
             // and goes first.
             Task { @MainActor [weak self] in
+                self?.askTheWaitingQuestionIfFree()
                 self?.sayLearnedIfQuiet()
             }
         }
@@ -1945,7 +2071,8 @@ final class DictationCoordinator: ObservableObject {
                 state: self.state.lamp,
                 hasFeedback: self.activeFeedbackGeneration != nil,
                 isOnboarding: self.isOnboardingPresented,
-                prewarmPresentsHUD: self.prewarmPresentsHUD
+                prewarmPresentsHUD: self.prewarmPresentsHUD,
+                meetingLight: self.meetingLight
             ) else {
                 panel.dismiss(fast: fastDismiss)
                 return
@@ -1959,7 +2086,19 @@ final class DictationCoordinator: ObservableObject {
                     screenWidth: screenWidth
                 )
             )
+            panel.hideFromCapture(
+                HUDPresentation.hidesFromCapture(
+                    meetingLight: self.meetingLight,
+                    meetingPillIsUp: self.isMeetingPillUp,
+                    isHiddenNow: panel.isHiddenFromCapture,
+                    isOnScreen: panel.isVisible
+                )
+            )
             panel.present()
+            // only a question takes the mouse, and only over the pill.
+            panel.makePillReachable(
+                self.isQuestionUp ? self.hudViewModel.layout.size : nil
+            )
         }
     }
 }
@@ -1976,8 +2115,11 @@ extension DictationCoordinator {
         machine.microphoneForPress = { [weak self] in
             self?.microphoneForPress() ?? .refused(.modelNotReady)
         }
+        // a question is not the pill a press can mean: a press while one is
+        // up is a new take, not a retry of the last failure.
         machine.isPillShowing = { [weak self] in
-            self?.activeFeedbackGeneration != nil
+            guard let self else { return false }
+            return self.activeFeedbackGeneration != nil && !self.isQuestionUp
         }
     }
 
@@ -2077,55 +2219,162 @@ extension DictationCoordinator {
         MeetingEngines.installed()
     }
 
-    var meetingAppName: String {
-        meetings.app.map(MeetingApps.displayName) ?? ""
-    }
-
-    /// What setup's last button should promise, when an errand is waiting.
-    var pendingMeetingAppName: String? {
-        pendingMeetingApp.map(MeetingApps.displayName)
-    }
-
-    /// `record a meeting ▸ zoom`. the model is a download you may not have
-    /// asked for yet: then this is the route back to the one surface that
-    /// knows how to ask (SPEC §5).
-    func startMeeting(_ app: RunningApp) {
+    /// `record a meeting`, and the pill's `record`. the model is a download
+    /// you may not have asked for yet: then this is the route back to the
+    /// one surface that knows how to ask (SPEC §5). the meeting is named
+    /// after the call that is on, if one is, so the file, its front matter
+    /// and the hook say `zoom` (ADR 0047); `name` is the call the pill
+    /// asked about. `model` is `record with`: this one meeting is heard by
+    /// it instead of the default, and only the menu passes one — the pill's
+    /// button and the hotkey always use the default.
+    func startMeeting(name: String? = nil, model: MeetingModel? = nil) {
         guard !meetings.isRecording else { return }
-        guard installedMeetingModels.contains(settings.meetingModel) else {
-            pendingMeetingApp = app
-            runOnboardingAgain(scope: .meetingsOnly)
+        guard installedMeetingModels.contains(model ?? settings.meetingModel) else {
+            if let model {
+                // the menu listed it when it was drawn, and it has gone since.
+                // setup fetches the default, so this is only said.
+                flashNotice(
+                    "\(model.shortName) is not on this mac",
+                    aboutAMeeting: true
+                )
+            } else {
+                meetingWaitsOnSetup = true
+                runOnboardingAgain(scope: .meetingsOnly)
+            }
             return
         }
         if state == .recording {
-            flashNotice("finish dictating first")
+            flashNotice("finish dictating first", aboutAMeeting: true)
             return
         }
         liveTranscript.clear()
-        liveTranscript.app = MeetingApps.displayName(app)
         liveTranscript.elapsed = .zero
         Task { [notifier = meetings.notifier] in
             await notifier.requestPermissionIfNeeded()
         }
-        meetings.coordinator.start(tapping: app)
+        withdrawQuestions { !$0.isAboutARecording }
+        meetings.coordinator.start(name: name ?? meetings.currentCall, model: model)
+    }
+
+    /// the lines of `record with ▸`, empty when the menu shows none.
+    var recordWithChoices: [RecordWith.Choice] {
+        RecordWith.choices(
+            installed: installedMeetingModels,
+            default: settings.meetingModel,
+            isRecording: meetings.isRecording)
     }
 
     func stopMeeting() {
         meetings.withdrawNudge()
+        withdrawQuestions(\.isAboutARecording)
         meetings.stop()
     }
+
+    /// what the meeting shortcut does, and what the menu would: `record a
+    /// meeting`, or `stop recording` while one runs. one still writing its
+    /// file is not recording, so a press then starts the next.
+    func toggleMeeting() {
+        switch MeetingShortcut.press(whileRecording: meetings.isRecording) {
+        case .start:
+            startMeeting()
+        case .stop:
+            stopMeeting()
+        }
+    }
+
+    /// registered at launch and again whenever settings change it. a sink
+    /// on a `@Published` runs before the new value is stored, so it uses
+    /// the one it is handed.
+    private func wireMeetingShortcut() {
+        meetingHotkey.onPress = { [weak self] in
+            self?.toggleMeeting()
+        }
+        settings.$meetingShortcut
+            .removeDuplicates()
+            .sink { [weak self] shortcut in
+                guard let self else {
+                    return
+                }
+                self.meetingHotkey.shortcut = shortcut
+                self.meetingShortcutIsTaken = self.meetingHotkey.isTaken
+            }
+            .store(in: &settingsCancellables)
+    }
+
+    /// while the settings row listens for a new combination, the old one
+    /// is let go, so pressing it again does not start a meeting.
+    func holdMeetingShortcut(_ held: Bool) {
+        meetingHotkey.isHeld = held
+    }
+
+    #if DEBUG
+    /// Development only, compiled out of release like the lamp lab: a
+    /// meeting a script can start and stop without the mouse, so a check of
+    /// the real tap can run end to end. `notifyutil -p
+    /// gg.jass.dictate.dev.meeting.toggle` does what the menu would —
+    /// `record a meeting`, or `stop recording` while one runs.
+    private func listenForTheMeetingToggle() {
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "\(AppIdentity.bundleID).meeting.toggle", &token, .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.toggleMeeting()
+            }
+        }
+    }
+
+    /// Development only, beside the toggle: `notifyutil -p
+    /// gg.jass.dictate.dev.meeting.probe-sweep` during a meeting plays the
+    /// quiet probe at five levels and logs what the tap heard of each
+    /// (measurement 02). Without a meeting it does nothing.
+    private func listenForTheProbeSweep() {
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "\(AppIdentity.bundleID).meeting.probe-sweep", &token, .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.meetings.isRecording else { return }
+                self.meetings.coordinator.sweepTheQuietProbe()
+            }
+        }
+    }
+
+    /// Development only: `notifyutil -p gg.jass.dictate.dev.meeting.lose-tap`
+    /// during a meeting takes its tap for dead and rebuilds it.
+    private func listenForTheTapLoss() {
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "\(AppIdentity.bundleID).meeting.lose-tap", &token, .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.meetings.isRecording else { return }
+                self.meetings.coordinator.loseTheTapForDevelopment()
+            }
+        }
+    }
+    #endif
 
     /// A quit can arrive from the menu, from ⌘Q, or from brew asking the app
     /// to go so it can replace the bundle under it (the cask's
     /// `uninstall quit:`). A meeting recording is one of the two durable
     /// nouns, so a quit that lands mid-meeting stops it first and waits for
-    /// the markdown — `finishQuitting()` answers when the transcript is
-    /// written, and the ceiling answers if whisper is still flushing.
+    /// the markdown — and so does one that lands while a meeting already
+    /// stopped is still being written out, or two are. `finishQuitting()`
+    /// answers once every transcript is written, and the ceiling answers if
+    /// whisper is still flushing.
     func prepareToQuit() -> NSApplication.TerminateReply {
-        guard meetings.isRecording else {
+        guard meetings.isRecording || meetings.isWritingOut else {
             return .terminateNow
         }
         quitWaitingOnMeeting = true
-        stopMeeting()
+        if meetings.isRecording {
+            stopMeeting()
+        }
+        Task { @MainActor [weak self, meetings = meetings] in
+            await meetings.untilWrittenOut()
+            self?.finishQuitting()
+        }
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(20))
             self?.finishQuitting()
@@ -2164,29 +2413,54 @@ extension DictationCoordinator {
         meetings.onNotifierBuilt = { [weak self] notifier in
             self?.wire(notifier)
         }
+        meetings.onCallMonitorBuilt = { [weak self] monitor in
+            self?.wire(monitor)
+        }
         // recovery loads the meeting model and can run for a quarter of an
         // hour. five seconds of head start keeps it off the dictation
         // model's prewarm, so the first fn press is not slower for it. the
         // number is a guess, like the rest of MeetingThresholds.
         meetings.launch(
             setUp: hasMeetingsSetUp,
+            watchesForCalls: chosenMeetingModelIsInstalled,
             transcripts: settings.meetingsFolder,
             spool: MeetingSpool(),
-            recoveryDelay: .seconds(5)
+            recoveryDelay: .seconds(5),
+            keptAudio: KeptAudio()
         )
+        // a model picked in settings starts the watch if it is on this mac,
+        // and stops it if it is not. a sink on a `@Published` runs before
+        // the new value is stored, so it reads the one it is handed.
+        settings.$meetingModel
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] model in
+                self?.watchForCallsIfSetUp(model)
+            }
+            .store(in: &settingsCancellables)
     }
 
-    /// a meeting model on disk, or a folder somebody chose. both are a
-    /// stat, so a mac that only dictates learns it has nothing to repair
-    /// without walking the transcripts folder.
+    /// the meeting model settings chose, on disk. not any meeting model:
+    /// parakeet is on disk for anyone who dictates with v3, and a mac that
+    /// only dictates is not set up for meetings.
+    private var chosenMeetingModelIsInstalled: Bool {
+        MeetingEngines.isInstalled(settings.meetingModel)
+    }
+
+    /// the chosen meeting model on disk, or a folder somebody chose. both
+    /// are a stat, so a mac that only dictates learns it has nothing to
+    /// repair without walking the transcripts folder.
     private var hasMeetingsSetUp: Bool {
-        !installedMeetingModels.isEmpty || settings.meetingsFolderWasChosen
+        chosenMeetingModelIsInstalled || settings.meetingsFolderWasChosen
     }
 
     /// the notifier's buttons. a nudge or a stop from a banner the last run
     /// left behind finds no meeting, and does nothing.
     private func wire(_ notifier: MeetingNudgeNotifier) {
+        // answered in the notification, the pill's copy of the nudge
+        // leaves without being acted on: exactly one answer counts.
         notifier.onKeepGoing = { [weak self] in
+            self?.withdrawQuestions { $0 == .stillRecording }
             self?.meetings.keepGoing()
         }
         notifier.onStop = { [weak self] in
@@ -2194,6 +2468,30 @@ extension DictationCoordinator {
         }
         notifier.onShowFile = { url in
             NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+    }
+
+    /// the call watcher suggests; the pill asks. the app never acts on a
+    /// suggestion by itself (ADR 0047).
+    private func wire(_ monitor: CallMonitor) {
+        monitor.onSuggestion = { [weak self] suggestion in
+            self?.ask(MeetingQuestion(suggestion))
+        }
+        monitor.onCallsChanged = { [weak self] in
+            self?.unrecordedCall = self?.meetings.unrecordedCall
+        }
+    }
+
+    /// a meeting model arrived, from setup or from the first press of
+    /// record, or settings picked another: a call is offered only while
+    /// the chosen one is on this mac, so `record` can start what it offers.
+    /// a meeting that records keeps its watch, so the end of its call is
+    /// still asked about.
+    private func watchForCallsIfSetUp(_ model: MeetingModel? = nil) {
+        if MeetingEngines.isInstalled(model ?? settings.meetingModel) {
+            meetings.watchForCalls()
+        } else if !meetings.isRecording {
+            meetings.stopWatchingForCalls()
         }
     }
 
@@ -2206,9 +2504,21 @@ extension DictationCoordinator {
         built.onLine = { [weak self] line in
             self?.liveTranscript.upsert(line)
         }
+        // the lamp follows the meeting's phase, which the menu and the badge
+        // read too. from the value handed over: a @Published sink runs
+        // before the new phase is stored.
+        built.$phase
+            .removeDuplicates()
+            .sink { [weak self] phase in
+                self?.meetingPhaseChanged(phase)
+            }
+            .store(in: &meetingCancellables)
         built.recordHookRun = { [weak self] run in
             self?.settings.meetingHookLastRunAt = run.finishedAt
             self?.settings.meetingHookLastRunLabel = run.outcome.label
+        }
+        built.keepMeetingRecord = { [weak self] record in
+            self?.keep(record)
         }
         built.$elapsed
             .sink { [weak self] elapsed in
@@ -2219,6 +2529,11 @@ extension DictationCoordinator {
         // meeting that starts without this line leaves the menu drawing the
         // idle version, with no way to stop what it cannot see.
         built.$state
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &meetingCancellables)
+        // the menu's first line and the badge read the phase.
+        built.$phase
             .removeDuplicates()
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &meetingCancellables)
@@ -2238,12 +2553,43 @@ extension DictationCoordinator {
             .removeDuplicates()
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &meetingCancellables)
-        // same reason as the two above: the menu watches this object, and
-        // the recovery line lives on the one nested inside it.
-        built.$recovering
+        // the call watcher hears a recording start or stop at once, so the
+        // menu's call line goes the moment you press record. a turn later,
+        // for the same willSet reason.
+        built.$state
+            .map { $0 != .idle }
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.meetings.recordingChanged()
+                }
+            }
+            .store(in: &meetingCancellables)
+        // settings › history watches this object too, and its rows say which
+        // transcript is being made again.
+        built.$transcribingAgain
             .removeDuplicates()
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &meetingCancellables)
+    }
+
+    /// how a meeting ended, the way a press's is kept: the line to the
+    /// unified log now, the file on the press log's queue, in order. one
+    /// per meeting, whatever the ending, and none of what was said.
+    private func keep(_ record: MeetingRecord) {
+        meetingRecordLogger.notice("\(record.line(), privacy: .public)")
+        let store = meetingRecords
+        let logger = meetingRecordLogger
+        pressLogQueue.async {
+            do {
+                try store.append(record)
+            } catch {
+                logger.error(
+                    "couldn't keep a meeting record: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
     }
 
     private func handle(_ event: MeetingEvent) {
@@ -2256,52 +2602,133 @@ extension DictationCoordinator {
         case .nudge:
             // only a built coordinator says anything, so this builds nothing
             meetings.notifier.ask(
-                app: meetingAppName,
                 quietFor: meetings.coordinator.thresholds.quietNudgeAfter
             )
+            // and on the pill, for whoever has notifications off. whichever
+            // is answered first is the answer; the other is withdrawn.
+            ask(.stillRecording)
         case .saved(let summary):
-            liveTranscriptPanel?.dismissKeepingPreference()
+            dismissLiveTranscriptUnlessRecording()
             // the file *is* the feature, and the pill that names it is gone
             // in two seconds — often before you are back at the mac.
             lastMeeting = summary
             lastMeetingSavedAt = Date()
             meetings.notifier.saved(summary)
-            // the transcript has landed, so a quit that was waiting on it
-            // can go through. the hook runs after this and may not finish;
-            // the file it was told about is already written.
-            finishQuitting()
+            // a quit waiting on the transcript is answered by
+            // `untilWrittenOut`, not here: this file may be one of two.
         case .saveFailed:
-            liveTranscriptPanel?.dismissKeepingPreference()
+            dismissLiveTranscriptUnlessRecording()
             meetings.notifier.saveFailed()
-            // nothing more will be written, so a quit waiting on the file
-            // goes through here too.
-            finishQuitting()
-        case .nothingToKeep, .engineFailed:
-            liveTranscriptPanel?.dismissKeepingPreference()
-            finishQuitting()
-        case .cannotHear:
+        case .nothingToKeep, .engineFailed, .spoolFailed:
+            dismissLiveTranscriptUnlessRecording()
+        case .cannotHear, .micNotAllowed, .micFailed:
             // the pill cannot be clicked, so naming the switch was a dead
             // end. this reopens the one surface allowed to ask for it, and
-            // leaves a way back in the menu for anyone who closes it.
-            meetingsNeedAttention = true
+            // leaves a way back in the menu for anyone who closes it. only
+            // ever at the start: a problem mid-call is the lamp's alone. a
+            // mic that would not start has no switch, and opens nothing.
             liveTranscriptPanel?.dismissKeepingPreference()
-            runOnboardingAgain(scope: .meetingsOnly, openAt: .permissions)
-        case .recovering, .gapBegan, .gapEnded, .writingItOut, .hookFailed:
+            if event.opensSetup {
+                // the row is about the tap: a mic that is not allowed opens
+                // the same window, but `fix system audio…` would be the
+                // wrong name for the way back.
+                if case .cannotHear = event { meetingsNeedAttention = true }
+                runOnboardingAgain(scope: .meetingsOnly, openAt: .permissions)
+            }
+        case .gettingReady, .recovering, .gapBegan, .gapEnded, .problemBegan,
+             .problemCleared, .micMuted, .micUnmuted, .writingItOut, .readingAgain,
+             .hookFailed, .transcribingAgain, .transcribedAgain,
+             .couldNotTranscribeAgain:
             break
         }
 
         if let text = event.hudText {
             let duration: TimeInterval
             switch event {
-            case .hookFailed, .engineFailed, .saveFailed: duration = 4
+            case .hookFailed, .engineFailed, .spoolFailed, .saveFailed, .couldNotTranscribeAgain,
+                 .transcribedAgain, .micFailed: duration = 4
             // a recovered meeting arrives unprompted and is about yesterday:
             // two seconds is not long enough to read it.
             case .saved(let summary): duration = summary.recovered ? 4 : 2
-            case .writingItOut, .recovering: duration = 6
+            case .writingItOut, .readingAgain, .recovering, .transcribingAgain: duration = 6
             default: duration = 2
             }
-            flashNotice(text, duration: duration)
+            flashNotice(text, duration: duration, aboutAMeeting: true)
         }
+    }
+
+    /// the lamp reads the meeting's phase: the ember while it gets ready,
+    /// the steady light while it records (a rebuild included: the pill
+    /// says the gap), the attention colour while a problem stands, out
+    /// with the cool-out at the stop. read from the phase, not the events:
+    /// a mute that ends a mic problem says `micMuted`, not that it cleared.
+    private func meetingPhaseChanged(_ phase: MeetingPhase) {
+        meetingFacts = HUDMeetingFacts(phase)
+        followTheMeeting()
+    }
+
+    /// the meeting's facts moved: its light follows, and a light that goes
+    /// out keeps the panel up for the cool-out before it lets go.
+    private func followTheMeeting() {
+        let next = HUDPresentation.meetingLight(meetingFacts, after: meetingLight)
+        guard next != meetingLight else {
+            return
+        }
+        meetingLight = next
+        meetingLightCooling?.cancel()
+        meetingLightCooling = nil
+        if next == .coolingOut {
+            meetingLightCooling = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(HUDWaveMotion.coolDuration))
+                guard !Task.isCancelled,
+                      let self,
+                      self.meetingLight == .coolingOut else {
+                    return
+                }
+                self.meetingLight = .off
+                self.showTheMeetingLight()
+                self.synchronizeHUD(fastDismiss: true)
+            }
+        }
+        showTheMeetingLight()
+        synchronizeHUD()
+    }
+
+    /// the view wears the meeting's light whenever the lamp is the
+    /// meeting's, a pill over it or not: the pill leaving shows what was
+    /// under it, and a take ending gives the lamp back.
+    private func showTheMeetingLight() {
+        let underThePill = HUDPresentation.stage(
+            state: state.lamp,
+            hasFeedback: false,
+            isOnboarding: false,
+            prewarmPresentsHUD: prewarmPresentsHUD,
+            meetingLight: meetingLight
+        )
+        if case let .meeting(light) = underThePill {
+            hudViewModel.showMeetingLight(light)
+        } else {
+            hudViewModel.showMeetingLight(.off)
+        }
+    }
+
+    /// a pill about a meeting is up: any question (each is about a
+    /// meeting), or a sentence a meeting said.
+    private var isMeetingPillUp: Bool {
+        guard let active = activeFeedbackGeneration else {
+            return false
+        }
+        return isQuestionUp || active == meetingPillGeneration
+    }
+
+    /// the panel belongs to the meeting being recorded. the end of one
+    /// that stopped earlier — or of a recovery — can land while the next is
+    /// recording, and closing it then would take it from that one.
+    private func dismissLiveTranscriptUnlessRecording() {
+        guard !meetings.isRecording else {
+            return
+        }
+        liveTranscriptPanel?.dismissKeepingPreference()
     }
 
     private func prepareMeetingModel(progress: @escaping @Sendable (Double) -> Void) async -> Bool {
@@ -2312,8 +2739,250 @@ extension DictationCoordinator {
             Task { @MainActor in self?.meetingModelDownloads[model] = value }
         }
         meetingModelDownloads[model] = nil
+        if ok {
+            watchForCallsIfSetUp()
+        }
         return ok
     }
+}
+
+
+// MARK: - the pill's questions (ADR 0047)
+
+extension DictationCoordinator {
+    /// the two clicks a question can take, wired once: what they mean is up
+    /// to the question that is up when they land.
+    private func wirePillQuestions() {
+        hudViewModel.onPillButton = { [weak self] in
+            self?.answerTheQuestion(.button)
+        }
+        hudViewModel.onPillElsewhere = { [weak self] in
+            self?.answerTheQuestion(.elsewhere)
+        }
+    }
+
+    private var questionNow: Duration {
+        ContinuousClock.now - questionClockOrigin
+    }
+
+    /// up while the pill it went up on is still the pill.
+    private var isQuestionUp: Bool {
+        guard let questionShown else { return false }
+        return activeFeedbackGeneration == questionShown.token
+    }
+
+    /// from the call watcher, the nudge, or a development check. it goes up
+    /// on a free pill, or waits for one; it never interrupts anything.
+    private func ask(_ question: MeetingQuestion) {
+        guard isWorthAsking(question, afterWaiting: false) else { return }
+        let free = HUDPresentation.pillIsFreeForAQuestion(
+            state: state.lamp,
+            hasFeedback: activeFeedbackGeneration != nil && !isQuestionUp,
+            isOnboarding: isOnboardingPresented
+        )
+        if questions.ask(question, pillIsFree: free) {
+            putUp(question)
+        }
+    }
+
+    private func putUp(_ question: MeetingQuestion) {
+        feedbackGeneration += 1
+        let token = feedbackGeneration
+        activeFeedbackGeneration = token
+        questionShown = (
+            token,
+            PillCountdown(
+                lasts: question.lasts,
+                startedAt: questionNow,
+                pointerAt: NSEvent.mouseLocation
+            )
+        )
+        showOnThePill(question)
+        announce(question.text)
+        synchronizeHUD()
+        timeTheQuestion()
+    }
+
+    private func showOnThePill(_ question: MeetingQuestion) {
+        hudViewModel.showQuestion(
+            question.text,
+            button: HUDPillButton(
+                title: question.button,
+                accessibilityLabel: question.buttonLabel
+            )
+        )
+    }
+
+    /// a take, a sentence or setup took the pill: the question is gone,
+    /// unanswered, and the menu is where it can still be answered.
+    private func questionTakenOffThePill() {
+        questions.pillTaken()
+        questionShown = nil
+        questionExpiry?.cancel()
+        questionExpiry = nil
+    }
+
+    /// the lamp settled at idle when it already was, and cleared the pill
+    /// on the way: the same question goes back up, with the time it had.
+    private func putTheQuestionBack() {
+        guard let shown = questionShown, let question = questions.asked else {
+            return
+        }
+        feedbackGeneration += 1
+        questionShown = (feedbackGeneration, shown.countdown)
+        activeFeedbackGeneration = feedbackGeneration
+        showOnThePill(question)
+        timeTheQuestion()
+    }
+
+    /// the pill just came free: a question that waited for it goes up, if
+    /// the moment it was about has not passed.
+    private func askTheWaitingQuestionIfFree() {
+        guard HUDPresentation.pillIsFreeForAQuestion(
+            state: state.lamp,
+            hasFeedback: activeFeedbackGeneration != nil,
+            isOnboarding: isOnboardingPresented
+        ) else {
+            return
+        }
+        let next = questions.pillFreed { question in
+            isWorthAsking(question, afterWaiting: true)
+        }
+        if let next {
+            putUp(next)
+        }
+    }
+
+    /// record is for a call nothing is recording; the other two are about a
+    /// recording that is running. a record question that waited is also
+    /// about a call that must still be on.
+    private func isWorthAsking(
+        _ question: MeetingQuestion,
+        afterWaiting: Bool
+    ) -> Bool {
+        switch question {
+        case let .record(app):
+            return !meetings.isRecording
+                && (!afterWaiting || meetings.currentCall == app)
+        case .stopAfterCall, .stillRecording:
+            return meetings.isRecording
+        }
+    }
+
+    /// a click on the button or beside it, or the countdown running out.
+    /// the first of them is the answer; the pill goes, then the answer
+    /// does what it does, which for anything but the button is little or
+    /// nothing.
+    private func answerTheQuestion(_ answer: MeetingQuestion.Answer) {
+        guard isQuestionUp,
+              let question = questions.asked,
+              questions.answer(question) else {
+            return
+        }
+        questionShown = nil
+        questionExpiry?.cancel()
+        questionExpiry = nil
+        activeFeedbackGeneration = nil
+        hudViewModel.clearFeedback()
+        synchronizeHUD(fastDismiss: answer != .unanswered)
+        act(on: question.effect(of: answer))
+        askTheWaitingQuestionIfFree()
+        sayLearnedIfQuiet()
+    }
+
+    /// only the button starts or stops a recording, and it does what the
+    /// menu item of the same name does.
+    private func act(on effect: MeetingQuestion.Effect) {
+        switch effect {
+        case let .startMeeting(name):
+            startMeeting(name: name)
+        case .stopMeeting:
+            stopMeeting()
+        case .keepGoing:
+            // the pill answered the nudge; the notification's copy goes.
+            meetings.keepGoing()
+            meetings.withdrawNudge()
+        case .declineTheCall:
+            meetings.declineTheCall()
+        case .nothing:
+            break
+        }
+    }
+
+    /// answered somewhere else, or made moot: a meeting started or stopped
+    /// from the menu, the nudge answered in its notification. the question
+    /// leaves without being acted on, or stops waiting.
+    private func withdrawQuestions(_ which: (MeetingQuestion) -> Bool) {
+        let candidates = [questions.asked, questions.waiting].compactMap { $0 }
+        for question in candidates where which(question) {
+            let wasUp = isQuestionUp && questions.asked == question
+            guard questions.withdraw(question), wasUp else { continue }
+            questionShown = nil
+            questionExpiry?.cancel()
+            questionExpiry = nil
+            activeFeedbackGeneration = nil
+            hudViewModel.clearFeedback()
+            synchronizeHUD(fastDismiss: true)
+        }
+    }
+
+    /// the countdown stops once the pointer moves onto the pill, so it
+    /// never leaves from under a hand on its way to the button — for a
+    /// minute at most, and not for a pointer that was resting there when
+    /// the pill came up.
+    private func pointerOverPill(_ over: Bool) {
+        guard isQuestionUp, var shown = questionShown else { return }
+        shown.countdown.pointer(
+            isOver: over, at: NSEvent.mouseLocation, now: questionNow)
+        questionShown = shown
+        timeTheQuestion()
+    }
+
+    private func timeTheQuestion() {
+        questionExpiry?.cancel()
+        questionExpiry = nil
+        guard let shown = questionShown else {
+            return
+        }
+        let token = shown.token
+        let remaining = shown.countdown.timeLeft(at: questionNow)
+        questionExpiry = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: remaining)
+            guard !Task.isCancelled,
+                  let self,
+                  self.questionShown?.token == token else {
+                return
+            }
+            self.answerTheQuestion(.unanswered)
+        }
+    }
+
+    #if DEBUG
+    /// Development only, compiled out of release like the meeting toggle:
+    /// the call watcher's two suggestions and the nudge, faked, so the
+    /// pill's questions can be seen and clicked without a call or an hour
+    /// of silence. `notifyutil -p gg.jass.dictate.dev.call.suggest-record`
+    /// is a zoom call beginning, `….call.suggest-stop` one ending under a
+    /// recording, `….meeting.nudge` the quiet hour running out.
+    private func listenForTheCallChecks() {
+        let checks: [(String, @MainActor @Sendable (DictationCoordinator) -> Void)] = [
+            ("call.suggest-record", { $0.ask(MeetingQuestion(.record("zoom"))) }),
+            ("call.suggest-stop", { $0.ask(MeetingQuestion(.stop("zoom"))) }),
+            ("meeting.nudge", { $0.handle(.nudge) }),
+        ]
+        for (name, check) in checks {
+            var token: Int32 = 0
+            notify_register_dispatch(
+                "\(AppIdentity.bundleID).\(name)", &token, .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    check(self)
+                }
+            }
+        }
+    }
+    #endif
 }
 
 

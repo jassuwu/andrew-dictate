@@ -68,4 +68,72 @@ final class MeetingsListModelTests: XCTestCase {
         XCTAssertTrue(model.isSearching)
         XCTAssertEqual(model.items.count, 1, "and the folder is untouched")
     }
+
+    // MARK: - recordings that could not be transcribed
+
+    /// the line that counts them offers a retry, and what it says afterwards
+    /// is what is on disk afterwards: the ones that worked are meetings now,
+    /// the ones that did not are still counted.
+    func testTryingAgainRereadsTheCountAndTheMeetingsOnceTheRetryIsDone() async {
+        let zoom = meeting(app: "zoom", at: 1_000_000)
+        var setAside = 3
+        var meetings: [MeetingSummary] = []
+        var asked = 0
+        let model = MeetingsListModel(
+            setAsideFolder: URL(fileURLWithPath: "/tmp/unreadable"),
+            countSetAside: { setAside },
+            tryAgain: {
+                asked += 1
+                setAside = 1
+                meetings = [zoom]
+            },
+            load: { meetings })
+        XCTAssertEqual(model.setAsideCount, 3)
+        XCTAssertEqual(model.items, [])
+        XCTAssertTrue(model.canTryAgain)
+
+        await model.tryAgain()
+
+        XCTAssertEqual(asked, 1)
+        XCTAssertEqual(model.setAsideCount, 1)
+        XCTAssertEqual(model.items, [zoom])
+        XCTAssertFalse(model.tryingAgain)
+    }
+
+    /// a retry can take a quarter of an hour a recording. the line says it
+    /// is working, and asking again meanwhile asks for nothing.
+    func testTheLineSaysItIsTryingAgainWhileItRunsAndAsksOnlyOnce() async {
+        var model: MeetingsListModel!
+        var asked = 0
+        var tryingWhileItRan: Bool?
+        model = MeetingsListModel(
+            setAsideFolder: URL(fileURLWithPath: "/tmp/unreadable"),
+            countSetAside: { 2 },
+            tryAgain: {
+                asked += 1
+                tryingWhileItRan = model.tryingAgain
+                await model.tryAgain()
+            },
+            load: { [] })
+
+        await model.tryAgain()
+
+        XCTAssertEqual(asked, 1)
+        XCTAssertEqual(tryingWhileItRan, true)
+        XCTAssertFalse(model.tryingAgain)
+    }
+
+    /// a pane that was given nothing to retry with offers no button for it.
+    func testWithNothingToRetryWithThereIsNoTryAgain() async {
+        let model = MeetingsListModel(
+            setAsideFolder: URL(fileURLWithPath: "/tmp/unreadable"),
+            countSetAside: { 2 },
+            load: { [] })
+
+        await model.tryAgain()
+
+        XCTAssertFalse(model.canTryAgain)
+        XCTAssertFalse(model.tryingAgain)
+        XCTAssertEqual(model.setAsideCount, 2)
+    }
 }

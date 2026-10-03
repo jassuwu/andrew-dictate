@@ -45,6 +45,18 @@ final class MeetingSessionTests: XCTestCase {
         XCTAssertNil(session.finish(at: .seconds(10)))
     }
 
+    /// No output to play the start sound on: the tap was never asked, so
+    /// its silence proves nothing. "Could not check" is not "cannot hear" —
+    /// the meeting records, and what it captures is kept.
+    func testAProbeThatCouldNotPlayIsNotAProbeThatWentUnheard() {
+        var session = session()
+        session.start()
+        session.couldNotPlayTheProbe()
+
+        XCTAssertEqual(session.state, .recording)
+        XCTAssertEqual(session.finish(at: .seconds(30))?.isComplete, true)
+    }
+
     // MARK: - the tap dying mid-meeting
 
     func testADeadTapIsRebuiltAndTheGapIsRemembered() {
@@ -82,17 +94,94 @@ final class MeetingSessionTests: XCTestCase {
         XCTAssertEqual(session.finish(at: .seconds(200))?.isComplete, true)
     }
 
-    func testARebuildThatFailsStopsPretendingToRecord() {
+    /// A tap that cannot be rebuilt is a problem, not the end: the meeting
+    /// goes on, your side with it, and the gap stays open until the tap is
+    /// back — or runs to the end of a meeting stopped before it was.
+    func testARebuildThatFailsIsAProblemTheMeetingRecordsThrough() {
         var session = session()
         session.start()
         session.heardTheProbe()
         session.tapWentSilent(at: .seconds(60))
-        session.rebuildFailed()
+        session.problemBegan(.cannotHearTheCall)
 
-        XCTAssertEqual(session.state, .cannotHear)
-        // What was captured before it broke is still worth keeping.
+        XCTAssertEqual(session.state, .rebuilding)
+        XCTAssertEqual(session.problem, .cannotHearTheCall)
+        XCTAssertEqual(session.dictationRequest(), .refuseAndSayWhy)
         let recording = session.finish(at: .seconds(70))
+        XCTAssertEqual(recording?.gaps, [.init(began: .seconds(60), ended: .seconds(70))])
         XCTAssertEqual(recording?.isComplete, false)
+        XCTAssertNil(session.problem, "a meeting that has ended has no problem")
+    }
+
+    func testAProblemClearsWhenItIsOver() {
+        var session = session()
+        session.start()
+        session.heardTheProbe()
+        session.tapWentSilent(at: .seconds(60))
+        session.problemBegan(.cannotHearTheCall)
+
+        session.tapRecovered(at: .seconds(90))
+        session.problemCleared(.cannotHearTheCall)
+
+        XCTAssertNil(session.problem)
+        XCTAssertEqual(session.state, .recording)
+        XCTAssertEqual(
+            session.finish(at: .seconds(100))?.gaps,
+            [.init(began: .seconds(60), ended: .seconds(90))])
+    }
+
+    /// A problem belongs to a meeting that is running: none before the tap
+    /// has been heard, none once it has stopped.
+    func testOnlyARunningMeetingHasAProblem() {
+        var session = session()
+        session.problemBegan(.cannotHearTheCall)
+        XCTAssertNil(session.problem)
+
+        session.start()
+        session.problemBegan(.cannotHearTheCall)
+        XCTAssertNil(session.problem)
+
+        session.heardTheProbe()
+        session.problemBegan(.cannotHearTheCall)
+        XCTAssertEqual(session.problem, .cannotHearTheCall)
+    }
+
+    /// The mic going silent and the disk filling are two things wrong at
+    /// once: both stand, the worse first, and each clears on its own.
+    func testTwoProblemsStandAtOnceAndClearOneAtATime() {
+        var session = session()
+        session.start()
+        session.heardTheProbe()
+        session.problemBegan(.diskNearlyFull)
+        session.problemBegan(.cannotHearYourMic("MacBook Pro Microphone"))
+
+        XCTAssertEqual(session.problems, [
+            .cannotHearYourMic("MacBook Pro Microphone"), .diskNearlyFull,
+        ])
+        XCTAssertEqual(session.problem, .cannotHearYourMic("MacBook Pro Microphone"))
+
+        session.problemCleared(.cannotHearYourMic)
+        XCTAssertEqual(session.problems, [.diskNearlyFull])
+
+        session.problemCleared(.diskNearlyFull)
+        XCTAssertEqual(session.problems, [])
+        XCTAssertNil(session.problem)
+    }
+
+    /// One of each kind: the call unheard is said one way while your side
+    /// is still recorded and another once it is not, and the second
+    /// wording takes the first's place rather than standing beside it.
+    func testAProblemOfAKindAlreadyStandingTakesItsPlace() {
+        var session = session()
+        session.start()
+        session.heardTheProbe()
+        session.tapWentSilent(at: .seconds(60))
+        session.problemBegan(.cannotHearTheCall)
+        session.problemBegan(.cannotHearAnything)
+
+        XCTAssertEqual(session.problems, [.cannotHearAnything])
+        session.problemCleared(.cannotHearTheCall)
+        XCTAssertEqual(session.problems, [])
     }
 
     // MARK: - dictation is blocked, and says so

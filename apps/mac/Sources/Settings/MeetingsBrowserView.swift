@@ -18,17 +18,22 @@ struct MeetingsBrowserView: View {
                     .padding(.top, 14)
             }
 
-            // kept, not deleted, and never retried again — so this is the
-            // only place it exists as far as anyone can tell.
+            // kept, not deleted, and not retried on its own — so this is the
+            // only place it exists as far as anyone can tell, and the only
+            // place to ask for another try.
             if viewModel.setAsideCount > 0, let folder = viewModel.setAsideFolder {
                 HStack(spacing: 8) {
-                    Text(
-                        viewModel.setAsideCount == 1
-                            ? "1 recording couldn't be transcribed"
-                            : "\(viewModel.setAsideCount) recordings couldn't be transcribed"
-                    )
-                    .font(BrandUI.bodyFont)
-                    .foregroundStyle(BrandUI.attention)
+                    Text(setAsideSentence)
+                        .font(BrandUI.bodyFont)
+                        .foregroundStyle(BrandUI.attention)
+
+                    if viewModel.canTryAgain {
+                        Button("try again") {
+                            Task { await viewModel.tryAgain() }
+                        }
+                        .font(.caption)
+                        .disabled(viewModel.tryingAgain)
+                    }
 
                     Button("show in finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([folder])
@@ -56,6 +61,10 @@ struct MeetingsBrowserView: View {
                         ForEach(viewModel.filtered) { meeting in
                             MeetingRow(
                                 meeting: meeting,
+                                audioNote: viewModel.audioNote(for: meeting),
+                                again: viewModel.again(for: meeting),
+                                transcribeAgain: { viewModel.transcribeAgain(meeting, with: $0) },
+                                deleteAudio: { viewModel.deleteAudio(of: meeting) },
                                 delete: { viewModel.delete(meeting) }
                             )
                             Divider().overlay(BrandUI.hairline)
@@ -68,10 +77,26 @@ struct MeetingsBrowserView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .preferredColorScheme(.dark)
     }
+
+    /// what the line says: how many, or that they are being tried.
+    private var setAsideSentence: String {
+        if viewModel.tryingAgain {
+            return "trying again…"
+        }
+        return viewModel.setAsideCount == 1
+            ? "1 recording couldn't be transcribed"
+            : "\(viewModel.setAsideCount) recordings couldn't be transcribed"
+    }
 }
 
 private struct MeetingRow: View {
     let meeting: MeetingSummary
+    /// `audio until fri 14:02`, `audio kept`, or nil when there is none.
+    let audioNote: String?
+    /// `transcribe again with ▸`, or why it is off, or that it is running.
+    let again: MeetingsListModel.Again
+    let transcribeAgain: (MeetingModel) -> Void
+    let deleteAudio: () -> Void
     let delete: () -> Void
 
     @State private var isHovering = false
@@ -100,6 +125,24 @@ private struct MeetingRow: View {
                 separator
                 Text(completeness.text)
                     .foregroundStyle(completeness.tint)
+
+                // the audio is on this mac for a while yet: said on the
+                // row, so nobody has to go looking to know it is there.
+                if let audioNote {
+                    separator
+                    Text(audioNote)
+                        .foregroundStyle(BrandUI.textSecondary)
+                        .lineLimit(1)
+                }
+
+                // a rerun takes minutes, and nothing else on the row says
+                // it is happening.
+                if again == .running {
+                    separator
+                    Text("transcribing again…")
+                        .foregroundStyle(BrandUI.textSecondary)
+                        .lineLimit(1)
+                }
             }
             .font(BrandUI.bodyFont)
 
@@ -115,6 +158,11 @@ private struct MeetingRow: View {
                         [meeting.fileURL]
                     )
                 }
+                againAction
+                if audioNote != nil {
+                    Button("delete audio now", action: deleteAudio)
+                        .help("the transcript stays")
+                }
                 Button("delete", action: delete)
             }
             .font(.caption)
@@ -125,6 +173,31 @@ private struct MeetingRow: View {
         .contentShape(Rectangle())
         .onTapGesture(count: 2, perform: open)
         .onHover { isHovering = $0 }
+    }
+
+    /// while the audio is kept, the models to read it again with. off, it
+    /// says why beside itself, so the row never has a dead button.
+    @ViewBuilder
+    private var againAction: some View {
+        switch again {
+        case .none:
+            EmptyView()
+        case .offer(let models):
+            Menu("transcribe again with") {
+                ForEach(models, id: \.self) { model in
+                    Button(model.shortName) { transcribeAgain(model) }
+                }
+            }
+            .help("read the kept audio again; the transcript is replaced")
+        case .wait(let why):
+            Text(why)
+                .foregroundStyle(BrandUI.textSecondary)
+            Menu("transcribe again with") {}
+                .disabled(true)
+        case .running:
+            Menu("transcribe again with") {}
+                .disabled(true)
+        }
     }
 
     /// the file *is* the artifact (ADR 0040), so this hands it to whatever

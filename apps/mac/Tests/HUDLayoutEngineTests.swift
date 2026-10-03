@@ -87,6 +87,82 @@ final class HUDLayoutEngineTests: XCTestCase {
     }
 }
 
+/// the pill's one button (ADR 0047): beside the words, inside the glass, and
+/// the pill grows to hold it rather than squeezing the sentence.
+extension HUDLayoutEngineTests {
+    func testAPillWithAButtonIsWiderByTheButtonAndTheGapBeforeIt() throws {
+        // wider than the smallest pill, so the minimum does not hide the sum
+        let message = "a question long enough to outgrow the smallest pill?"
+        let plain = HUDLayoutEngine.layout(
+            for: .text(message),
+            screenWidth: 1_440
+        )
+        let asking = HUDLayoutEngine.layout(
+            for: .text(message, button: "record"),
+            screenWidth: 1_440
+        )
+
+        let button = try XCTUnwrap(asking.button)
+        XCTAssertNil(plain.button)
+        XCTAssertEqual(asking.lineCount, 1)
+        XCTAssertEqual(asking.size.height, HUDLayoutEngine.minimumSize.height)
+        XCTAssertEqual(button.height, HUDLayoutEngine.buttonHeight)
+        XCTAssertEqual(
+            asking.size.width,
+            plain.size.width
+                - HUDLayoutEngine.horizontalPadding
+                + HUDLayoutEngine.buttonGap
+                + button.width
+                + HUDLayoutEngine.buttonInset,
+            accuracy: 0.001
+        )
+    }
+
+    /// the button sits as far from the glass's edge as the glass's corner
+    /// is round minus its own, so the two curves share a centre.
+    func testTheButtonIsConcentricWithThePill() {
+        XCTAssertEqual(
+            HUDLayoutEngine.buttonInset,
+            (HUDLayoutEngine.minimumSize.height - HUDLayoutEngine.buttonHeight) / 2
+        )
+        XCTAssertEqual(
+            HUDLayoutEngine.pillCornerRadius - HUDLayoutEngine.buttonInset,
+            HUDLayoutEngine.buttonHeight / 2
+        )
+    }
+
+    /// a pill without a button is the pill it always was.
+    func testAPillWithoutAButtonIsUnchanged() {
+        let message = "the mic changed — pasted what i had."
+        XCTAssertEqual(
+            HUDLayoutEngine.layout(for: .text(message), screenWidth: 1_512),
+            HUDLayoutEngine.layout(for: .text(message, button: nil), screenWidth: 1_512)
+        )
+        XCTAssertNil(
+            HUDLayoutEngine.layout(for: .text(message), screenWidth: 1_512).button
+        )
+    }
+
+    /// the questions are short on purpose: none of them wraps, even on the
+    /// smallest screen a mac ships with.
+    func testTheQuestionsStayOnOneLineOnASmallScreen() {
+        for (message, button) in [
+            ("call in facetime — record it?", "record"),
+            ("call ended — stop recording?", "stop"),
+            ("still recording?", "stop"),
+        ] {
+            XCTAssertEqual(
+                HUDLayoutEngine.layout(
+                    for: .text(message, button: button),
+                    screenWidth: 1_280
+                ).lineCount,
+                1,
+                message
+            )
+        }
+    }
+}
+
 /// `flashFeedback` pays a wrapped pill 0.6 s more, because two lines are two
 /// reads — so which messages wrap is a timing decision, not just a layout one.
 extension HUDLayoutEngineTests {

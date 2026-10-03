@@ -37,7 +37,7 @@ struct LiveTranscriptView: View {
     }
 
     private var header: some View {
-        Text("recording \(model.app) · \(clock)")
+        Text("recording · \(clock)")
             .font(BrandUI.machineFont(size: 11))
             .foregroundStyle(BrandUI.textSecondary)
             .lineLimit(1)
@@ -146,7 +146,6 @@ struct LiveTranscriptView: View {
 #if DEBUG
 private struct LiveTranscriptPreview: View {
     @StateObject private var model = LiveTranscriptModel(
-        app: "zoom",
         elapsed: .seconds(754),
         lines: [
             LiveLine(

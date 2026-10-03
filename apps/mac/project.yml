@@ -11,11 +11,15 @@ packages:
     # pinned, not ranged: the generated .xcodeproj is gitignored, so its
     # Package.resolved never reaches CI and `from:` let every release
     # resolve whatever was newest that morning. 0.15.6 arrived unable to
-    # compile for x86_64 and took a release build with it.
+    # compile for x86_64 and took a release build with it. the voice model
+    # in Sources/Resources/Voice is the one this version's VadManager is
+    # written for: moving the pin means checking it.
     exactVersion: 0.15.5
   WhisperKit:
     url: https://github.com/argmaxinc/WhisperKit
     # the meeting engine (ADR 0040). pinned for the same reason as above.
+    # setup fetches its tokenizer by repo name (MeetingEngines): moving the
+    # pin means checking it is still the repo WhisperKit asks for.
     exactVersion: 1.1.0
 
 targets:
@@ -32,6 +36,12 @@ targets:
         buildPhase: resources
       # copied as a folder so ATSApplicationFontsPath can point at it.
       - path: Sources/Resources/Fonts
+        type: folder
+        buildPhase: resources
+      # silero's voice model and its licence, copied as they are: a folder,
+      # so xcode does not recompile the compiled model. SileroVoice looks
+      # for it as `Voice` in the app's resources.
+      - path: Sources/Resources/Voice
         type: folder
         buildPhase: resources
     dependencies:
@@ -85,7 +95,7 @@ targets:
       path: Sources/Info.plist
       properties:
         CFBundleDisplayName: $(PRODUCT_NAME)
-        CFBundleShortVersionString: "0.10.0"
+        CFBundleShortVersionString: "0.11.0"
         CFBundleVersion: "6"
         LSUIElement: true
         # deliberately no LSMultipleInstancesProhibited: this block is
@@ -134,14 +144,19 @@ targets:
           # not link; the coordinator is tested through the seams instead
           - FluidDiarizer.swift
           - MeetingEngines.swift
-          - WhisperMeetingTranscriber.swift
+          - ParakeetStretchEngine.swift
+          - SileroDetector.swift
+          - WhisperStretchEngine.swift
       - Sources/Settings/MeetingsListModel.swift
       - Sources/Onboarding/OnboardingMeetingSetup.swift
       - Sources/App/AppIdentity.swift
       - Sources/App/AppRelaunch.swift
+      - Sources/App/BadgeLook.swift
+      - Sources/App/BadgeMarks.swift
       - Sources/App/Capabilities.swift
       - Sources/App/CaptureInterruptionNotice.swift
       - Sources/App/EnginePreparationState.swift
+      - Sources/App/MeetingPhaseLooks.swift
       - Sources/App/RemovalPlan.swift
       - Sources/App/RemovalViewModel.swift
       - Sources/App/RetryBuffer.swift
@@ -149,6 +164,8 @@ targets:
       - Sources/HUD/HUDPresentation.swift
       - Sources/HUD/WaveLevelShaper.swift
       - Sources/HUD/HUDLayoutEngine.swift
+      - Sources/HUD/HUDQuestionSlot.swift
+      - Sources/HUD/PillCountdown.swift
       - Sources/UI/BrandUI.swift
       - Sources/Settings/AppSettings.swift
       - Sources/Settings/DictationOption.swift
@@ -159,6 +176,9 @@ targets:
       - Sources/Permissions/EnginePrewarmGate.swift
       - Sources/Settings/SetupHealth.swift
       - Sources/Hotkey/HotkeyBinding.swift
+      - Sources/Hotkey/MeetingShortcut.swift
+      # for the words a failed registration gets; no test registers one.
+      - Sources/Hotkey/MeetingHotkey.swift
       - Sources/Hotkey/TapLockDetector.swift
       - Sources/Hotkey/TranscribingRepress.swift
       - Sources/Dictation
@@ -175,7 +195,9 @@ targets:
       - Sources/Instrumentation/UtteranceTimeline.swift
       - Sources/Instrumentation/TimelineSummary.swift
       - Sources/Instrumentation/PressLogStore.swift
+      - Sources/Instrumentation/MeetingRecordStore.swift
       - Sources/Instrumentation/PressDiagnostics.swift
+      - Sources/Instrumentation/LogLine.swift
       - Sources/Instrumentation/MainThreadWatchdog.swift
       # the protocol only; ParakeetEngine is the FluidAudio half.
       - Sources/Transcription/TranscriptionEngine.swift

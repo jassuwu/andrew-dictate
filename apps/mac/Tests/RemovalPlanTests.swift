@@ -164,6 +164,56 @@ final class RemovalPlanTests: XCTestCase {
         )
     }
 
+    /// the meeting records ride with the press log: no words in them, but
+    /// left behind they would be the one file keeping the folder alive, and
+    /// they say when you were on a call.
+    func testRemovingDictationsTakesTheMeetingRecordsAndTheFolder() throws {
+        try write("dictations.jsonl")
+        try write("presses.jsonl")
+        try write("meeting-records.jsonl", bytes: 512)
+
+        let entry = remover().plan().entries.first { $0.item == .dictations }
+        XCTAssertGreaterThanOrEqual(entry?.bytes ?? 0, 512)
+
+        XCTAssertTrue(remover().remove([.dictations]).isEmpty)
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: support.appendingPathComponent("meeting-records.jsonl").path
+            )
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: support.path))
+    }
+
+    /// meeting records with no press log beside them are still something to
+    /// remove.
+    func testMeetingRecordsAloneStillCountAsDictations() throws {
+        try write("meeting-records.jsonl")
+
+        XCTAssertEqual(
+            remover().plan().entries.first { $0.item == .dictations }?.exists,
+            true
+        )
+    }
+
+    /// the file the store writes is the file the plan looks for, whatever
+    /// either is later called.
+    func testThePlanLooksForTheFileTheStoreWrites() throws {
+        let store = MeetingRecordStore(
+            fileURL: support.appendingPathComponent(MeetingRecordStore.fileName))
+        try store.append(
+            MeetingRecord(
+                outcome: .saved, app: "zoom", model: "m",
+                startedAt: Date(timeIntervalSince1970: 1_790_923_951), durationS: 1))
+
+        XCTAssertEqual(MeetingRecordStore.fileName, "meeting-records.jsonl")
+        XCTAssertEqual(
+            remover().plan().entries.first { $0.item == .dictations }?.exists,
+            true
+        )
+        XCTAssertTrue(remover().remove([.dictations]).isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL.path))
+    }
+
     /// the pairs you turned down ride with the dictionary they were
     /// turned down from: left behind, they would keep the folder alive and
     /// a reinstall would still refuse to learn them.

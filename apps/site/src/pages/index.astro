@@ -12,9 +12,9 @@ const compare = [
   { row: "your voice", ours: "never leaves the mac", theirs: "transcribed in the cloud", src: "https://wisprflow.ai/privacy" },
   { row: "also sent", ours: "nothing", theirs: "text around your cursor, on-screen text, and a screenshot", src: "https://docs.wisprflow.ai/articles/4678293671-feature-context-awareness" },
   { row: "on a plane", ours: "works", theirs: "needs a connection", src: "https://docs.wisprflow.ai/articles/5094956927-fix-no-internet-connection-issues" },
-  { row: "meetings", ours: "transcript written on your mac, audio never kept", theirs: "notetaker, on the free tier", src: "https://wisprflow.ai/post/wispr-flow-notetaker" },
+  { row: "meetings", ours: "transcript written on your mac, audio kept there a day by default, then deleted", theirs: "notetaker, on the free tier", src: "https://wisprflow.ai/post/wispr-flow-notetaker" },
   { row: "source", ours: "MIT", theirs: "closed" },
-  { row: "languages", ours: "english, or 25 languages · meetings hear anything and write english", theirs: "100+, auto-detected", src: "https://wisprflow.ai/" },
+  { row: "languages", ours: "english, or 25 languages · meetings in english by default, from any language whisper knows", theirs: "100+, auto-detected", src: "https://wisprflow.ai/" },
   { row: "platforms", ours: "macOS, apple silicon", theirs: "mac, windows, iphone, android", src: "https://wisprflow.ai/", them: true },
 ];
 
@@ -127,11 +127,12 @@ const description =
           </svg>
           <h2 class="mt-4 text-[16px] font-semibold tracking-[-0.01em] text-[#f9e9a8]">record a meeting</h2>
           <p class="mt-2 text-[14px] leading-[1.7] text-[#f2ede0]/65">
-            pick the app from the menu bar. press stop and you have one markdown
-            file, speakers split out, everything in english.
+            press record in the menu bar. your mic is you, and whatever the
+            mac plays is them. press stop and you have one markdown file with
+            the speakers split out, written in english by the default model.
           </p>
           <p class="mt-4 font-mono text-[11.5px] leading-[1.8] tracking-[0.02em] text-[#f2ede0]/65">
-            ~2.9 gb · no audio kept · you start it, you stop it
+            ~2.9 gb · audio kept a day by default, a thin transcript's until you delete it · you start it, you stop it
           </p>
         </div>
       </section>
@@ -277,7 +278,6 @@ const description =
         <nav class="flex flex-wrap items-baseline gap-x-6 gap-y-2 text-[14px]">
           <a class="text-[#e5be62] transition hover:text-[#f9e9a8]" href="https://github.com/jassuwu/andrew-dictate">github</a>
           <a class="text-[#e5be62] transition hover:text-[#f9e9a8]" href="https://github.com/jassuwu/andrew-dictate/releases">releases</a>
-          <a class="text-[#e5be62] transition hover:text-[#f9e9a8]" href="https://github.com/jassuwu/andrew-dictate/releases/latest/download/andrew-dictate-launch.mp4">the film</a>
           <a class="hand text-[16px] text-[#e5be62] transition hover:text-[#f9e9a8]" href="https://jass.gg">made by jass</a>
         </nav>
       </footer>

@@ -81,15 +81,40 @@ struct AndrewDictateApp: App {
     private var lifecycleDelegate
 
     /// the badge carries hue and corner and nothing else. voiceover gets the
-    /// sentence, including which mic is live.
+    /// sentence: what the meeting is doing, or the call nobody records.
     private var menuBarLabel: String {
         if coordinator.needsAttention {
             return "Andrew Dictate — setup needed"
         }
-        if coordinator.meetings.isRecording {
-            return "Andrew Dictate — recording a meeting"
+        if let meeting = coordinator.meetings.phase.spoken {
+            return "Andrew Dictate — \(meeting)"
+        }
+        if let call = coordinator.unrecordedCall {
+            return "Andrew Dictate — call in \(call), not recording"
         }
         return "Andrew Dictate"
+    }
+
+    /// `record a meeting`, and under it `record with ▸` when another meeting
+    /// model is on this mac: the models other than the default, for this one
+    /// meeting. the submenu is the same menu's second line, so it comes and
+    /// goes with it and never shows while a meeting records.
+    @ViewBuilder
+    private var recordAMeeting: some View {
+        Button("record a meeting") {
+            coordinator.startMeeting()
+        }
+
+        let others = coordinator.recordWithChoices
+        if !others.isEmpty {
+            Menu("record with") {
+                ForEach(others, id: \.model) { choice in
+                    Button(choice.title) {
+                        coordinator.startMeeting(model: choice.model)
+                    }
+                }
+            }
+        }
     }
 
     var body: some Scene {
@@ -114,18 +139,27 @@ struct AndrewDictateApp: App {
                     .disabled(true)
             }
 
-            // a meeting owns the mic and the menu while it runs (ADR 0023):
-            // the state line, the stop, the live view. dictation's row goes,
-            // because dictation is refused until you stop.
-            if coordinator.meetings.isRecording {
-                Text(
-                    "recording \(coordinator.meetingAppName) · "
-                        + coordinator.meetings.elapsed.runningClock
-                )
-                .foregroundStyle(.secondary)
-                .disabled(true)
+            // what the meeting is doing, in words, first (ticket 27): getting
+            // ready, recording and its clock, a problem until it clears,
+            // writing it out — or an unsaved recording a crash left, being
+            // written out at launch. the badge and the lamp read the same
+            // phase. after a save there is none, and `show last meeting in
+            // finder` below leads for ten minutes.
+            if let line = coordinator.meetings.phase.menuLine(
+                elapsed: coordinator.meetings.elapsed
+            ) {
+                Text(line)
+                    .foregroundStyle(.secondary)
+                    .disabled(true)
+            }
 
-                Button("stop recording \(coordinator.meetingAppName)") {
+            // a meeting owns the mic and the menu while it runs (ADR 0023):
+            // the stop and the live view, from the press, getting ready
+            // included — a stop then keeps the words, because the file waits
+            // for the model. dictation's row goes, because dictation is
+            // refused until you stop.
+            if coordinator.meetings.isRecording {
+                Button("stop recording") {
                     coordinator.stopMeeting()
                 }
                 .keyboardShortcut(".", modifiers: [.command, .shift])
@@ -138,13 +172,16 @@ struct AndrewDictateApp: App {
                     coordinator.toggleLiveTranscript()
                 }
             } else {
-                // a spool the app died on is being written out in the
-                // background. the pill says it once; this says it for as
-                // long as it runs.
-                if let app = coordinator.meetings.recovering {
-                    Text("writing out an unsaved \(app) recording…")
+                // a call is on and nothing is recording it (ADR 0047). the
+                // pill offered it once, for fifteen seconds; the menu leads
+                // with it for as long as the call lasts, the way it leads
+                // with a recording while one runs.
+                if let call = coordinator.unrecordedCall {
+                    Text("call in \(call) · not recording")
                         .foregroundStyle(.secondary)
                         .disabled(true)
+
+                    recordAMeeting
                 }
 
                 // a meeting leaves one file and no other trace on screen.
@@ -186,27 +223,12 @@ struct AndrewDictateApp: App {
                     }
                 }
 
-                // nothing starts a recording but the user, and the user
-                // names the app (ADR 0023, 0040). meeting apps first.
-                Menu("record a meeting") {
-                    let ranked = MeetingApps.rank(MeetingApps.running())
-                    ForEach(ranked.meeting) { app in
-                        Button(MeetingApps.displayName(app)) {
-                            coordinator.startMeeting(app)
-                        }
-                    }
-                    if !ranked.meeting.isEmpty, !ranked.other.isEmpty {
-                        Divider()
-                    }
-                    ForEach(ranked.other) { app in
-                        Button(MeetingApps.displayName(app)) {
-                            coordinator.startMeeting(app)
-                        }
-                    }
-                    if ranked.meeting.isEmpty, ranked.other.isEmpty {
-                        Text("nothing is running that could be recorded")
-                            .disabled(true)
-                    }
+                // nothing starts a recording but the user (ADR 0023, 0047),
+                // and there is no app to pick: a meeting hears the whole mac
+                // (ADR 0049). it is named after the call that is on, if one
+                // is, and then it sits under that call's line above.
+                if coordinator.unrecordedCall == nil {
+                    recordAMeeting
                 }
 
                 // one row, and only while it is needed: the tap would not
@@ -284,12 +306,10 @@ struct AndrewDictateApp: App {
             }
             .keyboardShortcut("q")
         } label: {
+            // the badge wears what the coordinator says it is: a take, a
+            // meeting's rim, a call nobody records, or a setup gap.
             Image(
-                nsImage: MenuBarBrandIcon.image(
-                    for: coordinator.state,
-                    needsAttention: coordinator.needsAttention,
-                    isRecordingMeeting: coordinator.meetings.isRecording
-                )
+                nsImage: MenuBarBrandIcon.image(for: coordinator.badgeLook)
             )
             .accessibilityLabel(menuBarLabel)
             .task {

@@ -69,6 +69,9 @@ final class LiveTranscriptPanel: NSObject, NSWindowDelegate {
         // a floating transcript that vanishes the moment you click back into
         // the meeting is not a transcript.
         panel.hidesOnDeactivate = false
+        // other people's words, on a call where your screen may be shared:
+        // out of every capture, always. you see it; they do not.
+        panel.sharingType = CaptureExclusion.sharingType(hidden: true)
         panel.isReleasedWhenClosed = false
         panel.contentMinSize = NSSize(width: 280, height: 160)
         panel.delegate = self

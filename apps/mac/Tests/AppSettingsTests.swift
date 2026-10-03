@@ -249,6 +249,150 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertNil(AppSettings(userDefaults: userDefaults).meetingHook)
     }
 
+    /// ⌃⌥M, stored the way settings keep it, so a mac can be set up from the
+    /// command line and the hotkey comes back at launch.
+    func testTheMeetingShortcutSurvivesARelaunch() throws {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let shortcut = MeetingShortcut(
+            keyCode: 46, modifiers: [.control, .option], keyName: "M")
+
+        let settings = AppSettings(userDefaults: userDefaults)
+        settings.setMeetingShortcut(shortcut)
+
+        XCTAssertEqual(AppSettings(userDefaults: userDefaults).meetingShortcut, shortcut)
+        let stored = try XCTUnwrap(userDefaults.data(forKey: "AndrewDictate.meetingShortcut"))
+        XCTAssertEqual(
+            try JSONDecoder().decode(MeetingShortcut.self, from: stored), shortcut)
+    }
+
+    /// the shape `defaults write … -data` can write by hand.
+    func testAMeetingShortcutWrittenByHandLoadsAtLaunch() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        userDefaults.set(
+            Data(#"{"keyCode":46,"keyName":"M","modifiers":3}"#.utf8),
+            forKey: "AndrewDictate.meetingShortcut")
+
+        XCTAssertEqual(
+            AppSettings(userDefaults: userDefaults).meetingShortcut,
+            MeetingShortcut(keyCode: 46, modifiers: [.control, .option], keyName: "M"))
+    }
+
+    /// ⌘W kept from a build that took it would go on closing nothing and
+    /// starting meetings: a shortcut this build would refuse does not load.
+    func testAStoredMeetingShortcutThisBuildWouldRefuseDoesNotLoad() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        userDefaults.set(
+            Data(#"{"keyCode":13,"keyName":"W","modifiers":8}"#.utf8),
+            forKey: "AndrewDictate.meetingShortcut")
+
+        XCTAssertNil(AppSettings(userDefaults: userDefaults).meetingShortcut)
+    }
+
+    func testThereIsNoMeetingShortcutUntilOneIsSet() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertNil(AppSettings(userDefaults: userDefaults).meetingShortcut)
+    }
+
+    /// clearing it has to erase the stored value, not leave the old one
+    /// behind for the next launch to register again.
+    func testClearingTheMeetingShortcutForgetsIt() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppSettings(userDefaults: userDefaults)
+        settings.setMeetingShortcut(
+            MeetingShortcut(keyCode: 46, modifiers: [.control, .option], keyName: "M"))
+        settings.setMeetingShortcut(nil)
+
+        XCTAssertNil(AppSettings(userDefaults: userDefaults).meetingShortcut)
+        XCTAssertNil(userDefaults.data(forKey: "AndrewDictate.meetingShortcut"))
+    }
+
+    func testSettingsRefuseAMeetingShortcutThatHoldsTheDictationKey() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let settings = AppSettings(userDefaults: userDefaults)
+        XCTAssertTrue(settings.setHotkeyBinding(.rightOption))
+
+        let refusal = settings.setMeetingShortcut(
+            MeetingShortcut(keyCode: 46, modifiers: [.option, .command], keyName: "M"))
+
+        XCTAssertEqual(refusal, .includesTheDictationKey(.rightOption))
+        XCTAssertNil(settings.meetingShortcut)
+        XCTAssertNil(AppSettings(userDefaults: userDefaults).meetingShortcut)
+    }
+
+    /// a refused shortcut leaves the one already set alone.
+    func testARefusedMeetingShortcutKeepsTheOneThatWasSet() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let settings = AppSettings(userDefaults: userDefaults)
+        let kept = MeetingShortcut(keyCode: 46, modifiers: [.control, .option], keyName: "M")
+        XCTAssertNil(settings.setMeetingShortcut(kept))
+
+        let refusal = settings.setMeetingShortcut(
+            MeetingShortcut(keyCode: 46, modifiers: [.shift], keyName: "M"))
+
+        XCTAssertEqual(refusal, .needsAModifier)
+        XCTAssertEqual(settings.meetingShortcut, kept)
+    }
+
+    /// the other direction of the same rule: the dictation key cannot move
+    /// onto a modifier the meeting shortcut holds.
+    func testTheDictationKeyCannotMoveOntoAModifierTheMeetingShortcutHolds() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let settings = AppSettings(userDefaults: userDefaults)
+        XCTAssertNil(settings.setMeetingShortcut(
+            MeetingShortcut(keyCode: 46, modifiers: [.control, .option], keyName: "M")))
+
+        XCTAssertFalse(settings.setHotkeyBinding(.rightOption))
+        XCTAssertEqual(settings.dictationHotkey, .fn)
+        XCTAssertTrue(settings.setHotkeyBinding(.rightCommand))
+        XCTAssertEqual(settings.dictationHotkey, .rightCommand)
+    }
+
+    /// a meeting model is stored by name in two places: settings, and the
+    /// manifest of every spool a crash leaves behind. both names from
+    /// before parakeet could listen to meetings still read back as what
+    /// they were.
+    func testMeetingModelsStoredBeforeParakeetStillLoad() throws {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        let key = "AndrewDictate.meetingModel"
+
+        userDefaults.set("whisperLargeV3", forKey: key)
+        XCTAssertEqual(AppSettings(userDefaults: userDefaults).meetingModel, .whisperLargeV3)
+        userDefaults.set("whisperLargeV3Turbo", forKey: key)
+        XCTAssertEqual(AppSettings(userDefaults: userDefaults).meetingModel, .whisperLargeV3Turbo)
+
+        let manifest = Data(#"["whisperLargeV3","whisperLargeV3Turbo"]"#.utf8)
+        XCTAssertEqual(
+            try JSONDecoder().decode([MeetingModel].self, from: manifest),
+            [.whisperLargeV3, .whisperLargeV3Turbo])
+    }
+
+    /// parakeet is a choice like the other two, and kept like them; the
+    /// default stays whisper large, the one that writes english.
+    func testParakeetForMeetingsSurvivesARelaunchAndIsNotTheDefault() throws {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppSettings(userDefaults: userDefaults)
+        XCTAssertEqual(settings.meetingModel, .whisperLargeV3)
+        settings.meetingModel = .parakeetV3
+
+        XCTAssertEqual(AppSettings(userDefaults: userDefaults).meetingModel, .parakeetV3)
+        let manifest = try JSONEncoder().encode(MeetingModel.parakeetV3)
+        XCTAssertEqual(try JSONDecoder().decode(MeetingModel.self, from: manifest), .parakeetV3)
+        XCTAssertEqual(MeetingModel.default, .whisperLargeV3)
+    }
+
     func testUnknownMeetingModelFallsBackToWhisperLarge() {
         let (userDefaults, suiteName) = makeUserDefaults()
         defer { userDefaults.removePersistentDomain(forName: suiteName) }

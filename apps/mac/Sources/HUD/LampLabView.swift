@@ -49,6 +49,9 @@ struct LampLabView: View {
         case burn
         case cool
         case text
+        /// a meeting recording, and one with a problem (ticket 28)
+        case meeting
+        case problem
 
         var id: String { rawValue }
 
@@ -58,6 +61,8 @@ struct LampLabView: View {
             case .burn: "burn"
             case .cool: "cool"
             case .text: "text"
+            case .meeting: "meeting"
+            case .problem: "problem"
             }
         }
 
@@ -67,7 +72,12 @@ struct LampLabView: View {
             case .burn: .burn
             case .cool: .cool
             case .text: nil
+            case .meeting, .problem: .pilot
             }
+        }
+
+        var palette: LampPalette {
+            self == .problem ? .attention : .gold
         }
     }
 
@@ -320,6 +330,7 @@ private struct LampLabCell: View {
                         loudness: loudness,
                         startedAt: startedAt,
                         isLocked: isLocked,
+                        palette: stage.palette,
                         ground: ground,
                         glassID: ground.isGlass ? "hud" : nil,
                         glassNamespace: glassNamespace

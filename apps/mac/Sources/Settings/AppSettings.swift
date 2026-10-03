@@ -157,6 +157,22 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// the global shortcut that starts a meeting and stops it, or nil. unset
+    /// until somebody sets one.
+    @Published private(set) var meetingShortcut: MeetingShortcut? {
+        didSet {
+            guard meetingShortcut != oldValue else {
+                return
+            }
+            if let meetingShortcut,
+               let data = try? JSONEncoder().encode(meetingShortcut) {
+                userDefaults.set(data, forKey: Self.meetingShortcutKey)
+            } else {
+                userDefaults.removeObject(forKey: Self.meetingShortcutKey)
+            }
+        }
+    }
+
     /// the parent folder meetings are written under; the app makes
     /// `meetings/<year-month>/` inside it. a real folder you can open in
     /// finder, because the file *is* the artifact (SPEC §11).
@@ -193,6 +209,20 @@ final class AppSettings: ObservableObject {
             } else {
                 userDefaults.removeObject(forKey: Self.meetingHookKey)
             }
+        }
+    }
+
+    /// how long a meeting's audio stays on this mac once its transcript is
+    /// written (ADR 0048): one day unless someone chose otherwise.
+    @Published var keepMeetingAudio: KeepMeetingAudio {
+        didSet {
+            guard keepMeetingAudio != oldValue else {
+                return
+            }
+            userDefaults.set(
+                keepMeetingAudio.rawValue,
+                forKey: Self.keepMeetingAudioKey
+            )
         }
     }
 
@@ -306,8 +336,10 @@ final class AppSettings: ObservableObject {
 
     private static let dictationWantedKey = "AndrewDictate.dictationWanted"
     private static let meetingModelKey = "AndrewDictate.meetingModel"
+    private static let meetingShortcutKey = "AndrewDictate.meetingShortcut"
     private static let meetingsFolderKey = "AndrewDictate.meetingsFolder"
     private static let meetingHookKey = "AndrewDictate.meetingHook"
+    private static let keepMeetingAudioKey = "AndrewDictate.keepMeetingAudio"
     private static let meetingHookLastRunAtKey =
         "AndrewDictate.meetingHookLastRunAt"
     private static let meetingHookLastRunLabelKey =
@@ -413,6 +445,13 @@ final class AppSettings: ObservableObject {
         meetingModel = userDefaults
             .string(forKey: Self.meetingModelKey)
             .flatMap(MeetingModel.init(rawValue:)) ?? .default
+        // a value this build cannot read is no shortcut, never a crash; nor
+        // is one it would refuse, kept from a build that took it (⌘W).
+        let dictationKey = userDefaults.hotkeyBinding()
+        meetingShortcut = userDefaults
+            .data(forKey: Self.meetingShortcutKey)
+            .flatMap { try? JSONDecoder().decode(MeetingShortcut.self, from: $0) }
+            .flatMap { $0.refusal(againstDictationKey: dictationKey) == nil ? $0 : nil }
         let pickedMeetingsFolder = userDefaults
             .string(forKey: Self.meetingsFolderKey)
             .map { URL(fileURLWithPath: $0, isDirectory: true) }
@@ -420,6 +459,10 @@ final class AppSettings: ObservableObject {
         meetingHook = userDefaults
             .string(forKey: Self.meetingHookKey)
             .map { URL(fileURLWithPath: $0) }
+        // a choice this build has no name for is the default, never longer.
+        keepMeetingAudio = userDefaults
+            .string(forKey: Self.keepMeetingAudioKey)
+            .flatMap(KeepMeetingAudio.init(rawValue:)) ?? .default
         meetingHookLastRunAt = userDefaults
             .object(forKey: Self.meetingHookLastRunAtKey) as? Date
         meetingHookLastRunLabel = userDefaults
@@ -448,9 +491,25 @@ final class AppSettings: ObservableObject {
         guard HotkeyBinding.supported.contains(binding) else {
             return false
         }
+        // the same rule from the other side: the meeting shortcut stays
+        // one the dictation key's handling would not swallow.
+        guard meetingShortcut?.refusal(againstDictationKey: binding) == nil else {
+            return false
+        }
 
         dictationHotkey = binding
         return true
+    }
+
+    /// nil clears it. a shortcut the dictation key would swallow is not
+    /// stored, and the answer says why, in the words the row shows.
+    @discardableResult
+    func setMeetingShortcut(_ shortcut: MeetingShortcut?) -> MeetingShortcut.Refusal? {
+        if let refusal = shortcut?.refusal(againstDictationKey: dictationHotkey) {
+            return refusal
+        }
+        meetingShortcut = shortcut
+        return nil
     }
 
     /// "not a mistake", and it never comes back.
