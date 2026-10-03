@@ -11,6 +11,8 @@ export type Cut = { heard: string; pasted: string };
     its answer. */
 export type Prompt = { reply: string; cuts: Cut[] };
 
+import { coolMs, pillMs } from "./timings";
+
 export const timing = {
   /** key-down to the mic's first audio. the lamp lights and the chime plays
       here, not at the press (glossary: lamp). */
@@ -22,14 +24,12 @@ export const timing = {
       (docs: wayfinder 019, further notes). the one place it is written, and
       the page never prints it. */
   wait: 210,
-  /** the lamp's cool-out, as the app times it. */
-  cool: 300,
+  cool: coolMs,
   /** how long the landed text sits in the prompt box before it is sent. */
   send: 1100,
   /** the send to the agent's first words. */
   reply: 500,
-  /** how long a pill stays. */
-  pill: 2200,
+  pill: pillMs,
 } as const;
 
 type Take = {
@@ -42,11 +42,15 @@ export type State = {
   /** the prompt the next press will say. */
   next: number;
   take: Take | null;
+  /** when a press came while the last take was still being written out. */
+  refusedAt: number | null;
 };
 
 export type Event = { type: "press" | "release" | "esc"; at: number };
 
-export type Lamp = "off" | "ember" | "lit" | "cooling";
+/** the lamp's phases, by the names the app gives them (GoldRippleLine.Phase):
+    an ember from the press, the burn once the mic is heard, the cool-out. */
+export type Lamp = "off" | "ember" | "burn" | "cool";
 
 export type View = {
   phase: "idle" | "holding" | "waiting" | "landed";
@@ -104,19 +108,23 @@ export function dictationDemo(prompts: Prompt[]) {
   };
 
   function initial(): State {
-    return { next: 0, take: null };
+    return { next: 0, take: null, refusedAt: null };
   }
 
   function step(state: State, event: Event): State {
     const take = state.take;
     switch (event.type) {
       case "press":
-        // a press during a take is key repeat, or a second finger. a press
-        // before the last text has landed waits for it.
-        if (take && !settled(take, event.at)) return state;
+        if (take && !settled(take, event.at)) {
+          // a press during a hold is key repeat, or a second finger. a press
+          // while the last take is still being written out is refused, and
+          // the app says so: no press ends in silence.
+          return take.end ? { ...state, refusedAt: event.at } : state;
+        }
         return {
-          ...state,
+          next: state.next,
           take: { prompt: state.next, pressedAt: event.at, end: null },
+          refusedAt: null,
         };
       case "release":
       case "esc": {
@@ -124,6 +132,7 @@ export function dictationDemo(prompts: Prompt[]) {
         const by = event.type;
         const landed = by === "release" && wordsBy(take, event.at) > 0;
         return {
+          ...state,
           // only a take that landed something uses its prompt up
           next: landed ? (take.prompt + 1) % prompts.length : state.next,
           take: { ...take, end: { at: event.at, by } },
@@ -145,7 +154,7 @@ export function dictationDemo(prompts: Prompt[]) {
         ...idle,
         phase: "holding",
         lamp: lit
-          ? { state: "lit", since: litAt(take) }
+          ? { state: "burn", since: litAt(take) }
           : { state: "ember", since: take.pressedAt },
         said: words.slice(0, count),
         speaking: lit && count < words.length,
@@ -164,11 +173,13 @@ export function dictationDemo(prompts: Prompt[]) {
 
     const lamp: View["lamp"] =
       now < at + timing.cool
-        ? { state: "cooling", since: at }
+        ? { state: "cool", since: at }
         : { state: "off", since: at + timing.cool };
+    const refused = state.refusedAt !== null && now < state.refusedAt + timing.pill;
+    const pill = refused ? "still finishing the last one" : null;
     const landAt = at + timing.wait;
     if (now < landAt) {
-      return { ...idle, phase: "waiting", lamp, said: words.slice(0, count) };
+      return { ...idle, phase: "waiting", lamp, said: words.slice(0, count), pill };
     }
 
     const pasted = prompt.cuts[count - 1].pasted;
@@ -178,6 +189,7 @@ export function dictationDemo(prompts: Prompt[]) {
       ...idle,
       phase: "landed",
       lamp,
+      pill,
       box: sent ? "" : pasted,
       sent: sent ? pasted : null,
       reply: now >= sendAt + timing.reply ? prompt.reply : null,

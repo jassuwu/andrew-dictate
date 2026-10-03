@@ -2,24 +2,14 @@
 // for it, but space is also how a lot of people scroll and how every button
 // is pressed. the demo takes it only when nothing else has a claim.
 
-export type Focus =
-  /** nothing that answers to space has focus */
-  | "none"
-  /** a button, a link, a field: space is theirs */
-  | "control"
-  /** the demo's own key, which listens for space itself */
-  | "key";
-
-export type SpaceOwner = "demo" | "page" | "control";
-
-export function spaceOwner(at: { demoOnScreen: boolean; focus: Focus }): SpaceOwner {
-  if (at.focus !== "none") return "control";
-  return at.demoOnScreen ? "demo" : "page";
+export function demoOwnsSpace(at: { demoOnScreen: boolean; controlFocused: boolean }): boolean {
+  return at.demoOnScreen && !at.controlFocused;
 }
 
 /** shorter than this and a press of space was a tap, which is someone
-    scrolling. the demo gives the tap back to the page. */
-export const tapMs = 180;
+    scrolling. the take does not start until a press has lasted this long, so
+    a tap lights no lamp and plays no chime: the page just scrolls. */
+export const tapMs = 120;
 
 export function spaceRelease(heldMs: number): "scroll" | "release" {
   return heldMs < tapMs ? "scroll" : "release";

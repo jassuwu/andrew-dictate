@@ -2,6 +2,8 @@
 // in apps/mac (HUDView: LampPose, wavePath, drawGlassTube, drawOffDot), with
 // the same numbers, so the page's lamp is the app's lamp and not a likeness.
 
+import { coolMs } from "./timings";
+
 export type LampPhase = "off" | "ember" | "burn" | "cool" | "pilot";
 
 export type LampFrame = {
@@ -17,7 +19,7 @@ export type LampFrame = {
 
 // HUDWaveMotion and LampLine, in the app's points
 const ignite = 0.14;
-const cool = 0.3;
+const cool = coolMs / 1000;
 const length = 112;
 const thickness = 6;
 const amplitude = 7.5;
@@ -176,9 +178,16 @@ export function createLamp(canvas: HTMLCanvasElement) {
   }
 
   let box = resize();
-  window.addEventListener("resize", () => (box = resize()));
+  let last: LampFrame | null = null;
+  // sizing a canvas wipes it. a meeting's light is drawn once and then left,
+  // so what was on it is drawn again.
+  window.addEventListener("resize", () => {
+    box = resize();
+    if (last) draw(last);
+  });
 
   function draw(frame: LampFrame) {
+    last = frame;
     const { width, height, ratio } = box;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);

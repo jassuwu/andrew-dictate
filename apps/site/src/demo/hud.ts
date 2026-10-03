@@ -8,6 +8,7 @@ import { createLamp, type LampFrame } from "./lamp";
 
 const canvas = document.querySelector<HTMLCanvasElement>("canvas[data-lamp]");
 const pillElement = document.querySelector<HTMLElement>("[data-pill]");
+const pillStatus = document.querySelector<HTMLElement>("[data-pill-status]");
 const badgeElement = document.querySelector<HTMLElement>("[data-badge]");
 const lamp = canvas ? createLamp(canvas) : null;
 const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -33,6 +34,10 @@ function showPill() {
   }
   pillElement.textContent = text ?? "";
   pillElement.hidden = text === null;
+  // the pill comes and goes, and a region that was hidden a moment ago is
+  // not reliably read out. so the words are also put in one that never
+  // leaves the page, which is the one a screen reader hears.
+  if (pillStatus) pillStatus.textContent = text ?? "";
 }
 
 export const hud = {
@@ -47,7 +52,7 @@ export const hud = {
   },
 
   /** a pill that stands for as long as its demo says so. every pill is said
-      out loud too: the element is a `status` region. */
+      out loud too, as the app announces its own. */
   pill(owner: Owner, text: string | null) {
     pills.set(owner, text);
     showPill();

@@ -4,11 +4,30 @@
 import pairs from "./pairs.json";
 import { agentLine } from "./agent";
 import { dictationDemo, timing, type State, type View } from "./dictation";
+import { differ, frameLoop } from "./frames";
 import { hud, mic, reduceMotion } from "./hud";
-import { scriptedLoudness, type LampPhase } from "./lamp";
-import { spaceOwner, spaceRelease, type Focus } from "./space";
+import { scriptedLoudness } from "./lamp";
+import { demoOwnsSpace, spaceRelease, tapMs } from "./space";
 
 const demo = dictationDemo(pairs.prompts);
+
+/** the sound switch, remembered for the visit where the browser allows it. */
+const soundChoice = {
+  read(): boolean {
+    try {
+      return sessionStorage.getItem("sound") !== "off";
+    } catch {
+      return true;
+    }
+  },
+  write(on: boolean) {
+    try {
+      sessionStorage.setItem("sound", on ? "on" : "off");
+    } catch {
+      // storage is blocked: the switch still works, it is just not kept
+    }
+  },
+};
 
 export function mountDictation(root: HTMLElement) {
   const key = root.querySelector<HTMLButtonElement>("[data-key]")!;
@@ -17,20 +36,17 @@ export function mountDictation(root: HTMLElement) {
   const boxText = root.querySelector<HTMLElement>("[data-box-text]")!;
   const hint = root.querySelector<HTMLElement>("[data-hint]")!;
   const said = root.querySelector<HTMLElement>("[data-said]")!;
-
   const soundSwitch = root.querySelector<HTMLButtonElement>("[data-sound]")!;
   root.querySelector<HTMLElement>("[data-controls]")!.hidden = false;
 
   let state: State = demo.initial();
-  let frame = 0;
-  let drawn = "";
 
   // the app's own start sound. it plays when the lamp lights, and only ever
-  // after the visitor's own press. the switch is remembered for the visit.
+  // after the visitor's own press.
   const chime = new Audio("/start.wav");
   chime.preload = "auto";
-  let sound = sessionStorage.getItem("sound") !== "off";
-  let ticked = 0;
+  let sound = soundChoice.read();
+  let chimedUpTo = 0;
   const showSound = () => {
     soundSwitch.textContent = sound ? "sound on" : "sound off";
     soundSwitch.setAttribute("aria-pressed", String(sound));
@@ -38,54 +54,58 @@ export function mountDictation(root: HTMLElement) {
   showSound();
   soundSwitch.addEventListener("click", () => {
     sound = !sound;
-    sessionStorage.setItem("sound", sound ? "on" : "off");
+    soundChoice.write(sound);
     showSound();
   });
 
-  const send = (type: "press" | "release" | "esc") => {
+  const changed = differ();
+
+  const loop = frameLoop<View>({
+    read: (now) => demo.view(state, now),
+    draw(view, now) {
+      render(view);
+      light(view, now);
+      if (demo.chimeDue(state, chimedUpTo, now, { sound })) {
+        chime.currentTime = 0;
+        void chime.play().catch(() => {});
+      }
+      chimedUpTo = now;
+    },
+    // nothing changes by itself once a take has played out, so stop asking
+    settled: (view) =>
+      view.pill === null &&
+      (view.phase === "idle" ||
+        (view.phase === "landed" && view.reply !== null && view.lamp.state === "off")),
+  });
+
+  function send(type: "press" | "release" | "esc", at = performance.now()) {
     if (type === "press" && mic.meeting) {
       // the mic is one. the app refuses a take while a meeting records, and
       // this is the pill it refuses with.
       hud.say("recording a meeting — stop it to dictate", timing.pill);
       return;
     }
-    const at = performance.now();
-    if (!frame) ticked = at;
+    if (loop.asleep) chimedUpTo = at;
     state = demo.step(state, { type, at });
     mic.dictating = state.take !== null && state.take.end === null;
     key.toggleAttribute("data-down", mic.dictating);
-    if (!frame) frame = requestAnimationFrame(tick);
-  };
-
-  function tick(now: number) {
-    const view = demo.view(state, now);
-    render(view);
-    light(view, now);
-    if (demo.chimeDue(state, ticked, now, { sound })) {
-      chime.currentTime = 0;
-      void chime.play().catch(() => {});
-    }
-    ticked = now;
-    // nothing changes by itself once a take has played out, so stop asking
-    frame = settled(view) ? 0 : requestAnimationFrame(tick);
+    loop.wake();
   }
 
-  const settled = (view: View) =>
-    (view.phase === "idle" && view.pill === null) ||
-    (view.phase === "landed" && view.reply !== null && view.lamp.state === "off");
-
   function render(view: View) {
-    const next = JSON.stringify([
-      view.phase,
-      view.lamp.state,
-      view.said.length,
-      view.box,
-      view.sent,
-      view.reply,
-      view.pill,
-    ]);
-    if (next === drawn) return;
-    drawn = next;
+    if (
+      !changed([
+        view.phase,
+        view.lamp.state,
+        view.said.length,
+        view.box,
+        view.sent,
+        view.reply,
+        view.pill,
+      ])
+    ) {
+      return;
+    }
 
     boxText.textContent = view.box;
     box.toggleAttribute("data-filled", view.box !== "");
@@ -101,28 +121,21 @@ export function mountDictation(root: HTMLElement) {
 
     hud.pill("dictation", view.pill);
     // a gold dot on the badge means the mic is live for a take
-    hud.badge("dictation", view.lamp.state === "lit" ? "dot" : "none");
+    hud.badge("dictation", view.lamp.state === "burn" ? "dot" : "none");
   }
-
-  const phases: Record<View["lamp"]["state"], LampPhase> = {
-    off: "off",
-    ember: "ember",
-    lit: "burn",
-    cooling: "cool",
-  };
 
   /** the lamp is drawn every frame it is on: it is the one thing that moves. */
   function light(view: View, now: number) {
     const elapsed = now - view.lamp.since;
     const words = state.take ? pairs.prompts[state.take.prompt].cuts.length : 0;
     hud.lamp("dictation", {
-      phase: phases[view.lamp.state],
+      phase: view.lamp.state,
       elapsed,
       now,
       loudness:
-        view.lamp.state === "lit"
+        view.lamp.state === "burn"
           ? scriptedLoudness(elapsed, timing.word, words)
-          : view.lamp.state === "cooling"
+          : view.lamp.state === "cool"
             ? 0.5
             : 0,
     });
@@ -147,6 +160,15 @@ export function mountDictation(root: HTMLElement) {
     event.preventDefault();
     send("release");
   });
+  // a screen reader presses a button, it does not hold one. a click that no
+  // pointer and no key made is that press, and the demo says a whole prompt
+  // for it: the take is held for as long as the words take, then let go.
+  key.addEventListener("click", (event) => {
+    if (event.detail !== 0 || mic.dictating) return;
+    send("press");
+    const words = state.take ? pairs.prompts[state.take.prompt].cuts.length : 0;
+    window.setTimeout(() => send("release"), timing.firstAudio + words * timing.word + 150);
+  });
   // a hand that leaves mid-take ends it, the way the app keeps what it heard
   key.addEventListener("blur", () => send("release"));
   window.addEventListener("blur", () => send("release"));
@@ -162,49 +184,56 @@ export function mountDictation(root: HTMLElement) {
     threshold: 0.6,
   }).observe(key);
 
-  const focus = (): Focus => {
-    const active = document.activeElement;
-    if (active === key) return "key";
-    return active?.matches("a[href], button, input, textarea, select, summary, [contenteditable]")
-      ? "control"
-      : "none";
-  };
+  const controlFocused = () =>
+    document.activeElement?.matches(
+      "a[href], button, input, textarea, select, summary, [contenteditable]",
+    ) ?? false;
 
-  let spaceDownAt: number | null = null;
-  let beforeSpace = state;
+  // a press of space is not a take until it has outlasted a tap. the take is
+  // then dated from when the key really went down, so the words keep time.
+  let space: { downAt: number; pending: number; began: boolean } | null = null;
   document.addEventListener("keydown", (event) => {
     if (event.key !== " " || event.metaKey || event.ctrlKey || event.altKey) return;
-    if (spaceDownAt !== null) {
+    if (space) {
       // key repeat while it is held: still ours, and not a new take
       event.preventDefault();
       return;
     }
-    if (spaceOwner({ demoOnScreen: onScreen, focus: focus() }) !== "demo") return;
+    if (!demoOwnsSpace({ demoOnScreen: onScreen, controlFocused: controlFocused() })) return;
     event.preventDefault();
-    spaceDownAt = performance.now();
-    beforeSpace = state;
-    send("press");
+    const downAt = performance.now();
+    const held = {
+      downAt,
+      began: false,
+      pending: window.setTimeout(() => {
+        held.began = true;
+        send("press", downAt);
+      }, tapMs),
+    };
+    space = held;
   });
   document.addEventListener("keyup", (event) => {
-    if (event.key !== " " || spaceDownAt === null) return;
-    const held = performance.now() - spaceDownAt;
-    spaceDownAt = null;
-    if (spaceRelease(held) === "release") {
+    if (event.key !== " " || !space) return;
+    const { downAt, pending, began } = space;
+    space = null;
+    window.clearTimeout(pending);
+    if (spaceRelease(performance.now() - downAt) === "release") {
+      // a timer can run late. if the take has not begun, begin it now
+      if (!began) send("press", downAt);
       send("release");
       return;
     }
-    // a tap was someone scrolling. put back what was there, as if the key
-    // had never gone down, and scroll for them.
-    state = beforeSpace;
-    mic.dictating = false;
-    key.removeAttribute("data-down");
-    if (!frame) frame = requestAnimationFrame(tick);
+    // a tap was someone scrolling. no take began, so there is nothing to
+    // undo: scroll for them.
     window.scrollBy({
       top: window.innerHeight * (event.shiftKey ? -0.9 : 0.9),
       behavior: reduceMotion() ? "auto" : "smooth",
     });
   });
-  window.addEventListener("blur", () => (spaceDownAt = null));
+  window.addEventListener("blur", () => {
+    if (space) window.clearTimeout(space.pending);
+    space = null;
+  });
 
   render(demo.view(state, performance.now()));
 }

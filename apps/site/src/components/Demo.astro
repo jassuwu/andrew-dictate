@@ -20,8 +20,15 @@ const landed = first.cuts[first.cuts.length - 1].pasted;
   <!-- hidden until the script that makes them work has loaded -->
   <div data-controls hidden>
   <div class="mt-6 flex items-center gap-5">
-    <button type="button" class="key" data-key aria-label="hold to dictate">fn</button>
-    <p class="speech" data-speech>
+    <button
+      type="button"
+      class="key"
+      data-key
+      aria-label="hold to dictate. the demo says a prompt for you."
+    >
+      fn
+    </button>
+    <p class="speech">
       <span data-hint>
         <span class="with-keys">hold <kbd>space</kbd>, or hold this key.</span>
         <span class="without-keys">hold this key.</span>{" "}
@@ -36,4 +43,11 @@ const landed = first.cuts[first.cuts.length - 1].pasted;
     a simulation. the wait after you let go is the app's real one.
   </p>
   </div>
+
+  <!-- the page always says what this is, the key working or not -->
+  <noscript>
+    <p class="fact mt-5 text-cream/45">
+      a simulation, shown at its end. with scripts on, you hold a key and the text lands.
+    </p>
+  </noscript>
 </div>

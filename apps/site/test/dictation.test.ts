@@ -45,7 +45,7 @@ describe("while the key is held", () => {
   test("the lamp is dim at the press and lit once the mic is heard", () => {
     expect(demo.view(pressed, 1000).lamp.state).toBe("ember");
     expect(demo.view(pressed, 1000 + timing.firstAudio - 1).lamp.state).toBe("ember");
-    expect(demo.view(pressed, 1000 + timing.firstAudio).lamp.state).toBe("lit");
+    expect(demo.view(pressed, 1000 + timing.firstAudio).lamp.state).toBe("burn");
   });
 
   test("the words are said one at a time", () => {
@@ -63,7 +63,7 @@ describe("after the text lands", () => {
   const landed = letGo + timing.wait;
 
   test("the lamp cools and goes out", () => {
-    expect(demo.view(released, letGo).lamp.state).toBe("cooling");
+    expect(demo.view(released, letGo).lamp.state).toBe("cool");
     expect(demo.view(released, letGo + timing.cool).lamp.state).toBe("off");
   });
 
@@ -84,9 +84,17 @@ describe("after the text lands", () => {
     expect(view.reply).toBeNull();
   });
 
-  test("a press before the text has landed waits for it", () => {
+  test("a press before the text has landed is refused out loud, and the text still lands", () => {
     const early = demo.step(released, { type: "press", at: landed - 1 });
+    expect(demo.view(early, landed - 1).pill).toBe("still finishing the last one");
     expect(demo.view(early, landed).box).toBe("Run the tests.");
+    expect(demo.view(early, landed - 1 + timing.pill).pill).toBeNull();
+  });
+
+  test("the refusal is forgotten by the next take", () => {
+    const early = demo.step(released, { type: "press", at: landed - 1 });
+    const again = demo.step(early, { type: "press", at: landed + 100 });
+    expect(demo.view(again, landed + 100).pill).toBeNull();
   });
 });
 
