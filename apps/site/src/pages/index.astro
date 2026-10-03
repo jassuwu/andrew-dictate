@@ -63,23 +63,23 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
       <h2 class="heading text-cream">hold <kbd>fn</kbd>, talk, let go.</h2>
       <div class="mt-6 space-y-4">
         <p class="prose-line">
-          the text lands where your cursor is, in any app. a terminal, a chat
-          box, a commit message.
+          the text shows up where your cursor is, in any app. i mostly use it
+          to talk to agents in a terminal.
         </p>
         <p class="prose-line">
           the model runs on your mac, so there's no wait for a server. it works
           offline too.
         </p>
         <p class="prose-line">
-          a dictionary fixes a mishearing that keeps coming back. correct the
-          same word twice and the app adds it for you.
+          if it keeps mishearing a word, add the word to the dictionary. or fix
+          it twice and the app adds it for you.
         </p>
         <p class="prose-line">
-          double-tap <kbd>fn</kbd> to talk hands-free. <kbd>esc</kbd> throws it
-          away. if your keyboard eats <kbd>fn</kbd>, pick another key in
+          double-tap <kbd>fn</kbd> if you don't want to hold it. <kbd>esc</kbd>
+          throws it away. if your keyboard eats <kbd>fn</kbd>, pick another key in
           settings.
         </p>
-        <p class="fact pt-2">{sizes.dictation} · english, or 25 languages</p>
+        <p class="fact pt-2">{sizes.dictation} to download. english, or 25 languages.</p>
       </div>
     </section>
 
@@ -94,19 +94,20 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
 
       <div class="mt-10 space-y-4">
         <p class="prose-line">
-          press record in the menu bar. your mic is you, and whatever the mac
-          plays is them.
+          press record in the menu bar. it hears your mic and whatever your mac
+          plays, so it gets both sides of the call.
         </p>
         <p class="prose-line">
-          press stop and you have one markdown file, with the speakers split
-          out. point your agent at the folder.
+          press stop and you get one markdown file that says who said what.
+          point your agent at the folder and ask it what you agreed to.
         </p>
         <p class="prose-line">
           when a call starts, the app asks if you want it recorded. it never
           starts by itself.
         </p>
         <p class="fact pt-2">
-          {sizes.meetings} · written in english by default, from any language whisper knows
+          {sizes.meetings} to download. the call can be in any language whisper
+          knows. the file comes out in english unless you change it.
         </p>
       </div>
     </section>
@@ -118,7 +119,7 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
         <div class="mt-8">
           <Command command={install} label="the install command" />
         </div>
-        <p class="fact mt-3">apple silicon · macOS 26 · free · MIT</p>
+        <p class="fact mt-3">for apple silicon macs on macOS 26. free, MIT.</p>
 
         <p class="prose-line mt-10">
           i'm broke, so i didn't pay apple $99 to sign this. run this once, and
@@ -128,8 +129,8 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
           <Command command={unblock} label="the unblock command" quiet />
         </div>
         <p class="prose-line mt-4">
-          the second line opens it. there's no dock icon. a setup window comes
-          up, and after that it lives as the gold badge in your menu bar.
+          the second line opens it. a setup window comes up. after that it lives
+          in your menu bar as the gold badge. there's no dock icon.
         </p>
         <p class="fact mt-4 max-w-[38rem]">
           no terminal? open the app, let macOS refuse, then click open anyway in
