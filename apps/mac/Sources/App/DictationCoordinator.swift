@@ -2629,7 +2629,10 @@ extension DictationCoordinator {
             // mic that would not start has no switch, and opens nothing.
             liveTranscriptPanel?.dismissKeepingPreference()
             if event.opensSetup {
-                meetingsNeedAttention = true
+                // the row is about the tap: a mic that is not allowed opens
+                // the same window, but `fix system audio…` would be the
+                // wrong name for the way back.
+                if case .cannotHear = event { meetingsNeedAttention = true }
                 runOnboardingAgain(scope: .meetingsOnly, openAt: .permissions)
             }
         case .gettingReady, .recovering, .gapBegan, .gapEnded, .problemBegan,
