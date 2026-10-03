@@ -1,0 +1,100 @@
+{
+  "app": "zoom",
+  "started": "2026-10-03T14:02:11+05:30",
+  "timeZone": "Asia/Kolkata",
+  "engine": "whisperLargeV3",
+  "file": "2026-10-03-1402-zoom.md",
+  "ask": "Read the transcript of this morning's meeting and list what I promised to do.",
+  "lines": [
+    {
+      "speaker": "you",
+      "at": 4,
+      "text": "Okay, can everyone hear me?"
+    },
+    {
+      "speaker": "them 1",
+      "at": 7,
+      "text": "Yes. Let's start with the release."
+    },
+    {
+      "speaker": "you",
+      "at": 15,
+      "text": "The build is green. I'll cut the release after this call."
+    },
+    {
+      "speaker": "them 2",
+      "at": 31,
+      "text": "The login page is still slow on my machine."
+    },
+    {
+      "speaker": "you",
+      "at": 38,
+      "text": "I saw that. I'll look at it today and tell you what I find."
+    },
+    {
+      "speaker": "them 1",
+      "at": 52,
+      "text": "Good. And the docs?"
+    },
+    {
+      "speaker": "them 2",
+      "at": 58,
+      "text": "I can take the docs. I'll have a draft on Friday."
+    },
+    {
+      "speaker": "you",
+      "at": 70,
+      "text": "Great. That's everything from me."
+    }
+  ],
+  "stops": [
+    {
+      "duration": 10,
+      "saved": "saved · <1m",
+      "reply": "You haven't promised anything yet.",
+      "markdown": "---\napp: zoom\nstarted: 2026-10-03T14:02:11+05:30\nended: 2026-10-03T14:02:21+05:30\nduration_s: 10\nengine: whisperLargeV3\nspeakers: [you]\nwords: 5\ncomplete: true\ngaps: []\nrecovered: false\n---\n\n[00:00:04] you: Okay, can everyone hear me?\n"
+    },
+    {
+      "duration": 13,
+      "saved": "saved · <1m",
+      "reply": "You haven't promised anything yet.",
+      "markdown": "---\napp: zoom\nstarted: 2026-10-03T14:02:11+05:30\nended: 2026-10-03T14:02:24+05:30\nduration_s: 13\nengine: whisperLargeV3\nspeakers: [you, them 1]\nwords: 11\ncomplete: true\ngaps: []\nrecovered: false\n---\n\n[00:00:04] you: Okay, can everyone hear me?\n\n[00:00:07] them 1: Yes. Let's start with the release.\n"
+    },
+    {
+      "duration": 21,
+      "saved": "saved · <1m",
+      "reply": "You promised one thing: cut the release after the call.",
+      "markdown": "---\napp: zoom\nstarted: 2026-10-03T14:02:11+05:30\nended: 2026-10-03T14:02:32+05:30\nduration_s: 21\nengine: whisperLargeV3\nspeakers: [you, them 1]\nwords: 22\ncomplete: true\ngaps: []\nrecovered: false\n---\n\n[00:00:04] you: Okay, can everyone hear me?\n\n[00:00:07] them 1: Yes. Let's start with the release.\n\n[00:00:15] you: The build is green. I'll cut the release after this call.\n"
+    },
+    {
+      "duration": 37,
+      "saved": "saved · <1m",
+      "reply": "You promised one thing: cut the release after the call.",
+      "markdown": "---\napp: zoom\nstarted: 2026-10-03T14:02:11+05:30\nended: 2026-10-03T14:02:48+05:30\nduration_s: 37\nengine: whisperLargeV3\nspeakers: [you, them 1, them 2]\nwords: 31\ncomplete: true\ngaps: []\nrecovered: false\n---\n\n[00:00:04] you: Okay, can everyone hear me?\n\n[00:00:07] them 1: Yes. Let's start with the release.\n\n[00:00:15] you: The build is green. I'll cut the release after this call.\n\n[00:00:31] them 2: The login page is still slow on my machine.\n"
+    },
+    {
+      "duration": 44,
+      "saved": "saved · <1m",
+      "reply": "You promised two things: cut the release after the call, and look at the slow login page today.",
+      "markdown": "---\napp: zoom\nstarted: 2026-10-03T14:02:11+05:30\nended: 2026-10-03T14:02:55+05:30\nduration_s: 44\nengine: whisperLargeV3\nspeakers: [you, them 1, them 2]\nwords: 45\ncomplete: true\ngaps: []\nrecovered: false\n---\n\n[00:00:04] you: Okay, can everyone hear me?\n\n[00:00:07] them 1: Yes. Let's start with the release.\n\n[00:00:15] you: The build is green. I'll cut the release after this call.\n\n[00:00:31] them 2: The login page is still slow on my machine.\n\n[00:00:38] you: I saw that. I'll look at it today and tell you what I find.\n"
+    },
+    {
+      "duration": 58,
+      "saved": "saved · <1m",
+      "reply": "You promised two things: cut the release after the call, and look at the slow login page today.",
+      "markdown": "---\napp: zoom\nstarted: 2026-10-03T14:02:11+05:30\nended: 2026-10-03T14:03:09+05:30\nduration_s: 58\nengine: whisperLargeV3\nspeakers: [you, them 1, them 2]\nwords: 49\ncomplete: true\ngaps: []\nrecovered: false\n---\n\n[00:00:04] you: Okay, can everyone hear me?\n\n[00:00:07] them 1: Yes. Let's start with the release.\n\n[00:00:15] you: The build is green. I'll cut the release after this call.\n\n[00:00:31] them 2: The login page is still slow on my machine.\n\n[00:00:38] you: I saw that. I'll look at it today and tell you what I find.\n\n[00:00:52] them 1: Good. And the docs?\n"
+    },
+    {
+      "duration": 64,
+      "saved": "saved · 1m",
+      "reply": "You promised two things: cut the release after the call, and look at the slow login page today.",
+      "markdown": "---\napp: zoom\nstarted: 2026-10-03T14:02:11+05:30\nended: 2026-10-03T14:03:15+05:30\nduration_s: 64\nengine: whisperLargeV3\nspeakers: [you, them 1, them 2]\nwords: 60\ncomplete: true\ngaps: []\nrecovered: false\n---\n\n[00:00:04] you: Okay, can everyone hear me?\n\n[00:00:07] them 1: Yes. Let's start with the release.\n\n[00:00:15] you: The build is green. I'll cut the release after this call.\n\n[00:00:31] them 2: The login page is still slow on my machine.\n\n[00:00:38] you: I saw that. I'll look at it today and tell you what I find.\n\n[00:00:52] them 1: Good. And the docs?\n\n[00:00:58] them 2: I can take the docs. I'll have a draft on Friday.\n"
+    },
+    {
+      "duration": 76,
+      "saved": "saved · 1m",
+      "reply": "You promised two things: cut the release after the call, and look at the slow login page today.",
+      "markdown": "---\napp: zoom\nstarted: 2026-10-03T14:02:11+05:30\nended: 2026-10-03T14:03:27+05:30\nduration_s: 76\nengine: whisperLargeV3\nspeakers: [you, them 1, them 2]\nwords: 65\ncomplete: true\ngaps: []\nrecovered: false\n---\n\n[00:00:04] you: Okay, can everyone hear me?\n\n[00:00:07] them 1: Yes. Let's start with the release.\n\n[00:00:15] you: The build is green. I'll cut the release after this call.\n\n[00:00:31] them 2: The login page is still slow on my machine.\n\n[00:00:38] you: I saw that. I'll look at it today and tell you what I find.\n\n[00:00:52] them 1: Good. And the docs?\n\n[00:00:58] them 2: I can take the docs. I'll have a draft on Friday.\n\n[00:01:10] you: Great. That's everything from me.\n"
+    }
+  ]
+}
