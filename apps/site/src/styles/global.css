@@ -186,6 +186,14 @@
     text-wrap: pretty;
   }
 
+  .note-code {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    font-variant-ligatures: none;
+    color: var(--color-gold-pale);
+    overflow-wrap: anywhere;
+  }
+
   .link {
     color: var(--color-gold);
     text-decoration: underline;

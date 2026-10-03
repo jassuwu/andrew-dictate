@@ -15,6 +15,8 @@ export function visibleText(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    // a link or a keycap sits inside a sentence and adds no space to it
+    .replace(/<\/?(a|span|kbd|code|em|strong)\b[^>]*>/gi, "")
     .replace(/<[^>]+>/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&#39;|&apos;/g, "'")

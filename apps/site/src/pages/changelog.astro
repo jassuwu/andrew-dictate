@@ -1,0 +1,49 @@
+---
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import Page from "../layouts/Page.astro";
+import { inline, releases } from "../changelog";
+
+// the notes live with the app, one folder over, and the release workflow
+// reads them from there. if they cannot be read here the build fails, which
+// is the point: an empty changelog never ships.
+const notes = readFileSync(join(process.cwd(), "../mac/RELEASE_NOTES.md"), "utf8");
+const all = releases(notes);
+---
+
+<Page
+  title="andrew dictate · changelog"
+  description="what changed in each release of andrew dictate."
+  path="/changelog"
+>
+  <main class="mx-auto max-w-[72rem] px-6 pb-8 pt-24 sm:px-10 lg:pt-28">
+    <h1 class="pitch text-gold-pale">changelog.</h1>
+    <p class="prose-line mt-6">
+      every release, newest first. this is where "they get better over time" is kept.
+    </p>
+
+    <div class="mt-16 space-y-20">
+      {
+        all.map((release) => (
+          <section
+            id={release.version}
+            class="grid gap-x-16 gap-y-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,10fr)]"
+          >
+            <h2 class="font-mono text-[1.25rem] leading-[1.5] text-gold">
+              <a href={`#${release.version}`}>{release.version}</a>
+            </h2>
+            <div class="space-y-4">
+              {release.paragraphs.map((paragraph) => (
+                <p class="prose-line max-w-[42rem]">
+                  {inline(paragraph).map((piece) =>
+                    piece.code ? <code class="note-code">{piece.text}</code> : piece.text,
+                  )}
+                </p>
+              ))}
+            </div>
+          </section>
+        ))
+      }
+    </div>
+  </main>
+</Page>

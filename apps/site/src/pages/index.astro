@@ -4,7 +4,7 @@ import Command from "../components/Command.astro";
 import Demo from "../components/Demo.astro";
 import Hud from "../components/Hud.astro";
 import Meeting from "../components/Meeting.astro";
-import { description, install, sizes, topBlock, unblock } from "../copy";
+import { description, install, proof, sizes, topBlock, unblock } from "../copy";
 
 const [dictation, meetings, three] = topBlock.pitch;
 ---
@@ -47,7 +47,18 @@ const [dictation, meetings, three] = topBlock.pitch;
       </div>
 
       <div class="hero-why space-y-4">
-        {topBlock.why.map((line) => <p class="prose-line">{line}</p>)}
+        {
+          topBlock.why.map((line) => {
+            // the claim links to where it is kept
+            const [before, after] = line.split(proof);
+            return after === undefined ? (
+              <p class="prose-line">{line}</p>
+            ) : (
+              // on one line: a break here would put a space before the comma
+              <p class="prose-line">{before}<a class="link" href="/changelog">{proof}</a>{after}</p>
+            );
+          })
+        }
         <p class="prose-line">{topBlock.models}</p>
       </div>
     </section>
