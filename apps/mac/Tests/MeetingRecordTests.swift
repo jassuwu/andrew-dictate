@@ -499,7 +499,9 @@ final class MeetingRecordTests: XCTestCase {
 
         clock.advance(by: .seconds(3_498))
         c.probeTapIsAlive()
-        await settle()
+        // three tries, each paced by a real pause: until the problem stands,
+        // not for a fixed time a slow runner can run past.
+        await until { !c.problems.isEmpty }
         XCTAssertEqual(records.count, 0, "still recording")
         c.stop()
         await c.untilWrittenOut()
@@ -685,6 +687,14 @@ final class MeetingRecordTests: XCTestCase {
 
     private func settle(for seconds: Double = 0.3) async {
         try? await Task.sleep(for: .seconds(seconds))
+    }
+
+    /// Until `done`, or two seconds, so a test against code that never gets
+    /// there fails instead of hanging.
+    private func until(_ done: @MainActor () -> Bool) async {
+        for _ in 0..<200 where !done() {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     /// Until the transcriber is parked in its hold, or two seconds, so a
