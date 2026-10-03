@@ -128,13 +128,13 @@
   /* one column for the whole page, the menu bar and the footer too. it
      reads like a note, top to bottom. */
   .column {
-    width: min(44rem, 100% - 3rem);
+    width: min(35rem, 100% - 3rem);
     margin-inline: auto;
   }
 
   @media (width >= 40rem) {
     .column {
-      width: min(44rem, 100% - 5rem);
+      width: min(35rem, 100% - 5rem);
     }
   }
 

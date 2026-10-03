@@ -13,7 +13,7 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
   <main>
     <!-- one column on every screen: the pitch, then the demo right under
          it, so the thing itself is never a long scroll away. -->
-    <section class="column pb-16 pt-24 lg:pt-28">
+    <section class="column pb-11 pt-26">
       <div class="hero-intro">
         <div class="flex items-center gap-3">
           <img src="/badge.png" alt="" width="32" height="32" class="rounded-[7px]" />
@@ -40,11 +40,11 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
         <p class="mt-5 font-mono text-[0.8125rem] tracking-[0.02em] text-gold">{freeFastLocal}</p>
       </div>
 
-      <div class="mt-12">
+      <div class="mt-10">
         <Demo />
       </div>
 
-      <div class="hero-why mt-14 space-y-4">
+      <div class="hero-why mt-12 space-y-3.5">
         {
           topBlock.why.map((line) => {
             // the claim links to where it is kept
@@ -61,9 +61,9 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
       </div>
     </section>
 
-    <section class="column py-16">
+    <section class="column py-11">
       <h2 class="heading">hold <kbd>fn</kbd>, talk, let go.</h2>
-      <div class="mt-6 space-y-4">
+      <div class="mt-4 space-y-3.5">
         <p class="prose-line">
           the text shows up where your cursor is, in any app. i mostly use it
           to talk to agents in a terminal.
@@ -87,14 +87,14 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
 
     <!-- meetings are the smaller half, lower on the page. the scene comes
          before the facts, as the demo does. -->
-    <section class="column py-16">
+    <section class="column py-11">
       <h2 class="heading">record a meeting.</h2>
 
-      <div class="mt-6">
+      <div class="mt-4">
         <Meeting />
       </div>
 
-      <div class="mt-10 space-y-4">
+      <div class="mt-8 space-y-3.5">
         <p class="prose-line">
           press record in the menu bar. it hears your mic and whatever your mac
           plays, so it gets both sides of the call.
@@ -114,16 +114,16 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
       </div>
     </section>
 
-    <section id="install" class="column py-16">
+    <section id="install" class="column py-11">
       <div>
         <h2 class="heading">install.</h2>
 
-        <div class="mt-8">
+        <div class="mt-4">
           <Command command={install} label="the install command" />
         </div>
         <p class="fact mt-3">for apple silicon macs on macOS 26. free, MIT.</p>
 
-        <p class="prose-line mt-10">
+        <p class="prose-line mt-8">
           i'm broke, so i didn't pay apple $99 to sign this. run this once, and
           never again:
         </p>
@@ -134,13 +134,13 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
           the second line opens it. a setup window comes up. after that it lives
           in your menu bar as the gold badge. there's no dock icon.
         </p>
-        <p class="fact mt-4 max-w-[38rem]">
+        <p class="fact mt-3">
           no terminal? open the app, let macOS refuse, then click open anyway in
           system settings › privacy & security. that button is only there for
           about an hour.
         </p>
 
-        <p class="prose-line mt-10">
+        <p class="prose-line mt-8">
           to update, run the same command with{" "}
           <span class="font-mono text-[0.9em] text-gold-pale">upgrade</span> instead of{" "}
           <span class="font-mono text-[0.9em] text-gold-pale">install</span>. the menu tells
