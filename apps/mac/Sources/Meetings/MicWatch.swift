@@ -10,6 +10,14 @@
 /// purpose: while it is, nothing is held against it, and once it is back
 /// its silence is timed afresh.
 ///
+/// Known, and left as it is: an input that gates itself — Krisp and the
+/// other noise cancellers that sit between the mic and the app, a headset
+/// that gates in hardware — hands over exact zeros while you listen, not a
+/// room's hiss. Ten seconds of the far side talking through that read as a
+/// mic not delivering, and "can't hear your mic" is said over a mic that is
+/// fine; it clears the moment you speak. Telling the two apart would take
+/// knowing the input gates, which the mac does not say.
+///
 /// Pure: each chunk's two loudnesses in, at the meeting time it covers;
 /// whether the mic is unheard out.
 struct MicWatch: Equatable, Sendable {
