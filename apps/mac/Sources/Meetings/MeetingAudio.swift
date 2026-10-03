@@ -179,6 +179,11 @@ protocol MeetingAudioSource: Sendable {
     /// player that would not start: the tap was given nothing to hear, so
     /// its silence is no verdict on it. `nil` when the source cannot say.
     var startSoundPlayed: Bool? { get }
+    /// Where on the chunks' clock that start sound was played, for a source
+    /// that can say: the window for hearing it opens there, wherever the
+    /// chunks of a rig still delivering beside a rebuild had got to. `nil`
+    /// for one that cannot, whose window opens with its first chunk after.
+    var startSoundAt: Duration? { get }
     /// The mic your side is being recorded from, as the mac names it, so a
     /// problem with it can say which. `nil` when there is none, or the
     /// source cannot say. Kept, like `anythingIsPlaying`: cheap to read.
@@ -199,6 +204,7 @@ extension MeetingAudioSource {
     }
     func playQuietProbe() async throws {}
     var startSoundPlayed: Bool? { nil }
+    var startSoundAt: Duration? { nil }
 }
 
 /// The engine listening to a meeting. Lines arrive as whisper decides them,

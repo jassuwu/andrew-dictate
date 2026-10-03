@@ -330,8 +330,9 @@ final class MeetingCoordinator: ObservableObject {
     /// this mark the far side the transcriber is handed is ours, and after
     /// it, whatever the window, it is the call (`OurTones`).
     private var toneUntil: Duration = .zero
-    /// A rebuilt tap's start sound is on its way: the window runs from the
-    /// first chunk the tap delivers, wherever the source stamps it.
+    /// A rebuilt tap's start sound is on its way, from a source that
+    /// cannot say where it played it: the window runs from the first chunk
+    /// the tap delivers, wherever the source stamps it.
     private var probeOpensAtNextChunk = false
     /// Every health check in here is driven by a chunk arriving, so a tap
     /// that stops calling back altogether — the mac slept, the screen
@@ -905,8 +906,7 @@ final class MeetingCoordinator: ObservableObject {
         // that is not delivering yet.
         if probeOpensAtNextChunk, source.capturing != .yourSideAlone {
             probeOpensAtNextChunk = false
-            probeUntil = max(probeUntil, chunk.at + thresholds.probeTimeout)
-            toneUntil = max(toneUntil, chunk.at + OurTones.silenced(for: OurTones.startSound))
+            openTheStartSoundsWindow(at: chunk.at)
         }
         #if DEBUG
         if let peak = sweepPeak {
@@ -1264,13 +1264,20 @@ final class MeetingCoordinator: ObservableObject {
         var notedUnplayable = false
         while await pause(wait), isRebuilding(meeting) {
             let failed: MeetingRecord.Label
-            // Set before the rebuild, not after: the tone can be heard the
-            // instant the tap is back. Where the window ends is only known
-            // then, too: the source stamps the rebuilt tap past the outage,
-            // settle and rebuild included, so it runs from the first chunk.
-            probeOpensAtNextChunk = true
+            // A source that says where it played the start sound has the
+            // window opened there once it is back: a rig still delivering
+            // beside the one being built has chunks that are not the new
+            // tap's. One that cannot say has it set before the rebuild, not
+            // after: the tone can be heard the instant the tap is back, and
+            // the source stamps the rebuilt tap past the outage, settle and
+            // rebuild included, so it runs from the first chunk.
+            let playedBefore = source.startSoundAt
+            probeOpensAtNextChunk = playedBefore == nil
             do {
                 try await source.rebuild()
+                if let played = source.startSoundAt, played != playedBefore {
+                    openTheStartSoundsWindow(at: played)
+                }
                 // No output to play its start sound on: the rebuilt tap was
                 // asked nothing, so the try neither worked nor failed. The
                 // gap stays open until the far side is heard, and the tap
@@ -1308,6 +1315,14 @@ final class MeetingCoordinator: ObservableObject {
                 wait = thresholds.retryWhileTheProblemStands
             }
         }
+    }
+
+    /// The start sound, played at `at` on the chunks' clock, is ours and
+    /// not the call, for as long as it lasts; and it proves the tap, not the
+    /// room, for as long as the tap is given to hear it.
+    private func openTheStartSoundsWindow(at at: Duration) {
+        probeUntil = max(probeUntil, at + thresholds.probeTimeout)
+        toneUntil = max(toneUntil, at + OurTones.silenced(for: OurTones.startSound))
     }
 
     /// Until the rebuilt tap has been heard, or the probe window has passed

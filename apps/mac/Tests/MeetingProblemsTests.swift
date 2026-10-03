@@ -351,6 +351,46 @@ final class MeetingProblemsTests: XCTestCase {
         XCTAssertEqual(fed.filter { $0.themRMS > 0 }.count, 0, "the start sound is ours")
     }
 
+    /// The far side went quiet while something played, and the tap did not
+    /// hear the quiet probe: taken for dead. The rig goes on delivering your
+    /// side while the new one is built beside it, slowly, and it is the new
+    /// rig's start sound that proves the tap, wherever the old rig's chunks
+    /// had got to by then. The source says where it played it, and the
+    /// window opens there: the chirp is never handed to the transcriber as
+    /// somebody speaking, and it ends the gap.
+    func testTheStartSoundOfARigBuiltBesideTheLiveOneIsNotTheCall() async throws {
+        source.anythingIsPlaying = true
+        source.capturing = .bothSides
+        source.saysWhereTheStartSoundPlayed = true
+        source.rebuildTakes = .milliseconds(800)
+        let c = coordinator(thresholds: .init(
+            probeTimeout: .seconds(1), silenceTimeout: .seconds(5),
+            silenceFloor: 0.001, quietNudgeAfter: .seconds(3_600),
+            quietProbeWindow: .seconds(2),
+            settleBeforeRebuild: .milliseconds(50)))
+        c.start()
+        await source.awaitStart()
+        await play(both(at: .zero))
+        // asked at 7, missed by 10.
+        var s = 1
+        while !events.contains(.gapBegan), s < 20 {
+            await play(you(at: .seconds(s)))
+            s += 1
+        }
+        XCTAssertEqual(events, [.started, .gapBegan])
+        while !events.contains(.gapEnded), s < 200 {
+            await play(you(at: .seconds(s)))
+            s += 1
+        }
+
+        XCTAssertEqual(events, [.started, .gapBegan, .gapEnded])
+        let played = try XCTUnwrap(source.startSoundAt)
+        XCTAssertGreaterThan(played, .seconds(12), "the old rig's chunks went on while it was built")
+        let fed = transcriber.fed.filter { $0.at >= .seconds(10) }
+        XCTAssertTrue(fed.contains { $0.at == played }, "the start sound reached the transcriber")
+        XCTAssertEqual(fed.filter { $0.themRMS > 0 }.count, 0, "the start sound is ours")
+    }
+
     /// A settle, then three tries in a row 100 ms and 200 ms apart, then
     /// one every 300 ms with the problem standing.
     private var retrying: MeetingThresholds {
@@ -634,18 +674,47 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     private var _rebuildTakes: Duration = .zero
 
     /// One that works brings both sides back and plays the start sound,
-    /// which the tap hears a moment later as far-side audio.
+    /// which the tap hears a moment later as far-side audio. One that says
+    /// where it played it hears it a tenth of a second after it returns,
+    /// the way the real tap's chunk comes after the player has started.
     func rebuild() async throws {
         if rebuildsFail { throw DeviceGone() }
         try? await Task.sleep(for: rebuildTakes)
-        let at = lock.withLock { () -> Duration in
+        let (at, says) = lock.withLock { () -> (Duration, Bool) in
             _capturing = .bothSides
-            return nextAt
+            if _saysWhereTheStartSoundPlayed { _startSoundAt = nextAt }
+            return (nextAt, _saysWhereTheStartSoundPlayed)
         }
         let n = 4_800
-        send(.init(you: Array(repeating: 0, count: n),
-                   them: (0..<n).map { sin(Float($0) * 0.05) * 0.3 }, at: at))
+        let tone = MeetingAudioChunk(
+            you: Array(repeating: 0, count: n),
+            them: (0..<n).map { sin(Float($0) * 0.05) * 0.3 }, at: at)
+        guard says else { return send(tone) }
+        Task {
+            try? await Task.sleep(for: .milliseconds(100))
+            self.send(tone)
+        }
     }
+
+    /// While set, a rebuild says where on its clock it played the start
+    /// sound, as the real source does.
+    var saysWhereTheStartSoundPlayed: Bool {
+        get { lock.withLock { _saysWhereTheStartSoundPlayed } }
+        set { lock.withLock { _saysWhereTheStartSoundPlayed = newValue } }
+    }
+    private var _saysWhereTheStartSoundPlayed = false
+
+    var startSoundAt: Duration? {
+        lock.withLock { _startSoundAt }
+    }
+    private var _startSoundAt: Duration?
+
+    /// What the source last heard of the mac playing anything.
+    var anythingIsPlaying: Bool? {
+        get { lock.withLock { _anythingIsPlaying } }
+        set { lock.withLock { _anythingIsPlaying = newValue } }
+    }
+    private var _anythingIsPlaying: Bool?
 
     /// What it says it is delivering: after a rebuild that threw, the mic
     /// alone, or nothing.
@@ -669,7 +738,7 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
 
     func send(_ chunk: MeetingAudioChunk) {
         let chunks = lock.withLock { () -> AsyncStream<MeetingAudioChunk>.Continuation? in
-            nextAt = chunk.at + chunk.duration
+            nextAt = max(nextAt, chunk.at + chunk.duration)
             return self.chunks
         }
         chunks?.yield(chunk)
