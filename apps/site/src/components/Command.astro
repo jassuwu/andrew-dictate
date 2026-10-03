@@ -1,0 +1,15 @@
+---
+interface Props {
+  command: string;
+  /** what the copy button copies, said for a screen reader */
+  label: string;
+  quiet?: boolean;
+}
+
+const { command, label, quiet = false } = Astro.props;
+---
+
+<div class:list={["cmd", quiet ? "text-[12px] sm:text-[12.5px]" : "text-[12.5px] sm:text-[14px]"]}>
+  <code>{command}</code>
+  <button type="button" hidden aria-label={`copy ${label}`} aria-live="polite">copy</button>
+</div>

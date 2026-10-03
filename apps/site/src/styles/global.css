@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 /* the app's type roles (ADR 0037): paper is prose, machine is anything
-   factual (keycaps, commands, versions), hand is the one signature.
-   same files the app ships, OFL, in public/fonts. */
+   factual (keycaps, commands, versions, text a model wrote), hand is the one
+   signature. same files the app ships, OFL, in public/fonts. */
 @font-face {
   font-family: "Ioskeley Mono";
   src: url("/fonts/IoskeleyMono-Regular.ttf") format("truetype");
@@ -17,6 +17,7 @@
   font-display: swap;
 }
 
+/* the app's own colours (BrandUI). the lamp burns pale, gold and deep. */
 @theme {
   --font-sans:
     ui-sans-serif, -apple-system, "SF Pro Text", "Segoe UI", system-ui,
@@ -24,26 +25,39 @@
   --font-mono:
     "Ioskeley Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
   --font-hand: "Excalifont", "Comic Sans MS", cursive;
+
+  --color-ink: #0c0c0e;
+  --color-window: #161619;
+  --color-card: #1f1f24;
+  --color-cream: #f2ede0;
+  --color-gold: #e5be62;
+  --color-gold-pale: #f9e9a8;
+  --color-gold-deep: #9e7527;
 }
 
 @layer base {
   html {
     -webkit-text-size-adjust: 100%;
+    background: var(--color-ink);
+    color-scheme: dark;
+    scroll-padding-top: 4rem;
   }
 
   body {
     font-family: var(--font-sans);
     font-synthesis-weight: none;
     text-rendering: optimizeLegibility;
+    background: var(--color-ink);
+    color: var(--color-cream);
   }
 
   ::selection {
-    background: #e5be62;
-    color: #0c0c0e;
+    background: var(--color-gold);
+    color: var(--color-ink);
   }
 
   :focus-visible {
-    outline: 2px solid #f9e9a8;
+    outline: 2px solid var(--color-gold-pale);
     outline-offset: 3px;
     border-radius: 6px;
   }
@@ -54,28 +68,81 @@
     padding: 0.15em 0.42em;
     border-radius: 5px;
     border: 1px solid rgb(229 190 98 / 0.3);
-    background: #1f1f24;
-    color: #f9e9a8;
+    background: var(--color-card);
+    color: var(--color-gold-pale);
     white-space: nowrap;
-  }
-
-  code {
-    font-family: var(--font-mono);
-    font-size: 0.88em;
-    color: #e5be62;
-    word-break: break-word;
   }
 }
 
-/* the wordmark lets you in on the name, and only if you go looking.
-   ADR 0013's deadpan rule holds everywhere else. */
 @layer components {
   .hand {
     font-family: var(--font-hand);
   }
 
+  /* the page is laid out like the screen the app lives on: a menu bar along
+     the top with the badge in it, and the lamp at the bottom centre. */
+  .menubar {
+    position: fixed;
+    inset: 0 0 auto 0;
+    z-index: 30;
+    height: 2.25rem;
+    background: rgb(12 12 14 / 0.72);
+    backdrop-filter: blur(18px) saturate(1.4);
+    -webkit-backdrop-filter: blur(18px) saturate(1.4);
+    border-bottom: 1px solid rgb(242 237 224 / 0.06);
+  }
+
+  /* the two lines that say what it is. dictation is said in gold, meetings
+     in a quieter cream: about sixty and forty. */
+  .pitch {
+    font-size: clamp(2.1rem, 1.15rem + 3.1vw, 3.4rem);
+    line-height: 1.07;
+    letter-spacing: -0.035em;
+    font-weight: 600;
+    text-wrap: balance;
+  }
+
+  .heading {
+    font-size: clamp(1.6rem, 1.1rem + 1.6vw, 2.2rem);
+    line-height: 1.12;
+    letter-spacing: -0.03em;
+    font-weight: 600;
+    text-wrap: balance;
+  }
+
+  .prose-line {
+    font-size: 1.0625rem;
+    line-height: 1.7;
+    color: rgb(242 237 224 / 0.72);
+    max-width: 34rem;
+  }
+
+  .fact {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.8;
+    letter-spacing: 0.02em;
+    color: rgb(242 237 224 / 0.6);
+  }
+
+  .link {
+    color: var(--color-gold);
+    text-decoration: underline;
+    text-decoration-color: rgb(229 190 98 / 0.35);
+    text-underline-offset: 0.22em;
+    transition:
+      color 150ms ease,
+      text-decoration-color 150ms ease;
+  }
+
+  .link:hover {
+    color: var(--color-gold-pale);
+    text-decoration-color: var(--color-gold-pale);
+  }
+
+  /* the wordmark lets you in on the name, and only if you go looking.
+     ADR 0013's deadpan rule holds everywhere else. */
   .aside {
-    margin-top: 0.25rem;
     color: transparent;
     transition: color 500ms ease;
   }
@@ -93,8 +160,54 @@
     }
   }
 
+  /* a command you can select with scripts off, and a button beside it that
+     copies it with them on. */
+  .cmd {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    border-radius: 0.75rem;
+    border: 1px solid rgb(242 237 224 / 0.1);
+    background: var(--color-card);
+    padding: 0.9rem 1rem 0.9rem 1.1rem;
+    font-family: var(--font-mono);
+    transition: border-color 150ms ease;
+  }
+
+  .cmd:hover,
+  .cmd:focus-within {
+    border-color: rgb(229 190 98 / 0.4);
+  }
+
+  .cmd code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    user-select: all;
+    -webkit-user-select: all;
+    color: var(--color-gold-pale);
+  }
+
+  .cmd button {
+    flex: none;
+    font-size: 0.75rem;
+    line-height: 1.6;
+    color: rgb(242 237 224 / 0.65);
+    cursor: pointer;
+    padding: 0.1rem 0.35rem;
+    border-radius: 0.35rem;
+    transition: color 150ms ease;
+  }
+
+  .cmd button:hover {
+    color: var(--color-gold-pale);
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .aside {
+    .aside,
+    .link,
+    .cmd,
+    .cmd button {
       transition: none;
     }
   }
