@@ -216,6 +216,25 @@ final class OnboardingFlowTests: XCTestCase {
         )
     }
 
+    /// The model runs here, and the half of that a person feels is that
+    /// there is nothing to wait for. The card says that half.
+    func testTheModelScreenSaysThereIsNoWaitForAServer() {
+        XCTAssertEqual(
+            OnboardingStep.model.reason(
+                for: OnboardingJobs(dictation: true, meetings: false),
+                key: "fn"
+            ),
+            "it runs on this mac, so there is no wait for a server."
+        )
+        XCTAssertEqual(
+            OnboardingStep.model.reason(
+                for: OnboardingJobs(dictation: true, meetings: true),
+                key: "fn"
+            ),
+            "they run on this mac, so there is no wait for a server."
+        )
+    }
+
     /// Microphone is both jobs'; accessibility is dictation's and system
     /// audio is meetings'. So two, three, or two again.
     func testThePermissionScreenCountsWhatEachJobNeeds() {

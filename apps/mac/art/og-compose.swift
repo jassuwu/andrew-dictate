@@ -1,10 +1,13 @@
 import AppKit
 
-// og image compositor: dark bg + the badge (from badge_1024.png) + type.
+// og image compositor: the one lockup. dark bg, the badge (from
+// badge_1024.png) beside the name, the pitch in large type, the facts line
+// under it, and the lamp lit at the bottom centre, where the app puts it.
+// the readme's banner is this same picture.
 // rendered at 2x (2400x1260) because that is what the site ships, into an
 // explicit bitmap so a retina display cannot double it again.
-// the type roles match the app (ADR 0037): paper for the name, machine
-// (Ioskeley Mono) for the tagline and the facts line.
+// the type roles match the app (ADR 0037): paper for the name and the pitch,
+// machine (Ioskeley Mono) for the facts line.
 let art = FileManager.default.currentDirectoryPath
 // the badge alone, never icon_1024.png: that one carries apple's icon-grid
 // padding (process-icon.swift), and a poster is not an icon slot.
@@ -34,32 +37,68 @@ ctx.imageInterpolation = .high
 NSColor(srgbRed: 0x0C/255, green: 0x0C/255, blue: 0x0E/255, alpha: 1).setFill()
 NSRect(x: 0, y: 0, width: W, height: H).fill()
 
-badge.draw(in: NSRect(x: 80 * S, y: 95 * S, width: 440 * S, height: 440 * S))
-
 let goldPale = NSColor(srgbRed: 0xF9/255, green: 0xE9/255, blue: 0xA8/255, alpha: 1)
 let gold = NSColor(srgbRed: 0xE5/255, green: 0xBE/255, blue: 0x62/255, alpha: 1)
+let goldDeep = NSColor(srgbRed: 0x9E/255, green: 0x75/255, blue: 0x27/255, alpha: 1)
 
-let name = NSAttributedString(string: "andrew dictate", attributes: [
-    .font: NSFont.systemFont(ofSize: 84 * S, weight: .semibold),
-    .foregroundColor: goldPale, .kern: -1.5 * S])
-name.draw(at: NSPoint(x: 580 * S, y: 330 * S))
+let left = 84 * S
 
-let tag = NSAttributedString(string: "escape the keyboard.", attributes: [
-    .font: mono(36 * S),
-    .foregroundColor: gold])
-tag.draw(at: NSPoint(x: 584 * S, y: 268 * S))
+// the badge and the name, as the site's first lines have them
+badge.draw(in: NSRect(x: left, y: 452 * S, width: 96 * S, height: 96 * S))
 
-// the facts line ends at the same margin the badge starts on. shrink until it fits.
-let subX = 584 * S, rightMargin = 80 * S
-var subSize = 25 * S
-var sub: NSAttributedString
-repeat {
-    sub = NSAttributedString(string: "dictation · meetings · free · fully local", attributes: [
-        .font: mono(subSize),
-        .foregroundColor: goldPale.withAlphaComponent(0.5)])
-    subSize -= 1
-} while sub.size().width > CGFloat(W) - subX - rightMargin
-sub.draw(at: NSPoint(x: subX, y: 96 * S))
+NSAttributedString(string: "andrew dictate", attributes: [
+    .font: NSFont.systemFont(ofSize: 40 * S, weight: .semibold),
+    .foregroundColor: goldPale, .kern: -0.8 * S,
+]).draw(at: NSPoint(x: left + 122 * S, y: 498 * S))
+
+NSAttributedString(string: "escape the keyboard.", attributes: [
+    .font: NSFont.systemFont(ofSize: 25 * S, weight: .regular),
+    .foregroundColor: gold,
+]).draw(at: NSPoint(x: left + 124 * S, y: 460 * S))
+
+// the pitch, in two lines
+let pitch: [NSAttributedString.Key: Any] = [
+    .font: NSFont.systemFont(ofSize: 92 * S, weight: .semibold),
+    .foregroundColor: goldPale, .kern: -3.4 * S,
+]
+NSAttributedString(string: "dictation for talking", attributes: pitch)
+    .draw(at: NSPoint(x: left - 4 * S, y: 296 * S))
+NSAttributedString(string: "to your agents.", attributes: pitch)
+    .draw(at: NSPoint(x: left - 4 * S, y: 196 * S))
+
+NSAttributedString(string: "dictation · meetings · free · fast · local", attributes: [
+    .font: mono(27 * S),
+    .foregroundColor: gold,
+]).draw(at: NSPoint(x: left, y: 128 * S))
+
+// the lamp, lit: the tube the hud draws, with the light it spills
+let lampY = 58 * S, lampHalf = 110 * S, lampThickness = 7 * S
+let tube = NSBezierPath()
+tube.move(to: NSPoint(x: CGFloat(W) / 2 - lampHalf, y: lampY))
+tube.line(to: NSPoint(x: CGFloat(W) / 2 + lampHalf, y: lampY))
+tube.lineCapStyle = .round
+
+NSGraphicsContext.saveGraphicsState()
+let halo = NSShadow()
+halo.shadowColor = gold.withAlphaComponent(0.75)
+halo.shadowBlurRadius = 26 * S
+halo.set()
+gold.withAlphaComponent(0.9).setStroke()
+tube.lineWidth = lampThickness
+tube.stroke()
+NSGraphicsContext.restoreGraphicsState()
+
+goldDeep.blended(withFraction: 0.72, of: goldPale)!.setStroke()
+tube.lineWidth = lampThickness
+tube.stroke()
+
+let rim = NSBezierPath()
+rim.move(to: NSPoint(x: CGFloat(W) / 2 - lampHalf, y: lampY + lampThickness / 2 - 1.2 * S))
+rim.line(to: NSPoint(x: CGFloat(W) / 2 + lampHalf, y: lampY + lampThickness / 2 - 1.2 * S))
+rim.lineCapStyle = .round
+rim.lineWidth = 1.3 * S
+goldPale.setStroke()
+rim.stroke()
 
 ctx.flushGraphics()
 NSGraphicsContext.restoreGraphicsState()

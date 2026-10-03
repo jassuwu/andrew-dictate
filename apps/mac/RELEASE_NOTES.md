@@ -1,3 +1,17 @@
+## 0.12.0
+
+a new site, a readme, and two lines in the app.
+
+the site says what this is for now: talking to your agents. you can hold a key on it and watch a prompt land in an agent's box, after the same wait the app takes. you can press record and watch a call become a markdown file. both are simulations, and the page says so. it's at dictate.jass.gg.
+
+the site has a changelog page, made from these notes.
+
+the readme is back, and it is short: what it is, how to install it, how to update it, and the two jobs.
+
+in the app, the model card in setup now says the model runs on your mac, so there is no wait for a server. the macOS prompt for the transcripts folder says what the app writes there and nothing else.
+
+nothing else in the app changed. everything else is 0.11.1.
+
 ## 0.11.1
 
 a new logo, and nothing else.

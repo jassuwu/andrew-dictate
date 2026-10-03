@@ -7,6 +7,8 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   // og cards and canonical links need absolute urls; this is where they come from
   site: 'https://dictate.jass.gg',
+  // astro's dev toolbar sits at the bottom centre, which is where the lamp is
+  devToolbar: { enabled: false },
   vite: {
     plugins: [tailwindcss()]
   }

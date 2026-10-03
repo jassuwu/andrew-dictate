@@ -9,7 +9,9 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "test": "bun test",
+    "test": "astro build && bun test",
+    "check": "astro check",
+    "loop": "astro build && bun run scripts/loop.ts",
     "checkins": "bun run scripts/checkins.ts",
     "astro": "astro"
   },
@@ -17,5 +19,11 @@
     "@tailwindcss/vite": "^4.3.3",
     "astro": "^7.1.3",
     "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "@types/bun": "^1.4.2",
+    "playwright-core": "^1.63.0",
+    "typescript": "^6"
   }
 }

@@ -6,6 +6,34 @@ on:
     branches: [main]
 
 jobs:
+  # the site has tests of its own, and a build that fails on purpose when the
+  # release notes cannot be read. nothing ran either before this job.
+  site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/site
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: install
+        run: bun install --frozen-lockfile
+
+      - name: typecheck
+        run: bun run check
+
+      # build first: the copy guard reads the built page
+      - name: build
+        run: bun run build
+
+      - name: test
+        run: bun test
+
   test:
     runs-on: macos-latest
     timeout-minutes: 20

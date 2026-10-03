@@ -19,7 +19,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.11.1</string>
+	<string>0.12.0</string>
 	<key>CFBundleVersion</key>
 	<string>6</string>
 	<key>LSMinimumSystemVersion</key>
@@ -27,7 +27,7 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSDocumentsFolderUsageDescription</key>
-	<string>andrew dictate writes your meeting transcripts here. nothing leaves this mac.</string>
+	<string>andrew dictate writes your meeting transcripts here.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2026 jass. MIT license.</string>
 	<key>NSMicrophoneUsageDescription</key>
