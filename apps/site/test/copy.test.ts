@@ -69,6 +69,50 @@ describe("the page", () => {
   });
 });
 
+/** what a reader of the readme on github can read. */
+function markdownText(markdown: string): string {
+  return visibleText(
+    markdown
+      .replace(/```[\s\S]*?```/g, " ")
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+      .replace(/[*`]/g, ""),
+  );
+}
+
+describe("the readme", () => {
+  const readme = markdownText(readFileSync(join(repo, "README.md"), "utf8"));
+
+  for (const [name, pattern] of retired) {
+    test(`does not bring back ${name}`, () => {
+      expect(readme).not.toMatch(pattern);
+    });
+  }
+
+  test("opens with the same top block as the page", () => {
+    for (const line of [
+      topBlock.name,
+      topBlock.tagline,
+      ...topBlock.pitch,
+      ...topBlock.why,
+      topBlock.models,
+    ]) {
+      expect(readme).toContain(line);
+    }
+  });
+
+  test("quotes the download sizes onboarding shows", () => {
+    expect(readme).toContain(sizes.dictation);
+    expect(readme).toContain(sizes.meetings);
+  });
+
+  test("leaves out the sections that sold what the app does not do", () => {
+    for (const heading of ["where your words go", "limits", "next", "not coming"]) {
+      expect(readme).not.toMatch(new RegExp(`(^|\\s)#+ ${heading}`, "i"));
+    }
+  });
+});
+
 describe("the download sizes", () => {
   // onboarding is the source (SPEC §5). the site quotes it, so it is held
   // to it here rather than trusted to be remembered.
