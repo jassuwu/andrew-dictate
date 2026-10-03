@@ -55,7 +55,6 @@ final class SpokenEmailTests: XCTestCase {
     }
 
     func testAddressMidSentenceKeepsTheSentenceCapitalised() {
-        // also printed on dictate.jass.gg — apps/site/src/pages/index.astro
         XCTAssertEqual(
             cleaned("ping me at support at acme dot io tomorrow"),
             "Ping me at support@acme.io tomorrow."
