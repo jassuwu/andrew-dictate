@@ -19,15 +19,9 @@ final class DemoPairsTests: XCTestCase {
         let pasted: String
     }
 
-    /// apps/mac/Tests/ → apps/site/src/demo/pairs.json
-    private static let file = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .appendingPathComponent("site/src/demo/pairs.json")
-
     private func pairs() throws -> Pairs {
-        try JSONDecoder().decode(Pairs.self, from: Data(contentsOf: Self.file))
+        try JSONDecoder().decode(
+            Pairs.self, from: Data(contentsOf: SiteDemoFile.url("pairs.json")))
     }
 
     func testThereAreAFewPromptsAndEachCanBeCutAnywhere() throws {
