@@ -52,6 +52,29 @@ enum MicMix {
         return tap > 0 && carried == tap ? 0 : nil
     }
 
+    /// A buffer's flat channels, each `frames` long, down to the two
+    /// sides: the first `mic` are the mic's (002 §4), mixed by `mono`, and
+    /// the rest the tap's, averaged. Without the one, its side is silence as
+    /// long as the other, so a chunk always has both.
+    static func sides(_ channels: [[Float]], mic: Int, frames: Int) -> (you: [Float], them: [Float]) {
+        let mic = min(max(0, mic), channels.count)
+        let you = mic == 0 ? [Float](repeating: 0, count: frames) : mono(Array(channels[..<mic]))
+        var them = [Float](repeating: 0, count: frames)
+        let tap = channels[mic...]
+        for channel in tap {
+            for (f, sample) in channel.enumerated() where f < frames {
+                them[f] += sample
+            }
+        }
+        if tap.count > 1 {
+            let count = Float(tap.count)
+            for f in them.indices {
+                them[f] /= count
+            }
+        }
+        return (you, them)
+    }
+
     private static func rms(_ samples: [Float]) -> Float {
         guard !samples.isEmpty else { return 0 }
         let sum = samples.reduce(Float(0)) { $0 + $1 * $1 }

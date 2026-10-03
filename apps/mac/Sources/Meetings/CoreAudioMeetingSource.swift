@@ -1120,34 +1120,20 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
         // Sub-device channels come first, taps after (002 §4, confirmed by
         // the spike): the first `micChannels` flat channels are the mic.
-        // The mic's are kept apart and mixed by `MicMix`; the tap's two
-        // sides are averaged.
-        var micChannelSamples: [[Float]] = []
-        var tap = [Float](repeating: 0, count: frames)
-        var tapCount: Float = 0
-        var flatIndex = 0
+        // `MicMix` makes the two sides of them.
+        var channels: [[Float]] = []
         for buffer in list {
             guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
-            let channels = Int(buffer.mNumberChannels)
-            let available = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size / max(channels, 1)
-            for channel in 0..<channels {
-                let isMic = flatIndex < micChannels
-                flatIndex += 1
-                let n = min(frames, available)
-                if isMic {
-                    var samples = [Float](repeating: 0, count: frames)
-                    for f in 0..<n { samples[f] = data[f * channels + channel] }
-                    micChannelSamples.append(samples)
-                } else {
-                    tapCount += 1
-                    for f in 0..<n { tap[f] += data[f * channels + channel] }
-                }
+            let count = Int(buffer.mNumberChannels)
+            let available = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size / max(count, 1)
+            let n = min(frames, available)
+            for channel in 0..<count {
+                var samples = [Float](repeating: 0, count: frames)
+                for f in 0..<n { samples[f] = data[f * count + channel] }
+                channels.append(samples)
             }
         }
-        let mic = micChannelSamples.isEmpty
-            ? [Float](repeating: 0, count: frames)
-            : MicMix.mono(micChannelSamples)
-        if tapCount > 1 { for f in 0..<frames { tap[f] /= tapCount } }
+        let (mic, tap) = MicMix.sides(channels, mic: micChannels, frames: frames)
 
         for (you, them) in rig.assembler.push(you: mic, them: tap) {
             let at = lock.withLock { () -> Duration in

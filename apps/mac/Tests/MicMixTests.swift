@@ -83,6 +83,36 @@ final class MicMixTests: XCTestCase {
         XCTAssertNil(MicMix.micChannels(said: 2, first: 2, carried: 1, tap: 0))
     }
 
+    // MARK: - the two sides
+
+    /// the built-in mic's channel and the tap's two: `you` the mic's,
+    /// `them` the tap's averaged.
+    func testTheMicsChannelsAreYouAndTheTapsAreThem() {
+        let left = voice.map { $0 * 0.5 }
+        let sides = MicMix.sides([voice, left, voice], mic: 1, frames: 512)
+
+        XCTAssertEqual(sides.you, voice)
+        XCTAssertEqual(sides.them, voice.map { $0 * 0.75 })
+    }
+
+    /// the mic went from under the rig and its buffers carry the tap's two
+    /// channels alone: they are `them`, and `you` is silence as long as
+    /// they are, so the chunks go on with both sides the same length.
+    func testWithNoMicChannelsYouIsSilenceAsLongAsThem() {
+        let sides = MicMix.sides([voice, voice], mic: 0, frames: 512)
+
+        XCTAssertEqual(sides.you, silence)
+        XCTAssertEqual(sides.them, voice)
+    }
+
+    /// the mic alone has no tap: `them` is silence as long as `you`.
+    func testWithNoTapChannelsThemIsSilence() {
+        let sides = MicMix.sides([voice], mic: 1, frames: 512)
+
+        XCTAssertEqual(sides.you, voice)
+        XCTAssertEqual(sides.them, silence)
+    }
+
     /// a rig with the mic alone, while the tap cannot be rebuilt, has no
     /// tap channels after the mic's: every channel it carries is `you`,
     /// and none of it is ever read as the far side.
