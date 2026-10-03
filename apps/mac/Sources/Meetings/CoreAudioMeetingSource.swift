@@ -21,6 +21,10 @@ import os
 /// move is silent: the probe tone is for a tap nobody has heard yet, and if
 /// the new tap stops being heard the coordinator's own checks find out.
 ///
+/// The clock is the chunks' own (`ChunkClock`): a time no buffer came in —
+/// a mic gone before the next took over, a lid shut — is skipped, and told
+/// as `nothingDelivered`, so the meeting marks it a gap.
+///
 /// `@unchecked Sendable` because Core Audio hands us raw object ids and an
 /// IOProc on its own queue; every field they touch is behind `lock`, the
 /// ids themselves are plain integers the HAL owns, and what the handoff
@@ -141,8 +145,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     private var continuation: AsyncStream<MeetingAudioChunk>.Continuation?
     private var events = AsyncStream<MeetingSourceEvent> { $0.finish() }
     private var told: AsyncStream<MeetingSourceEvent>.Continuation?
-    private var framesDelivered: Int64 = 0
-    private var lastDelivery: ContinuousClock.Instant?
+    /// Where the chunks are, and the times nothing came.
+    private var clock = ChunkClock()
     private var player: AVAudioPlayer?
     /// Whether the last start sound could be played at all.
     private var startSoundSounded: Bool?
@@ -209,8 +213,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             self.continuation = continuation
             self.events = events
             self.told = told
-            self.framesDelivered = 0
-            self.lastDelivery = ContinuousClock.now
+            self.clock = ChunkClock()
             self.aloneTold = nil
             self.epoch += 1
             return self.epoch
@@ -256,7 +259,6 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             await retire([alone])
         }
         lock.withLock { aloneTold = nil }
-        skipTheTimeNothingWasDelivered()
         // The tone again: a rebuilt tap must prove itself like a new one.
         playProbeTone()
     }
@@ -279,7 +281,6 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         do {
             let rig = try await bringUp(slot, on: nil, withTap: false)
             try await adopt(rig, epoch: epoch)
-            skipTheTimeNothingWasDelivered()
             tellAlone(.micAlone, mic: rig.mic)
         } catch is CancellationError {
             return
@@ -308,6 +309,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         let adopted = lock.withLock { () -> Bool in
             guard self.epoch == epoch else { return false }
             live = rig
+            clock.newRig()
             return true
         }
         guard adopted else {
@@ -319,33 +321,6 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
     var sourceEvents: AsyncStream<MeetingSourceEvent> {
         lock.withLock { events }
-    }
-
-    /// A chunk's `at` is a frame count, and frames only exist while the tap
-    /// is calling back — so a rebuild after a sleep would stamp the next
-    /// chunk as if the lost hour never happened, and the gap the session
-    /// records would be zero seconds long. Advancing the counter over the
-    /// outage keeps the whole meeting on one clock. Small outages are the
-    /// teardown itself and are left alone.
-    private func skipTheTimeNothingWasDelivered() {
-        lock.withLock { skipOutage(until: ContinuousClock.now) }
-    }
-
-    /// `skipTheTimeNothingWasDelivered`, with `lock` already held: a rig
-    /// taking over from one whose mic went away carries on from where that
-    /// one stopped, plus the time nothing came.
-    private func skipOutage(until now: ContinuousClock.Instant) {
-        guard let last = lastDelivery else { return }
-        let outage = now - last
-        guard outage > .seconds(1) else { return }
-        framesDelivered += Int64(outage.totalSeconds * MeetingAudioChunk.sampleRate)
-        lastDelivery = now
-    }
-
-    /// Where the meeting's clock is: the `at` the next chunk will carry.
-    /// With `lock` held.
-    private var nextStamp: Duration {
-        .seconds(Double(framesDelivered) / MeetingAudioChunk.sampleRate)
     }
 
     var anythingIsPlaying: Bool? {
@@ -633,7 +608,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
     /// For the meeting's record, and the log.
     private func tell(_ kind: MeetingSourceEvent.Kind, mic: MicHandoff.Mic?, at stamp: Duration?) {
-        let (told, at) = lock.withLock { (self.told, stamp ?? nextStamp) }
+        let (told, at) = lock.withLock { (self.told, stamp ?? clock.stamp) }
         let name = mic?.name ?? "no mic"
         let seconds = String(format: "%.2f", at.totalSeconds)
         switch kind {
@@ -870,8 +845,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
         var procID: AudioDeviceIOProcID?
         let status = AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, queue) {
-            [weak self] _, inputData, _, _, _ in
-            self?.ingest(inputData, from: id)
+            [weak self] _, inputData, inputTime, _, _ in
+            self?.ingest(inputData, at: inputTime, from: id)
         }
         guard status == noErr, let procID else {
             AudioHardwareDestroyAggregateDevice(aggregateID)
@@ -931,19 +906,28 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
     // MARK: - the IO proc
 
-    /// A buffer from rig `id`. Read if it is the live rig's. The standby's
-    /// first makes it the live one, there and then, so not a buffer of it
-    /// is lost to the handoff; the old rig's are dropped from that moment,
-    /// as is the one last callback of any rig being torn down.
-    private func ingest(_ inputData: UnsafePointer<AudioBufferList>, from id: Int) {
+    /// A buffer from rig `id`, captured at `inputTime`. Read if it is the
+    /// live rig's. The standby's first makes it the live one, there and
+    /// then, so not a buffer of it is lost to the handoff; the old rig's are
+    /// dropped from that moment, as is the one last callback of any rig
+    /// being torn down. One that begins well after the last one ended —
+    /// from a rig taking over from one whose mic went, or from the same
+    /// rig after the mac slept — is past a time nothing came, which the
+    /// clock skips and the meeting is told.
+    private func ingest(
+        _ inputData: UnsafePointer<AudioBufferList>, at inputTime: UnsafePointer<AudioTimeStamp>,
+        from id: Int
+    ) {
+        let arrived = ContinuousClock.now
+        let hostNow = AudioGetCurrentHostTime()
         let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
         guard let first = list.first, first.mData != nil, first.mNumberChannels > 0 else { return }
         let frames = Int(first.mDataByteSize) / MemoryLayout<Float>.size / Int(first.mNumberChannels)
         guard frames > 0 else { return }
         let layout = list.reduce(0) { $0 + Int($1.mNumberChannels) }
 
-        let (rig, continuation, takeover) = lock.withLock {
-            () -> (Rig?, AsyncStream<MeetingAudioChunk>.Continuation?, Takeover?) in
+        let (rig, continuation, handedOver) = lock.withLock {
+            () -> (Rig?, AsyncStream<MeetingAudioChunk>.Continuation?, (old: Rig?, epoch: Int)?) in
             if let live, live.id == id {
                 return (live, self.continuation, nil)
             }
@@ -957,18 +941,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             let old = live
             live = standby
             self.standby = nil
-            // An old rig still delivering left off a moment ago, and the
-            // clock carries straight on; one whose mic went stopped
-            // seconds back, and the clock skips the time nothing came.
-            let now = ContinuousClock.now
-            let quiet = lastDelivery.map { now - $0 } ?? .zero
-            skipOutage(until: now)
-            let takeover = Takeover(
-                old: old, new: standby, at: nextStamp, quiet: quiet, epoch: epoch)
-            return (standby, self.continuation, takeover)
-        }
-        if let takeover {
-            following.async { self.tookOver(takeover) }
+            clock.newRig()
+            return (standby, self.continuation, (old, epoch))
         }
         guard let rig, let continuation else { return }
         let firstLayout = rig.layout ?? layout
@@ -991,6 +965,22 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         if layout != firstLayout, !rig.lostItsMic {
             rig.lostItsMic = true
             logger.error("\(rig.mic.name, privacy: .public) went from under \(rig.uid, privacy: .public): its tap's channels go on as the far side, and `you` is silence")
+        }
+
+        let lasting = Duration.seconds(Double(frames) / rig.rate)
+        let began = Self.began(inputTime.pointee, hostNow: hostNow, arrived: arrived, lasting: lasting)
+        let (outage, stamp) = lock.withLock { () -> (ChunkClock.Outage?, Duration) in
+            let outage = clock.buffer(began: began, lasting: lasting)
+            return (outage, clock.stamp)
+        }
+        if let handedOver {
+            let takeover = Takeover(
+                old: handedOver.old, new: rig, at: stamp,
+                quiet: outage.map { $0.to - $0.from } ?? .zero, epoch: handedOver.epoch)
+            following.async { self.tookOver(takeover) }
+        }
+        if let outage {
+            tell(.nothingDelivered(until: outage.to), mic: rig.mic, at: outage.from)
         }
 
         // Sub-device channels come first, taps after (002 §4, confirmed by
@@ -1026,13 +1016,27 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
         for (you, them) in rig.assembler.push(you: mic, them: tap) {
             let at = lock.withLock { () -> Duration in
-                let at = nextStamp
-                framesDelivered += Int64(them.count)
-                lastDelivery = ContinuousClock.now
-                return at
+                defer { clock.delivered(them.count) }
+                return clock.stamp
             }
             continuation.yield(MeetingAudioChunk(you: you, them: them, at: at))
         }
+    }
+
+    /// Where on the wall a buffer began: the host time the HAL stamped it
+    /// with as it was captured, carried onto the continuous clock — host
+    /// time stands still while the mac sleeps, and the wall does not — so a
+    /// buffer the IO queue was slow to hand over is not taken for a late
+    /// one. Without a host time, it is taken to have ended as it arrived.
+    private static func began(
+        _ time: AudioTimeStamp, hostNow: UInt64, arrived: ContinuousClock.Instant,
+        lasting: Duration
+    ) -> ContinuousClock.Instant {
+        guard time.mFlags.contains(.hostTimeValid), time.mHostTime <= hostNow else {
+            return arrived - lasting
+        }
+        let ago = AudioConvertHostTimeToNanos(hostNow - time.mHostTime)
+        return arrived - .nanoseconds(Int64(clamping: ago))
     }
 
     private func check(_ status: OSStatus, _ call: String, at stage: Stage) throws {
@@ -1099,7 +1103,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         let new: Rig
         /// The `at` of the new rig's first chunk.
         let at: Duration
-        /// How long nothing had been delivered when it took over.
+        /// How long nothing had been delivered when it took over, when that
+        /// was an outage.
         let quiet: Duration
         let epoch: Int
     }
