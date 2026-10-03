@@ -58,6 +58,11 @@ struct MeetingSourceEvent: Equatable, Sendable {
         case micAlone
         /// And not even that would come up: nothing is being recorded.
         case micAloneFailed
+        /// Nothing came from the mic or the tap from `at` until `until`, and
+        /// the source's clock skipped it, so the chunks after it are
+        /// stamped where they were heard: a mic that went before the next
+        /// one took over, a lid shut while the tap slept. The meeting's gap.
+        case nothingDelivered(until: Duration)
     }
 
     let kind: Kind
@@ -76,6 +81,7 @@ struct MeetingSourceEvent: Equatable, Sendable {
         case .micUnmuted: .micUnmuted
         case .micAlone: .micAlone
         case .micAloneFailed: .micAloneFailed
+        case .nothingDelivered: .nothingDelivered
         }
     }
 }
@@ -97,6 +103,9 @@ extension MeetingRecord.Label {
     static let micAlone = MeetingRecord.Label(rawValue: "mic-alone")
     /// not even the mic alone would come up: nothing was recorded.
     static let micAloneFailed = MeetingRecord.Label(rawValue: "mic-alone-failed")
+    /// nothing came from the mic or the tap for a while, and the meeting's
+    /// clock skipped it: a gap in the file, over by the time it was known.
+    static let nothingDelivered = MeetingRecord.Label(rawValue: "nothing-delivered")
 }
 
 /// What a source is delivering, as far as it knows.

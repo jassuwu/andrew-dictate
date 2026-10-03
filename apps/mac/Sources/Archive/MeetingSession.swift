@@ -203,6 +203,23 @@ struct MeetingSession {
         silenceBegan = elapsed
     }
 
+    /// Nothing came from `began` to `ended`, and the source skipped it: a
+    /// gap, over already, in its place among the others. Whoever calls this
+    /// has made sure no gap holds that time already. Says whether it was
+    /// taken: there is no meeting before the start or after the stop.
+    @discardableResult
+    mutating func nothingDelivered(from began: Duration, to ended: Duration) -> Bool {
+        guard state == .provingItCanHear || state == .recording || state == .rebuilding,
+              ended > began
+        else {
+            return false
+        }
+        gaps.insert(
+            Gap(began: began, ended: ended),
+            at: gaps.firstIndex { $0.began > began } ?? gaps.endIndex)
+        return true
+    }
+
     /// A recovered tap proves the tap is alive — it is our own probe tone it
     /// heard — not that anyone in the room spoke. So it deliberately does not
     /// touch the quiet clock: `heardAudio` and `keepGoing` are the only two

@@ -651,6 +651,9 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             logger.notice("mic: \(name, privacy: .public) going on alone at \(seconds, privacy: .public) s; the far side is silence until the tap is back")
         case .micAloneFailed:
             logger.error("mic: could not go on alone at \(seconds, privacy: .public) s; nothing is being recorded")
+        case .nothingDelivered(let until):
+            let to = String(format: "%.2f", until.totalSeconds)
+            logger.error("nothing delivered from \(seconds, privacy: .public) s to \(to, privacy: .public) s; the clock skips it")
         }
         told?.yield(MeetingSourceEvent(kind: kind, mic: mic?.name, at: at))
     }

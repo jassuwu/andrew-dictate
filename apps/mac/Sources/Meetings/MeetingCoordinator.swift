@@ -1000,9 +1000,8 @@ final class MeetingCoordinator: ObservableObject {
                 // the zeros since the far side was last heard are no more
                 // proven than the tap now: the gap begins there, and the
                 // spool where it was then.
-                loseTheTap(
-                    meeting, at: session.farSideLastHeard,
-                    spooled: meeting.spooledWhenLastHeard)
+                let lost = meeting.lostSince(heard: session.farSideLastHeard)
+                loseTheTap(meeting, at: lost.at, spooled: lost.spooled)
             }
         }
 
@@ -1092,7 +1091,39 @@ final class MeetingCoordinator: ObservableObject {
         // says the same thing without waiting on this stream.
         case .micChanged, .micHandoffFailed, .micFellBack, .micAlone, .micAloneFailed:
             break
+        case .nothingDelivered(let until):
+            nothingWasDelivered(from: event.at, to: until, in: meeting)
         }
+    }
+
+    /// The source skipped its clock over a time nothing came from the mic
+    /// or the tap — a mic that went before the next one took over, a lid
+    /// shut while the tap slept — and said so. That time is a gap like any
+    /// other, over already, noted with where the spool was, which holds
+    /// none of it, so the turns after it are found where their audio is. A
+    /// gap that already holds it says it already. Nothing on the lamp: it
+    /// is over by the time it is known.
+    private func nothingWasDelivered(
+        from began: Duration, to ended: Duration, in meeting: Meeting
+    ) {
+        guard ended > began, !meeting.hasAGap(from: began, to: ended),
+              session.nothingDelivered(from: began, to: ended)
+        else { return }
+        // the chunks between the last one taken in and the outage are
+        // spooled as they come, whichever of them comes first.
+        let spooled: Duration
+        if elapsed <= began {
+            spooled = meeting.spooledSoFar + (began - elapsed)
+        } else if elapsed >= ended {
+            spooled = max(.zero, meeting.spooledSoFar - (elapsed - ended))
+        } else {
+            spooled = meeting.spooledSoFar
+        }
+        meeting.gapNoted(from: began, to: ended, spooled: spooled)
+        noteGaps(of: meeting)
+        let from = String(format: "%.1f", began.totalSeconds)
+        let to = String(format: "%.1f", ended.totalSeconds)
+        logger.notice("nothing was delivered from \(from, privacy: .public) s to \(to, privacy: .public) s: a gap")
     }
 
     /// Whether you are heard, while there is a meeting to hear you in: a
@@ -1977,6 +2008,31 @@ extension MeetingCoordinator {
         /// is now.
         func gapBegan(at began: Duration, spooled: Duration? = nil) {
             gaps.append(MeetingSpool.Gap(began: began, spooledAtBegan: spooled ?? spooledSoFar))
+        }
+
+        /// A gap over already, from `began` to `ended`, that the spool has
+        /// none of: `spooled` at both ends. In its place among the others.
+        func gapNoted(from began: Duration, to ended: Duration, spooled: Duration) {
+            let gap = MeetingSpool.Gap(
+                began: began, spooledAtBegan: spooled, ended: ended, spooledAtEnded: spooled)
+            gaps.insert(gap, at: gaps.firstIndex { $0.began > began } ?? gaps.endIndex)
+        }
+
+        /// Whether a gap, closed or still open, has any of this time in it.
+        func hasAGap(from began: Duration, to ended: Duration) -> Bool {
+            gaps.contains { gap in
+                ended > gap.began && gap.ended.map { began < $0 } ?? true
+            }
+        }
+
+        /// Where a gap found later begins, when the far side was last heard
+        /// at `heard`, and the spool then: there, unless a gap has closed
+        /// since, when it is where that one ended.
+        func lostSince(heard: Duration) -> (at: Duration, spooled: Duration) {
+            guard let last = gaps.last, let ended = last.ended,
+                  let spooled = last.spooledAtEnded, ended > heard
+            else { return (heard, spooledWhenLastHeard) }
+            return (ended, spooled)
         }
 
         /// The gap still open, if one is, closed at `ended`.
