@@ -14,7 +14,11 @@ the words and the formatting aren't always right. [they get better over time](ht
 
 the speech models are parakeet and whisper. this app puts them together and stays out of your way.
 
-you can try it without installing it. there's a demo you can hold at [dictate.jass.gg](https://dictate.jass.gg).
+<p align="center">
+  <img src="apps/site/demo.gif" width="760" alt="a key is held, words are said, and when the key comes up the text lands in an agent's prompt box." />
+</p>
+
+that's the demo from [dictate.jass.gg](https://dictate.jass.gg), filmed. you can hold the key yourself there.
 
 ## install
 
