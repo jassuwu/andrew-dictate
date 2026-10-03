@@ -10,7 +10,7 @@ decisions in this spec are backed by ADRs kept in `docs/adr/` and research in `~
 - **name:** Andrew Dictate. binary/app: `Andrew Dictate.app`, cask `andrew-dictate`, repo `jassuwu/andrew-dictate` (MIT, public day one — ADR 0010).
 - **platform:** macOS 26+, Apple Silicon only. *(was 14+ until 0.8.0; the glass windows and the meeting tap both need 26, and a floor that moves once is better than two features that each say "not on this mac".)*
 - **thesis:** frontier-fast dictation, with the smallest possible surface: no account, no cloud, no settings maze, no subscription. trust is architectural. the app goes online in three places and no others: the model download, the about window's `check for updates`, and the daily update check, which sends dictate.jass.gg the running version and nothing else (ADR 0043).
-- **non-goals (v1):** windows/linux, iOS, always-on listening (deferred — ADR 0003), ~~meeting transcription~~ (**crossed 2026-08-22 — ADR 0023**: manual start and stop, the app never observes which processes hold the mic), ~~history browser~~ (**superseded — ADR 0022**), App Store.
+- **non-goals (v1):** windows/linux, iOS, always-on listening (deferred — ADR 0003), ~~meeting transcription~~ (**crossed 2026-08-22 — ADR 0023**: manual start and stop. since ADR 0047 the app watches which apps hold the mic so it can ask, and never acts on what it sees), ~~history browser~~ (**superseded — ADR 0022**), App Store.
 - **voice command mode: removed (2026-08-06).** shipped in early v1 (router tiers, agent delegation, ask/screen-ask), cut entirely to focus the product on dictation. this spec describes the app as it is; command-mode sections and terms are gone from here and the glossary.
 
 ## 2. the pipeline
