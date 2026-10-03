@@ -594,8 +594,9 @@ final class MeetingCoordinator: ObservableObject {
             // the wall from here: a rig that never calls back is caught.
             lastChunkArrived = now()
             deliveryAskedOn = now()
-            // this start's own start sound has its window already.
-            startSoundSeen = source.startSoundAt
+            // this start's own start sound has its window from zero
+            // (`begin`); the first chunk opens it again where the source
+            // says it played it, the same as after a rebuild.
             watchTheStart(meeting)
             // what the source does by itself, a mic it moved to, goes in the
             // record at the meeting time it stamped. it ends with the tap.
