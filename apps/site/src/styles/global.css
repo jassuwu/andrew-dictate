@@ -356,6 +356,23 @@
     color: rgb(242 237 224 / 0.6);
   }
 
+  .sound {
+    flex: none;
+    margin-left: auto;
+    align-self: flex-start;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.6;
+    color: rgb(242 237 224 / 0.5);
+    cursor: pointer;
+    padding: 0.1rem 0.35rem;
+    border-radius: 0.35rem;
+  }
+
+  .sound:hover {
+    color: var(--color-gold-pale);
+  }
+
   /* a phone has no space bar to hold */
   .without-keys {
     display: none;

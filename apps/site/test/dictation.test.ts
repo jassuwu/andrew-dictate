@@ -208,6 +208,10 @@ describe("the start chime", () => {
     expect(demo.chimeDue(pressed, lit, lit + 16)).toBe(false);
   });
 
+  test("does not play with the sound switched off", () => {
+    expect(demo.chimeDue(pressed, lit - 1, lit, { sound: false })).toBe(false);
+  });
+
   test("does not play for a key that came up before the mic was heard", () => {
     const brushed = demo.step(pressed, { type: "release", at: lit - 10 });
     expect(demo.chimeDue(brushed, 1000, lit + 100)).toBe(false);
@@ -229,5 +233,16 @@ describe("the prompts the page ships", async () => {
     for (const prompt of pairs.prompts) {
       expect(spoken(prompt).length).toBe(prompt.cuts.length);
     }
+  });
+});
+
+describe("the start chime's file", () => {
+  test("is the app's own start sound, byte for byte", async () => {
+    const app = Bun.file(
+      new URL("../../mac/Sources/Resources/Sounds/dictation-start.wav", import.meta.url),
+    );
+    const site = Bun.file(new URL("../public/start.wav", import.meta.url));
+    expect(await site.exists()).toBe(true);
+    expect(Bun.hash(await site.arrayBuffer())).toBe(Bun.hash(await app.arrayBuffer()));
   });
 });

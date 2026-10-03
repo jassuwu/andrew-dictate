@@ -185,10 +185,16 @@ export function dictationDemo(prompts: Prompt[]) {
   }
 
   /** whether the start chime falls due in (from, to]. it plays when the
-      lamp lights, once a take, and never for a key that came up first. */
-  function chimeDue(state: State, from: number, to: number): boolean {
+      lamp lights, once a take, and never for a key that came up first or
+      with the sound switched off. */
+  function chimeDue(
+    state: State,
+    from: number,
+    to: number,
+    { sound = true }: { sound?: boolean } = {},
+  ): boolean {
     const take = state.take;
-    if (!take) return false;
+    if (!take || !sound) return false;
     const at = litAt(take);
     if (take.end && take.end.at < at) return false;
     return from < at && at <= to;

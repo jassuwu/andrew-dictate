@@ -20,12 +20,33 @@ function mount(root: HTMLElement) {
   const hint = root.querySelector<HTMLElement>("[data-hint]")!;
   const said = root.querySelector<HTMLElement>("[data-said]")!;
 
+  const soundSwitch = root.querySelector<HTMLButtonElement>("[data-sound]")!;
+
   let state: State = demo.initial();
   let frame = 0;
   let drawn = "";
 
+  // the app's own start sound. it plays when the lamp lights, and only ever
+  // after the visitor's own press. the switch is remembered for the visit.
+  const chime = new Audio("/start.wav");
+  chime.preload = "auto";
+  let sound = sessionStorage.getItem("sound") !== "off";
+  let ticked = 0;
+  const showSound = () => {
+    soundSwitch.textContent = sound ? "sound on" : "sound off";
+    soundSwitch.setAttribute("aria-pressed", String(sound));
+  };
+  showSound();
+  soundSwitch.addEventListener("click", () => {
+    sound = !sound;
+    sessionStorage.setItem("sound", sound ? "on" : "off");
+    showSound();
+  });
+
   const send = (type: "press" | "release" | "esc") => {
-    state = demo.step(state, { type, at: performance.now() });
+    const at = performance.now();
+    if (!frame) ticked = at;
+    state = demo.step(state, { type, at });
     key.toggleAttribute("data-down", state.take !== null && state.take.end === null);
     if (!frame) frame = requestAnimationFrame(tick);
   };
@@ -34,6 +55,11 @@ function mount(root: HTMLElement) {
     const view = demo.view(state, now);
     render(view);
     light(view, now);
+    if (demo.chimeDue(state, ticked, now, { sound })) {
+      chime.currentTime = 0;
+      void chime.play().catch(() => {});
+    }
+    ticked = now;
     // nothing changes by itself once a take has played out, so stop asking
     frame = settled(view) ? 0 : requestAnimationFrame(tick);
   }
