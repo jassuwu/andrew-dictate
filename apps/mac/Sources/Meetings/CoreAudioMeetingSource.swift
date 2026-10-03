@@ -223,6 +223,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             self.told = told
             self.clock = ChunkClock()
             self.aloneTold = nil
+            // the last meeting's, which this one's chunks are not on.
+            self.startSoundStamp = nil
             self.epoch += 1
             return self.epoch
         }

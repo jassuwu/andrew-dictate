@@ -340,6 +340,11 @@ final class MeetingCoordinator: ObservableObject {
     /// cannot say where it played it: the window runs from the first chunk
     /// the tap delivers, wherever the source stamps it.
     private var probeOpensAtNextChunk = false
+    /// Where the source last said it played the start sound. One said
+    /// since opens the window there, looked for with every chunk: the
+    /// stamp is at or past the last chunk delivered, so the chunk with the
+    /// tone in it is always taken in after it.
+    private var startSoundSeen: Duration?
     /// When the source was last asked for audio it has to prove it can
     /// deliver: the capture opened, or the first try at a lost tap. Past the
     /// probe timeout and the allowance from here, with no chunk since,
@@ -492,6 +497,7 @@ final class MeetingCoordinator: ObservableObject {
         startedOn = nil
         lastChunkArrived = now()
         deliveryAskedOn = nil
+        startSoundSeen = nil
         nudgePending = false
         probeUntil = thresholds.probeTimeout
         toneUntil = OurTones.silenced(for: OurTones.startSound)
@@ -588,6 +594,8 @@ final class MeetingCoordinator: ObservableObject {
             // the wall from here: a rig that never calls back is caught.
             lastChunkArrived = now()
             deliveryAskedOn = now()
+            // this start's own start sound has its window already.
+            startSoundSeen = source.startSoundAt
             watchTheStart(meeting)
             // what the source does by itself, a mic it moved to, goes in the
             // record at the meeting time it stamped. it ends with the tap.
@@ -644,8 +652,7 @@ final class MeetingCoordinator: ObservableObject {
                 suspect = .some(mic)
                 logger.error("\(mic ?? "the mic", privacy: .public) delivered nothing; trying the built-in mic")
                 meeting.notes.note(.micDeliveredNothing, at: elapsed)
-                let playedBefore = source.startSoundAt
-                probeOpensAtNextChunk = playedBefore == nil
+                probeOpensAtNextChunk = source.startSoundAt == nil
                 do {
                     try await source.rebuildOnTheBuiltInMic()
                 } catch {
@@ -653,9 +660,6 @@ final class MeetingCoordinator: ObservableObject {
                     guard current === meeting, session.state == .provingItCanHear else { return }
                     micDeliveredNothing(meeting, mic)
                     return
-                }
-                if let played = source.startSoundAt, played != playedBefore {
-                    openTheStartSoundsWindow(at: played)
                 }
                 deliveryAskedOn = now()
             }
@@ -987,6 +991,10 @@ final class MeetingCoordinator: ObservableObject {
         // Not on a chunk from the mic alone, still coming while the whole
         // rig is built again: the start sound is on its way through a tap
         // that is not delivering yet.
+        if let played = source.startSoundAt, played != startSoundSeen {
+            startSoundSeen = played
+            openTheStartSoundsWindow(at: played)
+        }
         if probeOpensAtNextChunk, source.capturing != .yourSideAlone {
             probeOpensAtNextChunk = false
             openTheStartSoundsWindow(at: chunk.at)
@@ -1362,22 +1370,19 @@ final class MeetingCoordinator: ObservableObject {
                 deliveryAskedOn = now()
             }
             // A source that says where it played the start sound has the
-            // window opened there once it is back: a rig still delivering
-            // beside the one being built has chunks that are not the new
-            // tap's. One that cannot say has it set before the rebuild, not
-            // after: the tone can be heard the instant the tap is back, and
-            // the source stamps the rebuilt tap past the outage, settle and
-            // rebuild included, so it runs from the first chunk.
-            let playedBefore = source.startSoundAt
-            probeOpensAtNextChunk = playedBefore == nil
+            // window opened there, as `ingest` sees it said: a rig still
+            // delivering beside the one being built has chunks that are not
+            // the new tap's. One that cannot say has it set before the
+            // rebuild, not after: the tone can be heard the instant the tap
+            // is back, and the source stamps the rebuilt tap past the
+            // outage, settle and rebuild included, so it runs from the
+            // first chunk.
+            probeOpensAtNextChunk = source.startSoundAt == nil
             do {
                 if onTheBuiltInMic {
                     try await source.rebuildOnTheBuiltInMic()
                 } else {
                     try await source.rebuild()
-                }
-                if let played = source.startSoundAt, played != playedBefore {
-                    openTheStartSoundsWindow(at: played)
                 }
                 // No output to play its start sound on: the rebuilt tap was
                 // asked nothing, so the try neither worked nor failed. The

@@ -391,6 +391,44 @@ final class MeetingProblemsTests: XCTestCase {
         XCTAssertEqual(fed.filter { $0.themRMS > 0 }.count, 0, "the start sound is ours")
     }
 
+    /// The same, and the old rig is slow to go: the rebuild plays the new
+    /// rig's start sound the moment it is live and then waits on the old
+    /// one's teardown, while the new one's chunks, the tone among them,
+    /// arrive. The window opens from the stamp the moment the source has
+    /// it, not when the rebuild comes back: the tone is fed as ours.
+    func testTheStartSoundIsOursWhileTheOldRigIsStillGoing() async throws {
+        source.anythingIsPlaying = true
+        source.capturing = .bothSides
+        source.saysWhereTheStartSoundPlayed = true
+        source.rebuildTakes = .milliseconds(400)
+        source.retireTakes = .milliseconds(1_500)
+        let c = coordinator(thresholds: .init(
+            probeTimeout: .seconds(1), silenceTimeout: .seconds(5),
+            silenceFloor: 0.001, quietNudgeAfter: .seconds(3_600),
+            quietProbeWindow: .seconds(2),
+            settleBeforeRebuild: .milliseconds(50)))
+        c.start()
+        await source.awaitStart()
+        await play(both(at: .zero))
+        var s = 1
+        while !events.contains(.gapBegan), s < 20 {
+            await play(you(at: .seconds(s)))
+            s += 1
+        }
+        while source.startSoundAt == nil, s < 200 {
+            await play(you(at: .seconds(s)))
+            s += 1
+        }
+        let played = try XCTUnwrap(source.startSoundAt)
+        await until { transcriber.fed.contains { $0.at == played && $0.you.allSatisfy { $0 == 0 } } }
+
+        let tone = try XCTUnwrap(
+            transcriber.fed.first { $0.at == played && $0.you.allSatisfy { $0 == 0 } })
+        XCTAssertEqual(tone.themRMS, 0, "the start sound is ours")
+        XCTAssertEqual(events, [.started, .gapBegan, .gapEnded])
+        XCTAssertEqual(source.rebuildsReturned, 0, "the old rig is still going")
+    }
+
     /// A settle, then three tries in a row 100 ms and 200 ms apart, then
     /// one every 300 ms with the problem standing.
     private var retrying: MeetingThresholds {
@@ -799,7 +837,23 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
             try? await Task.sleep(for: .milliseconds(100))
             self.send(tone)
         }
+        // the old rig, retired once the new one is live.
+        try? await Task.sleep(for: retireTakes)
+        lock.withLock { _rebuildsReturned += 1 }
     }
+
+    /// How long the old rig takes to go, once the new one is live.
+    var retireTakes: Duration {
+        get { lock.withLock { _retireTakes } }
+        set { lock.withLock { _retireTakes = newValue } }
+    }
+    private var _retireTakes: Duration = .zero
+
+    /// Rebuilds that played their start sound and have come back.
+    var rebuildsReturned: Int {
+        lock.withLock { _rebuildsReturned }
+    }
+    private var _rebuildsReturned = 0
 
     /// While set, a rebuild says where on its clock it played the start
     /// sound, as the real source does.
