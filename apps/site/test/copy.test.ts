@@ -78,7 +78,7 @@ describe("the download sizes", () => {
     swift.match(new RegExp(`static let ${name} = "([^"]+)"`))?.[1];
 
   test("are the ones onboarding shows", () => {
-    expect(sizes.dictation).toBe(constant("dictationDownload")!);
-    expect(sizes.meetings).toBe(constant("meetingsDownload")!);
+    expect(constant("dictationDownload")).toBe(sizes.dictation);
+    expect(constant("meetingsDownload")).toBe(sizes.meetings);
   });
 });

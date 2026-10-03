@@ -24,6 +24,9 @@ jobs:
       - name: install
         run: bun install --frozen-lockfile
 
+      - name: typecheck
+        run: bun run check
+
       # build first: the copy guard reads the built page
       - name: build
         run: bun run build
