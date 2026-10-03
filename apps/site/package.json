@@ -9,7 +9,7 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "test": "bun test",
+    "test": "astro build && bun test",
     "checkins": "bun run scripts/checkins.ts",
     "astro": "astro"
   },
