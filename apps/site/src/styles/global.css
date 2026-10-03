@@ -43,6 +43,7 @@
   }
 
   body {
+    font-size: 15px;
     font-family: var(--font-sans);
     font-synthesis-weight: none;
     text-rendering: optimizeLegibility;
@@ -124,89 +125,60 @@
     box-shadow: 0 0 0 1.5px var(--color-ink);
   }
 
-  .hero {
-    display: grid;
-    gap: 2.5rem;
+  /* one column for the whole page, the menu bar and the footer too. it
+     reads like a note, top to bottom. */
+  .column {
+    width: min(35rem, 100% - 3rem);
+    margin-inline: auto;
   }
 
-  @media (width >= 64rem) {
-    .hero {
-      grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
-      grid-template-rows: 1fr auto auto 1fr;
-      column-gap: 4rem;
-      row-gap: 2rem;
-    }
-
-    .hero-intro {
-      grid-area: 2 / 1;
-    }
-
-    .hero-why {
-      grid-area: 3 / 1;
-    }
-
-    .hero-demo {
-      grid-area: 1 / 2 / -1 / 2;
-      align-self: center;
+  @media (width >= 40rem) {
+    .column {
+      width: min(35rem, 100% - 5rem);
     }
   }
 
-  .meet {
-    display: grid;
-    gap: 2rem;
-  }
-
-  @media (width >= 64rem) {
-    .meet {
-      grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
-      grid-template-rows: auto 1fr;
-      column-gap: 4rem;
-    }
-
-    .meet-intro {
-      grid-area: 1 / 1;
-    }
-
-    .meet-facts {
-      grid-area: 2 / 1;
-    }
-
-    .meet-scene {
-      grid-area: 1 / 2 / -1 / 2;
-    }
-  }
-
-  /* the two lines that say what it is. dictation is said in gold, meetings
-     in a quieter cream: about sixty and forty. */
-  .pitch {
-    font-size: clamp(2.1rem, 1.15rem + 3.1vw, 3.4rem);
-    line-height: 1.07;
-    letter-spacing: -0.035em;
-    font-weight: 600;
+  /* the page is small and quiet: nearly everything is one size, and the
+     order comes from colour and weight. the two lines that say what it is
+     are the only bigger text. dictation is in gold, meetings in a quieter
+     cream: about sixty and forty. */
+  .pitch,
+  .pitch-second {
+    font-size: 1.5rem;
+    line-height: 1.3;
+    letter-spacing: -0.012em;
+    font-weight: 500;
     text-wrap: balance;
+    color: var(--color-gold-pale);
+  }
+
+  .pitch-second {
+    color: rgb(242 237 224 / 0.5);
   }
 
   .heading {
-    font-size: clamp(1.6rem, 1.1rem + 1.6vw, 2.2rem);
-    line-height: 1.12;
-    letter-spacing: -0.03em;
-    font-weight: 600;
-    text-wrap: balance;
+    font-size: 15px;
+    line-height: 1.4;
+    font-weight: 500;
+    color: var(--color-cream);
+  }
+
+  .heading kbd {
+    font-size: 0.8em;
   }
 
   .prose-line {
-    font-size: 1.0625rem;
-    line-height: 1.7;
-    color: rgb(242 237 224 / 0.72);
-    max-width: 34rem;
+    font-size: 15px;
+    line-height: 1.65;
+    color: rgb(242 237 224 / 0.62);
   }
 
   .fact {
     font-family: var(--font-mono);
-    font-size: 0.8125rem;
+    font-size: 0.72rem;
     line-height: 1.8;
     letter-spacing: 0.02em;
-    color: rgb(242 237 224 / 0.6);
+    color: rgb(242 237 224 / 0.42);
     text-wrap: pretty;
   }
 
@@ -260,10 +232,9 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: 1rem;
-    border-radius: 0.75rem;
+    border-radius: 7px;
     border: 1px solid rgb(242 237 224 / 0.1);
-    background: var(--color-card);
-    padding: 0.9rem 1rem 0.9rem 1.1rem;
+    padding: 0.7rem 0.9rem;
     font-family: var(--font-mono);
     transition: border-color 150ms ease;
   }
@@ -297,22 +268,20 @@
     color: var(--color-gold-pale);
   }
 
-  /* an agent's window, drawn plainly: a thread, and a prompt box under it.
+  /* an agent's window, drawn as an outline: a thread, and a prompt box under it.
      it copies no real product. everything in it is set in the machine face,
      because a model either wrote it or is about to read it. */
   .agent {
-    border-radius: 1rem;
-    border: 1px solid rgb(242 237 224 / 0.09);
-    background: var(--color-window);
+    border-radius: 10px;
+    border: 1px solid rgb(242 237 224 / 0.1);
     font-family: var(--font-mono);
-    font-size: 0.875rem;
+    font-size: 0.78rem;
     line-height: 1.65;
-    box-shadow: 0 40px 90px -40px rgb(0 0 0 / 0.9);
   }
 
   .agent-head {
-    padding: 0.65rem 1.1rem;
-    font-size: 0.75rem;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.7rem;
     letter-spacing: 0.04em;
     color: rgb(242 237 224 / 0.45);
     border-bottom: 1px solid rgb(242 237 224 / 0.06);
@@ -323,8 +292,8 @@
     flex-direction: column;
     justify-content: flex-end;
     gap: 0.6rem;
-    min-height: 8.5rem;
-    padding: 1.1rem 1.1rem 0.4rem;
+    min-height: 6rem;
+    padding: 0.9rem 0.9rem 0.3rem;
   }
 
   .agent-line {
@@ -358,12 +327,12 @@
   .composer {
     display: flex;
     gap: 0.7rem;
-    margin: 0.75rem;
-    min-height: 4.6rem;
-    padding: 0.8rem 1rem;
-    border-radius: 0.75rem;
+    margin: 0.6rem;
+    min-height: 3rem;
+    padding: 0.6rem 0.8rem;
+    border-radius: 7px;
     border: 1px solid rgb(242 237 224 / 0.12);
-    background: var(--color-ink);
+    background: rgb(242 237 224 / 0.03);
     color: var(--color-cream);
   }
 
@@ -380,12 +349,11 @@
      the live transcript while the meeting runs and the file once it stops. */
   .menu-item {
     flex: none;
-    padding: 0.5rem 0.95rem;
-    border-radius: 0.6rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: 7px;
     border: 1px solid rgb(242 237 224 / 0.16);
-    background: var(--color-card);
     font-family: var(--font-mono);
-    font-size: 0.8125rem;
+    font-size: 0.75rem;
     color: var(--color-gold-pale);
     cursor: pointer;
   }
@@ -405,17 +373,16 @@
   }
 
   .sheet {
-    border-radius: 1rem;
-    border: 1px solid rgb(242 237 224 / 0.09);
-    background: var(--color-window);
+    border-radius: 10px;
+    border: 1px solid rgb(242 237 224 / 0.1);
     font-family: var(--font-mono);
-    font-size: 0.8125rem;
+    font-size: 0.78rem;
     line-height: 1.65;
   }
 
   .sheet-head {
-    padding: 0.65rem 1.1rem;
-    font-size: 0.75rem;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.7rem;
     letter-spacing: 0.04em;
     color: rgb(242 237 224 / 0.45);
     border-bottom: 1px solid rgb(242 237 224 / 0.06);
@@ -424,16 +391,16 @@
   /* the same height as the lines and the file that follow it, so pressing
      record moves nothing on the page */
   .sheet-hint {
-    height: 16rem;
-    padding: 1.1rem;
+    height: 13rem;
+    padding: 0.9rem;
     color: rgb(242 237 224 / 0.45);
   }
 
   .live,
   .file {
-    height: 16rem;
+    height: 13rem;
     overflow-y: auto;
-    padding: 1.1rem;
+    padding: 0.9rem;
   }
 
   .live {
@@ -484,17 +451,17 @@
     flex: none;
     display: grid;
     place-items: end start;
-    width: 4.25rem;
-    height: 4.25rem;
-    padding: 0.5rem 0.65rem;
-    border-radius: 0.9rem;
+    width: 2.75rem;
+    height: 2.75rem;
+    padding: 0.35rem 0.45rem;
+    border-radius: 0.55rem;
     border: 1px solid rgb(229 190 98 / 0.32);
     background: linear-gradient(#27272d, #1b1b20);
     box-shadow:
-      0 3px 0 #050506,
-      inset 0 1px 0 rgb(255 255 255 / 0.07);
+      0 2px 0 #050506,
+      inset 0 1px 0 rgb(255 255 255 / 0.06);
     font-family: var(--font-mono);
-    font-size: 1.05rem;
+    font-size: 0.8rem;
     color: var(--color-gold-pale);
     cursor: pointer;
     touch-action: none;
@@ -505,7 +472,7 @@
   }
 
   .key[data-down] {
-    transform: translateY(3px);
+    transform: translateY(2px);
     border-color: var(--color-gold);
     box-shadow:
       0 0 0 #050506,
@@ -514,7 +481,7 @@
 
   .speech {
     font-family: var(--font-mono);
-    font-size: 0.875rem;
+    font-size: 0.78rem;
     line-height: 1.6;
     color: rgb(242 237 224 / 0.6);
   }
@@ -522,7 +489,6 @@
   .sound {
     flex: none;
     margin-left: auto;
-    align-self: flex-start;
     font-family: var(--font-mono);
     font-size: 0.75rem;
     line-height: 1.6;

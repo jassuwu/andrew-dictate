@@ -11,41 +11,40 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
 
 <Page title="andrew dictate · escape the keyboard." description={description}>
   <main>
-    <!-- on a wide screen the words are on the left and the demo beside
-         them. on a phone the demo comes right after the pitch, before the
-         paragraphs, so the thing itself is never a long scroll away. -->
-    <section class="hero mx-auto max-w-[72rem] px-6 pb-16 pt-24 sm:px-10 lg:min-h-svh lg:pb-24 lg:pt-28">
+    <!-- one column on every screen: the pitch, then the demo right under
+         it, so the thing itself is never a long scroll away. -->
+    <section class="column pb-11 pt-26">
       <div class="hero-intro">
-        <div class="flex items-start gap-4">
-          <img src="/badge.png" alt="" width="52" height="52" class="rounded-[12px]" />
-          <div>
+        <div class="flex items-center gap-3">
+          <img src="/badge.png" alt="" width="32" height="32" class="rounded-[7px]" />
+          <div class="relative">
             <div class="name-row flex flex-wrap items-center gap-x-3 gap-y-1">
-              <h1 class="text-[22px] font-semibold leading-[1.2] tracking-[-0.02em] text-gold-pale">
+              <h1 class="text-[15px] font-medium leading-[1.35] text-gold-pale">
                 <span class="wordmark">{topBlock.name}</span>
               </h1>
               <span
-                class="-rotate-[4deg] rounded-[3px] bg-gold px-1.5 py-[3px] font-mono text-[11px] leading-none tracking-[0.14em] text-ink"
+                class="-rotate-[4deg] rounded-[3px] bg-gold px-1 py-[2px] font-mono text-[9px] leading-none tracking-[0.14em] text-ink"
               >
                 ALPHA
               </span>
             </div>
-            <p class="mt-0.5 text-[15px] text-gold">{topBlock.tagline}</p>
-            <p class="aside text-[13px] leading-[1.5]" aria-hidden="true">get it?</p>
+            <p class="text-[15px] text-cream/50">{topBlock.tagline}</p>
+            <!-- out of the flow, so the hidden joke doesn't push the name off
+                 the badge's centre -->
+            <p class="aside absolute left-0 top-full whitespace-nowrap text-[12px] leading-[1.5]" aria-hidden="true">get it?</p>
           </div>
         </div>
 
-        <p class="pitch mt-8">
-          <span class="block text-gold-pale">{dictation}</span>
-          <span class="mt-2 block text-cream/55">{meetings}</span>
-        </p>
-        <p class="mt-6 font-mono text-[1rem] tracking-[0.02em] text-gold">{freeFastLocal}</p>
+        <p class="pitch mt-12">{dictation}</p>
+        <p class="pitch-second mt-1">{meetings}</p>
+        <p class="mt-5 font-mono text-[0.8125rem] tracking-[0.02em] text-gold">{freeFastLocal}</p>
       </div>
 
-      <div class="hero-demo">
+      <div class="mt-10">
         <Demo />
       </div>
 
-      <div class="hero-why space-y-4">
+      <div class="hero-why mt-12 space-y-3.5">
         {
           topBlock.why.map((line) => {
             // the claim links to where it is kept
@@ -62,68 +61,69 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
       </div>
     </section>
 
-    <section class="mx-auto grid max-w-[72rem] gap-x-16 gap-y-8 px-6 py-20 sm:px-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-      <h2 class="heading text-cream">hold <kbd>fn</kbd>, talk, let go.</h2>
-      <div class="space-y-4">
+    <section class="column py-11">
+      <h2 class="heading">hold <kbd>fn</kbd>, talk, let go.</h2>
+      <div class="mt-4 space-y-3.5">
         <p class="prose-line">
-          the text lands where your cursor is, in any app. a terminal, a chat
-          box, a commit message.
+          the text shows up where your cursor is, in any app. i mostly use it
+          to talk to agents in a terminal.
         </p>
         <p class="prose-line">
           the model runs on your mac, so there's no wait for a server. it works
           offline too.
         </p>
         <p class="prose-line">
-          a dictionary fixes a mishearing that keeps coming back. correct the
-          same word twice and the app adds it for you.
+          if it keeps mishearing a word, add the word to the dictionary. or fix
+          it twice and the app adds it for you.
         </p>
         <p class="prose-line">
-          double-tap <kbd>fn</kbd> to talk hands-free. <kbd>esc</kbd> throws it
-          away. if your keyboard eats <kbd>fn</kbd>, pick another key in
+          double-tap <kbd>fn</kbd> if you don't want to hold it. <kbd>esc</kbd>
+          throws it away. if your keyboard eats <kbd>fn</kbd>, pick another key in
           settings.
         </p>
-        <p class="fact pt-2">{sizes.dictation} · english, or 25 languages</p>
+        <p class="fact pt-2">{sizes.dictation} to download. english, or 25 languages.</p>
       </div>
     </section>
 
-    <!-- meetings are the smaller half: a narrower scene, lower on the page.
-         on a phone the scene comes before the facts, as the demo does. -->
-    <section class="meet mx-auto max-w-[72rem] px-6 py-20 sm:px-10">
-      <h2 class="meet-intro heading text-cream">record a meeting.</h2>
+    <!-- meetings are the smaller half, lower on the page. the scene comes
+         before the facts, as the demo does. -->
+    <section class="column py-11">
+      <h2 class="heading">record a meeting.</h2>
 
-      <div class="meet-scene">
+      <div class="mt-4">
         <Meeting />
       </div>
 
-      <div class="meet-facts space-y-4">
+      <div class="mt-8 space-y-3.5">
         <p class="prose-line">
-          press record in the menu bar. your mic is you, and whatever the mac
-          plays is them.
+          press record in the menu bar. it hears your mic and whatever your mac
+          plays, so it gets both sides of the call.
         </p>
         <p class="prose-line">
-          press stop and you have one markdown file, with the speakers split
-          out. point your agent at the folder.
+          press stop and you get one markdown file that says who said what.
+          point your agent at the folder and ask it what you agreed to.
         </p>
         <p class="prose-line">
           when a call starts, the app asks if you want it recorded. it never
           starts by itself.
         </p>
         <p class="fact pt-2">
-          {sizes.meetings} · written in english by default, from any language whisper knows
+          {sizes.meetings} to download. the call can be in any language whisper
+          knows. the file comes out in english unless you change it.
         </p>
       </div>
     </section>
 
-    <section id="install" class="mx-auto max-w-[72rem] px-6 py-20 sm:px-10">
-      <div class="max-w-[44rem]">
-        <h2 class="heading text-cream">install.</h2>
+    <section id="install" class="column py-11">
+      <div>
+        <h2 class="heading">install.</h2>
 
-        <div class="mt-8">
+        <div class="mt-4">
           <Command command={install} label="the install command" />
         </div>
-        <p class="fact mt-3">apple silicon · macOS 26 · free · MIT</p>
+        <p class="fact mt-3">for apple silicon macs on macOS 26. free, MIT.</p>
 
-        <p class="prose-line mt-10">
+        <p class="prose-line mt-8">
           i'm broke, so i didn't pay apple $99 to sign this. run this once, and
           never again:
         </p>
@@ -131,16 +131,16 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
           <Command command={unblock} label="the unblock command" quiet />
         </div>
         <p class="prose-line mt-4">
-          the second line opens it. there's no dock icon. a setup window comes
-          up, and after that it lives as the gold badge in your menu bar.
+          the second line opens it. a setup window comes up. after that it lives
+          in your menu bar as the gold badge. there's no dock icon.
         </p>
-        <p class="fact mt-4 max-w-[38rem]">
+        <p class="fact mt-3">
           no terminal? open the app, let macOS refuse, then click open anyway in
           system settings › privacy & security. that button is only there for
           about an hour.
         </p>
 
-        <p class="prose-line mt-10">
+        <p class="prose-line mt-8">
           to update, run the same command with{" "}
           <span class="font-mono text-[0.9em] text-gold-pale">upgrade</span> instead of{" "}
           <span class="font-mono text-[0.9em] text-gold-pale">install</span>. the menu tells

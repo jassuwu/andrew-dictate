@@ -38,7 +38,7 @@ const github = "https://github.com/jassuwu/andrew-dictate";
     <!-- the app lives as a badge in the menu bar, so the page has one -->
     <header class="menubar">
       <nav
-        class="mx-auto flex h-full max-w-[72rem] items-center justify-between px-6 font-mono text-[12.5px] sm:px-10"
+        class="column flex h-full items-center justify-between font-mono text-[12.5px]"
       >
         <div class="flex items-center gap-5 text-cream/65">
           <a class="transition-colors hover:text-gold-pale" href="/#install">install</a>
@@ -53,12 +53,12 @@ const github = "https://github.com/jassuwu/andrew-dictate";
 
     <slot />
 
-    <footer class="mx-auto max-w-[72rem] px-6 pb-28 pt-24 sm:px-10">
-      <nav class="flex flex-wrap items-baseline gap-x-6 gap-y-2 text-[14px]">
+    <footer class="column pb-28 pt-12">
+      <nav class="flex flex-wrap items-baseline gap-x-5 gap-y-2 text-[13px]">
         <a class="link" href={github}>github</a>
         <a class="link" href={`${github}/releases`}>releases</a>
         <a class="link" href="/changelog">changelog</a>
-        <a class="hand text-[16px] text-gold transition-colors hover:text-gold-pale" href="https://jass.gg">
+        <a class="hand text-[15px] text-gold transition-colors hover:text-gold-pale" href="https://jass.gg">
           made by jass
         </a>
       </nav>
