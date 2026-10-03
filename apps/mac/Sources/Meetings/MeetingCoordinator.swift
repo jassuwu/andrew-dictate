@@ -337,6 +337,12 @@ final class MeetingCoordinator: ObservableObject {
     /// that stops calling back altogether — the mac slept, the screen
     /// locked, the driver died — freezes the clock instead of failing. These
     /// two are the wall the meeting is measured against when that happens.
+    /// `startedOn` is where the chunks' clock is zero on the wall, set by
+    /// the first chunk: the mic asked about, the last tap closing and the
+    /// build before it are not the meeting's time. Taken from where that
+    /// chunk begins, it is behind the audio by the chunk at most, never
+    /// ahead of it, so the wall never moves the menu past where the audio
+    /// comes back.
     private var startedOn: ContinuousClock.Instant?
     private var lastChunkArrived: ContinuousClock.Instant?
     /// injected so a test can move the wall without waiting on it.
@@ -469,7 +475,7 @@ final class MeetingCoordinator: ObservableObject {
         nextDiskLook = nil
         elapsed = .zero
         liveLines = []
-        startedOn = now()
+        startedOn = nil
         lastChunkArrived = now()
         nudgePending = false
         probeUntil = thresholds.probeTimeout
@@ -886,7 +892,13 @@ final class MeetingCoordinator: ObservableObject {
     // MARK: - audio
 
     private func ingest(_ chunk: MeetingAudioChunk, into meeting: Meeting) async {
-        elapsed = chunk.at + chunk.duration
+        if startedOn == nil {
+            startedOn = now() - chunk.at
+        }
+        // never back: the wall it was moved to while nothing arrived is
+        // where the audio is, and a chunk stamped a moment short of it
+        // does not take the menu's clock back.
+        elapsed = max(elapsed, chunk.at + chunk.duration)
         lastChunkArrived = now()
         // Not on a chunk from the mic alone, still coming while the whole
         // rig is built again: the start sound is on its way through a tap

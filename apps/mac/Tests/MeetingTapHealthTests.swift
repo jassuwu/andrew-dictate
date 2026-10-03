@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 
 /// A meeting's tap, kept honest through the coordinator and its fakes:
@@ -214,6 +215,39 @@ final class MeetingTapHealthTests: XCTestCase {
             "[00:00:00] you: you said something",
             "[00:01:04] them: they said something",
         ])
+    }
+
+    // MARK: - the meeting's clock
+
+    /// The tap took five seconds to open — the mic asked about, the last
+    /// tap closed, the rig built — and the meeting's clock starts with its
+    /// first chunk, not at `record`. The lid shuts a second in and opens a
+    /// minute later: the menu catches up to the wall the audio is on and
+    /// no further, so the rebuilt tap's first chunk never steps it back,
+    /// and the file is as long as the meeting the turns are stamped in.
+    func testTheMeetingsClockStartsWithItsFirstChunkAndNeverStepsBack() async throws {
+        let clock = FakeClock()
+        let c = coordinator(clock: clock)
+        var seen: [Duration] = []
+        let watching = c.$elapsed.sink { seen.append($0) }
+        defer { watching.cancel() }
+        c.start()
+        await source.awaitStart()
+        clock.advance(by: .seconds(5))
+        await play(loud(at: .zero))
+
+        clock.advance(by: .seconds(60))
+        source.skip(to: .seconds(60))
+        c.probeTapIsAlive()
+        XCTAssertEqual(c.elapsed, .seconds(60), "the wall since the first chunk")
+        await until { events.contains(.gapEnded) }
+        XCTAssertEqual(c.elapsed, .milliseconds(60_300))
+        XCTAssertEqual(seen, seen.sorted(), "never back")
+
+        clock.advance(by: .seconds(10))
+        c.stop()
+        await c.untilWrittenOut()
+        XCTAssertEqual(try savedFile().duration, .seconds(70))
     }
 
     // MARK: - the mac stays awake
