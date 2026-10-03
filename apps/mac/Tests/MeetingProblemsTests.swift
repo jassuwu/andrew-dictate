@@ -403,6 +403,85 @@ final class MeetingProblemsTests: XCTestCase {
             retryWhileTheProblemStands: .milliseconds(300))
     }
 
+    // MARK: - a mic that never delivers
+
+    /// The default mic is there and never calls back — a headset stuck, an
+    /// interface with no clock, a phone's mic over continuity — so the tap
+    /// is never heard and nothing ever arrives. Past the probe timeout and
+    /// the allowance on the wall, the built-in mic is tried; nothing from
+    /// that either, and the start fails as the mic's, naming the one it
+    /// was on, rather than getting ready for ever.
+    func testAMicThatNeverDeliversAtTheStartIsTriedOnTheBuiltInMicThenNamed() async throws {
+        source.micName = "AirPods Pro"
+        source.rebuildsDeliverNothing = true
+        let clock = FakeClock()
+        let c = coordinator(clock: clock)
+        c.start()
+        await source.awaitStart()
+        try? await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(source.rebuiltOn, [], "the wall has not moved")
+
+        clock.advance(by: .seconds(4))
+        await until { source.rebuiltOn == ["built-in"] }
+        XCTAssertEqual(source.rebuiltOn, ["built-in"])
+        XCTAssertEqual(c.state, .provingItCanHear)
+        XCTAssertEqual(events, [])
+
+        clock.advance(by: .seconds(4))
+        await until { c.state == .idle }
+        XCTAssertEqual(c.state, .idle, "the start failed")
+        c.stop()
+        await c.untilWrittenOut()
+        XCTAssertEqual(events, [.micFailed("AirPods Pro")])
+        XCTAssertEqual(events.first?.hudText, "can't start your mic — airpods pro")
+        XCTAssertEqual(records.first?.outcome, .nothingKept(.micFailed))
+        XCTAssertEqual(records.first?.events.map(\.label), [.init(rawValue: "mic-delivered-nothing")])
+    }
+
+    /// The same stuck mic, and the built-in one delivers: its start sound
+    /// is heard, and the meeting records on it.
+    func testAMicThatNeverDeliversAtTheStartGivesWayToTheBuiltInMic() async throws {
+        source.micName = "AirPods Pro"
+        let clock = FakeClock()
+        let c = coordinator(clock: clock)
+        c.start()
+        await source.awaitStart()
+        clock.advance(by: .seconds(4))
+        await until { c.state == .recording }
+
+        XCTAssertEqual(source.rebuiltOn, ["built-in"])
+        XCTAssertEqual(c.state, .recording)
+        XCTAssertEqual(events, [.started])
+    }
+
+    /// The headset stalls mid-call: nothing at all arrives, and the wake
+    /// finds the tap silent. Rebuilt on the same mic, the rig delivers
+    /// nothing in its time either, so the next try is on the built-in mic;
+    /// and with nothing arriving, the lamp says neither side is heard, not
+    /// that your side is still recorded.
+    func testARebuiltRigThatDeliversNothingIsTriedNextOnTheBuiltInMicAndTheLampSaysSo() async throws {
+        source.micName = "AirPods Pro"
+        source.rebuildsDeliverNothing = true
+        let clock = FakeClock()
+        var thresholds = retrying
+        thresholds.probeTimeout = .milliseconds(300)
+        let c = coordinator(thresholds: thresholds, clock: clock)
+        c.start()
+        await source.awaitStart()
+        await play(both(at: .zero), both(at: .seconds(1)))
+
+        clock.advance(by: .seconds(60))
+        c.probeTapIsAlive()
+        await until { source.rebuiltOn.count == 1 }
+        XCTAssertEqual(source.rebuiltOn, ["default"])
+        clock.advance(by: .seconds(5))
+        await until { c.problem != nil }
+
+        XCTAssertEqual(Array(source.rebuiltOn.prefix(2)), ["default", "built-in"])
+        XCTAssertEqual(c.problems, [.cannotHearAnything])
+        XCTAssertEqual(events.last?.hudText, "can't hear the call or your mic — still trying")
+    }
+
     // MARK: - a start that fails
 
     /// The mic permission was taken back in system settings — or never
@@ -673,12 +752,38 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
     }
     private var _rebuildTakes: Duration = .zero
 
+    /// Which mic each rebuild was asked to bring the rig up on: the
+    /// default, or the built-in one.
+    var rebuiltOn: [String] {
+        lock.withLock { _rebuiltOn }
+    }
+    private var _rebuiltOn: [String] = []
+
+    /// While set, a rebuild comes back without complaint and nothing ever
+    /// arrives from it: a mic that is there and does not call back.
+    var rebuildsDeliverNothing: Bool {
+        get { lock.withLock { _rebuildsDeliverNothing } }
+        set { lock.withLock { _rebuildsDeliverNothing = newValue } }
+    }
+    private var _rebuildsDeliverNothing = false
+
+    func rebuild() async throws {
+        lock.withLock { _rebuiltOn.append("default") }
+        try await rebuilt()
+    }
+
+    func rebuildOnTheBuiltInMic() async throws {
+        lock.withLock { _rebuiltOn.append("built-in") }
+        try await rebuilt()
+    }
+
     /// One that works brings both sides back and plays the start sound,
     /// which the tap hears a moment later as far-side audio. One that says
     /// where it played it hears it a tenth of a second after it returns,
     /// the way the real tap's chunk comes after the player has started.
-    func rebuild() async throws {
+    private func rebuilt() async throws {
         if rebuildsFail { throw DeviceGone() }
+        if rebuildsDeliverNothing { return }
         try? await Task.sleep(for: rebuildTakes)
         let (at, says) = lock.withLock { () -> (Duration, Bool) in
             _capturing = .bothSides

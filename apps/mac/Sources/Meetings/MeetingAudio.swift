@@ -106,6 +106,9 @@ extension MeetingRecord.Label {
     /// nothing came from the mic or the tap for a while, and the meeting's
     /// clock skipped it: a gap in the file, over by the time it was known.
     static let nothingDelivered = MeetingRecord.Label(rawValue: "nothing-delivered")
+    /// the mic came up and delivered nothing at all in its time, at the
+    /// start or after a rebuild: the built-in mic was tried.
+    static let micDeliveredNothing = MeetingRecord.Label(rawValue: "mic-delivered-nothing")
 }
 
 /// What a source is delivering, as far as it knows.
@@ -152,6 +155,10 @@ protocol MeetingAudioSource: Sendable {
     func start() async throws -> AsyncStream<MeetingAudioChunk>
     /// 002 §6's response to a tap that went all-zero: tear down, rebuild.
     func rebuild() async throws
+    /// The same, with the mac's built-in mic for your side whatever the
+    /// default input is: for a mic that came up and has delivered nothing
+    /// at all, which a rig on it again would not either.
+    func rebuildOnTheBuiltInMic() async throws
     func stop() async
     /// Whether anything but this app was putting audio out when the source
     /// last asked, or `nil` when that cannot be told. Silence from a mac that
@@ -205,6 +212,7 @@ extension MeetingAudioSource {
     func playQuietProbe() async throws {}
     var startSoundPlayed: Bool? { nil }
     var startSoundAt: Duration? { nil }
+    func rebuildOnTheBuiltInMic() async throws { try await rebuild() }
 }
 
 /// The engine listening to a meeting. Lines arrive as whisper decides them,

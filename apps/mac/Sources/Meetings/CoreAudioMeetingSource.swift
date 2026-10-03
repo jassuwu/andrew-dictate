@@ -248,6 +248,16 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         try await rebuild(on: nil)
     }
 
+    /// The default input came up and delivered nothing: the same, on the
+    /// built-in mic. A mac without one has only the default to try.
+    func rebuildOnTheBuiltInMic() async throws {
+        let builtIn = CoreAudioProperties.mics().builtIn
+        if builtIn == nil {
+            logger.error("no built-in mic to rebuild on; the default input it is")
+        }
+        try await rebuild(on: builtIn)
+    }
+
     /// `rebuild()`, on `mic`, or with none named, the mic a meeting should
     /// use now.
     private func rebuild(on mic: MicHandoff.Mic?) async throws {

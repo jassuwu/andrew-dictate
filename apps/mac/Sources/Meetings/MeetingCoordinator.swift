@@ -45,6 +45,12 @@ struct MeetingThresholds: Sendable {
     /// heard yet either, is said on the pill: parakeet is in before it and
     /// says nothing extra. Provisional.
     var gettingReadySaidAfter: Duration = .seconds(3)
+    /// How long past the probe timeout a rig that has started may take to
+    /// hand over its first chunk — a bluetooth headset can take a second or
+    /// two to open its mic — measured on the wall, from the capture opening
+    /// or a try at the tap. Nothing at all by then, and the mic is the
+    /// suspect. Provisional.
+    var firstChunkAllowance: Duration = .seconds(3)
 
     /// Tries in a row before the meeting stops waiting on the tap.
     var rebuildAttempts: Int { rebuildSpacing.count + 1 }
@@ -334,6 +340,11 @@ final class MeetingCoordinator: ObservableObject {
     /// cannot say where it played it: the window runs from the first chunk
     /// the tap delivers, wherever the source stamps it.
     private var probeOpensAtNextChunk = false
+    /// When the source was last asked for audio it has to prove it can
+    /// deliver: the capture opened, or the first try at a lost tap. Past the
+    /// probe timeout and the allowance from here, with no chunk since,
+    /// nothing is being delivered (`nothingDelivered`).
+    private var deliveryAskedOn: ContinuousClock.Instant?
     /// Every health check in here is driven by a chunk arriving, so a tap
     /// that stops calling back altogether — the mac slept, the screen
     /// locked, the driver died — freezes the clock instead of failing. These
@@ -382,6 +393,8 @@ final class MeetingCoordinator: ObservableObject {
     /// Unprompted, nothing has proven anything — so the watchdog waits the
     /// full silence timeout before it says the same thing.
     private static let watchdogInterval = Duration.seconds(10)
+    /// How often a start with nothing delivered yet looks at the wall.
+    private static let startLooksEvery = Duration.milliseconds(250)
 
     init(
         source: any MeetingAudioSource,
@@ -478,6 +491,7 @@ final class MeetingCoordinator: ObservableObject {
         liveLines = []
         startedOn = nil
         lastChunkArrived = now()
+        deliveryAskedOn = nil
         nudgePending = false
         probeUntil = thresholds.probeTimeout
         toneUntil = OurTones.silenced(for: OurTones.startSound)
@@ -571,6 +585,10 @@ final class MeetingCoordinator: ObservableObject {
                 }
                 return
             }
+            // the wall from here: a rig that never calls back is caught.
+            lastChunkArrived = now()
+            deliveryAskedOn = now()
+            watchTheStart(meeting)
             // what the source does by itself, a mic it moved to, goes in the
             // record at the meeting time it stamped. it ends with the tap.
             let sourceEvents = source.sourceEvents
@@ -599,6 +617,67 @@ final class MeetingCoordinator: ObservableObject {
                 await ingest(chunk, into: meeting)
             }
         }
+    }
+
+    /// The probe window is counted in chunks, so a rig that starts and
+    /// never calls back — a headset that is stuck, an interface with no
+    /// clock, a phone's mic over continuity — would leave the meeting
+    /// getting ready for ever, and a stop would keep nothing. The wall is
+    /// looked at instead: nothing at all by the probe timeout and the
+    /// allowance, and the mic is the suspect, so the built-in mic is tried.
+    /// Nothing from that either, and the start fails as the mic's, naming
+    /// the one it was on.
+    private func watchTheStart(_ meeting: Meeting) {
+        meeting.startWatch = Task { [weak self] in
+            var suspect: String??
+            while true {
+                try? await Task.sleep(for: MeetingCoordinator.startLooksEvery)
+                guard !Task.isCancelled, let self, current === meeting,
+                      session.state == .provingItCanHear, meeting.chunks == 0
+                else { return }
+                guard nothingDelivered else { continue }
+                if let named = suspect {
+                    micDeliveredNothing(meeting, named)
+                    return
+                }
+                let mic = source.micName
+                suspect = .some(mic)
+                logger.error("\(mic ?? "the mic", privacy: .public) delivered nothing; trying the built-in mic")
+                meeting.notes.note(.micDeliveredNothing, at: elapsed)
+                let playedBefore = source.startSoundAt
+                probeOpensAtNextChunk = playedBefore == nil
+                do {
+                    try await source.rebuildOnTheBuiltInMic()
+                } catch {
+                    logger.error("the built-in mic would not come up: \(error.localizedDescription, privacy: .public)")
+                    guard current === meeting, session.state == .provingItCanHear else { return }
+                    micDeliveredNothing(meeting, mic)
+                    return
+                }
+                if let played = source.startSoundAt, played != playedBefore {
+                    openTheStartSoundsWindow(at: played)
+                }
+                deliveryAskedOn = now()
+            }
+        }
+    }
+
+    /// The start fails as the mic's: it was there, and delivered nothing.
+    private func micDeliveredNothing(_ meeting: Meeting, _ mic: String?) {
+        guard current === meeting else { return }
+        logger.error("nothing was ever delivered; the meeting does not start")
+        onEvent?(.micFailed(mic))
+        stop(nothingKept: .micFailed)
+    }
+
+    /// Nothing has come from the source since it was last asked for audio
+    /// (`deliveryAskedOn`) and the last chunk, for the probe timeout and
+    /// the allowance: the mic it is on has stalled, and nothing said may
+    /// claim your side is being recorded.
+    private var nothingDelivered: Bool {
+        guard let asked = deliveryAskedOn else { return false }
+        let since = max(asked, lastChunkArrived ?? asked)
+        return now() - since >= thresholds.probeTimeout + thresholds.firstChunkAllowance
     }
 
     /// The meeting's spool: its folder and manifest, then its audio file.
@@ -703,6 +782,7 @@ final class MeetingCoordinator: ObservableObject {
         meeting.capture?.cancel()
         meeting.lines?.cancel()
         meeting.watchdog?.cancel()
+        meeting.startWatch?.cancel()
         // a rebuild still waiting its turn is cut short; one already
         // talking to the HAL is let finish, and the tap's close waits on it.
         meeting.rebuild?.cancel()
@@ -741,10 +821,12 @@ final class MeetingCoordinator: ObservableObject {
         let lastTapClosed = tapClosing
         let capture = meeting.capture
         let rebuild = meeting.rebuild
+        let startWatch = meeting.startWatch
         let closing = Task { [source] in
             await lastTapClosed?.value
             await capture?.value
             await rebuild?.value
+            await startWatch?.value
             await source.stop()
         }
         tapClosing = closing
@@ -896,6 +978,7 @@ final class MeetingCoordinator: ObservableObject {
         if startedOn == nil {
             startedOn = now() - chunk.at
         }
+        meeting.chunks += 1
         // never back: the wall it was moved to while nothing arrived is
         // where the audio is, and a chunk stamped a moment short of it
         // does not take the menu's clock back.
@@ -1262,8 +1345,22 @@ final class MeetingCoordinator: ObservableObject {
         var wait = thresholds.settleBeforeRebuild
         var failures = 0
         var notedUnplayable = false
+        var notedNothingDelivered = false
+        deliveryAskedOn = nil
         while await pause(wait), isRebuilding(meeting) {
             let failed: MeetingRecord.Label
+            // a try before this that has had nothing at all delivered in
+            // its time: the mic it was on is the suspect, and this one is on
+            // the built-in mic.
+            let onTheBuiltInMic = nothingDelivered
+            if onTheBuiltInMic, !notedNothingDelivered {
+                logger.error("\(self.source.micName ?? "the mic", privacy: .public) delivered nothing; trying the built-in mic")
+                meeting.notes.note(.micDeliveredNothing, at: elapsed)
+                notedNothingDelivered = true
+            }
+            if deliveryAskedOn == nil {
+                deliveryAskedOn = now()
+            }
             // A source that says where it played the start sound has the
             // window opened there once it is back: a rig still delivering
             // beside the one being built has chunks that are not the new
@@ -1274,7 +1371,11 @@ final class MeetingCoordinator: ObservableObject {
             let playedBefore = source.startSoundAt
             probeOpensAtNextChunk = playedBefore == nil
             do {
-                try await source.rebuild()
+                if onTheBuiltInMic {
+                    try await source.rebuildOnTheBuiltInMic()
+                } else {
+                    try await source.rebuild()
+                }
                 if let played = source.startSoundAt, played != playedBefore {
                     openTheStartSoundsWindow(at: played)
                 }
@@ -1339,10 +1440,12 @@ final class MeetingCoordinator: ObservableObject {
 
     /// The call is not heard, and the lamp says whether your side still
     /// is: the source keeps the mic going on its own when it can, and one
-    /// that could not is not recording anything. Said again only when that
-    /// changes, as a later try brings the mic back alone or loses it.
+    /// that could not is not recording anything — nor is one whose rig has
+    /// delivered nothing since the tries began, whatever it says. Said
+    /// again only when that changes, as a later try brings the mic back
+    /// alone or loses it.
     private func cannotHearTheCall(_ meeting: Meeting) {
-        let problem: MeetingSession.Problem = source.capturing == .nothing
+        let problem: MeetingSession.Problem = source.capturing == .nothing || nothingDelivered
             ? .cannotHearAnything
             : .cannotHearTheCall
         begin(problem, noting: .problemBegan, in: meeting)
@@ -1987,6 +2090,10 @@ extension MeetingCoordinator {
         var watchdog: Task<Void, Never>?
         /// A rebuild of its tap, while one is in flight.
         var rebuild: Task<Void, Never>?
+        /// Looks at the wall while nothing has been delivered yet.
+        var startWatch: Task<Void, Never>?
+        /// Chunks taken in.
+        var chunks = 0
         /// The mac kept from idle sleep, from its start until it is let go.
         var awake: (any NSObjectProtocol)?
         /// What its record will say besides what the file does.
