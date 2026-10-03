@@ -3,6 +3,7 @@ import Page from "../layouts/Page.astro";
 import Command from "../components/Command.astro";
 import Demo from "../components/Demo.astro";
 import Hud from "../components/Hud.astro";
+import Meeting from "../components/Meeting.astro";
 import { description, install, sizes, topBlock, unblock } from "../copy";
 
 const [dictation, meetings, three] = topBlock.pitch;
@@ -97,7 +98,7 @@ const [dictation, meetings, three] = topBlock.pitch;
         </div>
       </div>
 
-      <div id="meeting"></div>
+      <Meeting />
     </section>
 
     <section id="install" class="mx-auto max-w-[72rem] px-6 py-20 sm:px-10">

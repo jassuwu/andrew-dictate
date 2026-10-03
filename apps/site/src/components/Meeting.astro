@@ -1,0 +1,34 @@
+---
+import call from "../demo/meeting.json";
+
+// with scripts off the visitor sees the end of the scene: the file. with
+// them on, the sheet starts empty and waits for record.
+const whole = call.stops[call.stops.length - 1];
+---
+
+<div data-meeting>
+  <div data-scene hidden>
+    <div class="flex items-center gap-4">
+      <button type="button" class="menu-item" data-record>record a meeting</button>
+      <p class="fact" data-status role="status"></p>
+    </div>
+
+    <div class="sheet mt-4">
+      <p class="sheet-head" data-title>live transcript</p>
+      <p class="sheet-hint" data-meeting-hint>
+        press record. a short call plays, faster than life.
+      </p>
+      <ol class="live" data-lines aria-live="polite"></ol>
+      <pre class="file" data-file hidden></pre>
+    </div>
+
+    <div class="agent-thread agent-under mt-4" data-meeting-thread aria-live="polite" hidden></div>
+  </div>
+
+  <noscript>
+    <div class="sheet">
+      <p class="sheet-head">{call.file}</p>
+      <pre class="file">{whole.markdown}</pre>
+    </div>
+  </noscript>
+</div>

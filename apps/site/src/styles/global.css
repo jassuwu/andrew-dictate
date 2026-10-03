@@ -242,6 +242,7 @@
   }
 
   .cmd code {
+    font-variant-ligatures: none;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     user-select: all;
@@ -341,6 +342,109 @@
   .composer-mark {
     flex: none;
     color: rgb(229 190 98 / 0.75);
+  }
+
+  /* the meeting scene: one item, as in the app's menu, and one sheet that is
+     the live transcript while the meeting runs and the file once it stops. */
+  .menu-item {
+    flex: none;
+    padding: 0.5rem 0.95rem;
+    border-radius: 0.6rem;
+    border: 1px solid rgb(242 237 224 / 0.16);
+    background: var(--color-card);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-gold-pale);
+    cursor: pointer;
+  }
+
+  .menu-item:hover:not(:disabled) {
+    border-color: rgb(229 190 98 / 0.5);
+  }
+
+  .menu-item[data-live] {
+    border-color: var(--color-gold);
+  }
+
+  .menu-item:disabled {
+    color: rgb(242 237 224 / 0.45);
+    cursor: default;
+  }
+
+  .sheet {
+    border-radius: 1rem;
+    border: 1px solid rgb(242 237 224 / 0.09);
+    background: var(--color-window);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.65;
+  }
+
+  .sheet-head {
+    padding: 0.65rem 1.1rem;
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    color: rgb(242 237 224 / 0.45);
+    border-bottom: 1px solid rgb(242 237 224 / 0.06);
+  }
+
+  .sheet-hint {
+    padding: 1.1rem;
+    color: rgb(242 237 224 / 0.45);
+  }
+
+  .live,
+  .file {
+    height: 19rem;
+    overflow-y: auto;
+    padding: 1.1rem;
+  }
+
+  .live {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    color: rgb(242 237 224 / 0.85);
+  }
+
+  .sheet-hint:not([hidden]) + .live {
+    display: none;
+  }
+
+  .live[hidden] {
+    display: none;
+  }
+
+  .live-stamp {
+    color: rgb(242 237 224 / 0.4);
+  }
+
+  .live-you {
+    color: var(--color-gold-pale);
+  }
+
+  .live-them {
+    color: rgb(242 237 224 / 0.6);
+  }
+
+  .file {
+    /* three hyphens are three hyphens: this is a file, not prose */
+    font-variant-ligatures: none;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: rgb(242 237 224 / 0.8);
+  }
+
+  noscript .file {
+    height: auto;
+  }
+
+  .agent-under {
+    min-height: 0;
+    padding: 0 0.2rem;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.65;
   }
 
   /* the key. a browser cannot see fn, so this one is held by hand. */
