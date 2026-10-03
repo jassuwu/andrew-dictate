@@ -6,12 +6,11 @@ import Hud from "../components/Hud.astro";
 import Meeting from "../components/Meeting.astro";
 import { description, install, proof, sizes, topBlock, unblock } from "../copy";
 
-const [dictation, meetings, three] = topBlock.pitch;
+const [dictation, meetings, freeFastLocal] = topBlock.pitch;
 ---
 
 <Page title="andrew dictate · escape the keyboard." description={description}>
   <main>
-    <!-- the top block, and beside it the thing itself -->
     <!-- on a wide screen the words are on the left and the demo beside
          them. on a phone the demo comes right after the pitch, before the
          paragraphs, so the thing itself is never a long scroll away. -->
@@ -39,7 +38,7 @@ const [dictation, meetings, three] = topBlock.pitch;
           <span class="block text-gold-pale">{dictation}</span>
           <span class="mt-2 block text-cream/55">{meetings}</span>
         </p>
-        <p class="mt-6 font-mono text-[1rem] tracking-[0.02em] text-gold">{three}</p>
+        <p class="mt-6 font-mono text-[1rem] tracking-[0.02em] text-gold">{freeFastLocal}</p>
       </div>
 
       <div class="hero-demo">
@@ -87,29 +86,32 @@ const [dictation, meetings, three] = topBlock.pitch;
       </div>
     </section>
 
-    <section class="mx-auto grid max-w-[72rem] gap-x-16 gap-y-8 px-6 py-20 sm:px-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-      <div>
-        <h2 class="heading text-cream">record a meeting.</h2>
-        <div class="mt-8 space-y-4">
-          <p class="prose-line">
-            press record in the menu bar. your mic is you, and whatever the mac
-            plays is them.
-          </p>
-          <p class="prose-line">
-            press stop and you have one markdown file, with the speakers split
-            out. point your agent at the folder.
-          </p>
-          <p class="prose-line">
-            when a call starts, the app asks if you want it recorded. it never
-            starts by itself.
-          </p>
-          <p class="fact pt-2">
-            {sizes.meetings} · written in english by default, from any language whisper knows
-          </p>
-        </div>
+    <!-- meetings are the smaller half: a narrower scene, lower on the page.
+         on a phone the scene comes before the facts, as the demo does. -->
+    <section class="meet mx-auto max-w-[72rem] px-6 py-20 sm:px-10">
+      <h2 class="meet-intro heading text-cream">record a meeting.</h2>
+
+      <div class="meet-scene">
+        <Meeting />
       </div>
 
-      <Meeting />
+      <div class="meet-facts space-y-4">
+        <p class="prose-line">
+          press record in the menu bar. your mic is you, and whatever the mac
+          plays is them.
+        </p>
+        <p class="prose-line">
+          press stop and you have one markdown file, with the speakers split
+          out. point your agent at the folder.
+        </p>
+        <p class="prose-line">
+          when a call starts, the app asks if you want it recorded. it never
+          starts by itself.
+        </p>
+        <p class="fact pt-2">
+          {sizes.meetings} · written in english by default, from any language whisper knows
+        </p>
+      </div>
     </section>
 
     <section id="install" class="mx-auto max-w-[72rem] px-6 py-20 sm:px-10">

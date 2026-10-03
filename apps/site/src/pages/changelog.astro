@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import Page from "../layouts/Page.astro";
 import { inline, releases } from "../changelog";
+import { proof } from "../copy";
 
 // the notes live with the app, one folder over, and the release workflow
 // reads them from there. if they cannot be read here the build fails, which
@@ -19,7 +20,7 @@ const all = releases(notes);
   <main class="mx-auto max-w-[72rem] px-6 pb-8 pt-24 sm:px-10 lg:pt-28">
     <h1 class="pitch text-gold-pale">changelog.</h1>
     <p class="prose-line mt-6">
-      every release, newest first. this is where "they get better over time" is kept.
+      every release, newest first. this is where "{proof}" is kept.
     </p>
 
     <div class="mt-16 space-y-20">
