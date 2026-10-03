@@ -8,42 +8,42 @@
   "lines": [
     {
       "speaker": "you",
-      "at": 4,
+      "second": 4,
       "text": "Okay, can everyone hear me?"
     },
     {
       "speaker": "them 1",
-      "at": 7,
+      "second": 7,
       "text": "Yes. Let's start with the release."
     },
     {
       "speaker": "you",
-      "at": 15,
+      "second": 15,
       "text": "The build is green. I'll cut the release after this call."
     },
     {
       "speaker": "them 2",
-      "at": 31,
+      "second": 31,
       "text": "The login page is still slow on my machine."
     },
     {
       "speaker": "you",
-      "at": 38,
+      "second": 38,
       "text": "I saw that. I'll look at it today and tell you what I find."
     },
     {
       "speaker": "them 1",
-      "at": 52,
+      "second": 52,
       "text": "Good. And the docs?"
     },
     {
       "speaker": "them 2",
-      "at": 58,
+      "second": 58,
       "text": "I can take the docs. I'll have a draft on Friday."
     },
     {
       "speaker": "you",
-      "at": 70,
+      "second": 70,
       "text": "Great. That's everything from me."
     }
   ],

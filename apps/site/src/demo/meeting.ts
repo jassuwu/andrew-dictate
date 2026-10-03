@@ -2,7 +2,10 @@
 // the dictation demo: a state, an event and a time go in, a state or a view
 // comes out.
 
-export type Line = { speaker: string; at: number; text: string };
+import { coolMs, pillMs } from "./timings";
+
+/** a line of the call: who, how many seconds into the meeting, and what. */
+export type Line = { speaker: string; second: number; text: string };
 
 /** one place a visitor can press stop: how long the meeting ran, what the
     lamp says, the file the app writes, and what an agent makes of it. the
@@ -19,13 +22,11 @@ export const pace = {
   line: 1300,
   /** stop to the file. the real one is on disk in seconds. */
   write: 900,
-  /** the lamp's cool-out, as the app times it. */
-  cool: 300,
+  cool: coolMs,
   /** the file to the agent being asked, and the ask to its answer. */
   ask: 900,
   reply: 700,
-  /** how long a pill stays. */
-  pill: 2200,
+  pill: pillMs,
 } as const;
 
 type Run = { recordAt: number; stopAt: number | null };
@@ -37,8 +38,12 @@ export type Event = { type: "record" | "stop"; at: number };
 export type LiveLine = { speaker: string; stamp: string; text: string };
 
 export type View = {
-  phase: "idle" | "ready" | "recording" | "writing" | "saved";
-  /** the menu's first line, in the app's words. */
+  /** what the meeting is doing, by the glossary's names. `saved` is a moment
+      and not a phase: after it the scene is idle again, with a file to show. */
+  phase: "idle" | "gettingReady" | "recording" | "writingOut";
+  /** the mic is the meeting's: it is getting ready or recording. */
+  live: boolean;
+  /** the menu's first line, in the app's words. nothing once it is saved. */
   status: string;
   /** the live transcript: finished stretches, `you` and `them`. */
   lines: LiveLine[];
@@ -48,11 +53,13 @@ export type View = {
   ask: string | null;
   reply: string | null;
   badge: "none" | "part" | "rim";
-  lamp: { state: "off" | "ember" | "pilot" | "cooling"; since: number };
+  /** the lamp's phases, by the names the app gives them. */
+  lamp: { state: "off" | "ember" | "pilot" | "cool"; since: number };
 };
 
 const idle: View = {
   phase: "idle",
+  live: false,
   status: "",
   lines: [],
   canStop: false,
@@ -86,12 +93,20 @@ export function meetingScene(call: Call) {
   const live = (count: number): LiveLine[] =>
     call.lines.slice(0, count).map((line) => ({
       speaker: line.speaker.startsWith("them") ? "them" : line.speaker,
-      stamp: stamp(line.at),
+      stamp: stamp(line.second),
       text: line.text,
     }));
 
   function initial(): State {
     return { run: null };
+  }
+
+  /** the scene at its end, as if the whole call was recorded and stopped
+      long ago: the file, and the agent's answer. for a visitor who asked for
+      less motion, who gets the end without the play. */
+  function finished(now: number): State {
+    const recordAt = now - 10_000_000;
+    return { run: { recordAt, stopAt: startAt({ recordAt, stopAt: null }) + call.lines.length * pace.line } };
   }
 
   function step(state: State, event: Event): State {
@@ -116,17 +131,19 @@ export function meetingScene(call: Call) {
       if (now < startAt(run)) {
         return {
           ...idle,
-          phase: "ready",
+          phase: "gettingReady",
+          live: true,
           status: "getting ready…",
           badge: "part",
           lamp: { state: "ember", since: run.recordAt },
         };
       }
       const count = linesBy(run, now);
-      const last = count > 0 ? call.lines[count - 1].at : 0;
+      const last = count > 0 ? call.lines[count - 1].second : 0;
       return {
         ...idle,
         phase: "recording",
+        live: true,
         status: `recording · ${clock(last)}`,
         lines: live(count),
         canStop: count > 0,
@@ -140,13 +157,13 @@ export function meetingScene(call: Call) {
     const stop = call.stops[count - 1];
     const lamp: View["lamp"] =
       now < run.stopAt + pace.cool
-        ? { state: "cooling", since: run.stopAt }
+        ? { state: "cool", since: run.stopAt }
         : { state: "off", since: run.stopAt + pace.cool };
     const savedAt = run.stopAt + pace.write;
     if (now < savedAt) {
       return {
         ...idle,
-        phase: "writing",
+        phase: "writingOut",
         status: "writing it out…",
         lines: live(count),
         pill: "writing it out…",
@@ -157,8 +174,6 @@ export function meetingScene(call: Call) {
 
     return {
       ...idle,
-      phase: "saved",
-      status: stop.saved,
       lines: live(count),
       pill: now < savedAt + pace.pill ? stop.saved : null,
       file: { name: call.file, markdown: stop.markdown },
@@ -168,5 +183,5 @@ export function meetingScene(call: Call) {
     };
   }
 
-  return { initial, step, view };
+  return { initial, finished, step, view };
 }

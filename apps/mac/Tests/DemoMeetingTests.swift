@@ -18,7 +18,8 @@ final class DemoMeetingTests: XCTestCase {
 
     private struct Line: Decodable {
         let speaker: String
-        let at: Int
+        /// seconds into the meeting
+        let second: Int
         let text: String
     }
 
@@ -28,15 +29,9 @@ final class DemoMeetingTests: XCTestCase {
         let markdown: String
     }
 
-    /// apps/mac/Tests/ → apps/site/src/demo/meeting.json
-    private static let file = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .appendingPathComponent("site/src/demo/meeting.json")
-
     private func call() throws -> Call {
-        try JSONDecoder().decode(Call.self, from: Data(contentsOf: Self.file))
+        try JSONDecoder().decode(
+            Call.self, from: Data(contentsOf: SiteDemoFile.url("meeting.json")))
     }
 
     private func speaker(_ label: String) throws -> MeetingTurn.Speaker {
@@ -57,7 +52,7 @@ final class DemoMeetingTests: XCTestCase {
             gaps: [],
             recovered: false,
             turns: try call.lines.prefix(count).map {
-                MeetingTurn(speaker: try speaker($0.speaker), at: .seconds($0.at), text: $0.text)
+                MeetingTurn(speaker: try speaker($0.speaker), at: .seconds($0.second), text: $0.text)
             }
         )
     }

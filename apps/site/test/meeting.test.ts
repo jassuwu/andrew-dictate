@@ -8,9 +8,9 @@ const call: Call = {
   file: "2026-10-03-1402-zoom.md",
   ask: "What did I promise?",
   lines: [
-    { speaker: "you", at: 4, text: "Can you hear me?" },
-    { speaker: "them 1", at: 7, text: "Yes." },
-    { speaker: "you", at: 15, text: "I'll cut the release." },
+    { speaker: "you", second: 4, text: "Can you hear me?" },
+    { speaker: "them 1", second: 7, text: "Yes." },
+    { speaker: "you", second: 15, text: "I'll cut the release." },
   ],
   stops: [
     { duration: 10, saved: "saved · <1m", reply: "Nothing yet.", markdown: "one line" },
@@ -31,13 +31,16 @@ describe("record, then stop", () => {
 
   test("gives the file after `writing it out…` and `saved`", () => {
     const writing = scene.view(stopped, stopAt);
-    expect(writing.phase).toBe("writing");
+    expect(writing.phase).toBe("writingOut");
     expect(writing.pill).toBe("writing it out…");
     expect(writing.file).toBeNull();
 
+    // `saved` is a moment, said on the pill. it is not a phase.
     const saved = scene.view(stopped, stopAt + pace.write);
-    expect(saved.phase).toBe("saved");
+    expect(saved.phase).toBe("idle");
+    expect(saved.status).toBe("");
     expect(saved.pill).toBe("saved · 1m");
+    expect(scene.view(stopped, stopAt + pace.write + pace.pill).pill).toBeNull();
     expect(saved.file).toEqual({ name: "2026-10-03-1402-zoom.md", markdown: "three lines" });
   });
 
@@ -52,7 +55,7 @@ describe("record, then stop", () => {
   test("and record again starts the scene over", () => {
     const again = scene.step(stopped, { type: "record", at: stopAt + 60_000 });
     const view = scene.view(again, stopAt + 60_000);
-    expect(view.phase).toBe("ready");
+    expect(view.phase).toBe("gettingReady");
     expect(view.lines).toEqual([]);
     expect(view.file).toBeNull();
     expect(view.reply).toBeNull();
@@ -63,7 +66,7 @@ describe("while it records", () => {
   const recording = scene.step(scene.initial(), { type: "record", at: 1000 });
 
   test("it gets ready first, and says when it is recording", () => {
-    expect(scene.view(recording, 1000).phase).toBe("ready");
+    expect(scene.view(recording, 1000).phase).toBe("gettingReady");
     expect(scene.view(recording, 1000).status).toBe("getting ready…");
     const started = scene.view(recording, 1000 + pace.ready);
     expect(started.phase).toBe("recording");
@@ -101,6 +104,30 @@ describe("while it records", () => {
   });
 });
 
+describe("the mic", () => {
+  const recording = scene.step(scene.initial(), { type: "record", at: 1000 });
+  const stopAt = line(1000, 2);
+  const stopped = scene.step(recording, { type: "stop", at: stopAt });
+
+  test("is the meeting's from record to stop, and nobody's after", () => {
+    expect(scene.view(scene.initial(), 0).live).toBe(false);
+    expect(scene.view(recording, 1000).live).toBe(true);
+    expect(scene.view(recording, line(1000, 1)).live).toBe(true);
+    expect(scene.view(stopped, stopAt).live).toBe(false);
+  });
+});
+
+describe("the scene at its end", () => {
+  test("is the whole file and the agent's answer, with nothing still moving", () => {
+    const view = scene.view(scene.finished(50_000), 50_000);
+    expect(view.phase).toBe("idle");
+    expect(view.file?.markdown).toBe("three lines");
+    expect(view.reply).toBe("One thing.");
+    expect(view.pill).toBeNull();
+    expect(view.lamp.state).toBe("off");
+  });
+});
+
 describe("what the badge and the lamp wear", () => {
   const recording = scene.step(scene.initial(), { type: "record", at: 1000 });
   const stopAt = line(1000, 2);
@@ -117,7 +144,7 @@ describe("what the badge and the lamp wear", () => {
   test("the lamp is an ember, then the meeting's steady light, and out at stop", () => {
     expect(scene.view(recording, 1000).lamp.state).toBe("ember");
     expect(scene.view(recording, 1000 + pace.ready).lamp.state).toBe("pilot");
-    expect(scene.view(stopped, stopAt).lamp.state).toBe("cooling");
+    expect(scene.view(stopped, stopAt).lamp.state).toBe("cool");
     expect(scene.view(stopped, stopAt + pace.cool).lamp.state).toBe("off");
   });
 });
