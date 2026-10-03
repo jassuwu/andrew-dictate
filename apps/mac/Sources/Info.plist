@@ -27,7 +27,7 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSDocumentsFolderUsageDescription</key>
-	<string>andrew dictate writes your meeting transcripts here. nothing leaves this mac.</string>
+	<string>andrew dictate writes your meeting transcripts here.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2026 jass. MIT license.</string>
 	<key>NSMicrophoneUsageDescription</key>
