@@ -167,6 +167,10 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     /// answer to a uid lags a destroy, so for a moment it still names this
     /// one, which is gone rather than stale.
     private var lastDestroyed: [String: AudioObjectID] = [:]
+    /// The devices this source has made and not torn down: none of them
+    /// is stale. A mic move's standby and a rebuild can pick the same uid;
+    /// the second then fails to build, rather than sweeping away the first.
+    private var ours: Set<AudioObjectID> = []
 
     // Only ever touched on `following`.
     private var handoff = MicHandoff()
@@ -858,7 +862,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     /// ever on the HAL queue.
     private func destroyStaleAggregate(_ uid: String) {
         guard let stale = CoreAudioProperties.device(uid: uid),
-              stale != lock.withLock({ lastDestroyed[uid] })
+              lock.withLock({ stale != lastDestroyed[uid] && !ours.contains(stale) })
         else { return }
         let status = AudioHardwareDestroyAggregateDevice(stale)
         if status == noErr {
@@ -953,6 +957,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             dropTheTap()
             throw error
         }
+        lock.withLock { _ = ours.insert(aggregateID) }
 
         // Read for this rig, not once for the source: the next mic may run
         // at another rate.
@@ -970,6 +975,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         }
         guard status == noErr, let procID else {
             AudioHardwareDestroyAggregateDevice(aggregateID)
+            lock.withLock { _ = ours.remove(aggregateID) }
             dropTheTap()
             throw Failure.coreAudio("AudioDeviceCreateIOProcIDWithBlock", status, progress.stage)
         }
@@ -998,7 +1004,10 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         if let tapID = rig.tapID {
             AudioHardwareDestroyProcessTap(tapID)
         }
-        lock.withLock { lastDestroyed[rig.uid] = rig.aggregateID }
+        lock.withLock {
+            lastDestroyed[rig.uid] = rig.aggregateID
+            ours.remove(rig.aggregateID)
+        }
         logger.info("tap down: \(rig.mic.name, privacy: .public), through \(rig.uid, privacy: .public)")
     }
 
