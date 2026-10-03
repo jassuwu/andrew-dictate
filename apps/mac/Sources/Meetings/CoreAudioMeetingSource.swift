@@ -154,8 +154,10 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     /// A rebuild waiting on its new rig's first buffer.
     private var replacing: Replacing?
     private var player: AVAudioPlayer?
-    /// Whether the last start sound could be played at all.
+    /// Whether the last start sound could be played at all, and where on
+    /// the chunks' clock it was when it was.
     private var startSoundSounded: Bool?
+    private var startSoundStamp: Duration?
     private var playingTimer: DispatchSourceTimer?
     private var playing: Bool?
     /// What was last told of the mic alone, since the tap was last whole:
@@ -1000,14 +1002,18 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         }
         let player = try? AVAudioPlayer(contentsOf: url)
         player?.prepareToPlay()
+        // where on the chunks' clock it lands, read as it is played.
+        let at = lock.withLock { clock.position(at: .now) }
         // false with no output to play on: then the tap had nothing to hear,
         // and the meeting must not read its silence as a deaf tap.
         let played = player?.play() ?? false
         lock.withLock {
             self.player = player
             startSoundSounded = played
+            if played { startSoundStamp = at }
         }
-        logger.info("probe tone played: \(played, privacy: .public)")
+        let seconds = String(format: "%.2f", at.totalSeconds)
+        logger.info("probe tone played: \(played, privacy: .public), at \(seconds, privacy: .public) s")
     }
 
     // MARK: - the IO proc
@@ -1291,6 +1297,10 @@ extension CoreAudioMeetingSource {
 
     var startSoundPlayed: Bool? {
         lock.withLock { startSoundSounded }
+    }
+
+    var startSoundAt: Duration? {
+        lock.withLock { startSoundStamp }
     }
 
     func playQuietProbe() async throws {
