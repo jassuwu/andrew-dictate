@@ -971,10 +971,11 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             following.async { self.tookOver(takeover) }
         }
         guard let rig, let continuation else { return }
-        let micChannels = MicMix.micChannels(
-            said: rig.micChannels, carried: layout, tap: rig.tapChannels)
+        let firstLayout = rig.layout ?? layout
         if rig.layout == nil {
             rig.layout = layout
+            let micChannels = MicMix.micChannels(
+                said: rig.micChannels, carried: layout, tap: rig.tapChannels)
             if micChannels < rig.micChannels {
                 logger.error("\(rig.mic.name, privacy: .public) brought \(micChannels, privacy: .public) of its \(rig.micChannels, privacy: .public) channels through \(rig.uid, privacy: .public); the rest of `you` is silence")
             } else {
@@ -982,8 +983,15 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             }
         }
         // A rig whose mic went from under it can keep calling back with the
-        // tap's channels where the mic's were. That is not `you`.
-        guard rig.layout == layout else { return }
+        // tap's channels where the mic's were: the far side still, and a
+        // silent `you`. Any other change is not read.
+        guard let micChannels = MicMix.micChannels(
+            said: rig.micChannels, first: firstLayout, carried: layout, tap: rig.tapChannels)
+        else { return }
+        if layout != firstLayout, !rig.lostItsMic {
+            rig.lostItsMic = true
+            logger.error("\(rig.mic.name, privacy: .public) went from under \(rig.uid, privacy: .public): its tap's channels go on as the far side, and `you` is silence")
+        }
 
         // Sub-device channels come first, taps after (002 §4, confirmed by
         // the spike): the first `micChannels` flat channels are the mic.
@@ -1053,6 +1061,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         /// How many channels its first buffer carried, the mic's and the
         /// tap's together.
         var layout: Int?
+        /// Its buffers have come with the tap's channels alone: said once.
+        var lostItsMic = false
 
         var hasTap: Bool {
             tapID != nil

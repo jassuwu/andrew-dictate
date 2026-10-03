@@ -40,6 +40,18 @@ enum MicMix {
         min(said, max(0, carried - tap))
     }
 
+    /// The same for a buffer from a rig whose first buffer carried `first`
+    /// channels. One like the first is read as the first was. One with the
+    /// tap's channels alone is a rig whose mic went from under it: they are
+    /// still the far side, and none of them is `you`. Any other change
+    /// leaves which channel is whose a guess, and nil: it is not read.
+    static func micChannels(said: Int, first: Int, carried: Int, tap: Int = tapChannels) -> Int? {
+        if carried == first {
+            return micChannels(said: said, carried: carried, tap: tap)
+        }
+        return tap > 0 && carried == tap ? 0 : nil
+    }
+
     private static func rms(_ samples: [Float]) -> Float {
         guard !samples.isEmpty else { return 0 }
         let sum = samples.reduce(Float(0)) { $0 + $1 * $1 }

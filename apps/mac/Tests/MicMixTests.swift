@@ -57,6 +57,32 @@ final class MicMixTests: XCTestCase {
         XCTAssertEqual(MicMix.micChannels(said: 4, carried: 4), 2)
     }
 
+    // MARK: - a buffer unlike the first
+
+    /// a buffer like its rig's first is read as the first was.
+    func testABufferLikeTheFirstIsReadAsItWas() {
+        XCTAssertEqual(MicMix.micChannels(said: 1, first: 3, carried: 3), 1)
+        XCTAssertEqual(MicMix.micChannels(said: 4, first: 6, carried: 6), 4)
+        XCTAssertEqual(MicMix.micChannels(said: 1, first: 1, carried: 1, tap: 0), 1)
+    }
+
+    /// the airpods died, and the rig they were in calls back with the tap's
+    /// two channels alone: still the far side, and `you` is silence — not
+    /// a buffer dropped whole, with the far side in it.
+    func testABufferWithTheTapsChannelsAloneIsTheFarSideWithASilentYou() {
+        XCTAssertEqual(MicMix.micChannels(said: 1, first: 3, carried: 2), 0)
+        XCTAssertEqual(MicMix.micChannels(said: 4, first: 6, carried: 2), 0)
+    }
+
+    /// any other change — a mic with a channel more, or one fewer — leaves
+    /// which channel is whose a guess, and the buffer is not read. the mic
+    /// alone has no tap to keep.
+    func testAnyOtherChangeIsNotRead() {
+        XCTAssertNil(MicMix.micChannels(said: 1, first: 3, carried: 4))
+        XCTAssertNil(MicMix.micChannels(said: 2, first: 4, carried: 3))
+        XCTAssertNil(MicMix.micChannels(said: 2, first: 2, carried: 1, tap: 0))
+    }
+
     /// a rig with the mic alone, while the tap cannot be rebuilt, has no
     /// tap channels after the mic's: every channel it carries is `you`,
     /// and none of it is ever read as the far side.
