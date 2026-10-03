@@ -39,6 +39,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         case micGone(String)
         /// A native call that did not come back in time, and what it was.
         case noAnswer(Stage)
+        /// A rig on this mic came up and delivered nothing in time.
+        case silent(String)
 
         var errorDescription: String? {
             switch self {
@@ -47,6 +49,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             case .noStartSound: "the start sound is missing from the app"
             case .micGone(let mic): "the mic (\(mic)) is not there any more"
             case .noAnswer(let stage): stage.description
+            case .silent(let mic):
+                "the mic (\(mic)) came up and delivered nothing within \(Int(MicHandoff.patience.totalSeconds)) s"
             }
         }
 
@@ -56,7 +60,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         var fault: CaptureFault {
             switch self {
             case .noMicrophone: .mic(nil)
-            case .micGone(let mic): .mic(mic)
+            case .micGone(let mic), .silent(let mic): .mic(mic)
             case .noAnswer(.startingTheMic(let mic)), .coreAudio(_, _, .startingTheMic(let mic)):
                 .mic(mic)
             case .noAnswer, .coreAudio, .noStartSound: .tap
@@ -147,6 +151,8 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     private var told: AsyncStream<MeetingSourceEvent>.Continuation?
     /// Where the chunks are, and the times nothing came.
     private var clock = ChunkClock()
+    /// A rebuild waiting on its new rig's first buffer.
+    private var replacing: Replacing?
     private var player: AVAudioPlayer?
     /// Whether the last start sound could be played at all.
     private var startSoundSounded: Bool?
@@ -225,66 +231,164 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         return stream
     }
 
-    /// A whole rig again. One with the mic alone, left by a rebuild before
-    /// this that failed, keeps your side coming while this one is built
-    /// beside it under the other uid, and goes once this one is live. Any
-    /// other is retired first, as before: its tap is dead, and its uid is
-    /// the one the new rig is built under.
+    /// A whole rig again, built beside the one delivering now — whole with
+    /// its tap taken for dead, or the mic alone a rebuild before this left —
+    /// under the other uid, and live from its first buffer: your side goes
+    /// on from the old rig until then, and is not lost to the try. The start
+    /// sound the moment it is live, for the new tap to prove itself by, and
+    /// only then is the old rig retired, however long that takes. With
+    /// nothing live, the new rig is live at once.
     ///
-    /// A whole rig that will not come up leaves the mic alone, or brings it
-    /// up alone (`keepYourSide`), and the error goes back to the meeting,
-    /// which tries again.
+    /// One that will not come up, or never delivers, leaves your side to
+    /// `keepYourSide`, and the error goes back to the meeting, which tries
+    /// again.
     func rebuild() async throws {
-        let (old, alone, epoch) = lock.withLock { () -> ([Rig], Rig?, Int) in
-            self.epoch += 1
-            let alone = live.flatMap { $0.hasTap ? nil : $0 }
-            let old = [alone == nil ? live : nil, standby].compactMap { $0 }
-            live = alone
-            standby = nil
-            return (old, alone, self.epoch)
-        }
-        await retire(old)
-        // The live rig's uid, which it has just let go of: the other may
-        // still be closing a standby that never delivered. Beside the mic
-        // alone, the other one.
-        let slot = alone?.slot.other ?? old.first?.slot ?? .first
-        do {
-            let rig = try await bringUp(slot, on: nil)
-            try await adopt(rig, epoch: epoch)
-        } catch {
-            await keepYourSide(alone, in: slot, epoch: epoch, after: error)
-            throw error
-        }
-        if let alone {
-            await retire([alone])
-        }
-        lock.withLock { aloneTold = nil }
-        // The tone again: a rebuilt tap must prove itself like a new one.
-        playProbeTone()
+        try await rebuild(on: nil)
     }
 
-    /// The tap would not come back, and your side is to go on being
-    /// recorded: a rig with the mic alone already doing it carries on, and
-    /// without one, one is brought up, through the same chunks, the far side
-    /// silence, on the meeting's one clock. Told for the record when it
-    /// comes up or cannot, once, not at every try.
+    /// `rebuild()`, on `mic`, or with none named, the mic a meeting should
+    /// use now.
+    private func rebuild(on mic: MicHandoff.Mic?) async throws {
+        let (live, standby, waiting, epoch) = lock.withLock {
+            () -> (Rig?, Rig?, Replacing?, Int) in
+            self.epoch += 1
+            defer {
+                self.standby = nil
+                replacing = nil
+            }
+            return (self.live, self.standby, replacing, self.epoch)
+        }
+        waiting?.done.resume(throwing: CancellationError())
+        // a standby a mic move had out is under the other uid, which the
+        // new rig is built under.
+        await retire([standby].compactMap { $0 })
+        let slot = live?.slot.other ?? .first
+        do {
+            let rig = try await bringUp(slot, on: mic)
+            try await takeOver(rig, from: live, epoch: epoch)
+        } catch {
+            await keepYourSide(live, in: slot, on: mic, epoch: epoch, after: error)
+            throw error
+        }
+        // a rebuilt tap must prove itself like a new one, and its window
+        // opens where the tone is played: now, not after a slow teardown.
+        playProbeTone()
+        lock.withLock { aloneTold = nil }
+        if let live {
+            await retire([live])
+        }
+    }
+
+    /// `rig` is the live one: at once, with nothing live to hand over from;
+    /// otherwise from its first buffer, the live rig delivering until then.
+    /// One that delivers nothing in `MicHandoff.patience` is taken back
+    /// down, and the live rig is left as it was.
+    private func takeOver(_ rig: Rig, from live: Rig?, epoch: Int) async throws {
+        guard live != nil else {
+            try await adopt(rig, epoch: epoch)
+            return
+        }
+        do {
+            try await firstBuffer(of: rig, epoch: epoch)
+        } catch {
+            await retire([rig])
+            throw error
+        }
+        follow(rig, epoch: epoch)
+    }
+
+    /// Until `rig`, standing by beside the live one, delivers its first
+    /// buffer and so takes over: the IO queue answers. Throws when it has
+    /// not in `MicHandoff.patience`, or the meeting moved on meanwhile.
+    private func firstBuffer(of rig: Rig, epoch: Int) async throws {
+        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, any Error>) in
+            let waiting = lock.withLock { () -> Bool in
+                guard self.epoch == epoch else { return false }
+                standby = rig
+                replacing = Replacing(rig: rig.id, done: done)
+                return true
+            }
+            guard waiting else {
+                done.resume(throwing: CancellationError())
+                return
+            }
+            let milliseconds = Int(MicHandoff.patience.totalSeconds * 1_000)
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(
+                deadline: .now() + .milliseconds(milliseconds)
+            ) { [weak self] in
+                self?.stopWaiting(for: rig, with: Failure.silent(rig.mic.name))
+            }
+        }
+    }
+
+    /// A rebuild still waiting on `rig`'s first buffer is answered with
+    /// `error`, and `rig` stands by no longer.
+    private func stopWaiting(for rig: Rig, with error: any Error) {
+        let done = lock.withLock { () -> CheckedContinuation<Void, any Error>? in
+            guard let replacing, replacing.rig == rig.id else { return nil }
+            self.replacing = nil
+            if standby === rig { standby = nil }
+            return replacing.done
+        }
+        done?.resume(throwing: error)
+    }
+
+    /// A rig whose last buffer ended this recently is still delivering: a
+    /// buffer is a hundredth of a second, and a second with none is a rig
+    /// that has stopped.
+    private static let stillDelivering = Duration.seconds(1)
+
+    /// The whole rig would not come back, and your side is to go on being
+    /// recorded, through the same chunks, the far side silence, on the
+    /// meeting's one clock. The mic alone, delivering already, carries on.
+    /// A whole rig still delivering — its tap taken for dead, its mic not —
+    /// has the mic alone brought up beside it, which takes over on its
+    /// first buffer, so your side is not lost to the move; and if the mic
+    /// alone will not come, it goes on as it is. With nothing delivering,
+    /// the mic alone is brought up and is live at once. Told for the
+    /// record when it goes on alone or cannot, once, not at every try.
     private func keepYourSide(
-        _ alone: Rig?, in slot: MicHandoff.Slot, epoch: Int, after error: any Error
+        _ live: Rig?, in slot: MicHandoff.Slot, on mic: MicHandoff.Mic?, epoch: Int,
+        after error: any Error
     ) async {
-        guard lock.withLock({ self.epoch == epoch }) else { return }
-        if let alone {
+        let delivering = lock.withLock { () -> Bool? in
+            guard self.epoch == epoch else { return nil }
+            return clock.delivering(at: .now, within: Self.stillDelivering)
+        }
+        guard let delivering else { return }
+        if let live, delivering, !live.hasTap {
             // still live; followed again under this rebuild's count.
-            follow(alone, epoch: epoch)
+            follow(live, epoch: epoch)
             return
         }
         logger.error("tap would not come back (\(error.localizedDescription, privacy: .public)); bringing the mic up alone")
+        let beside = delivering ? live : nil
+        if let live, !delivering {
+            // stopped, and no use to anyone: gone first.
+            let taken = lock.withLock { () -> Bool in
+                guard self.epoch == epoch, self.live === live else { return false }
+                self.live = nil
+                return true
+            }
+            if taken {
+                await retire([live])
+            }
+        }
         do {
-            let rig = try await bringUp(slot, on: nil, withTap: false)
-            try await adopt(rig, epoch: epoch)
+            let rig = try await bringUp(slot, on: mic, withTap: false)
+            try await takeOver(rig, from: beside, epoch: epoch)
+            if let beside {
+                await retire([beside])
+            }
             tellAlone(.micAlone, mic: rig.mic)
         } catch is CancellationError {
             return
         } catch {
+            if let beside {
+                logger.error("the mic would not come up alone beside the live rig (\(error.localizedDescription, privacy: .public)); that one goes on with it")
+                follow(beside, epoch: epoch)
+                return
+            }
             logger.error("the mic would not come up alone either: \(error.localizedDescription, privacy: .public)")
             tellAlone(.micAloneFailed, mic: nil)
         }
@@ -371,14 +475,16 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
 
     func stop() async {
         stopAskingWhatIsPlaying()
-        let rigs = lock.withLock { () -> [Rig] in
+        let (rigs, waiting) = lock.withLock { () -> ([Rig], Replacing?) in
             defer {
                 live = nil
                 standby = nil
+                replacing = nil
             }
             epoch += 1
-            return [live, standby].compactMap { $0 }
+            return ([live, standby].compactMap { $0 }, replacing)
         }
+        waiting?.done.resume(throwing: CancellationError())
         unfollow()
         await retire(rigs)
         let (continuation, told) = lock.withLock {
@@ -927,7 +1033,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         let layout = list.reduce(0) { $0 + Int($1.mNumberChannels) }
 
         let (rig, continuation, handedOver) = lock.withLock {
-            () -> (Rig?, AsyncStream<MeetingAudioChunk>.Continuation?, (old: Rig?, epoch: Int)?) in
+            () -> (Rig?, AsyncStream<MeetingAudioChunk>.Continuation?, HandOver?) in
             if let live, live.id == id {
                 return (live, self.continuation, nil)
             }
@@ -942,7 +1048,13 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             live = standby
             self.standby = nil
             clock.newRig()
-            return (standby, self.continuation, (old, epoch))
+            // a rebuild waiting on it takes it from here, and the old rig
+            // with it; a mic move's goes to `following`.
+            if let replacing, replacing.rig == id {
+                self.replacing = nil
+                return (standby, self.continuation, .rebuilt(replacing.done))
+            }
+            return (standby, self.continuation, .moved(old: old, epoch: epoch))
         }
         guard let rig, let continuation else { return }
         let firstLayout = rig.layout ?? layout
@@ -973,14 +1085,19 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
             let outage = clock.buffer(began: began, lasting: lasting)
             return (outage, clock.stamp)
         }
-        if let handedOver {
-            let takeover = Takeover(
-                old: handedOver.old, new: rig, at: stamp,
-                quiet: outage.map { $0.to - $0.from } ?? .zero, epoch: handedOver.epoch)
-            following.async { self.tookOver(takeover) }
-        }
         if let outage {
             tell(.nothingDelivered(until: outage.to), mic: rig.mic, at: outage.from)
+        }
+        switch handedOver {
+        case .moved(let old, let epoch):
+            let takeover = Takeover(
+                old: old, new: rig, at: stamp,
+                quiet: outage.map { $0.to - $0.from } ?? .zero, epoch: epoch)
+            following.async { self.tookOver(takeover) }
+        case .rebuilt(let done):
+            done.resume()
+        case nil:
+            break
         }
 
         // Sub-device channels come first, taps after (002 §4, confirmed by
@@ -1107,6 +1224,20 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
         /// was an outage.
         let quiet: Duration
         let epoch: Int
+    }
+
+    /// A standby that just took over: from a mic move, for `following` to
+    /// finish, or from a rebuild waiting on it.
+    private enum HandOver: @unchecked Sendable {
+        case moved(old: Rig?, epoch: Int)
+        case rebuilt(CheckedContinuation<Void, any Error>)
+    }
+
+    /// A rebuild waiting on rig `rig`'s first buffer, answered by it, by
+    /// the wait running out, or by a stop.
+    private struct Replacing {
+        let rig: Int
+        let done: CheckedContinuation<Void, any Error>
     }
 
     /// A Core Audio listener and the property it listens to, kept so the
