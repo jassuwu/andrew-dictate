@@ -1,3 +1,13 @@
+## 0.11.1
+
+a new logo, and nothing else.
+
+the mic is the head now. it is a bald gold microphone in aviators. the old badge had a head, a mic for a jaw and sound waves on both sides, and in the menu bar all of that shrank to a gold smudge. you can tell this one is a mic in sunglasses at any size.
+
+the menu bar gets a simpler cut of the same drawing, with no rim of its own. a gold rim up there still means a meeting, and now nothing else wears one.
+
+the app icon, about, setup and the site all carry it. everything else is 0.11.0.
+
 ## 0.11.0
 
 the meetings release. i recorded my meetings with another tool because i did not trust this one with them. that is over.
