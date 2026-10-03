@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- andrew dictate, the logo (ADR 0013): the mic is the head. a bald gold
+       mic in aviators, the voice in its mouth. the tile is the whole canvas,
+       edge to edge; process-icon.swift stands it on apple's icon grid.
+       32 px and under is another cut of the same drawing: logo-small.svg. -->
+  <defs>
+    <radialGradient id="tile" cx="50%" cy="36%" r="75%">
+      <stop offset="0" stop-color="#1A1A1D"/>
+      <stop offset="1" stop-color="#09090B"/>
+    </radialGradient>
+    <!-- BrandUI's three golds, pale at the crown and deep at the foot. the
+         numbers are in the glyph's own space, inside the scale below. -->
+    <linearGradient id="gold" gradientUnits="userSpaceOnUse" x1="0" y1="170" x2="0" y2="940">
+      <stop offset="0" stop-color="#F9E9A8"/>
+      <stop offset="0.5" stop-color="#E5BE62"/>
+      <stop offset="1" stop-color="#9E7527"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F9E9A8"/>
+      <stop offset="0.5" stop-color="#E5BE62"/>
+      <stop offset="1" stop-color="#9E7527"/>
+    </linearGradient>
+    <!-- the aviators' two lenses and their brow, each drawn twice below -->
+    <path id="lenses" d="M 478.5 359.2 C 438 355.7 399 354.5 373.5 359.2 C 357 362.6 349.5 376.6 351 396.3 C 352.5 434.6 381 474 423 474 C 460.5 474 489 439.2 498 399.8 C 504 376.6 495 361.5 478.5 359.2 Z M 545.5 359.2 C 586 355.7 625 354.5 650.5 359.2 C 667 362.6 674.5 376.6 673 396.3 C 671.5 434.6 643 474 601 474 C 563.5 474 535 439.2 526 399.8 C 520 376.6 529 361.5 545.5 359.2 Z"/>
+    <path id="brow" d="M 450 356.5 H 574"/>
+  </defs>
+
+  <rect width="1024" height="1024" rx="230.4" fill="url(#tile)"/>
+  <!-- a thin rim. the menu bar's cut has none: there a gold rim means a
+       meeting is recording (BadgeMarks). -->
+  <rect x="5" y="5" width="1014" height="1014" rx="225.4" fill="none" stroke="url(#rim)" stroke-width="10"/>
+
+  <!-- the glyph, drawn on round numbers and grown about the centre to fill the tile -->
+  <g transform="translate(512 512) scale(1.33) translate(-512 -512)">
+    <!-- the head is the mic's capsule -->
+    <rect x="372" y="226" width="280" height="404" rx="140" fill="url(#gold)"/>
+    <!-- the voice: five bars, a mouth and a grille at once -->
+    <g fill="#0C0C0E">
+      <rect x="424" y="530" width="20" height="30" rx="10"/>
+      <rect x="463" y="517" width="20" height="56" rx="10"/>
+      <rect x="502" y="507" width="20" height="76" rx="10"/>
+      <rect x="541" y="517" width="20" height="56" rx="10"/>
+      <rect x="580" y="530" width="20" height="30" rx="10"/>
+    </g>
+    <!-- cradle, stem, foot -->
+    <path d="M 311 490 A 201 201 0 0 0 713 490" fill="none" stroke="url(#gold)" stroke-width="34" stroke-linecap="round"/>
+    <rect x="495" y="691" width="34" height="80" fill="url(#gold)"/>
+    <rect x="394" y="769" width="236" height="34" rx="17" fill="url(#gold)"/>
+    <!-- the aviators. a black gap parts them from the head, then the wire,
+         then the lens; the brow lies on the lens tops so wire and brow read
+         as one. -->
+    <g stroke-linejoin="round" stroke-linecap="round">
+      <use href="#lenses" fill="#0C0C0E" stroke="#0C0C0E" stroke-width="36"/>
+      <use href="#brow" stroke="#0C0C0E" stroke-width="28"/>
+      <use href="#lenses" fill="#0C0C0E" stroke="#F9E9A8" stroke-width="8"/>
+      <use href="#brow" stroke="#F9E9A8" stroke-width="8"/>
+      <path d="M 499 399.8 Q 512 381.2 525 399.8" fill="none" stroke="#F9E9A8" stroke-width="8"/>
+    </g>
+    <!-- the glint -->
+    <path d="M 625 366.8 L 630.2 387.6 L 651 392.8 L 630.2 398 L 625 418.8 L 619.8 398 L 599 392.8 L 619.8 387.6 Z" fill="#F9E9A8"/>
+  </g>
+</svg>
