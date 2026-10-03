@@ -68,8 +68,8 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
                 : "hold \(key), talk, let go. the text lands where your cursor is."
         case .model:
             return jobs.dictation && jobs.meetings
-                ? "they run on this mac, so nothing you say needs the internet."
-                : "it runs on this mac, so nothing you say needs the internet."
+                ? "they run on this mac, so there is no wait for a server."
+                : "it runs on this mac, so there is no wait for a server."
         case .permissions:
             switch verdict {
             case .ready:
