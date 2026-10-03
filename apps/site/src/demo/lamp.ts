@@ -1,8 +1,6 @@
 // the lamp, drawn the way the app draws it. this is a port of the glass tube
 // in apps/mac (HUDView: LampPose, wavePath, drawGlassTube, drawOffDot), with
 // the same numbers, so the page's lamp is the app's lamp and not a likeness.
-// the one thing left out is the smoke under it, which is only there so the
-// lamp survives a white page, and this page is black.
 
 export type LampPhase = "off" | "ember" | "burn" | "cool" | "pilot";
 
@@ -222,6 +220,17 @@ export function createLamp(canvas: HTMLCanvasElement) {
     if (half > 1.2) {
       const path = (target: CanvasRenderingContext2D, dy = 0) =>
         wave(target, cx, cy, half, amp, time, dy);
+
+      // smoke: a soft dark under the lamp, so it holds over the page's text
+      // the way it holds over whatever is on your screen
+      glow(
+        ctx,
+        () => path(ctx),
+        `rgba(0, 0, 0, ${0.42 * alpha * (0.6 + 0.4 * Math.min(p.heat, 1))})`,
+        12,
+        7,
+        unit,
+      );
 
       // halo: the light the glass spills
       glow(ctx, () => path(ctx), rgba(mix(b), 0.55 * lit * alpha), t + 8, 6 + 6 * lit, unit);

@@ -125,6 +125,33 @@
     box-shadow: 0 0 0 1.5px var(--color-ink);
   }
 
+  .hero {
+    display: grid;
+    gap: 2.5rem;
+  }
+
+  @media (width >= 64rem) {
+    .hero {
+      grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+      grid-template-rows: 1fr auto auto 1fr;
+      column-gap: 4rem;
+      row-gap: 2rem;
+    }
+
+    .hero-intro {
+      grid-area: 2 / 1;
+    }
+
+    .hero-why {
+      grid-area: 3 / 1;
+    }
+
+    .hero-demo {
+      grid-area: 1 / 2 / -1 / 2;
+      align-self: center;
+    }
+  }
+
   /* the two lines that say what it is. dictation is said in gold, meetings
      in a quieter cream: about sixty and forty. */
   .pitch {

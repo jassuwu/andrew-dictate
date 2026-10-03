@@ -11,10 +11,11 @@ const [dictation, meetings, three] = topBlock.pitch;
 <Page title="andrew dictate · escape the keyboard." description={description}>
   <main>
     <!-- the top block, and beside it the thing itself -->
-    <section
-      class="mx-auto grid max-w-[72rem] items-center gap-x-16 gap-y-14 px-6 pb-16 pt-24 sm:px-10 lg:min-h-svh lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] lg:pb-24 lg:pt-28"
-    >
-      <div>
+    <!-- on a wide screen the words are on the left and the demo beside
+         them. on a phone the demo comes right after the pitch, before the
+         paragraphs, so the thing itself is never a long scroll away. -->
+    <section class="hero mx-auto max-w-[72rem] px-6 pb-16 pt-24 sm:px-10 lg:min-h-svh lg:pb-24 lg:pt-28">
+      <div class="hero-intro">
         <div class="flex items-start gap-4">
           <img src="/badge.png" alt="" width="52" height="52" class="rounded-[12px]" />
           <div>
@@ -38,14 +39,16 @@ const [dictation, meetings, three] = topBlock.pitch;
           <span class="mt-2 block text-cream/55">{meetings}</span>
         </p>
         <p class="mt-6 font-mono text-[1rem] tracking-[0.02em] text-gold">{three}</p>
-
-        <div class="mt-8 space-y-4">
-          {topBlock.why.map((line) => <p class="prose-line">{line}</p>)}
-          <p class="prose-line">{topBlock.models}</p>
-        </div>
       </div>
 
-      <Demo />
+      <div class="hero-demo">
+        <Demo />
+      </div>
+
+      <div class="hero-why space-y-4">
+        {topBlock.why.map((line) => <p class="prose-line">{line}</p>)}
+        <p class="prose-line">{topBlock.models}</p>
+      </div>
     </section>
 
     <section class="mx-auto grid max-w-[72rem] gap-x-16 gap-y-8 px-6 py-20 sm:px-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">

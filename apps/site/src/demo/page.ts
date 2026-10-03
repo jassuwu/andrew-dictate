@@ -21,6 +21,7 @@ function mount(root: HTMLElement) {
   const said = root.querySelector<HTMLElement>("[data-said]")!;
 
   const soundSwitch = root.querySelector<HTMLButtonElement>("[data-sound]")!;
+  root.querySelector<HTMLElement>("[data-controls]")!.hidden = false;
 
   let state: State = demo.initial();
   let frame = 0;
@@ -134,6 +135,8 @@ function mount(root: HTMLElement) {
     key.setPointerCapture(event.pointerId);
     send("press");
   });
+  // a long press on a phone is a hold, not a request for a menu
+  key.addEventListener("contextmenu", (event) => event.preventDefault());
   key.addEventListener("pointerup", () => send("release"));
   key.addEventListener("pointercancel", () => send("release"));
   key.addEventListener("keydown", (event) => {
