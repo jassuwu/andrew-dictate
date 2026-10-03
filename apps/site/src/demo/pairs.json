@@ -1,0 +1,17 @@
+{
+  "prompts": [
+    {
+      "reply": "Running the suite now.",
+      "cuts": [
+        { "heard": "Run", "pasted": "Run." },
+        { "heard": "Run the", "pasted": "Run the." },
+        { "heard": "Run the test", "pasted": "Run the test." },
+        { "heard": "Run the test suite", "pasted": "Run the test suite." },
+        { "heard": "Run the test suite and", "pasted": "Run the test suite and." },
+        { "heard": "Run the test suite and fix", "pasted": "Run the test suite and fix." },
+        { "heard": "Run the test suite and fix whatever", "pasted": "Run the test suite and fix whatever." },
+        { "heard": "Run the test suite and fix whatever fails.", "pasted": "Run the test suite and fix whatever fails." }
+      ]
+    }
+  ]
+}

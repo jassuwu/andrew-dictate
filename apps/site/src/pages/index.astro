@@ -1,6 +1,8 @@
 ---
 import Page from "../layouts/Page.astro";
 import Command from "../components/Command.astro";
+import Demo from "../components/Demo.astro";
+import Hud from "../components/Hud.astro";
 import { description, install, sizes, topBlock, unblock } from "../copy";
 
 const [dictation, meetings, three] = topBlock.pitch;
@@ -43,7 +45,7 @@ const [dictation, meetings, three] = topBlock.pitch;
         </div>
       </div>
 
-      <div id="demo"></div>
+      <Demo />
     </section>
 
     <section class="mx-auto grid max-w-[72rem] gap-x-16 gap-y-8 px-6 py-20 sm:px-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
@@ -130,4 +132,10 @@ const [dictation, meetings, three] = topBlock.pitch;
       </div>
     </section>
   </main>
+
+  <Hud />
+
+  <script>
+    import "../demo/page";
+  </script>
 </Page>

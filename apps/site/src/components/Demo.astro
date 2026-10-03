@@ -1,0 +1,31 @@
+---
+import pairs from "../demo/pairs.json";
+
+// with scripts off the visitor sees the end of a take: a prompt landed in
+// the agent's box. with them on, the box starts empty and waits for the key.
+const first = pairs.prompts[0];
+const landed = first.cuts[first.cuts.length - 1].pasted;
+---
+
+<div data-demo>
+  <div class="agent">
+    <p class="agent-head">agent</p>
+    <div class="agent-thread" data-thread></div>
+    <div class="composer" data-box aria-live="polite">
+      <span class="composer-mark" aria-hidden="true">❯</span>
+      <span data-box-text><noscript>{landed}</noscript></span>
+    </div>
+  </div>
+
+  <div class="mt-6 flex items-center gap-5">
+    <button type="button" class="key" data-key aria-label="hold to dictate">fn</button>
+    <p class="speech" data-speech>
+      <span data-hint>hold this key. the demo does the talking.</span>
+      <span data-said hidden></span>
+    </p>
+  </div>
+
+  <p class="fact mt-5 text-cream/45">
+    a simulation. the wait after you let go is the app's real one.
+  </p>
+</div>
