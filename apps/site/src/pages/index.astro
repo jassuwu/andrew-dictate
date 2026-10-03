@@ -15,27 +15,29 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
          it, so the thing itself is never a long scroll away. -->
     <section class="column pb-16 pt-24 lg:pt-28">
       <div class="hero-intro">
-        <div class="flex items-start gap-4">
-          <img src="/badge.png" alt="" width="52" height="52" class="rounded-[12px]" />
-          <div>
+        <div class="flex items-center gap-3">
+          <img src="/badge.png" alt="" width="32" height="32" class="rounded-[7px]" />
+          <div class="relative">
             <div class="name-row flex flex-wrap items-center gap-x-3 gap-y-1">
-              <h1 class="text-[22px] font-semibold leading-[1.2] tracking-[-0.02em] text-gold-pale">
+              <h1 class="text-[15px] font-medium leading-[1.35] text-gold-pale">
                 <span class="wordmark">{topBlock.name}</span>
               </h1>
               <span
-                class="-rotate-[4deg] rounded-[3px] bg-gold px-1.5 py-[3px] font-mono text-[11px] leading-none tracking-[0.14em] text-ink"
+                class="-rotate-[4deg] rounded-[3px] bg-gold px-1 py-[2px] font-mono text-[9px] leading-none tracking-[0.14em] text-ink"
               >
                 ALPHA
               </span>
             </div>
-            <p class="mt-0.5 text-[15px] text-gold">{topBlock.tagline}</p>
-            <p class="aside text-[13px] leading-[1.5]" aria-hidden="true">get it?</p>
+            <p class="text-[15px] text-cream/50">{topBlock.tagline}</p>
+            <!-- out of the flow, so the hidden joke doesn't push the name off
+                 the badge's centre -->
+            <p class="aside absolute left-0 top-full whitespace-nowrap text-[12px] leading-[1.5]" aria-hidden="true">get it?</p>
           </div>
         </div>
 
-        <p class="pitch mt-10">{dictation}</p>
-        <p class="pitch-second mt-3">{meetings}</p>
-        <p class="mt-6 font-mono text-[1rem] tracking-[0.02em] text-gold">{freeFastLocal}</p>
+        <p class="pitch mt-12">{dictation}</p>
+        <p class="pitch-second mt-1">{meetings}</p>
+        <p class="mt-5 font-mono text-[0.8125rem] tracking-[0.02em] text-gold">{freeFastLocal}</p>
       </div>
 
       <div class="mt-12">
@@ -60,7 +62,7 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
     </section>
 
     <section class="column py-16">
-      <h2 class="heading text-cream">hold <kbd>fn</kbd>, talk, let go.</h2>
+      <h2 class="heading">hold <kbd>fn</kbd>, talk, let go.</h2>
       <div class="mt-6 space-y-4">
         <p class="prose-line">
           the text shows up where your cursor is, in any app. i mostly use it
@@ -86,7 +88,7 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
     <!-- meetings are the smaller half, lower on the page. the scene comes
          before the facts, as the demo does. -->
     <section class="column py-16">
-      <h2 class="heading text-cream">record a meeting.</h2>
+      <h2 class="heading">record a meeting.</h2>
 
       <div class="mt-6">
         <Meeting />
@@ -114,7 +116,7 @@ const [dictation, meetings, freeFastLocal] = topBlock.pitch;
 
     <section id="install" class="column py-16">
       <div>
-        <h2 class="heading text-cream">install.</h2>
+        <h2 class="heading">install.</h2>
 
         <div class="mt-8">
           <Command command={install} label="the install command" />

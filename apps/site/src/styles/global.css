@@ -43,6 +43,7 @@
   }
 
   body {
+    font-size: 15px;
     font-family: var(--font-sans);
     font-synthesis-weight: none;
     text-rendering: optimizeLegibility;
@@ -137,47 +138,47 @@
     }
   }
 
-  /* the two lines that say what it is. dictation is the big one, meetings
-     the smaller: about sixty and forty. */
-  .pitch {
-    font-size: clamp(2rem, 1.3rem + 2.4vw, 2.9rem);
-    line-height: 1.1;
-    letter-spacing: -0.02em;
-    font-weight: 600;
+  /* the page is small and quiet: nearly everything is one size, and the
+     order comes from colour and weight. the two lines that say what it is
+     are the only bigger text. dictation is in gold, meetings in a quieter
+     cream: about sixty and forty. */
+  .pitch,
+  .pitch-second {
+    font-size: 1.5rem;
+    line-height: 1.3;
+    letter-spacing: -0.012em;
+    font-weight: 500;
     text-wrap: balance;
     color: var(--color-gold-pale);
   }
 
   .pitch-second {
-    font-size: clamp(1.25rem, 1rem + 0.9vw, 1.6rem);
-    line-height: 1.25;
-    letter-spacing: -0.01em;
-    font-weight: 500;
-    text-wrap: balance;
-    color: var(--color-cream);
+    color: rgb(242 237 224 / 0.5);
   }
 
   .heading {
-    font-size: clamp(1.4rem, 1.1rem + 1vw, 1.75rem);
-    line-height: 1.2;
-    letter-spacing: -0.015em;
-    font-weight: 600;
-    text-wrap: balance;
+    font-size: 15px;
+    line-height: 1.4;
+    font-weight: 500;
+    color: var(--color-cream);
+  }
+
+  .heading kbd {
+    font-size: 0.8em;
   }
 
   .prose-line {
-    font-size: 1.0625rem;
-    line-height: 1.7;
-    color: rgb(242 237 224 / 0.72);
-    max-width: 34rem;
+    font-size: 15px;
+    line-height: 1.65;
+    color: rgb(242 237 224 / 0.62);
   }
 
   .fact {
     font-family: var(--font-mono);
-    font-size: 0.8125rem;
+    font-size: 0.72rem;
     line-height: 1.8;
     letter-spacing: 0.02em;
-    color: rgb(242 237 224 / 0.6);
+    color: rgb(242 237 224 / 0.42);
     text-wrap: pretty;
   }
 
