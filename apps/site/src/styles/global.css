@@ -396,7 +396,10 @@
     border-bottom: 1px solid rgb(242 237 224 / 0.06);
   }
 
+  /* the same height as the lines and the file that follow it, so pressing
+     record moves nothing on the page */
   .sheet-hint {
+    height: 19rem;
     padding: 1.1rem;
     color: rgb(242 237 224 / 0.45);
   }
