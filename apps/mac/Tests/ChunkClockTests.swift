@@ -2,9 +2,8 @@ import XCTest
 
 /// The chunks' clock as the source keeps it: frames out, and the time
 /// nothing came skipped and told. Each buffer says where on the wall it
-/// began; one that begins more than a fifth of a second after the last
-/// one ended is past an outage. Instants and frame counts in, stamps and
-/// outages out.
+/// began; one that begins more than a second after the last one ended is
+/// past an outage. Instants and frame counts in, stamps and outages out.
 final class ChunkClockTests: XCTestCase {
     private let origin = ContinuousClock.now
 
@@ -26,13 +25,15 @@ final class ChunkClockTests: XCTestCase {
         XCTAssertEqual(clock.stamp, .milliseconds(200))
     }
 
-    /// A buffer late by a tenth of a second is the hardware's jitter: left
-    /// alone, nothing told.
-    func testABufferLateByLessThanTheOutageIsLeftAlone() {
+    /// A buffer late by most of a second — a bluetooth profile switching,
+    /// the IO queue held up — is a loss nobody can hear, and a meeting
+    /// marked incomplete for it would cry wolf: left alone, nothing told.
+    func testABufferLateByLessThanASecondIsLeftAlone() {
         var clock = ChunkClock()
         XCTAssertNil(clock.buffer(began: at(0), lasting: .milliseconds(10)))
         clock.delivered(1_600)
-        XCTAssertNil(clock.buffer(began: at(0.21), lasting: .milliseconds(10)))
+        XCTAssertNil(clock.buffer(began: at(0.31), lasting: .milliseconds(10)))
+        XCTAssertNil(clock.buffer(began: at(1.3), lasting: .milliseconds(10)))
         XCTAssertEqual(clock.stamp, .milliseconds(100))
     }
 
@@ -89,6 +90,7 @@ final class ChunkClockTests: XCTestCase {
 
         clock.newRig()
         XCTAssertEqual(ms(clock.position(at: at(0.155))), 100, "the old rig's half is gone with it")
+        XCTAssertEqual(ms(clock.position(at: at(0.95))), 100, "under a second is not skipped")
         XCTAssertEqual(ms(clock.position(at: at(10.15))), 10_100, "ten seconds of nothing")
     }
 

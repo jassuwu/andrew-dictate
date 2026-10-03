@@ -1032,7 +1032,7 @@ final class CoreAudioMeetingSource: MeetingAudioSource, @unchecked Sendable {
     /// live rig's. The standby's first makes it the live one, there and
     /// then, so not a buffer of it is lost to the handoff; the old rig's are
     /// dropped from that moment, as is the one last callback of any rig
-    /// being torn down. One that begins well after the last one ended —
+    /// being torn down. One that begins a second after the last one ended —
     /// from a rig taking over from one whose mic went, or from the same
     /// rig after the mac slept — is past a time nothing came, which the
     /// clock skips and the meeting is told.

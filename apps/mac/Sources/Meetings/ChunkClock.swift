@@ -9,16 +9,18 @@
 /// than `outage` after the last one ended — whichever rig either came from —
 /// is past a time nothing came: the clock skips it, so the chunks after it
 /// are stamped where they were heard, and hands it back for the source to
-/// tell, so the meeting marks the gap. Less than that is the hardware's
-/// jitter, and is left alone.
+/// tell, so the meeting marks the gap. Less than that — a bluetooth profile
+/// switching, the IO queue held up — is a loss nobody can hear, and a file
+/// marked incomplete for it would cry wolf: it is left alone.
 ///
 /// Pure: wall instants and frame counts in, stamps and outages out.
 struct ChunkClock: Equatable, Sendable {
     typealias Instant = ContinuousClock.Instant
 
     /// More than this between one buffer's end and the next one's start is
-    /// a time nothing came. A buffer is a hundredth of a second.
-    static let outage = Duration.milliseconds(200)
+    /// a time nothing came. A buffer is a hundredth of a second, and a
+    /// second with none is a mic gone to the next, a lid, a sleep.
+    static let outage = Duration.seconds(1)
 
     /// A time nothing came, on the chunks' clock: from where the chunks had
     /// got to, to where the next one is stamped.
