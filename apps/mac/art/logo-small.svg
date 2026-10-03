@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- andrew dictate, the logo cut for 32 px and under: the menu bar, the
+       smallest app icons, the favicon. the same drawing as logo.svg with
+       what a few pixels cannot hold taken out: no wire on the aviators, no
+       glint, no voice, a heavier stand, and no rim, because in the menu bar
+       a gold rim means a meeting is recording (BadgeMarks). -->
+  <defs>
+    <radialGradient id="tile" cx="50%" cy="36%" r="75%">
+      <stop offset="0" stop-color="#1A1A1D"/>
+      <stop offset="1" stop-color="#09090B"/>
+    </radialGradient>
+    <!-- BrandUI's three golds, pale at the crown and deep at the foot. the
+         numbers are in the glyph's own space, inside the scale below. -->
+    <linearGradient id="gold" gradientUnits="userSpaceOnUse" x1="0" y1="170" x2="0" y2="950">
+      <stop offset="0" stop-color="#F9E9A8"/>
+      <stop offset="0.5" stop-color="#E5BE62"/>
+      <stop offset="1" stop-color="#9E7527"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" rx="230.4" fill="url(#tile)"/>
+
+  <!-- grown about the centre like logo.svg, and lifted 7 to sit centred:
+       the heavier foot would otherwise pull it low. it stops 2 pt short of
+       the tile's edge at 18 pt, clear of the rim BadgeMarks draws there. -->
+  <g transform="translate(512 512) scale(1.38) translate(-512 -519)">
+    <rect x="372" y="226" width="280" height="404" rx="140" fill="url(#gold)"/>
+    <path d="M 309 490 A 203 203 0 0 0 715 490" fill="none" stroke="url(#gold)" stroke-width="46" stroke-linecap="round"/>
+    <rect x="489" y="693" width="46" height="80" fill="url(#gold)"/>
+    <rect x="387" y="771" width="250" height="46" rx="23" fill="url(#gold)"/>
+    <!-- the aviators, lenses only, joined by the brow -->
+    <g fill="#0C0C0E">
+      <path d="M 474.5 359.2 C 434 355.6 395 354.3 369.5 359.2 C 353 362.9 345.5 377.5 347 398.3 C 348.5 438.5 377 480 419 480 C 456.5 480 485 443.4 494 401.9 C 500 377.5 491 361.7 474.5 359.2 Z M 549.5 359.2 C 590 355.6 629 354.3 654.5 359.2 C 671 362.9 678.5 377.5 677 398.3 C 675.5 438.5 647 480 605 480 C 567.5 480 539 443.4 530 401.9 C 524 377.5 533 361.7 549.5 359.2 Z"/>
+      <rect x="467" y="360" width="90" height="26"/>
+    </g>
+  </g>
+</svg>
