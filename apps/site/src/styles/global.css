@@ -356,6 +356,21 @@
     color: rgb(242 237 224 / 0.6);
   }
 
+  /* a phone has no space bar to hold */
+  .without-keys {
+    display: none;
+  }
+
+  @media (hover: none) {
+    .with-keys {
+      display: none;
+    }
+
+    .without-keys {
+      display: inline;
+    }
+  }
+
   .speech [data-said] {
     color: var(--color-cream);
   }

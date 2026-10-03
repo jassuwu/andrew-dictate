@@ -9,6 +9,8 @@ const badgeElement = document.querySelector<HTMLElement>("[data-badge]");
 const lamp = canvas ? createLamp(canvas) : null;
 const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
+export const reduceMotion = () => motion.matches;
+
 export type BadgeMark = "none" | "dot" | "part" | "rim";
 
 export const hud = {

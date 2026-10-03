@@ -3,8 +3,9 @@
 
 import pairs from "./pairs.json";
 import { dictationDemo, timing, type State, type View } from "./dictation";
-import { hud } from "./hud";
+import { hud, reduceMotion } from "./hud";
 import { scriptedLoudness, type LampPhase } from "./lamp";
+import { spaceOwner, spaceRelease, type Focus } from "./space";
 
 const demo = dictationDemo(pairs.prompts);
 
@@ -126,6 +127,56 @@ function mount(root: HTMLElement) {
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") send("esc");
   });
+
+  // the space bar, standing in for fn. it is the demo's only while the key
+  // is on screen and nothing else has a claim on it (space.ts).
+  let onScreen = false;
+  new IntersectionObserver(([entry]) => (onScreen = entry.isIntersecting), {
+    threshold: 0.6,
+  }).observe(key);
+
+  const focus = (): Focus => {
+    const active = document.activeElement;
+    if (active === key) return "key";
+    return active?.matches("a[href], button, input, textarea, select, summary, [contenteditable]")
+      ? "control"
+      : "none";
+  };
+
+  let spaceDownAt: number | null = null;
+  let beforeSpace = state;
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== " " || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (spaceDownAt !== null) {
+      // key repeat while it is held: still ours, and not a new take
+      event.preventDefault();
+      return;
+    }
+    if (spaceOwner({ demoOnScreen: onScreen, focus: focus() }) !== "demo") return;
+    event.preventDefault();
+    spaceDownAt = performance.now();
+    beforeSpace = state;
+    send("press");
+  });
+  document.addEventListener("keyup", (event) => {
+    if (event.key !== " " || spaceDownAt === null) return;
+    const held = performance.now() - spaceDownAt;
+    spaceDownAt = null;
+    if (spaceRelease(held) === "release") {
+      send("release");
+      return;
+    }
+    // a tap was someone scrolling. put back what was there, as if the key
+    // had never gone down, and scroll for them.
+    state = beforeSpace;
+    key.removeAttribute("data-down");
+    if (!frame) frame = requestAnimationFrame(tick);
+    window.scrollBy({
+      top: window.innerHeight * (event.shiftKey ? -0.9 : 0.9),
+      behavior: reduceMotion() ? "auto" : "smooth",
+    });
+  });
+  window.addEventListener("blur", () => (spaceDownAt = null));
 
   render(demo.view(state, performance.now()));
 }

@@ -20,7 +20,11 @@ const landed = first.cuts[first.cuts.length - 1].pasted;
   <div class="mt-6 flex items-center gap-5">
     <button type="button" class="key" data-key aria-label="hold to dictate">fn</button>
     <p class="speech" data-speech>
-      <span data-hint>hold this key. the demo does the talking.</span>
+      <span data-hint>
+        <span class="with-keys">hold <kbd>space</kbd>, or hold this key.</span>
+        <span class="without-keys">hold this key.</span>
+        the demo does the talking.
+      </span>
       <span data-said hidden></span>
     </p>
   </div>
