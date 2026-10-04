@@ -138,9 +138,6 @@
     color: var(--color-cream);
   }
 
-  .heading kbd {
-    font-size: 0.8em;
-  }
 
   .prose-line {
     font-size: 15px;
@@ -243,15 +240,15 @@
     color: var(--color-gold-pale);
   }
 
-  /* a loop from the launch film. a little wider than the words, because
-     the film's own type has to read inside it. an outline, like the
+  /* a demo loop. a little wider than the words, because the launch
+     video's own type has to read inside it. an outline, like the
      commands, and no shadow. */
-  .film {
+  .demo {
     width: min(44rem, 100% - 1.5rem);
     margin: 1rem auto 1.4rem;
   }
 
-  .film video {
+  .demo video {
     display: block;
     width: 100%;
     height: auto;
@@ -262,7 +259,7 @@
     cursor: zoom-in;
   }
 
-  .film video[controls] {
+  .demo video[controls] {
     cursor: auto;
   }
 

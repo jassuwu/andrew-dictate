@@ -1,8 +1,8 @@
 ---
-// a loop from the launch film, drawn, never a recording of the real app.
-// silent, so it can play by itself; the page's script plays it while it is
-// on screen and leaves it still for reduced motion. without scripts it has
-// controls and waits to be played.
+// one of the two demo loops, cut from the launch video: drawn, never a
+// recording of the real app, and silent, so it can play by itself. it plays
+// while it is on screen and only then. reduced motion leaves it on its
+// poster with its controls, and so does a page without scripts.
 interface Props {
   name: string;
   label: string;
@@ -11,9 +11,9 @@ interface Props {
 const { name, label } = Astro.props;
 ---
 
-<figure class="film">
+<figure class="demo">
   <video
-    poster={`/film/${name}.jpg`}
+    poster={`/demo/${name}.jpg`}
     width="1600"
     height="900"
     muted
@@ -22,10 +22,46 @@ const { name, label } = Astro.props;
     preload="metadata"
     controls
     aria-label={label}
-    data-film
+    data-demo
   >
     <!-- vp9 first, h.264 for whatever cannot play it -->
-    <source src={`/film/${name}.webm`} type="video/webm" />
-    <source src={`/film/${name}.mp4`} type="video/mp4" />
+    <source src={`/demo/${name}.webm`} type="video/webm" />
+    <source src={`/demo/${name}.mp4`} type="video/mp4" />
   </video>
 </figure>
+
+<script>
+  type Video = HTMLVideoElement & { webkitEnterFullscreen?: () => void };
+
+  const loops = document.querySelectorAll<Video>("[data-demo]");
+
+  if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    const watch = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const loop = entry.target as Video;
+          if (entry.isIntersecting) loop.play().catch(() => {});
+          else loop.pause();
+        }
+      },
+      { threshold: 0.35 },
+    );
+
+    // full size gets its controls back, so it can be left
+    document.addEventListener("fullscreenchange", () => {
+      loops.forEach((loop) => (loop.controls = document.fullscreenElement === loop));
+    });
+
+    loops.forEach((loop) => {
+      loop.controls = false;
+      watch.observe(loop);
+      // a click plays a loop the browser would not start by itself, and
+      // opens a playing one full size, which a phone needs to read it
+      loop.addEventListener("click", () => {
+        if (loop.paused) loop.play().catch(() => {});
+        else if (loop.requestFullscreen) loop.requestFullscreen().catch(() => {});
+        else loop.webkitEnterFullscreen?.();
+      });
+    });
+  }
+</script>

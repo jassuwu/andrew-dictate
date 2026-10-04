@@ -1,7 +1,7 @@
 ---
 import Page from "../layouts/Page.astro";
 import Command from "../components/Command.astro";
-import Film from "../components/Film.astro";
+import Demo from "../components/Demo.astro";
 import Line from "../components/Line.astro";
 import {
   credits,
@@ -24,7 +24,7 @@ const [dictation, meetingsPitch, freeFastLocal] = topBlock.pitch;
 <Page title="andrew dictate · escape the keyboard." description={description}>
   <main>
     <!-- the page says what the readme says, in the same order: what it is,
-         the two jobs, each with its loop from the launch film, then install. -->
+         the two jobs, each with its demo loop from the launch video, then install. -->
     <section class="column pb-12 pt-26">
       <div class="flex items-center gap-3">
         <img src="/badge.png" alt="" width="32" height="32" class="rounded-[7px]" />
@@ -55,7 +55,7 @@ const [dictation, meetingsPitch, freeFastLocal] = topBlock.pitch;
 
     <section class="py-10">
       <h2 class="heading column">dictate.</h2>
-      <Film
+      <Demo
         name="dictate"
         label="a prompt is typed into an agent and deleted. then fn is held, the same prompt is said, and when the key comes up it lands in the prompt box and the agent starts on it."
       />
@@ -67,7 +67,7 @@ const [dictation, meetingsPitch, freeFastLocal] = topBlock.pitch;
     <!-- meetings are the smaller half, lower on the page -->
     <section class="py-10">
       <h2 class="heading column">meetings.</h2>
-      <Film
+      <Demo
         name="meetings"
         label="a zoom call. the app asks to record it, and after the hang-up the call becomes a markdown file. later the agent is asked what was agreed, reads the file, and quotes the line."
       />
@@ -113,39 +113,4 @@ const [dictation, meetingsPitch, freeFastLocal] = topBlock.pitch;
     </section>
   </main>
 
-  <script>
-    // play a loop while it is on screen, and only then. reduced motion
-    // leaves every loop on its poster with its controls. a click on a
-    // playing loop opens it full size, which a phone needs to read it.
-    const films = document.querySelectorAll<HTMLVideoElement>("[data-film]");
-    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-    if (!still) {
-      const watch = new IntersectionObserver(
-        (entries) => {
-          for (const { target, isIntersecting } of entries) {
-            const film = target as HTMLVideoElement;
-            if (isIntersecting) film.play().catch(() => {});
-            else film.pause();
-          }
-        },
-        { threshold: 0.35 },
-      );
-
-      // full size gets its controls back, so it can be left
-      document.addEventListener("fullscreenchange", () => {
-        films.forEach((film) => (film.controls = document.fullscreenElement === film));
-      });
-
-      films.forEach((film) => {
-        film.controls = false;
-        watch.observe(film);
-        film.addEventListener("click", () => {
-          const big = film as HTMLVideoElement & { webkitEnterFullscreen?: () => void };
-          if (film.requestFullscreen) film.requestFullscreen().catch(() => {});
-          else big.webkitEnterFullscreen?.();
-        });
-      });
-    }
-  </script>
 </Page>
