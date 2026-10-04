@@ -1,3 +1,13 @@
+## 0.13.1
+
+a fix for macs that said `no sound from MacBook Pro Microphone` on every press.
+
+on some macs the speakers and the mic run at different rates, like 44.1 kHz and 48 kHz. since 0.9.4 the app listened to the mic at the speakers' rate, got nothing, and said there was no sound. now it listens at the mic's own rate, whatever the speakers are set to. if this hit you, nothing else changes: update and press.
+
+if the mic's rate changes while the app is open, the next press is heard too. before, that one press came back empty.
+
+everything else is 0.13.0.
+
 ## 0.13.0
 
 any model for either job, and a tiny new one.
