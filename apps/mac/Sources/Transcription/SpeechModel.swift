@@ -11,10 +11,11 @@ import Foundation
 /// model that can turn a Hindi colleague into English is the full large-v3.
 /// Turbo stays as the "as spoken" choice for someone who reads the language.
 ///
-/// Parakeet is the third card: dictation's v3, the multilingual one, by far
-/// the fastest and already on disk for anyone who dictates with it. It only
-/// knows English and the European languages; anything else, Hindi included,
-/// comes out as confident nonsense, so it is never the default.
+/// Parakeet is the third and fourth card: dictation's v3 and v2, by far the
+/// fastest and already on disk for anyone who dictates with them. v3 knows
+/// English and the European languages, v2 English alone; anything else,
+/// Hindi included, comes out as confident nonsense, so neither is ever the
+/// default.
 ///
 /// Stored by raw value in settings and in every spool's manifest: a case is
 /// never renamed.
@@ -22,6 +23,7 @@ enum SpeechModel: String, CaseIterable, Codable, Sendable {
     case whisperLargeV3
     case whisperLargeV3Turbo
     case parakeetV3
+    case parakeetV2
 
     static let `default`: SpeechModel = .whisperLargeV3
 
@@ -29,7 +31,8 @@ enum SpeechModel: String, CaseIterable, Codable, Sendable {
         switch self {
         case .whisperLargeV3: "whisper large"
         case .whisperLargeV3Turbo: "whisper turbo"
-        case .parakeetV3: "parakeet"
+        case .parakeetV3: "parakeet v3"
+        case .parakeetV2: "parakeet v2"
         }
     }
 
@@ -38,7 +41,8 @@ enum SpeechModel: String, CaseIterable, Codable, Sendable {
         switch self {
         case .whisperLargeV3: "every language, in english"
         case .whisperLargeV3Turbo: "every language, as spoken · faster"
-        case .parakeetV3: "fastest · english and european languages only · anything else comes out as nonsense"
+        case .parakeetV3: "fast · english and european languages only · anything else comes out as nonsense"
+        case .parakeetV2: "fastest · english only · anything else comes out as nonsense"
         }
     }
 
@@ -49,6 +53,7 @@ enum SpeechModel: String, CaseIterable, Codable, Sendable {
         // the same file dictation's v3 reads: nothing more to fetch for
         // anyone who already dictates with it.
         case .parakeetV3: "~470 mb, shared with dictation's v3"
+        case .parakeetV2: "~460 mb, shared with dictation's v2"
         }
     }
 
@@ -58,7 +63,7 @@ enum SpeechModel: String, CaseIterable, Codable, Sendable {
         switch self {
         case .whisperLargeV3: "openai_whisper-large-v3"
         case .whisperLargeV3Turbo: "openai_whisper-large-v3-v20240930_turbo"
-        case .parakeetV3: nil
+        case .parakeetV3, .parakeetV2: nil
         }
     }
 

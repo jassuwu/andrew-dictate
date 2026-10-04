@@ -6,8 +6,8 @@ import os
 /// Where the meeting models come from and go. Whisper lives beside parakeet
 /// under FluidAudio's shared folder, so removal (ADR 0035) has one place to
 /// look, and `installed()` is a question for the disk, never a memory.
-/// Parakeet *is* dictation's v3, in dictation's folder: on disk for one is
-/// on disk for both.
+/// Parakeet *is* dictation's v2 and v3, in dictation's folder: on disk for
+/// one job is on disk for both.
 enum MeetingEngines {
     private static let logger = Logger(subsystem: AppIdentity.loggingSubsystem, category: "meeting-models")
 
@@ -26,11 +26,21 @@ enum MeetingEngines {
             .appendingPathComponent(variant, isDirectory: true)
     }
 
-    static func isInstalled(_ model: SpeechModel) -> Bool {
-        guard let folder = folder(for: model) else {
-            // parakeet: the one answer dictation's settings and setup use.
-            return ModelStore.isOnDisk(.v3)
+    /// Dictation's name for a parakeet model; nil for whisper's.
+    static func parakeetVersion(of model: SpeechModel) -> EngineVersion? {
+        switch model {
+        case .parakeetV2: .v2
+        case .parakeetV3: .v3
+        case .whisperLargeV3, .whisperLargeV3Turbo: nil
         }
+    }
+
+    static func isInstalled(_ model: SpeechModel) -> Bool {
+        if let version = parakeetVersion(of: model) {
+            // the one answer dictation's settings and setup use.
+            return ModelStore.isOnDisk(version)
+        }
+        guard let folder = folder(for: model) else { return false }
         let decoder = folder.appendingPathComponent("TextDecoder.mlmodelc")
         return FileManager.default.fileExists(atPath: decoder.path)
     }
@@ -55,12 +65,10 @@ enum MeetingEngines {
         if !FluidDiarizer.isOnDisk {
             Task.detached(priority: .utility) { await fetchSpeakerSplit() }
         }
-        switch model {
-        case .parakeetV3:
-            return stretches(ParakeetStretchEngine(), ceiling: ParakeetStretchEngine.ceiling)
-        case .whisperLargeV3, .whisperLargeV3Turbo:
-            return stretches(WhisperStretchEngine(model: model), ceiling: WhisperStretchEngine.ceiling)
+        if let version = parakeetVersion(of: model) {
+            return stretches(ParakeetStretchEngine(version: version), ceiling: ParakeetStretchEngine.ceiling)
         }
+        return stretches(WhisperStretchEngine(model: model), ceiling: WhisperStretchEngine.ceiling)
     }
 
     /// A meeting heard a stretch at a time, both sides by one voice model
@@ -164,10 +172,10 @@ enum MeetingEngines {
                     downloadBase: modelDirectory,
                     progressCallback: { progress($0.fractionCompleted) }
                 )
-            } else {
+            } else if let version = parakeetVersion(of: model) {
                 // the call dictation's engine makes, to the folder it reads.
                 _ = try await AsrModels.download(
-                    version: EngineVersion.v3.asrModelVersion,
+                    version: version.asrModelVersion,
                     progressHandler: { progress($0.fractionCompleted) }
                 )
             }

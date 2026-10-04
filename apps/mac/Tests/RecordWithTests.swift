@@ -21,7 +21,7 @@ final class RecordWithTests: XCTestCase {
             isRecording: false)
 
         XCTAssertEqual(choices.map(\.model), [.parakeetV3])
-        XCTAssertEqual(choices.first?.title, "parakeet")
+        XCTAssertEqual(choices.first?.title, "parakeet v3")
     }
 
     func testTwoModelsOnThisMacListTheOneThatIsNotTheDefault() {
