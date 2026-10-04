@@ -17,6 +17,9 @@ import Foundation
 /// Hindi included, comes out as confident nonsense, so neither is ever the
 /// meeting default.
 ///
+/// Whistle is Cactus Compute's, released 2026-10-02: 17 mb, on the cpu, in
+/// English and six European languages. New enough that its card says so.
+///
 /// Stored by raw value in settings and in every spool's manifest: a case is
 /// never renamed.
 enum SpeechModel: String, CaseIterable, Codable, Identifiable, Sendable {
@@ -24,6 +27,7 @@ enum SpeechModel: String, CaseIterable, Codable, Identifiable, Sendable {
     case whisperLargeV3Turbo
     case parakeetV3
     case parakeetV2
+    case whistle
 
     /// The two places a model is picked for.
     enum Job: Sendable {
@@ -35,6 +39,7 @@ enum SpeechModel: String, CaseIterable, Codable, Identifiable, Sendable {
     enum Family: Sendable {
         case parakeet
         case whisper
+        case whistle
     }
 
     static let meetingDefault: SpeechModel = .whisperLargeV3
@@ -45,7 +50,7 @@ enum SpeechModel: String, CaseIterable, Codable, Identifiable, Sendable {
     /// also the order `record with ▸` lists them in.
     static func cards(for job: Job) -> [SpeechModel] {
         switch job {
-        case .dictation: [.parakeetV2, .parakeetV3, .whisperLargeV3Turbo, .whisperLargeV3]
+        case .dictation: [.parakeetV2, .parakeetV3, .whisperLargeV3Turbo, .whisperLargeV3, .whistle]
         case .meetings: allCases
         }
     }
@@ -68,6 +73,7 @@ enum SpeechModel: String, CaseIterable, Codable, Identifiable, Sendable {
         switch self {
         case .parakeetV2, .parakeetV3: .parakeet
         case .whisperLargeV3, .whisperLargeV3Turbo: .whisper
+        case .whistle: .whistle
         }
     }
 
@@ -77,6 +83,16 @@ enum SpeechModel: String, CaseIterable, Codable, Identifiable, Sendable {
         case .whisperLargeV3Turbo: "whisper turbo"
         case .parakeetV3: "parakeet v3"
         case .parakeetV2: "parakeet v2"
+        case .whistle: "whistle"
+        }
+    }
+
+    /// A word beside the name, for a model too new to have earned the
+    /// trust the others have.
+    var badge: String? {
+        switch self {
+        case .whistle: "experimental"
+        case .whisperLargeV3, .whisperLargeV3Turbo, .parakeetV3, .parakeetV2: nil
         }
     }
 
@@ -88,6 +104,7 @@ enum SpeechModel: String, CaseIterable, Codable, Identifiable, Sendable {
         case .whisperLargeV3Turbo: "whisper large-v3 turbo"
         case .parakeetV3: "parakeet v3 (multilingual)"
         case .parakeetV2: "parakeet v2 (english)"
+        case .whistle: "whistle (cactus compute)"
         }
     }
 
@@ -104,6 +121,8 @@ enum SpeechModel: String, CaseIterable, Codable, Identifiable, Sendable {
         case (.meetings, .whisperLargeV3Turbo): "every language, as spoken · faster"
         case (.meetings, .parakeetV3): "fast · english and european languages only · anything else comes out as nonsense"
         case (.meetings, .parakeetV2): "fastest · english only · anything else comes out as nonsense"
+        case (.dictation, .whistle): "english and 6 european languages · a tiny download"
+        case (.meetings, .whistle): "a tiny download · english and 6 european languages only · anything else comes out wrong"
         }
     }
 
@@ -113,7 +132,7 @@ enum SpeechModel: String, CaseIterable, Codable, Identifiable, Sendable {
     /// own length again; turbo, half that.
     var dictationPace: TranscriptionDeadline.Pace {
         switch self {
-        case .parakeetV2, .parakeetV3: .parakeet
+        case .parakeetV2, .parakeetV3, .whistle: .parakeet
         case .whisperLargeV3Turbo: .init(floor: .seconds(10), perSecondOfAudio: 0.5)
         case .whisperLargeV3: .init(floor: .seconds(20), perSecondOfAudio: 1)
         }
@@ -127,23 +146,24 @@ enum SpeechModel: String, CaseIterable, Codable, Identifiable, Sendable {
         case .whisperLargeV3Turbo: "~1.5 gb"
         case .parakeetV3: "~470 mb"
         case .parakeetV2: "~460 mb"
+        case .whistle: "~17 mb"
         }
     }
 
     /// WhisperKit's name for it, and the folder it lands in. Parakeet is
-    /// not whisper's, and lives in FluidAudio's folder.
+    /// not whisper's, and lives in FluidAudio's folder; nor is whistle.
     var whisperVariant: String? {
         switch self {
         case .whisperLargeV3: "openai_whisper-large-v3"
         case .whisperLargeV3Turbo: "openai_whisper-large-v3-v20240930_turbo"
-        case .parakeetV3, .parakeetV2: nil
+        case .parakeetV3, .parakeetV2, .whistle: nil
         }
     }
 
     /// Whether a meeting's far side comes out as English. Turbo cannot
     /// translate, so it transcribes — Hindi arrives in Devanagari, Hinglish
-    /// keeps its English words in Latin script. Parakeet has no translate
-    /// task at all. Dictation never translates: you are the one talking.
+    /// keeps its English words in Latin script. Parakeet and whistle have
+    /// no translate task at all. Dictation never translates: you are the one talking.
     var translatesToEnglish: Bool {
         self == .whisperLargeV3
     }

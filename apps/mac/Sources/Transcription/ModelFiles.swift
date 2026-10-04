@@ -1,3 +1,4 @@
+import CryptoKit
 import FluidAudio
 import Foundation
 import WhisperKit
@@ -16,12 +17,13 @@ enum ModelFiles {
     }
 
     /// Where a model's files are: FluidAudio's folder for parakeet, the
-    /// variant's folder for whisper.
+    /// variant's folder for whisper, whistle's own for whistle.
     static func folder(for model: SpeechModel) -> URL? {
-        if let version = model.asrModelVersion {
-            return AsrModels.defaultCacheDirectory(for: version)
+        switch model.family {
+        case .parakeet: model.asrModelVersion.map(AsrModels.defaultCacheDirectory(for:))
+        case .whisper: whisperFolder(for: model)
+        case .whistle: whistleDirectory
         }
-        return whisperFolder(for: model)
     }
 
     /// WhisperKit lays models out as `models/<repo>/<variant>` under its base.
@@ -37,11 +39,16 @@ enum ModelFiles {
 
     static func isInstalled(_ model: SpeechModel, fileManager: FileManager = .default) -> Bool {
         guard let folder = folder(for: model) else { return false }
-        if model.whisperVariant != nil {
+        switch model.family {
+        case .parakeet:
+            return isNonemptyDirectory(folder, fileManager: fileManager)
+        case .whisper:
             let decoder = folder.appendingPathComponent("TextDecoder.mlmodelc")
             return fileManager.fileExists(atPath: decoder.path)
+        case .whistle:
+            // only a file that was checked whole is ever moved here.
+            return fileManager.fileExists(atPath: whistleFile.path)
         }
-        return isNonemptyDirectory(folder, fileManager: fileManager)
     }
 
     static func installed() -> Set<SpeechModel> {
@@ -72,6 +79,58 @@ enum ModelFiles {
                 version: version,
                 progressHandler: { progress($0.fractionCompleted) }
             )
+        } else if model.family == .whistle, !isInstalled(model) {
+            try await downloadWhistle(progress: progress)
+        }
+    }
+
+    // MARK: - whistle
+
+    static var whistleDirectory: URL {
+        AppIdentity.sharedModelDirectory.appendingPathComponent("whistle", isDirectory: true)
+    }
+
+    static var whistleFile: URL {
+        whistleDirectory.appendingPathComponent("whistle.cact")
+    }
+
+    /// The one file, pinned to a commit so it is the file the engine in
+    /// Vendor/Needle was built for, and checked against its sha-256 before
+    /// it is moved into place.
+    private static let whistleSource = URL(string:
+        "https://huggingface.co/Cactus-Compute/whistle/resolve/"
+        + "b358ddadd89b7a713b5aa131f23032d3cca1b251/whistle.cact")!
+    private static let whistleDigest =
+        "b6e02f048568ac5d01a2042556c658061e699acbc0aa2a1439f52f3d461dffeb"
+
+    enum WhistleDownloadFailure: Error, LocalizedError {
+        case status(Int)
+        case notTheFile
+
+        var errorDescription: String? {
+            switch self {
+            case .status(let code): "whistle's download answered \(code)"
+            case .notTheFile: "the whistle download wasn't the file it should be"
+            }
+        }
+    }
+
+    private static func downloadWhistle(progress: @escaping @Sendable (Double) -> Void) async throws {
+        let (downloaded, response) = try await FileDownload.run(whistleSource, progress: progress)
+        defer { try? FileManager.default.removeItem(at: downloaded) }
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            throw WhistleDownloadFailure.status(http.statusCode)
+        }
+        let bytes = try Data(contentsOf: downloaded, options: .mappedIfSafe)
+        let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+        guard digest == whistleDigest else { throw WhistleDownloadFailure.notTheFile }
+
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(at: whistleDirectory, withIntermediateDirectories: true)
+        if fileManager.fileExists(atPath: whistleFile.path) {
+            _ = try fileManager.replaceItemAt(whistleFile, withItemAt: downloaded)
+        } else {
+            try fileManager.moveItem(at: downloaded, to: whistleFile)
         }
     }
 

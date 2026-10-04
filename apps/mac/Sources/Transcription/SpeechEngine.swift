@@ -23,7 +23,7 @@ extension LoadedSpeechModel {
 }
 
 /// whichever model dictation picked, loaded, swapped and woken the same
-/// way: parakeet, or whisper. a meeting that reads with parakeet has one of
+/// way: parakeet, whisper or whistle. a meeting that reads with parakeet has one of
 /// its own.
 actor SpeechEngine: TranscriptionEngine {
     /// a model and the gate every call into it goes through. made together
@@ -251,6 +251,10 @@ actor SpeechEngine: TranscriptionEngine {
             let whisper = WhisperModel(version, translates: false)
             try await whisper.load()
             loaded = whisper
+        case .whistle:
+            let whistle = WhistleModel()
+            try await whistle.load()
+            loaded = whistle
         }
         try Task.checkCancellation()
         transcriptionLogger.notice("transcription engine ready")
@@ -327,7 +331,7 @@ extension SpeechModel {
         switch self {
         case .parakeetV2: .v2
         case .parakeetV3: .v3
-        case .whisperLargeV3, .whisperLargeV3Turbo: nil
+        case .whisperLargeV3, .whisperLargeV3Turbo, .whistle: nil
         }
     }
 

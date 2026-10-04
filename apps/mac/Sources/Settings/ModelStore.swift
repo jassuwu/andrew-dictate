@@ -123,14 +123,18 @@ final class ModelStore {
     /// the one folder each kind of model may be removed from: anything
     /// else means a path went wrong, and nothing is deleted.
     private static func expectedParent(of version: SpeechModel) -> URL? {
-        if version.asrModelVersion != nil {
-            return MLModelConfigurationUtils
+        switch version.family {
+        case .parakeet:
+            MLModelConfigurationUtils
                 .defaultModelsDirectory()
                 .standardizedFileURL
+        case .whisper:
+            ModelFiles.whisperDirectory
+                .appendingPathComponent("models/argmaxinc/whisperkit-coreml", isDirectory: true)
+                .standardizedFileURL
+        case .whistle:
+            AppIdentity.sharedModelDirectory.standardizedFileURL
         }
-        return ModelFiles.whisperDirectory
-            .appendingPathComponent("models/argmaxinc/whisperkit-coreml", isDirectory: true)
-            .standardizedFileURL
     }
 
     private func recursiveAllocatedSize(of directory: URL) -> Int64 {

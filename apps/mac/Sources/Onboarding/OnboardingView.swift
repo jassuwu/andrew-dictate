@@ -680,6 +680,7 @@ struct OnboardingView: View {
         case .whisperLargeV3Turbo: "got it. it hears every language and writes it as spoken."
         case .parakeetV3: "got it. it hears english and european languages, as spoken."
         case .parakeetV2: "got it. it hears english, as spoken."
+        case .whistle: "got it. it hears english and six european languages, as spoken."
         }
     }
 

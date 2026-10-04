@@ -24,10 +24,14 @@ enum MeetingEngines {
         if !FluidDiarizer.isOnDisk {
             Task.detached(priority: .utility) { await fetchSpeakerSplit() }
         }
-        if model.asrModelVersion != nil {
+        switch model.family {
+        case .parakeet:
             return stretches(ParakeetStretchEngine(model: model), ceiling: ParakeetStretchEngine.ceiling)
+        case .whisper:
+            return stretches(WhisperModel(model, translates: model.translatesToEnglish), ceiling: WhisperModel.ceiling)
+        case .whistle:
+            return stretches(WhistleModel(), ceiling: WhistleModel.ceiling)
         }
-        return stretches(WhisperModel(model, translates: model.translatesToEnglish), ceiling: WhisperModel.ceiling)
     }
 
     /// A meeting heard a stretch at a time, both sides by one voice model
