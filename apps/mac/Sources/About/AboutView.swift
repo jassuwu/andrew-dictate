@@ -128,7 +128,7 @@ struct AboutView: View {
 
             Spacer(minLength: 12)
 
-            // five names no longer fit one line in 268 pt, so it wraps, and
+            // six names no longer fit one line in 268 pt, so it wraps, and
             // wrapped text leans left unless told otherwise.
             Text(creditsMarkdown)
                 .font(.system(size: 10.5))
@@ -198,7 +198,8 @@ struct AboutView: View {
     // time" and failed a tag build.
     private static let licenceTooltip = """
         FluidAudio: Apache-2.0 · parakeet weights: CC-BY-4.0 · \
-        WhisperKit: MIT · whisper weights: MIT · silero vad: MIT · \
+        WhisperKit: MIT · whisper weights: MIT · \
+        needle engine and whistle weights: Apache-2.0 · silero vad: MIT · \
         this app: MIT
         """
 
@@ -206,7 +207,8 @@ struct AboutView: View {
         built on [FluidAudio](https://github.com/FluidInference/FluidAudio), \
         [parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2), \
         [WhisperKit](https://github.com/argmaxinc/WhisperKit), \
-        [whisper](https://github.com/openai/whisper) \
+        [whisper](https://github.com/openai/whisper), \
+        [whistle](https://huggingface.co/Cactus-Compute/whistle) \
         and [silero](https://github.com/snakers4/silero-vad)
         """
 

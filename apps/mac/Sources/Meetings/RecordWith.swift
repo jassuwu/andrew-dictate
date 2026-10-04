@@ -6,17 +6,17 @@ import Foundation
 /// make a menu line wider than the menu.
 enum RecordWith {
     struct Choice: Equatable, Sendable {
-        let model: MeetingModel
+        let model: SpeechModel
         let title: String
     }
 
     static func choices(
-        installed: Set<MeetingModel>,
-        default defaultModel: MeetingModel,
+        installed: Set<SpeechModel>,
+        default defaultModel: SpeechModel,
         isRecording: Bool
     ) -> [Choice] {
         guard !isRecording else { return [] }
-        return MeetingModel.allCases
+        return SpeechModel.cards(for: .meetings)
             .filter { installed.contains($0) && $0 != defaultModel }
             .map { Choice(model: $0, title: $0.shortName) }
     }

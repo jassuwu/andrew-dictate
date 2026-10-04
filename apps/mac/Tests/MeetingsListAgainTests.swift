@@ -6,8 +6,8 @@ import XCTest
 @MainActor
 final class MeetingsListAgainTests: XCTestCase {
     private var dir: URL!
-    private var started: [(transcript: URL, model: MeetingModel)] = []
-    private var installed: Set<MeetingModel> = [.whisperLargeV3, .parakeetV3]
+    private var started: [(transcript: URL, model: SpeechModel)] = []
+    private var installed: Set<SpeechModel> = [.whisperLargeV3, .parakeetV3]
 
     /// thursday 2026-10-01 10:00 UTC.
     private let thursday = Date(timeIntervalSince1970: 1_790_848_800)
@@ -172,7 +172,7 @@ final class MeetingsListAgainTests: XCTestCase {
 
     /// two seconds of its audio, kept until you delete it.
     private func keepAudio(
-        for meeting: MeetingSummary, model: MeetingModel = .parakeetV3
+        for meeting: MeetingSummary, model: SpeechModel = .parakeetV3
     ) async throws {
         let spool = MeetingSpool(root: dir.appendingPathComponent("spool"))
         let handle = try spool.begin(.init(

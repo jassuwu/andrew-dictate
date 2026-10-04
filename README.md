@@ -59,4 +59,4 @@ if you want something that this app does not do, fork it. the licence is MIT.
 
 ## credits
 
-[FluidAudio](https://github.com/FluidInference/FluidAudio) (apache-2.0) · [parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) (cc-by-4.0) · [WhisperKit](https://github.com/argmaxinc/WhisperKit) (mit) · [whisper](https://github.com/openai/whisper) (mit) · [silero vad](https://github.com/snakers4/silero-vad) (mit) · [mit](LICENSE) · made by [jass](https://jass.gg)
+[FluidAudio](https://github.com/FluidInference/FluidAudio) (apache-2.0) · [parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) (cc-by-4.0) · [WhisperKit](https://github.com/argmaxinc/WhisperKit) (mit) · [whisper](https://github.com/openai/whisper) (mit) · [whistle](https://huggingface.co/Cactus-Compute/whistle) (apache-2.0) · [silero vad](https://github.com/snakers4/silero-vad) (mit) · [mit](LICENSE) · made by [jass](https://jass.gg)

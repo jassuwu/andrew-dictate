@@ -12,7 +12,7 @@ struct MeetingSpool: Sendable {
         let app: String
         let started: Date
         let engine: String
-        let model: MeetingModel
+        let model: SpeechModel
         /// How many launches have tried to write this one out and failed.
         /// Optional, not defaulted: a synthesized decoder does not fall back
         /// to a property's default, and a manifest written before the ledger
@@ -311,7 +311,7 @@ struct MeetingSpool: Sendable {
         let made = (attributes?[.creationDate] as? Date)
             ?? (attributes?[.modificationDate] as? Date)
             ?? Date()
-        let model = MeetingModel.default
+        let model = SpeechModel.meetingDefault
         return Manifest(
             app: MeetingCoordinator.unnamed, started: made, engine: model.rawValue,
             model: model)

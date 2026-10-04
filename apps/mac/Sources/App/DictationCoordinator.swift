@@ -55,7 +55,7 @@ final class DictationCoordinator: ObservableObject {
     /// way whether 460 mb came down or the folder was already full, and setup
     /// has to say which of the two the user just lived through.
     @Published private(set) var engineModelWasOnDisk = false
-    @Published private(set) var activeEngineVersion: EngineVersion
+    @Published private(set) var activeDictationModel: SpeechModel
     @Published private(set) var engineSwitchMessage: String?
     @Published private(set) var hotkeyDetection: HotkeyDetection?
     /// what actually reached the page, cleaned.
@@ -158,7 +158,7 @@ final class DictationCoordinator: ObservableObject {
     let settings: AppSettings
 
     private let hotkeyMonitor: HotkeyMonitor
-    private let transcriptionEngine: ParakeetEngine
+    private let transcriptionEngine: SpeechEngine
     /// the machine's, and the menu's copies go through it too, so they
     /// take their turn with a paste.
     private let inserter: PasteInserter
@@ -242,7 +242,7 @@ final class DictationCoordinator: ObservableObject {
     private var engineSwitchState: EngineSwitchState
     private var enginePreparationRequested: Bool
     private var settingsCancellables: Set<AnyCancellable> = []
-    private var isApplyingEngineVersionSetting = false
+    private var isApplyingDictationModelSetting = false
     private var onboardingWindowController: OnboardingWindowController?
     private var isOnboardingPresented: Bool
     private var hotkeyDetectionSequence = 0
@@ -299,7 +299,7 @@ final class DictationCoordinator: ObservableObject {
     let meetings: LazyMeetings
     /// made by the first meeting, like the panel that shows it.
     private lazy var liveTranscript = LiveTranscriptModel(elapsed: .zero)
-    @Published private(set) var meetingModelDownloads: [MeetingModel: Double] = [:]
+    @Published private(set) var meetingModelDownloads: [SpeechModel: Double] = [:]
     @Published private(set) var isLiveTranscriptShown = false
     /// `record a meeting` was pressed before its model was on disk, and is
     /// held while setup runs. the click already happened; setup is the
@@ -327,9 +327,9 @@ final class DictationCoordinator: ObservableObject {
 
     init(settings: AppSettings = .shared) {
         self.settings = settings
-        activeEngineVersion = settings.engineVersion
+        activeDictationModel = settings.dictationModel
         engineSwitchState = EngineSwitchState(
-            activeVersion: settings.engineVersion
+            activeVersion: settings.dictationModel
         )
         isOnboardingPresented = !settings.onboardingDismissed
         enginePreparationRequested = EnginePrewarmGate.shouldPrewarmAtLaunch(
@@ -338,8 +338,8 @@ final class DictationCoordinator: ObservableObject {
         )
         let dictionaryStore = DictionaryStore()
         self.dictionaryStore = dictionaryStore
-        let transcriptionEngine = ParakeetEngine(
-            version: settings.engineVersion
+        let transcriptionEngine = SpeechEngine(
+            version: settings.dictationModel
         )
         self.transcriptionEngine = transcriptionEngine
         let inserter = PasteInserter()
@@ -445,12 +445,12 @@ final class DictationCoordinator: ObservableObject {
             }
             .store(in: &settingsCancellables)
 
-        settings.$engineVersion
+        settings.$dictationModel
             .dropFirst()
             .removeDuplicates()
             .sink { [weak self] version in
                 guard let self,
-                      !self.isApplyingEngineVersionSetting else {
+                      !self.isApplyingDictationModelSetting else {
                     return
                 }
                 self.replaceEngine(with: version)
@@ -773,7 +773,7 @@ final class DictationCoordinator: ObservableObject {
     func copyTimings() {
         let report = timelineStore.formattedReport(
             conditions: .current(
-                engine: activeEngineVersion.displayName
+                engine: activeDictationModel.displayName
             )
         )
         Task { [inserter] in
@@ -791,7 +791,7 @@ final class DictationCoordinator: ObservableObject {
         let system = ProcessInfo.processInfo.operatingSystemVersion
         let appVersion = info["CFBundleShortVersionString"] as? String ?? "?"
         let build = info["CFBundleVersion"] as? String ?? "?"
-        let engine = activeEngineVersion.rawValue
+        let engine = activeDictationModel.rawValue
         let store = pressLog
         let meetingStore = meetingRecords
         pressLogQueue.async {
@@ -980,9 +980,9 @@ final class DictationCoordinator: ObservableObject {
     }
 
     func prepareForActiveModelRemoval(
-        _ version: EngineVersion
+        _ version: SpeechModel
     ) async {
-        guard version == activeEngineVersion else {
+        guard version == activeDictationModel else {
             return
         }
 
@@ -1002,7 +1002,7 @@ final class DictationCoordinator: ObservableObject {
         enginePreparationState = .notStarted
         engineSwitchMessage = nil
         _ = engineSwitchState.cancelPreparation()
-        applyEngineVersionSetting(activeEngineVersion)
+        applyDictationModelSetting(activeDictationModel)
 
         await transcriptionEngine.unloadModels()
     }
@@ -1073,7 +1073,7 @@ final class DictationCoordinator: ObservableObject {
         captureSlot.prepare()
     }
 
-    private func replaceEngine(with version: EngineVersion) {
+    private func replaceEngine(with version: SpeechModel) {
         engineHealthTask?.cancel()
         engineHealthTask = nil
         engineSwitchMessage = nil
@@ -1083,7 +1083,7 @@ final class DictationCoordinator: ObservableObject {
             enginePrewarmTask = nil
             engineSwapTask?.cancel()
             engineSwapTask = nil
-            activeEngineVersion = version
+            activeDictationModel = version
             engineSwitchState = EngineSwitchState(
                 activeVersion: version
             )
@@ -1126,7 +1126,7 @@ final class DictationCoordinator: ObservableObject {
         enginePrewarmTask?.cancel()
         engineGeneration += 1
         let generation = engineGeneration
-        let version = activeEngineVersion
+        let version = activeDictationModel
         isPrewarmed = false
         engineSwitchMessage = nil
         // asked before a byte moves, so the answer cannot be fooled by how
@@ -1196,7 +1196,7 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
-    private func startEngineSwap(to version: EngineVersion) {
+    private func startEngineSwap(to version: SpeechModel) {
         engineSwapTask?.cancel()
         enginePrewarmTask?.cancel()
         enginePrewarmTask = nil
@@ -1263,7 +1263,7 @@ final class DictationCoordinator: ObservableObject {
                     return
                 }
 
-                self.activeEngineVersion = activeVersion
+                self.activeDictationModel = activeVersion
                 self.enginePreparationState = .ready
                 self.engineSwitchMessage = nil
                 self.engineSwapTask = nil
@@ -1292,7 +1292,7 @@ final class DictationCoordinator: ObservableObject {
                 self.enginePreparationState = .ready
                 self.engineSwitchMessage = message
                 self.engineSwapTask = nil
-                self.applyEngineVersionSetting(settingVersion)
+                self.applyDictationModelSetting(settingVersion)
                 self.engineLogger.error(
                     "engine swap failed target=\(version.rawValue): \(error.localizedDescription)"
                 )
@@ -1301,14 +1301,14 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
-    private func applyEngineVersionSetting(_ version: EngineVersion) {
-        guard settings.engineVersion != version else {
+    private func applyDictationModelSetting(_ version: SpeechModel) {
+        guard settings.dictationModel != version else {
             return
         }
 
-        isApplyingEngineVersionSetting = true
-        settings.engineVersion = version
-        isApplyingEngineVersionSetting = false
+        isApplyingDictationModelSetting = true
+        settings.dictationModel = version
+        isApplyingDictationModelSetting = false
     }
 
     private func applyPreparationUpdate(
@@ -1676,8 +1676,9 @@ final class DictationCoordinator: ObservableObject {
 
         let engine = transcriptionEngine
         let generation = engineGeneration
+        let patience = activeDictationModel.dictationPace.floor
         engineHealthTask = Task { @MainActor [weak self] in
-            let answered = await EngineProbe.answers(engine)
+            let answered = await EngineProbe.answers(engine, within: patience)
             guard let self, !Task.isCancelled else {
                 return
             }
@@ -1803,7 +1804,7 @@ final class DictationCoordinator: ObservableObject {
             // read before the switch: `.notStarted` starts the download,
             // which sets `.downloading(progress: 0)` synchronously and would
             // turn the press that priced it into "0%".
-            let size = activeEngineVersion.approximateSize.dropFirst()
+            let size = activeDictationModel.approximateSize.dropFirst()
             let notice = enginePreparationState.pressedEarlyNotice(
                 downloadSize: "about \(size)"
             )
@@ -1819,7 +1820,7 @@ final class DictationCoordinator: ObservableObject {
                     flashNotice(
                         """
                         getting the speech model — \
-                        \(settings.engineVersion.approximateSize), once
+                        \(settings.dictationModel.approximateSize), once
                         """,
                         duration: 2
                     )
@@ -1891,7 +1892,7 @@ final class DictationCoordinator: ObservableObject {
                     ),
                     heard: heard,
                     inserted: inserted,
-                    engine: activeEngineVersion.rawValue,
+                    engine: activeDictationModel.rawValue,
                     keyUpToInsertedMilliseconds:
                         timeline.durations.keyUpToCompletion.inMilliseconds
                 )
@@ -2121,6 +2122,14 @@ extension DictationCoordinator {
             guard let self else { return false }
             return self.activeFeedbackGeneration != nil && !self.isQuestionUp
         }
+        // the press log says which model answered: diagnostics read it.
+        machine.engineVersion = { [weak self] in
+            self?.activeDictationModel.rawValue ?? ""
+        }
+        // whisper takes longer than parakeet, and is given longer.
+        machine.transcriptionPace = { [weak self] in
+            self?.activeDictationModel.dictationPace ?? .parakeet
+        }
     }
 
     private func handle(_ event: UtteranceEvent) {
@@ -2215,8 +2224,8 @@ extension DictationCoordinator {
 // MARK: - meetings
 
 extension DictationCoordinator {
-    var installedMeetingModels: Set<MeetingModel> {
-        MeetingEngines.installed()
+    var installedMeetingModels: Set<SpeechModel> {
+        ModelFiles.installed()
     }
 
     /// `record a meeting`, and the pill's `record`. the model is a download
@@ -2227,7 +2236,7 @@ extension DictationCoordinator {
     /// asked about. `model` is `record with`: this one meeting is heard by
     /// it instead of the default, and only the menu passes one — the pill's
     /// button and the hotkey always use the default.
-    func startMeeting(name: String? = nil, model: MeetingModel? = nil) {
+    func startMeeting(name: String? = nil, model: SpeechModel? = nil) {
         guard !meetings.isRecording else { return }
         guard installedMeetingModels.contains(model ?? settings.meetingModel) else {
             if let model {
@@ -2246,6 +2255,12 @@ extension DictationCoordinator {
         if state == .recording {
             flashNotice("finish dictating first", aboutAMeeting: true)
             return
+        }
+        // recording one is setting meetings up, whichever job downloaded
+        // the model it records with.
+        if !settings.meetingsSetUp {
+            settings.meetingsSetUp = true
+            watchForCallsIfSetUp()
         }
         liveTranscript.clear()
         liveTranscript.elapsed = .zero
@@ -2420,6 +2435,9 @@ extension DictationCoordinator {
         // hour. five seconds of head start keeps it off the dictation
         // model's prewarm, so the first fn press is not slower for it. the
         // number is a guess, like the rest of MeetingThresholds.
+        settings.settleMeetingsSetUp { [settings] in
+            ModelFiles.isInstalled(settings.meetingModel)
+        }
         meetings.launch(
             setUp: hasMeetingsSetUp,
             watchesForCalls: chosenMeetingModelIsInstalled,
@@ -2440,11 +2458,11 @@ extension DictationCoordinator {
             .store(in: &settingsCancellables)
     }
 
-    /// the meeting model settings chose, on disk. not any meeting model:
-    /// parakeet is on disk for anyone who dictates with v3, and a mac that
+    /// meetings set up, and the meeting model settings chose on disk. not
+    /// the model alone: dictation can download any model, and a mac that
     /// only dictates is not set up for meetings.
     private var chosenMeetingModelIsInstalled: Bool {
-        MeetingEngines.isInstalled(settings.meetingModel)
+        settings.meetingsSetUp && ModelFiles.isInstalled(settings.meetingModel)
     }
 
     /// the chosen meeting model on disk, or a folder somebody chose. both
@@ -2487,8 +2505,15 @@ extension DictationCoordinator {
     /// the chosen one is on this mac, so `record` can start what it offers.
     /// a meeting that records keeps its watch, so the end of its call is
     /// still asked about.
-    private func watchForCallsIfSetUp(_ model: MeetingModel? = nil) {
-        if MeetingEngines.isInstalled(model ?? settings.meetingModel) {
+    /// a download removed in settings may be the meeting model: a call is
+    /// then no longer offered, since `record` could not start it.
+    func modelWasRemoved() {
+        watchForCallsIfSetUp()
+    }
+
+    private func watchForCallsIfSetUp(_ model: SpeechModel? = nil) {
+        if settings.meetingsSetUp,
+           ModelFiles.isInstalled(model ?? settings.meetingModel) {
             meetings.watchForCalls()
         } else if !meetings.isRecording {
             meetings.stopWatchingForCalls()
@@ -2740,6 +2765,7 @@ extension DictationCoordinator {
         }
         meetingModelDownloads[model] = nil
         if ok {
+            settings.meetingsSetUp = true
             watchForCallsIfSetUp()
         }
         return ok

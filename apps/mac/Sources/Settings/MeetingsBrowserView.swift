@@ -95,7 +95,7 @@ private struct MeetingRow: View {
     let audioNote: String?
     /// `transcribe again with ▸`, or why it is off, or that it is running.
     let again: MeetingsListModel.Again
-    let transcribeAgain: (MeetingModel) -> Void
+    let transcribeAgain: (SpeechModel) -> Void
     let deleteAudio: () -> Void
     let delete: () -> Void
 

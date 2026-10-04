@@ -805,18 +805,18 @@ private final class FakeSource: MeetingAudioSource, @unchecked Sendable {
 private final class FakeTranscribers: @unchecked Sendable {
     private let lock = NSLock()
     private var lined: [FakeTranscriber] = []
-    private var models: [MeetingModel] = []
+    private var models: [SpeechModel] = []
 
     func lineUp(_ transcribers: FakeTranscriber...) {
         lock.withLock { lined.append(contentsOf: transcribers) }
     }
 
     /// The model each one was made for, in order.
-    var made: [MeetingModel] {
+    var made: [SpeechModel] {
         lock.withLock { models }
     }
 
-    func next(for model: MeetingModel) throws -> FakeTranscriber {
+    func next(for model: SpeechModel) throws -> FakeTranscriber {
         lock.withLock {
             models.append(model)
             return lined.isEmpty ? FakeTranscriber() : lined.removeFirst()

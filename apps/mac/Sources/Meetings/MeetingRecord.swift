@@ -333,7 +333,7 @@ extension MeetingRecord {
     init(
         _ outcome: Outcome,
         app: String,
-        model: MeetingModel,
+        model: SpeechModel,
         startedAt: Date,
         duration: Duration,
         gaps: [MeetingSession.Gap] = [],

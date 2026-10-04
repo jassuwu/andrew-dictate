@@ -1,3 +1,19 @@
+## 0.13.0
+
+any model for either job, and a tiny new one.
+
+dictation and meetings pick from the same five models now. before, dictation had the two parakeets, and meetings had whisper and parakeet v3. now whisper can take your dictation if you don't mind waiting for it, and parakeet v2 can hear a meeting in english. each card says what the model costs in the job you're picking for. a model you downloaded for one job is already there for the other.
+
+the new one is whistle, from cactus compute, out since october 2. it is a 17 mb download where the others are hundreds of mb or more, and it runs on the cpu. it hears english, german, french, spanish, italian, dutch and polish. its card says experimental: it is new, and on meeting audio whisper is better. try it and see.
+
+whisper and whistle read about 30 seconds at a time, so a longer dictation is cut where you pause, and no words are lost at the cut. a slow model gets more time before the app decides it is stuck.
+
+settings can remove any model's download, not only parakeet's. picking whisper for dictation does not set up meetings, so the app won't start asking about your calls.
+
+copy diagnostics now says which model answered each press. it never did.
+
+0.12.0 never shipped on its own, so its two lines in the app arrive with this one.
+
 ## 0.12.0
 
 a new site, a readme, and two lines in the app.

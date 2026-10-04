@@ -135,6 +135,8 @@ final class UtteranceMachine {
     /// which speech model is answering, for the press log. the engine's
     /// lifecycle is the coordinator's, so is the name.
     var engineVersion: (@MainActor () -> String)?
+    /// how long that model gets to answer a take; parakeet's when unset.
+    var transcriptionPace: (@MainActor () -> TranscriptionDeadline.Pace)?
 
     /// One cleaner, kept. Its nineteen regexes — plus one per taught word —
     /// compile on construction, and that used to happen on the main actor
@@ -1167,7 +1169,10 @@ final class UtteranceMachine {
     ) {
         transcriptionDeadline?.cancel()
         transcriptionDeadline = armDeadline(
-            after: TranscriptionDeadline.forSamples(samples.count)
+            after: TranscriptionDeadline.forSamples(
+                samples.count,
+                pace: transcriptionPace?() ?? .parakeet
+            )
         ) { machine in
             machine.transcriptionTimedOut(samples, generation: generation)
         }

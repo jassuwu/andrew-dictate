@@ -10,7 +10,7 @@ final class MeetingCoordinatorTests: XCTestCase {
     private var hookRuns: [HookRun] = []
     /// What settings say right now, read whenever the coordinator asks.
     private var meetingsFolder: URL!
-    private var meetingModel: MeetingModel = .whisperLargeV3Turbo
+    private var meetingModel: SpeechModel = .whisperLargeV3Turbo
     private var hook: URL?
 
     override func setUp() async throws {

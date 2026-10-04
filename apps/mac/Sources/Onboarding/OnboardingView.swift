@@ -639,7 +639,7 @@ struct OnboardingView: View {
                     ProgressView(value: bounded(progress))
                         .progressViewStyle(.linear)
                         .frame(width: 240)
-                    Text("about \(coordinator.settings.engineVersion.approximateSize.dropFirst()). carry on — this keeps going.")
+                    Text("about \(coordinator.settings.dictationModel.approximateSize.dropFirst()). carry on — this keeps going.")
                         .font(.caption)
                         .foregroundStyle(BrandUI.textSecondary)
                 }
@@ -679,6 +679,8 @@ struct OnboardingView: View {
         case .whisperLargeV3: "got it. it hears every language and writes english."
         case .whisperLargeV3Turbo: "got it. it hears every language and writes it as spoken."
         case .parakeetV3: "got it. it hears english and european languages, as spoken."
+        case .parakeetV2: "got it. it hears english, as spoken."
+        case .whistle: "got it. it hears english and six european languages, as spoken."
         }
     }
 

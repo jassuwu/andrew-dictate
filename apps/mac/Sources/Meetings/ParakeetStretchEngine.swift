@@ -1,9 +1,9 @@
 import FluidAudio
 import Foundation
 
-/// Parakeet v3 reading a meeting a stretch at a time.
+/// Parakeet, v2 or v3, reading a meeting a stretch at a time.
 ///
-/// Its own `ParakeetEngine`, never dictation's: the meeting loads it when it
+/// Its own `SpeechEngine`, never dictation's: the meeting loads it when it
 /// starts and lets it go with the transcriber when it ends, and a stretch
 /// never waits behind a dictation take or holds one up. Everything else is
 /// dictation's own code — the download if the model is missing, the load,
@@ -20,7 +20,11 @@ struct ParakeetStretchEngine: StretchEngine {
     private static let shortest = ASRConstants.minimumRequiredSamples(
         forSampleRate: Int(MeetingAudioChunk.sampleRate))
 
-    private let engine = ParakeetEngine(version: .v3)
+    private let engine: SpeechEngine
+
+    init(model: SpeechModel) {
+        engine = SpeechEngine(version: model)
+    }
 
     func load() async throws {
         try await engine.prewarm(progressHandler: nil)

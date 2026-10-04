@@ -44,6 +44,9 @@ targets:
       - path: Sources/Resources/Voice
         type: folder
         buildPhase: resources
+      # the whistle engine is apache-2.0, and its licence travels with it.
+      - path: Sources/Resources/Licenses/needle-LICENSE.txt
+        buildPhase: resources
     dependencies:
       - package: FluidAudio
       - package: WhisperKit
@@ -59,6 +62,10 @@ targets:
         CODE_SIGN_STYLE: Manual
         ENABLE_HARDENED_RUNTIME: false
         SWIFT_STRICT_CONCURRENCY: complete
+        # whistle's engine, a static library with a C header (Vendor/Needle).
+        # the module map links it and libc++; Swift sees it as `Needle`.
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/Vendor/Needle/include
+        LIBRARY_SEARCH_PATHS: $(SRCROOT)/Vendor/Needle
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # the brand gold as the app accent: native controls, pane icons,
         # toggles and pickers take it system-wide instead of per-view tints.
@@ -95,7 +102,7 @@ targets:
       path: Sources/Info.plist
       properties:
         CFBundleDisplayName: $(PRODUCT_NAME)
-        CFBundleShortVersionString: "0.12.0"
+        CFBundleShortVersionString: "0.13.0"
         CFBundleVersion: "6"
         LSUIElement: true
         # deliberately no LSMultipleInstancesProhibited: this block is
@@ -146,7 +153,6 @@ targets:
           - MeetingEngines.swift
           - ParakeetStretchEngine.swift
           - SileroDetector.swift
-          - WhisperStretchEngine.swift
       - Sources/Settings/MeetingsListModel.swift
       - Sources/Onboarding/OnboardingMeetingSetup.swift
       - Sources/App/AppIdentity.swift
@@ -199,9 +205,11 @@ targets:
       - Sources/Instrumentation/PressDiagnostics.swift
       - Sources/Instrumentation/LogLine.swift
       - Sources/Instrumentation/MainThreadWatchdog.swift
-      # the protocol only; ParakeetEngine is the FluidAudio half.
+      # the protocol only; SpeechEngine is the FluidAudio half.
       - Sources/Transcription/TranscriptionEngine.swift
       - Sources/Transcription/SerialGate.swift
+      - Sources/Transcription/SpeechModel.swift
+      - Sources/Transcription/QuietSplit.swift
     settings:
       base:
         GENERATE_INFOPLIST_FILE: true

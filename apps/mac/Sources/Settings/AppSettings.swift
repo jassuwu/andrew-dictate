@@ -5,24 +5,6 @@ func dictatedWordCount(in transcript: String) -> Int {
     transcript.split(whereSeparator: { $0.isWhitespace }).count
 }
 
-enum EngineVersion: String, CaseIterable, Identifiable, Sendable {
-    case v2
-    case v3
-
-    var id: Self {
-        self
-    }
-
-    var displayName: String {
-        switch self {
-        case .v2:
-            "parakeet v2 (english)"
-        case .v3:
-            "parakeet v3 (multilingual)"
-        }
-    }
-}
-
 struct ModelRemovalDecision: Equatable, Sendable {
     let isAllowed: Bool
     let requiresRepreparation: Bool
@@ -30,8 +12,8 @@ struct ModelRemovalDecision: Equatable, Sendable {
 
 enum ModelRemovalPolicy {
     static func decision(
-        of version: EngineVersion,
-        activeVersion: EngineVersion
+        of version: SpeechModel,
+        activeVersion: SpeechModel
     ) -> ModelRemovalDecision {
         ModelRemovalDecision(
             isAllowed: true,
@@ -104,14 +86,17 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    @Published var engineVersion: EngineVersion {
+    /// the model dictation listens with. picked from the same cards the
+    /// meeting model is, and stored apart from it: the two jobs want
+    /// opposite things (ADR 0040).
+    @Published var dictationModel: SpeechModel {
         didSet {
-            guard engineVersion != oldValue else {
+            guard dictationModel != oldValue else {
                 return
             }
             userDefaults.set(
-                engineVersion.rawValue,
-                forKey: Self.engineVersionKey
+                dictationModel.rawValue,
+                forKey: Self.dictationModelKey
             )
         }
     }
@@ -145,7 +130,7 @@ final class AppSettings: ObservableObject {
 
     /// which model listens to meetings — its own pick, not dictation's
     /// (ADR 0040). the two jobs want opposite things and the cards say so.
-    @Published var meetingModel: MeetingModel {
+    @Published var meetingModel: SpeechModel {
         didSet {
             guard meetingModel != oldValue else {
                 return
@@ -316,7 +301,9 @@ final class AppSettings: ObservableObject {
     private static let soundFeedbackKey =
         "AndrewDictate.soundFeedbackEnabled"
     private static let keepDictationsKey = "AndrewDictate.keepDictations"
-    private static let engineVersionKey = "AndrewDictate.engineVersion"
+    /// the key from when dictation only had parakeet to pick from, kept so
+    /// the pick survives the update.
+    private static let dictationModelKey = "AndrewDictate.engineVersion"
     private static let cleanupEnabledKey = "AndrewDictate.cleanupEnabled"
     private static let dismissedSuggestionsKey =
         "AndrewDictate.dismissedSuggestions"
@@ -335,6 +322,34 @@ final class AppSettings: ObservableObject {
     }
 
     private static let dictationWantedKey = "AndrewDictate.dictationWanted"
+
+    /// whether this mac set meetings up: the meeting model came down for
+    /// meetings, or a meeting was recorded. not the same as the meeting
+    /// model being on disk, now that dictation can download any model: a
+    /// mac that only dictates with whisper is not set up for meetings, and
+    /// is not asked about its calls.
+    @Published var meetingsSetUp: Bool {
+        didSet {
+            guard meetingsSetUp != oldValue else {
+                return
+            }
+            userDefaults.set(meetingsSetUp, forKey: Self.meetingsSetUpKey)
+        }
+    }
+
+    /// the first launch of a build that knows `meetingsSetUp` works it out
+    /// once from the disk, the way every build before it did — before
+    /// dictation could download a meeting model — and writes the answer
+    /// down either way, so it is never worked out again.
+    func settleMeetingsSetUp(_ wasSetUp: () -> Bool) {
+        guard userDefaults.object(forKey: Self.meetingsSetUpKey) == nil else {
+            return
+        }
+        meetingsSetUp = wasSetUp()
+        userDefaults.set(meetingsSetUp, forKey: Self.meetingsSetUpKey)
+    }
+
+    private static let meetingsSetUpKey = "AndrewDictate.meetingsSetUp"
     private static let meetingModelKey = "AndrewDictate.meetingModel"
     private static let meetingShortcutKey = "AndrewDictate.meetingShortcut"
     private static let meetingsFolderKey = "AndrewDictate.meetingsFolder"
@@ -421,9 +436,10 @@ final class AppSettings: ObservableObject {
             : userDefaults.bool(forKey: Self.keepDictationsKey)
         dictationHotkey = userDefaults.hotkeyBinding()
 
-        engineVersion = userDefaults
-            .string(forKey: Self.engineVersionKey)
-            .flatMap(EngineVersion.init(rawValue:)) ?? .v2
+        dictationModel = userDefaults
+            .string(forKey: Self.dictationModelKey)
+            .flatMap(SpeechModel.init(storedDictationValue:))
+            ?? .dictationDefault
         // unset means on: cleanup has always shipped enabled.
         cleanupEnabled = userDefaults.object(
             forKey: Self.cleanupEnabledKey
@@ -442,9 +458,10 @@ final class AppSettings: ObservableObject {
         dictationWanted = userDefaults.object(forKey: Self.dictationWantedKey) == nil
             ? true
             : userDefaults.bool(forKey: Self.dictationWantedKey)
+        meetingsSetUp = userDefaults.bool(forKey: Self.meetingsSetUpKey)
         meetingModel = userDefaults
             .string(forKey: Self.meetingModelKey)
-            .flatMap(MeetingModel.init(rawValue:)) ?? .default
+            .flatMap(SpeechModel.init(rawValue:)) ?? .meetingDefault
         // a value this build cannot read is no shortcut, never a crash; nor
         // is one it would refuse, kept from a build that took it (⌘W).
         let dictationKey = userDefaults.hotkeyBinding()

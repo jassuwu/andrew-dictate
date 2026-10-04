@@ -46,7 +46,7 @@ struct SettingsView: View {
     @State private var selectedTab: SettingsTab = .dictation
     @State private var historySegment: HistorySegment = .dictations
     @State private var installedModels: [InstalledModel] = []
-    @State private var pendingModelRemoval: EngineVersion?
+    @State private var pendingModelRemoval: SpeechModel?
     @State private var pendingArchiveWipe = false
     @State private var modelStoreMessage: String?
     @State private var showsRemoval = false
@@ -71,7 +71,7 @@ struct SettingsView: View {
                 countSetAside: { spool.unreadableCount() },
                 tryAgain: { await coordinator.meetings.coordinator.tryAgainSetAside() },
                 keptAudio: KeptAudio(),
-                installedModels: { MeetingEngines.installed() },
+                installedModels: { ModelFiles.installed() },
                 transcribeAgain: { transcript, model in
                     Task { @MainActor in
                         await coordinator.meetings.coordinator.transcribeAgain(
@@ -86,7 +86,7 @@ struct SettingsView: View {
             wrappedValue: coordinator.dictionaryStore
         )
         modelStore = ModelStore(
-            activeVersion: { coordinator.activeEngineVersion }
+            activeVersion: { coordinator.activeDictationModel }
         )
     }
 
@@ -190,24 +190,9 @@ struct SettingsView: View {
                 .frame(minHeight: 500)
         }
         .alert(item: $pendingModelRemoval) { version in
-            let isActive = version == coordinator.activeEngineVersion
-            return Alert(
-                title: Text(
-                    isActive
-                        ? "remove the active model?"
-                        : "remove parakeet \(version.rawValue) download?"
-                ),
-                message: Text(
-                    isActive
-                        ? "dictation will stop working until it downloads "
-                            + "again. it re-downloads the next time you "
-                            + "dictate or when you select it here. other "
-                            + "apps using FluidAudio models (like Hex) "
-                            + "share this storage."
-                        : "it will re-download if selected again. "
-                            + "other apps using FluidAudio models (like Hex) "
-                            + "share this storage and may re-download it too."
-                ),
+            Alert(
+                title: Text(removalTitle(version)),
+                message: Text(removalMessage(version)),
                 primaryButton: .destructive(Text("remove download")) {
                     removeDownload(version)
                 },
@@ -389,8 +374,8 @@ struct SettingsView: View {
             // the picker is the list (ADR 0039): the tradeoff is the
             // decision, so it goes on the control.
             ModelChooserView(
-                selection: $settings.engineVersion,
-                active: coordinator.activeEngineVersion,
+                selection: $settings.dictationModel,
+                active: coordinator.activeDictationModel,
                 preparation: coordinator.enginePreparationState,
                 installed: installedModels,
                 onRetry: { coordinator.retryEnginePrewarm() }
@@ -398,7 +383,7 @@ struct SettingsView: View {
 
             // storage is one quiet line, not a button per row.
             HStack(spacing: 12) {
-                Text("shared with other FluidAudio apps, downloaded once.")
+                Text("one download serves dictation and meetings.")
                     .font(.caption)
                     .foregroundStyle(BrandUI.textSecondary)
 
@@ -1035,10 +1020,42 @@ struct SettingsView: View {
         installedModels = modelStore.installedModels()
     }
 
+    private func removalTitle(_ version: SpeechModel) -> String {
+        version == coordinator.activeDictationModel
+            ? "remove the model you dictate with?"
+            : "remove the \(version.shortName) download?"
+    }
+
+    /// what removing it costs, for whichever job uses it, and who else
+    /// reads the same file.
+    private func removalMessage(_ version: SpeechModel) -> String {
+        var lines: [String] = []
+        if version == coordinator.activeDictationModel {
+            lines.append(
+                "dictation stops working until it downloads again. it "
+                    + "downloads the next time you dictate, or when you "
+                    + "pick it here."
+            )
+        }
+        if version == settings.meetingModel {
+            lines.append("meetings need it too. it downloads again before the next one.")
+        }
+        if lines.isEmpty {
+            lines.append("it downloads again if you pick it.")
+        }
+        if version.family == .parakeet {
+            lines.append(
+                "other apps that use FluidAudio models, like Hex, share "
+                    + "this download and may fetch it again too."
+            )
+        }
+        return lines.joined(separator: " ")
+    }
+
     /// the filesystem goes first. unloading the engine up front meant a
     /// failed delete left you with nothing loaded, the model still on
     /// disk, and no idea why — so a failure here must cost nothing.
-    private func removeDownload(_ version: EngineVersion) {
+    private func removeDownload(_ version: SpeechModel) {
         let decision: ModelRemovalDecision
         do {
             decision = try modelStore.remove(version)
@@ -1050,6 +1067,7 @@ struct SettingsView: View {
         }
 
         refreshInstalledModels()
+        coordinator.modelWasRemoved()
 
         guard decision.requiresRepreparation else {
             return

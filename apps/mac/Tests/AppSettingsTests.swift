@@ -12,7 +12,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(settings.preRollEnabled)
         XCTAssertTrue(settings.soundFeedbackEnabled)
         XCTAssertEqual(settings.dictationHotkey, .dictation)
-        XCTAssertEqual(settings.engineVersion, .v2)
+        XCTAssertEqual(settings.dictationModel, .parakeetV2)
         XCTAssertEqual(settings.totalWordsDictated, 0)
     }
 
@@ -25,7 +25,7 @@ final class AppSettingsTests: XCTestCase {
         settings.preRollEnabled = true
         settings.soundFeedbackEnabled = false
         XCTAssertTrue(settings.setHotkeyBinding(.leftCommand))
-        settings.engineVersion = .v3
+        settings.dictationModel = .parakeetV3
         settings.recordDictatedTranscript("two dictated words")
 
         let reloaded = AppSettings(userDefaults: userDefaults)
@@ -34,8 +34,53 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(reloaded.preRollEnabled)
         XCTAssertFalse(reloaded.soundFeedbackEnabled)
         XCTAssertEqual(reloaded.dictationHotkey, .leftCommand)
-        XCTAssertEqual(reloaded.engineVersion, .v3)
+        XCTAssertEqual(reloaded.dictationModel, .parakeetV3)
         XCTAssertEqual(reloaded.totalWordsDictated, 3)
+    }
+
+    /// a mac's first launch of this build works out once, from the disk,
+    /// whether meetings were set up, and never again: after it, dictation
+    /// downloading whisper large must not make it so.
+    func testMeetingsSetUpIsWorkedOutOnceAndWrittenDown() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let first = AppSettings(userDefaults: userDefaults)
+        first.settleMeetingsSetUp { false }
+        XCTAssertFalse(first.meetingsSetUp)
+
+        let later = AppSettings(userDefaults: userDefaults)
+        later.settleMeetingsSetUp { true }
+        XCTAssertFalse(later.meetingsSetUp, "asked once, the answer stands")
+
+        later.meetingsSetUp = true
+        XCTAssertTrue(AppSettings(userDefaults: userDefaults).meetingsSetUp)
+    }
+
+    func testAMacThatHadItsMeetingModelIsSetUpForMeetings() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppSettings(userDefaults: userDefaults)
+        settings.settleMeetingsSetUp { true }
+
+        XCTAssertTrue(AppSettings(userDefaults: userDefaults).meetingsSetUp)
+    }
+
+    /// before dictation could pick whisper, its two choices were stored as
+    /// "v2" and "v3": an update keeps the pick it finds.
+    func testADictationModelStoredByAnOlderBuildIsStillThePick() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        userDefaults.set("v3", forKey: "AndrewDictate.engineVersion")
+        XCTAssertEqual(AppSettings(userDefaults: userDefaults).dictationModel, .parakeetV3)
+
+        userDefaults.set("v2", forKey: "AndrewDictate.engineVersion")
+        XCTAssertEqual(AppSettings(userDefaults: userDefaults).dictationModel, .parakeetV2)
+
+        userDefaults.set("whisperLargeV3Turbo", forKey: "AndrewDictate.engineVersion")
+        XCTAssertEqual(AppSettings(userDefaults: userDefaults).dictationModel, .whisperLargeV3Turbo)
     }
 
     func testRejectsUnsupportedHotkey() {
@@ -77,15 +122,15 @@ final class AppSettingsTests: XCTestCase {
 
     func testActiveEngineVersionCanBeRemovedAndRequiresRepreparation() {
         let activeDecision = ModelRemovalPolicy.decision(
-            of: .v2,
-            activeVersion: .v2
+            of: .parakeetV2,
+            activeVersion: .parakeetV2
         )
         XCTAssertTrue(activeDecision.isAllowed)
         XCTAssertTrue(activeDecision.requiresRepreparation)
 
         let inactiveDecision = ModelRemovalPolicy.decision(
-            of: .v3,
-            activeVersion: .v2
+            of: .parakeetV3,
+            activeVersion: .parakeetV2
         )
         XCTAssertTrue(inactiveDecision.isAllowed)
         XCTAssertFalse(inactiveDecision.requiresRepreparation)
@@ -373,7 +418,7 @@ final class AppSettingsTests: XCTestCase {
 
         let manifest = Data(#"["whisperLargeV3","whisperLargeV3Turbo"]"#.utf8)
         XCTAssertEqual(
-            try JSONDecoder().decode([MeetingModel].self, from: manifest),
+            try JSONDecoder().decode([SpeechModel].self, from: manifest),
             [.whisperLargeV3, .whisperLargeV3Turbo])
     }
 
@@ -388,9 +433,9 @@ final class AppSettingsTests: XCTestCase {
         settings.meetingModel = .parakeetV3
 
         XCTAssertEqual(AppSettings(userDefaults: userDefaults).meetingModel, .parakeetV3)
-        let manifest = try JSONEncoder().encode(MeetingModel.parakeetV3)
-        XCTAssertEqual(try JSONDecoder().decode(MeetingModel.self, from: manifest), .parakeetV3)
-        XCTAssertEqual(MeetingModel.default, .whisperLargeV3)
+        let manifest = try JSONEncoder().encode(SpeechModel.parakeetV3)
+        XCTAssertEqual(try JSONDecoder().decode(SpeechModel.self, from: manifest), .parakeetV3)
+        XCTAssertEqual(SpeechModel.meetingDefault, .whisperLargeV3)
     }
 
     func testUnknownMeetingModelFallsBackToWhisperLarge() {

@@ -7,22 +7,22 @@ enum EngineSwitchPreparationOutcome: Equatable, Sendable {
 
 enum EngineSwitchResolution: Equatable, Sendable {
     case ignored
-    case swapped(from: EngineVersion, to: EngineVersion)
-    case reverted(to: EngineVersion, message: String)
+    case swapped(from: SpeechModel, to: SpeechModel)
+    case reverted(to: SpeechModel, message: String)
 }
 
 struct EngineSwitchState: Equatable, Sendable {
-    private(set) var activeVersion: EngineVersion
-    private(set) var targetVersion: EngineVersion?
+    private(set) var activeVersion: SpeechModel
+    private(set) var targetVersion: SpeechModel?
     private(set) var failureMessage: String?
 
-    init(activeVersion: EngineVersion) {
+    init(activeVersion: SpeechModel) {
         self.activeVersion = activeVersion
     }
 
     @discardableResult
     mutating func beginPreparing(
-        _ version: EngineVersion
+        _ version: SpeechModel
     ) -> Bool {
         failureMessage = nil
         guard version != activeVersion else {
@@ -35,14 +35,14 @@ struct EngineSwitchState: Equatable, Sendable {
     }
 
     @discardableResult
-    mutating func cancelPreparation() -> EngineVersion {
+    mutating func cancelPreparation() -> SpeechModel {
         targetVersion = nil
         failureMessage = nil
         return activeVersion
     }
 
     mutating func resolvePreparation(
-        for version: EngineVersion,
+        for version: SpeechModel,
         outcome: EngineSwitchPreparationOutcome
     ) -> EngineSwitchResolution {
         guard targetVersion == version else {
@@ -62,8 +62,8 @@ struct EngineSwitchState: Equatable, Sendable {
 
         case .failed:
             let message =
-                "couldn't switch — still on parakeet "
-                + activeVersion.rawValue
+                "couldn't switch — still on "
+                + activeVersion.shortName
             failureMessage = message
             return .reverted(
                 to: activeVersion,

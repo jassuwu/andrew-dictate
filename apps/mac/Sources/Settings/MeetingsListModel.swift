@@ -27,7 +27,7 @@ final class MeetingsListModel: ObservableObject {
     /// its transcript.
     @Published private(set) var audio: [String: KeptAudio.Entry] = [:]
     /// the meeting models on this mac, in the order the settings lists them.
-    @Published private(set) var meetingModels: [MeetingModel] = []
+    @Published private(set) var meetingModels: [SpeechModel] = []
     /// what the coordinator is doing that a row has to say, set by the pane
     /// as it changes: a meeting is being recorded, and the transcript being
     /// made again, if one is.
@@ -42,8 +42,8 @@ final class MeetingsListModel: ObservableObject {
     private let countSetAside: () -> Int
     private let retrySetAside: (@MainActor () async -> Void)?
     private let keptAudio: KeptAudio?
-    private let installedModels: () -> Set<MeetingModel>
-    private let startAgain: ((URL, MeetingModel) -> Void)?
+    private let installedModels: () -> Set<SpeechModel>
+    private let startAgain: ((URL, SpeechModel) -> Void)?
     private let now: () -> Date
     private let locale: Locale
     private let timeZone: TimeZone
@@ -58,8 +58,8 @@ final class MeetingsListModel: ObservableObject {
         countSetAside: @escaping () -> Int = { 0 },
         tryAgain: (@MainActor () async -> Void)? = nil,
         keptAudio: KeptAudio? = nil,
-        installedModels: @escaping () -> Set<MeetingModel> = { [] },
-        transcribeAgain: ((URL, MeetingModel) -> Void)? = nil,
+        installedModels: @escaping () -> Set<SpeechModel> = { [] },
+        transcribeAgain: ((URL, SpeechModel) -> Void)? = nil,
         now: @escaping () -> Date = { Date() },
         locale: Locale = .current,
         timeZone: TimeZone = .current,
@@ -110,7 +110,7 @@ final class MeetingsListModel: ObservableObject {
         // a stat of each model's folder, so it is asked when the pane
         // reads the disk and not each time a row is drawn.
         let installed = installedModels()
-        meetingModels = MeetingModel.allCases.filter(installed.contains)
+        meetingModels = SpeechModel.cards(for: .meetings).filter(installed.contains)
     }
 
     // MARK: - recordings that could not be transcribed
@@ -168,7 +168,7 @@ final class MeetingsListModel: ObservableObject {
         /// no audio to read again, or nothing to read it with: no action.
         case none
         /// `transcribe again with ▸` and these models, every one on this mac.
-        case offer([MeetingModel])
+        case offer([SpeechModel])
         /// the action, off, and why in a word or two.
         case wait(String)
         /// this meeting's transcript is being made again.
@@ -186,7 +186,7 @@ final class MeetingsListModel: ObservableObject {
 
     /// the menu's choice. one made when the row would not have offered it —
     /// the menu was open while a meeting started — is not started.
-    func transcribeAgain(_ meeting: MeetingSummary, with model: MeetingModel) {
+    func transcribeAgain(_ meeting: MeetingSummary, with model: SpeechModel) {
         guard case .offer(let models) = again(for: meeting), models.contains(model) else {
             return
         }
