@@ -80,7 +80,7 @@
   }
 
   /* the page is laid out like the screen the app lives on: a menu bar along
-     the top with the badge in it, and the lamp at the bottom centre. */
+     the top with the badge in it. */
   .menubar {
     position: fixed;
     inset: 0 0 auto 0;
@@ -92,37 +92,12 @@
     border-bottom: 1px solid rgb(242 237 224 / 0.06);
   }
 
-  /* the badge wears what the app's badge wears (BadgeMarks): a gold dot
-     while the mic is live for a take, a gold rim while a meeting records,
-     and part of a rim while one gets ready or is written out. */
   .badge {
-    position: relative;
     display: grid;
     place-items: center;
     width: 1.5rem;
     height: 1.5rem;
     border-radius: 0.4rem;
-    border: 1.5px solid transparent;
-  }
-
-  .badge[data-mark="rim"] {
-    border-color: var(--color-gold);
-  }
-
-  .badge[data-mark="part"] {
-    border-color: var(--color-gold) var(--color-gold) transparent transparent;
-  }
-
-  .badge[data-mark="dot"]::after {
-    content: "";
-    position: absolute;
-    right: -1px;
-    bottom: -1px;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--color-gold);
-    box-shadow: 0 0 0 1.5px var(--color-ink);
   }
 
   /* one column for the whole page, the menu bar and the footer too. it
@@ -268,297 +243,42 @@
     color: var(--color-gold-pale);
   }
 
-  /* an agent's window, drawn as an outline: a thread, and a prompt box under it.
-     it copies no real product. everything in it is set in the machine face,
-     because a model either wrote it or is about to read it. */
-  .agent {
-    border-radius: 10px;
-    border: 1px solid rgb(242 237 224 / 0.1);
-    font-family: var(--font-mono);
-    font-size: 0.78rem;
-    line-height: 1.65;
+  /* a loop from the launch film. a little wider than the words, because
+     the film's own type has to read inside it. an outline, like the
+     commands, and no shadow. */
+  .film {
+    width: min(44rem, 100% - 1.5rem);
+    margin: 1rem auto 1.4rem;
   }
 
-  .agent-head {
-    padding: 0.5rem 0.9rem;
-    font-size: 0.7rem;
-    letter-spacing: 0.04em;
-    color: rgb(242 237 224 / 0.45);
-    border-bottom: 1px solid rgb(242 237 224 / 0.06);
-  }
-
-  .agent-thread {
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
-    gap: 0.6rem;
-    min-height: 6rem;
-    padding: 0.9rem 0.9rem 0.3rem;
-  }
-
-  .agent-line {
-    display: flex;
-    gap: 0.7rem;
-  }
-
-  .agent-line::before {
-    flex: none;
-    width: 1ch;
-  }
-
-  .agent-line-sent {
-    color: rgb(242 237 224 / 0.55);
-  }
-
-  .agent-line-sent::before {
-    content: "❯";
-    color: rgb(229 190 98 / 0.55);
-  }
-
-  .agent-line-reply {
-    color: rgb(242 237 224 / 0.9);
-  }
-
-  .agent-line-reply::before {
-    content: "●";
-    color: var(--color-gold);
-  }
-
-  .composer {
-    display: flex;
-    gap: 0.7rem;
-    margin: 0.6rem;
-    min-height: 3rem;
-    padding: 0.6rem 0.8rem;
-    border-radius: 7px;
-    border: 1px solid rgb(242 237 224 / 0.12);
-    background: rgb(242 237 224 / 0.03);
-    color: var(--color-cream);
-  }
-
-  .composer[data-filled] {
-    border-color: rgb(229 190 98 / 0.45);
-  }
-
-  .composer-mark {
-    flex: none;
-    color: rgb(229 190 98 / 0.75);
-  }
-
-  /* the meeting scene: one item, as in the app's menu, and one sheet that is
-     the live transcript while the meeting runs and the file once it stops. */
-  .menu-item {
-    flex: none;
-    padding: 0.35rem 0.75rem;
-    border-radius: 7px;
-    border: 1px solid rgb(242 237 224 / 0.16);
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    color: var(--color-gold-pale);
-    cursor: pointer;
-  }
-
-  .menu-item:hover {
-    border-color: rgb(229 190 98 / 0.5);
-  }
-
-  .menu-item[data-live] {
-    border-color: var(--color-gold);
-  }
-
-  .menu-item[aria-disabled="true"] {
-    border-color: rgb(242 237 224 / 0.16);
-    color: rgb(242 237 224 / 0.45);
-    cursor: default;
-  }
-
-  .sheet {
-    border-radius: 10px;
-    border: 1px solid rgb(242 237 224 / 0.1);
-    font-family: var(--font-mono);
-    font-size: 0.78rem;
-    line-height: 1.65;
-  }
-
-  .sheet-head {
-    padding: 0.5rem 0.9rem;
-    font-size: 0.7rem;
-    letter-spacing: 0.04em;
-    color: rgb(242 237 224 / 0.45);
-    border-bottom: 1px solid rgb(242 237 224 / 0.06);
-  }
-
-  /* the same height as the lines and the file that follow it, so pressing
-     record moves nothing on the page */
-  .sheet-hint {
-    height: 13rem;
-    padding: 0.9rem;
-    color: rgb(242 237 224 / 0.45);
-  }
-
-  .live,
-  .file {
-    height: 13rem;
-    overflow-y: auto;
-    padding: 0.9rem;
-  }
-
-  .live {
-    display: flex;
-    flex-direction: column;
-    gap: 0.55rem;
-    color: rgb(242 237 224 / 0.85);
-  }
-
-  .sheet-hint:not([hidden]) + .live {
-    display: none;
-  }
-
-  .live-stamp {
-    color: rgb(242 237 224 / 0.4);
-  }
-
-  .live-you {
-    color: var(--color-gold-pale);
-  }
-
-  .live-them {
-    color: rgb(242 237 224 / 0.6);
-  }
-
-  .file {
-    /* three hyphens are three hyphens: this is a file, not prose */
-    font-variant-ligatures: none;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    color: rgb(242 237 224 / 0.8);
-  }
-
-  noscript .file {
-    height: auto;
-  }
-
-  .agent-under {
-    min-height: 0;
-    padding: 0 0.2rem;
-    font-family: var(--font-mono);
-    font-size: 0.8125rem;
-    line-height: 1.65;
-  }
-
-  /* the key. a browser cannot see fn, so this one is held by hand. */
-  .key {
-    flex: none;
-    display: grid;
-    place-items: end start;
-    width: 2.75rem;
-    height: 2.75rem;
-    padding: 0.35rem 0.45rem;
-    border-radius: 0.55rem;
-    border: 1px solid rgb(229 190 98 / 0.32);
-    background: linear-gradient(#27272d, #1b1b20);
-    box-shadow:
-      0 2px 0 #050506,
-      inset 0 1px 0 rgb(255 255 255 / 0.06);
-    font-family: var(--font-mono);
-    font-size: 0.8rem;
-    color: var(--color-gold-pale);
-    cursor: pointer;
-    touch-action: none;
-    user-select: none;
-    -webkit-user-select: none;
-    -webkit-touch-callout: none;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  .key[data-down] {
-    transform: translateY(2px);
-    border-color: var(--color-gold);
-    box-shadow:
-      0 0 0 #050506,
-      inset 0 1px 0 rgb(255 255 255 / 0.04);
-  }
-
-  .speech {
-    font-family: var(--font-mono);
-    font-size: 0.78rem;
-    line-height: 1.6;
-    color: rgb(242 237 224 / 0.6);
-  }
-
-  .sound {
-    flex: none;
-    margin-left: auto;
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    line-height: 1.6;
-    color: rgb(242 237 224 / 0.5);
-    cursor: pointer;
-    padding: 0.1rem 0.35rem;
-    border-radius: 0.35rem;
-  }
-
-  .sound:hover {
-    color: var(--color-gold-pale);
-  }
-
-  /* a phone has no space bar to hold */
-  .without-keys {
-    display: none;
-  }
-
-  @media (hover: none) {
-    .with-keys {
-      display: none;
-    }
-
-    .without-keys {
-      display: inline;
-    }
-  }
-
-  .speech [data-said] {
-    color: var(--color-cream);
-  }
-
-  /* the hud: bottom centre of the screen, as in the app, and never in the
-     way of a click. */
-  .hud {
-    position: fixed;
-    left: 50%;
-    bottom: 0;
-    z-index: 40;
-    width: 22rem;
-    height: 7rem;
-    transform: translateX(-50%);
-    pointer-events: none;
-  }
-
-  .hud canvas {
+  .film video {
     display: block;
     width: 100%;
-    height: 100%;
+    height: auto;
+    aspect-ratio: 16 / 9;
+    border-radius: 12px;
+    border: 1px solid rgb(242 237 224 / 0.08);
+    background: var(--color-ink);
+    cursor: zoom-in;
   }
 
-  .pill {
-    position: fixed;
-    left: 50%;
-    bottom: 2rem;
-    z-index: 41;
-    transform: translateX(-50%);
-    padding: 0.5rem 1rem;
-    border-radius: 999px;
-    border: 1px solid rgb(249 233 168 / 0.16);
-    background: rgb(22 22 25 / 0.78);
-    backdrop-filter: blur(20px) saturate(1.5);
-    -webkit-backdrop-filter: blur(20px) saturate(1.5);
-    box-shadow:
-      0 12px 32px rgb(0 0 0 / 0.55),
-      inset 0 1px 0 rgb(255 255 255 / 0.08);
-    font-size: 0.8125rem;
-    color: var(--color-gold-pale);
-    white-space: nowrap;
-    pointer-events: none;
+  .film video[controls] {
+    cursor: auto;
+  }
+
+  .credits {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 1.1rem;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .credits span {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.02em;
+    color: rgb(242 237 224 / 0.42);
   }
 
   @media (prefers-reduced-motion: reduce) {

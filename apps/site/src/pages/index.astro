@@ -1,158 +1,151 @@
 ---
 import Page from "../layouts/Page.astro";
 import Command from "../components/Command.astro";
-import Demo from "../components/Demo.astro";
-import Hud from "../components/Hud.astro";
-import Meeting from "../components/Meeting.astro";
-import { description, install, proof, sizes, topBlock, unblock } from "../copy";
+import Film from "../components/Film.astro";
+import Line from "../components/Line.astro";
+import {
+  credits,
+  description,
+  dictate,
+  install,
+  installLines,
+  intro,
+  licence,
+  meetings,
+  topBlock,
+  unblock,
+  updateLines,
+  upgrade,
+} from "../copy";
 
-const [dictation, meetings, freeFastLocal] = topBlock.pitch;
+const [dictation, meetingsPitch, freeFastLocal] = topBlock.pitch;
 ---
 
 <Page title="andrew dictate · escape the keyboard." description={description}>
   <main>
-    <!-- one column on every screen: the pitch, then the demo right under
-         it, so the thing itself is never a long scroll away. -->
-    <section class="column pb-11 pt-26">
-      <div class="hero-intro">
-        <div class="flex items-center gap-3">
-          <img src="/badge.png" alt="" width="32" height="32" class="rounded-[7px]" />
-          <div class="relative">
-            <div class="name-row flex flex-wrap items-center gap-x-3 gap-y-1">
-              <h1 class="text-[15px] font-medium leading-[1.35] text-gold-pale">
-                <span class="wordmark">{topBlock.name}</span>
-              </h1>
-              <span
-                class="-rotate-[4deg] rounded-[3px] bg-gold px-1 py-[2px] font-mono text-[9px] leading-none tracking-[0.14em] text-ink"
-              >
-                ALPHA
-              </span>
-            </div>
-            <p class="text-[15px] text-cream/50">{topBlock.tagline}</p>
-            <!-- out of the flow, so the hidden joke doesn't push the name off
-                 the badge's centre -->
-            <p class="aside absolute left-0 top-full whitespace-nowrap text-[12px] leading-[1.5]" aria-hidden="true">get it?</p>
+    <!-- the page says what the readme says, in the same order: what it is,
+         the two jobs, each with its loop from the launch film, then install. -->
+    <section class="column pb-12 pt-26">
+      <div class="flex items-center gap-3">
+        <img src="/badge.png" alt="" width="32" height="32" class="rounded-[7px]" />
+        <div class="relative">
+          <div class="name-row flex flex-wrap items-center gap-x-3 gap-y-1">
+            <h1 class="text-[15px] font-medium leading-[1.35] text-gold-pale">
+              <span class="wordmark">{topBlock.name}</span>
+            </h1>
+            <span
+              class="-rotate-[4deg] rounded-[3px] bg-gold px-1 py-[2px] font-mono text-[9px] leading-none tracking-[0.14em] text-ink"
+            >
+              ALPHA
+            </span>
           </div>
+          <p class="text-[15px] text-cream/50">{topBlock.tagline}</p>
+          <!-- out of the flow, so the hidden joke doesn't push the name off
+               the badge's centre -->
+          <p class="aside absolute left-0 top-full whitespace-nowrap text-[12px] leading-[1.5]" aria-hidden="true">get it?</p>
         </div>
-
-        <p class="pitch mt-12">{dictation}</p>
-        <p class="pitch-second mt-1">{meetings}</p>
-        <p class="mt-5 font-mono text-[0.8125rem] tracking-[0.02em] text-gold">{freeFastLocal}</p>
       </div>
 
-      <div class="mt-10">
-        <Demo />
-      </div>
+      <p class="pitch mt-12">{dictation}</p>
+      <p class="pitch-second mt-1">{meetingsPitch}</p>
+      <p class="mt-5 font-mono text-[0.8125rem] tracking-[0.02em] text-gold">{freeFastLocal}</p>
 
-      <div class="hero-why mt-12 space-y-3.5">
-        {
-          topBlock.why.map((line) => {
-            // the claim links to where it is kept
-            const [before, after] = line.split(proof);
-            return after === undefined ? (
-              <p class="prose-line">{line}</p>
-            ) : (
-              // on one line: a break here would put a space before the comma
-              <p class="prose-line">{before}<a class="link" href="/changelog">{proof}</a>{after}</p>
-            );
-          })
-        }
-        <p class="prose-line">{topBlock.models}</p>
+      <Line line={intro} class="prose-line mt-8" />
+    </section>
+
+    <section class="py-10">
+      <h2 class="heading column">dictate.</h2>
+      <Film
+        name="dictate"
+        label="a prompt is typed into an agent and deleted. then fn is held, the same prompt is said, and when the key comes up it lands in the prompt box and the agent starts on it."
+      />
+      <div class="column">
+        <Line line={dictate} />
       </div>
     </section>
 
-    <section class="column py-11">
-      <h2 class="heading">hold <kbd>fn</kbd>, talk, let go.</h2>
-      <div class="mt-4 space-y-3.5">
-        <p class="prose-line">
-          the text shows up where your cursor is, in any app. i mostly use it
-          to talk to agents in a terminal.
-        </p>
-        <p class="prose-line">
-          the model runs on your mac, so there's no wait for a server. it works
-          offline too.
-        </p>
-        <p class="prose-line">
-          if it keeps mishearing a word, add the word to the dictionary. or fix
-          it twice and the app adds it for you.
-        </p>
-        <p class="prose-line">
-          double-tap <kbd>fn</kbd> if you don't want to hold it. <kbd>esc</kbd>
-          throws it away. if your keyboard eats <kbd>fn</kbd>, pick another key in
-          settings.
-        </p>
-        <p class="fact pt-2">{sizes.dictation} to download. english, or 25 languages.</p>
+    <!-- meetings are the smaller half, lower on the page -->
+    <section class="py-10">
+      <h2 class="heading column">meetings.</h2>
+      <Film
+        name="meetings"
+        label="a zoom call. the app asks to record it, and after the hang-up the call becomes a markdown file. later the agent is asked what was agreed, reads the file, and quotes the line."
+      />
+      <div class="column">
+        <Line line={meetings} />
       </div>
     </section>
 
-    <!-- meetings are the smaller half, lower on the page. the scene comes
-         before the facts, as the demo does. -->
-    <section class="column py-11">
-      <h2 class="heading">record a meeting.</h2>
-
+    <section id="install" class="column py-10">
+      <h2 class="heading">install.</h2>
       <div class="mt-4">
-        <Meeting />
+        <Command command={install} label="the install command" />
       </div>
-
-      <div class="mt-8 space-y-3.5">
-        <p class="prose-line">
-          press record in the menu bar. it hears your mic and whatever your mac
-          plays, so it gets both sides of the call.
-        </p>
-        <p class="prose-line">
-          press stop and you get one markdown file that says who said what.
-          point your agent at the folder and ask it what you agreed to.
-        </p>
-        <p class="prose-line">
-          when a call starts, the app asks if you want it recorded. it never
-          starts by itself.
-        </p>
-        <p class="fact pt-2">
-          {sizes.meetings} to download. the call can be in any language whisper
-          knows. the file comes out in english unless you change it.
-        </p>
+      <Line line={installLines.unsigned} class="prose-line mt-6" />
+      <div class="mt-4">
+        <Command command={unblock} label="the unblock command" quiet />
       </div>
+      <Line line={installLines.after} class="prose-line mt-4" />
+      <Line line={installLines.noTerminal} class="fact mt-3" />
     </section>
 
-    <section id="install" class="column py-11">
-      <div>
-        <h2 class="heading">install.</h2>
-
-        <div class="mt-4">
-          <Command command={install} label="the install command" />
-        </div>
-        <p class="fact mt-3">for apple silicon macs on macOS 26. free, MIT.</p>
-
-        <p class="prose-line mt-8">
-          i'm broke, so i didn't pay apple $99 to sign this. run this once, and
-          never again:
-        </p>
-        <div class="mt-4">
-          <Command command={unblock} label="the unblock command" quiet />
-        </div>
-        <p class="prose-line mt-4">
-          the second line opens it. a setup window comes up. after that it lives
-          in your menu bar as the gold badge. there's no dock icon.
-        </p>
-        <p class="fact mt-3">
-          no terminal? open the app, let macOS refuse, then click open anyway in
-          system settings › privacy & security. that button is only there for
-          about an hour.
-        </p>
-
-        <p class="prose-line mt-8">
-          to update, run the same command with{" "}
-          <span class="font-mono text-[0.9em] text-gold-pale">upgrade</span> instead of{" "}
-          <span class="font-mono text-[0.9em] text-gold-pale">install</span>. the menu tells
-          you when there's a new version.
-        </p>
+    <section class="column py-10">
+      <h2 class="heading">update.</h2>
+      <Line line={updateLines.menu} class="prose-line mt-4" />
+      <div class="mt-4">
+        <Command command={upgrade} label="the update command" quiet />
       </div>
+      <Line line={updateLines.check} class="fact mt-3" />
+    </section>
+
+    <section class="column py-10">
+      <h2 class="heading">credits.</h2>
+      <ul class="credits mt-4">
+        {
+          credits.map(([name, href, kind]) => (
+            <li>
+              <a class="link" href={href}>{name}</a> <span>{kind}</span>
+            </li>
+          ))
+        }
+      </ul>
+      <Line line={licence} class="prose-line mt-4" />
     </section>
   </main>
 
-  <Hud />
-
   <script>
-    import "../demo/page";
+    // play a loop while it is on screen, and only then. reduced motion
+    // leaves every loop on its poster with its controls. a click on a
+    // playing loop opens it full size, which a phone needs to read it.
+    const films = document.querySelectorAll<HTMLVideoElement>("[data-film]");
+    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (!still) {
+      const watch = new IntersectionObserver(
+        (entries) => {
+          for (const { target, isIntersecting } of entries) {
+            const film = target as HTMLVideoElement;
+            if (isIntersecting) film.play().catch(() => {});
+            else film.pause();
+          }
+        },
+        { threshold: 0.35 },
+      );
+
+      // full size gets its controls back, so it can be left
+      document.addEventListener("fullscreenchange", () => {
+        films.forEach((film) => (film.controls = document.fullscreenElement === film));
+      });
+
+      films.forEach((film) => {
+        film.controls = false;
+        watch.observe(film);
+        film.addEventListener("click", () => {
+          const big = film as HTMLVideoElement & { webkitEnterFullscreen?: () => void };
+          if (film.requestFullscreen) film.requestFullscreen().catch(() => {});
+          else big.webkitEnterFullscreen?.();
+        });
+      });
+    }
   </script>
 </Page>
