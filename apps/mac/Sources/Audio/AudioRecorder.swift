@@ -423,8 +423,12 @@ private final class CaptureEngine: @unchecked Sendable {
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
         Self.bind(inputNode, to: device)
-        // read after the binding: the format is the bound device's.
-        let format = inputNode.outputFormat(forBus: 0)
+        // read after the binding, and from the input side: that is the
+        // bound device's. the output side still says the rate of the
+        // default output the engine started on, and a mic running at
+        // another rate (speakers at 44.1 kHz, the mic at 48) tapped at
+        // that rate never sends a frame.
+        let format = inputNode.inputFormat(forBus: 0)
 
         guard format.sampleRate > 0, format.channelCount > 0 else {
             throw AudioRecorderError.invalidInputFormat
