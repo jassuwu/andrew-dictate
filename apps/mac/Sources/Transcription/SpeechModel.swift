@@ -31,6 +31,12 @@ enum SpeechModel: String, CaseIterable, Codable, Identifiable, Sendable {
         case meetings
     }
 
+    /// Whose code runs it, and so where its files are and what loads it.
+    enum Family: Sendable {
+        case parakeet
+        case whisper
+    }
+
     static let meetingDefault: SpeechModel = .whisperLargeV3
     static let dictationDefault: SpeechModel = .parakeetV2
 
@@ -55,6 +61,13 @@ enum SpeechModel: String, CaseIterable, Codable, Identifiable, Sendable {
         case "v2": self = .parakeetV2
         case "v3": self = .parakeetV3
         default: self.init(rawValue: value)
+        }
+    }
+
+    var family: Family {
+        switch self {
+        case .parakeetV2, .parakeetV3: .parakeet
+        case .whisperLargeV3, .whisperLargeV3Turbo: .whisper
         }
     }
 

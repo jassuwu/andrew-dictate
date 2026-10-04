@@ -1,14 +1,16 @@
 import Foundation
 import WhisperKit
 
-/// Whisper reading a meeting a stretch at a time: large-v3 translating
-/// into english, turbo writing it as spoken (turbo was never taught to
-/// translate). Each stretch is one decode with no window of its own to
+/// Whisper, loaded, for either job. A meeting hands it a stretch at a
+/// time: large-v3 translating into english, turbo writing it as spoken
+/// (turbo was never taught to translate). Dictation hands it a take, cut at
+/// quiet into pieces no longer than `ceiling`, and never asks it to
+/// translate. Each piece is one decode with no window of its own to
 /// manage, because none is longer than the 30 s whisper reads at once.
 ///
-/// Loaded from the folders setup downloaded the model and its tokenizer to,
-/// and never from the network.
-actor WhisperStretchEngine: StretchEngine {
+/// Loaded from the folders the download put the model and its tokenizer
+/// in, and never from the network.
+actor WhisperModel: StretchEngine {
     enum Failure: Error, LocalizedError {
         case notLoaded
         case notWhisper(SpeechModel)
@@ -23,29 +25,31 @@ actor WhisperStretchEngine: StretchEngine {
         }
     }
 
-    /// The longest stretch it is handed: comfortably inside the 30 s
-    /// whisper reads at once.
+    /// The longest piece it is handed: comfortably inside the 30 s whisper
+    /// reads at once.
     static let ceiling = Duration.seconds(25)
 
     /// How long a load waits for a tokenizer setup never fetched: a 2 mb
     /// file, seconds on any network that answers. A meeting has started
     /// recording by then and its words wait for the model, so this is how
     /// long they wait before the meeting says the model failed and keeps
-    /// its spool. Provisional.
+    /// its spool; a dictation, how long the first take waits. Provisional.
     static let tokenizerPatience = Duration.seconds(30)
 
     private let model: SpeechModel
+    private let translates: Bool
     private var whisper: WhisperKit?
 
-    init(model: SpeechModel) {
+    init(_ model: SpeechModel, translates: Bool) {
         self.model = model
+        self.translates = translates
     }
 
     func load() async throws {
         guard whisper == nil else { return }
         guard let variant = model.whisperVariant,
-              let folder = MeetingEngines.folder(for: model),
-              let tokenizerFolder = MeetingEngines.tokenizerFolder(for: model)
+              let folder = ModelFiles.whisperFolder(for: model),
+              let tokenizerFolder = ModelFiles.tokenizerFolder(for: model)
         else {
             throw Failure.notWhisper(model)
         }
@@ -53,14 +57,14 @@ actor WhisperStretchEngine: StretchEngine {
         // the Hugging Face Hub, in the middle of loading. Read here first.
         //
         // A mac set up before the tokenizer came down with the model has
-        // the model and no tokenizer. That is fetched here, the way setup
-        // would have: failing a meeting over a 2 mb file the download owed
-        // it would be the wrong thing to be strict about. The tokenizer and
-        // nothing else — the speaker split is fetched beside the meeting,
+        // the model and no tokenizer. That is fetched here, the way the
+        // download would have: failing a job over a 2 mb file the download
+        // owed it would be the wrong thing to be strict about. The tokenizer
+        // and nothing else — a meeting's speaker split is fetched beside it,
         // not in front of it — and for `tokenizerPatience` at most. Only
         // when it still cannot be read does the load stop.
         if (try? await AutoTokenizerWrapper.from(modelFolder: tokenizerFolder)) == nil {
-            await MeetingEngines.fetchTokenizer(within: Self.tokenizerPatience)
+            await ModelFiles.fetchTokenizer(within: Self.tokenizerPatience)
             do {
                 _ = try await AutoTokenizerWrapper.from(modelFolder: tokenizerFolder)
             } catch {
@@ -69,7 +73,7 @@ actor WhisperStretchEngine: StretchEngine {
         }
         whisper = try await WhisperKit(WhisperKitConfig(
             model: variant,
-            downloadBase: MeetingEngines.modelDirectory,
+            downloadBase: ModelFiles.whisperDirectory,
             modelFolder: folder.path,
             tokenizerFolder: tokenizerFolder,
             verbose: false,
@@ -90,13 +94,13 @@ actor WhisperStretchEngine: StretchEngine {
         // probability. What whisper makes up over room noise is let go by
         // the transcriber, which does not depend on any of this.
         var options = DecodingOptions()
-        options.task = model.translatesToEnglish ? .translate : .transcribe
+        options.task = translates ? .translate : .transcribe
         options.language = nil
         options.detectLanguage = true
         options.usePrefillPrompt = true
         options.skipSpecialTokens = true
         options.temperature = 0
-        // A stretch is decoded as one window, whole. With timestamps on,
+        // A piece is decoded as one window, whole. With timestamps on,
         // WhisperKit moves on to the last timestamp whisper wrote and
         // decodes whatever is after it as a window of its own, padded out
         // to 30 s with silence — the input whisper makes things up on.
@@ -111,8 +115,8 @@ actor WhisperStretchEngine: StretchEngine {
         // its default `windowClipTime` is 1 s, so a stretch of a second or
         // less is never decoded at all. Measured on large-v3: "yes." (0.6 s)
         // and "okay." (0.5 s) came back empty, and came back whole with
-        // this at zero. A stretch is one window, cut at speech, so there is
-        // no tail of a longer recording to clip.
+        // this at zero. A piece is one window, cut at speech or at quiet,
+        // so there is no tail of a longer recording to clip.
         options.windowClipTime = 0
         let results = try await whisper.transcribe(audioArray: samples, decodeOptions: options)
         return results
@@ -124,7 +128,7 @@ actor WhisperStretchEngine: StretchEngine {
 
     /// Whisper marks a change of speaker with a leading dash, from the
     /// subtitles it learned on. The speaker is already known here: it is the
-    /// side the stretch came from.
+    /// side the stretch came from, or you.
     private static func clean(_ text: String) -> String {
         var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         while t.hasPrefix("-") || t.hasPrefix("–") {

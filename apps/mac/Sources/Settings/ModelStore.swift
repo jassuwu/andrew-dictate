@@ -52,31 +52,24 @@ final class ModelStore {
     }
 
     /// one answer to "is it already here": the settings list asks it per
-    /// version, and prewarm asks it once, before any bytes move, so setup can
+    /// model, and prewarm asks it once, before any bytes move, so setup can
     /// say whether the download it is about to start actually happened.
-    /// meetings ask it too, off the main actor: parakeet for meetings is
-    /// installed exactly when dictation's v3 is.
     nonisolated static func isOnDisk(
         _ version: SpeechModel,
         fileManager: FileManager = .default
     ) -> Bool {
-        guard let directory = modelDirectory(for: version) else {
-            return false
-        }
-        return isNonemptyDirectory(directory, fileManager: fileManager)
+        ModelFiles.isInstalled(version, fileManager: fileManager)
     }
 
     func installedModels() -> [InstalledModel] {
-        SpeechModel.allCases.compactMap { version in
-            guard let directory = Self.modelDirectory(for: version) else {
-                return nil
-            }
+        SpeechModel.allCases.map { version in
             let isDownloaded = Self.isOnDisk(
                 version,
                 fileManager: fileManager
             )
             let size = isDownloaded
-                ? recursiveAllocatedSize(of: directory)
+                ? ModelFiles.folder(for: version)
+                    .map(recursiveAllocatedSize(of:)) ?? 0
                 : 0
 
             return InstalledModel(
@@ -104,12 +97,10 @@ final class ModelStore {
     ) throws -> ModelRemovalDecision {
         let decision = removalDecision(for: version)
 
-        let modelsRoot = MLModelConfigurationUtils
-            .defaultModelsDirectory()
-            .standardizedFileURL
-        guard let directory = Self.modelDirectory(for: version)?
+        guard let directory = ModelFiles.folder(for: version)?
             .standardizedFileURL,
-              directory.deletingLastPathComponent() == modelsRoot else {
+              directory.deletingLastPathComponent()
+                == Self.expectedParent(of: version) else {
             throw ModelStoreError.unsafeModelDirectory
         }
 
@@ -129,26 +120,17 @@ final class ModelStore {
         return decision
     }
 
-    private nonisolated static func modelDirectory(for version: SpeechModel) -> URL? {
-        version.asrModelVersion.map(AsrModels.defaultCacheDirectory(for:))
-    }
-
-    private nonisolated static func isNonemptyDirectory(
-        _ directory: URL,
-        fileManager: FileManager
-    ) -> Bool {
-        var isDirectory: ObjCBool = false
-        guard fileManager.fileExists(
-            atPath: directory.path,
-            isDirectory: &isDirectory
-        ), isDirectory.boolValue else {
-            return false
+    /// the one folder each kind of model may be removed from: anything
+    /// else means a path went wrong, and nothing is deleted.
+    private static func expectedParent(of version: SpeechModel) -> URL? {
+        if version.asrModelVersion != nil {
+            return MLModelConfigurationUtils
+                .defaultModelsDirectory()
+                .standardizedFileURL
         }
-
-        return (try? fileManager.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: nil
-        ).isEmpty) == false
+        return ModelFiles.whisperDirectory
+            .appendingPathComponent("models/argmaxinc/whisperkit-coreml", isDirectory: true)
+            .standardizedFileURL
     }
 
     private func recursiveAllocatedSize(of directory: URL) -> Int64 {
