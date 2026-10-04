@@ -310,6 +310,7 @@ private final class CaptureEngine: @unchecked Sendable {
             throw AudioRecorderError.alreadyRecording
         }
 
+        rebuildIfTheMicChangedRate()
         let (engine, storage) = try built()
         // armed once the storage is taking the take: with pre-roll on the
         // engine is already running, and the first audio it reports must
@@ -423,8 +424,12 @@ private final class CaptureEngine: @unchecked Sendable {
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
         Self.bind(inputNode, to: device)
-        // read after the binding: the format is the bound device's.
-        let format = inputNode.outputFormat(forBus: 0)
+        // read after the binding, and from the input side: that is the
+        // bound device's. the output side still says the rate of the
+        // default output the engine started on, and a mic running at
+        // another rate (speakers at 44.1 kHz, the mic at 48) tapped at
+        // that rate never sends a frame.
+        let format = inputNode.inputFormat(forBus: 0)
 
         guard format.sampleRate > 0, format.channelCount > 0 else {
             throw AudioRecorderError.invalidInputFormat
@@ -581,6 +586,47 @@ private final class CaptureEngine: @unchecked Sendable {
             recorderLogger.notice("audio capture's engine reconfigured itself")
             configurationChangeNotifier.notify()
         }
+    }
+
+    /// a stopped engine was built at the rate its mic ran at then, and
+    /// says nothing when the mic changes rate under it — a call app, audio
+    /// midi setup. tapped at the old rate it never sends a frame, so the
+    /// press would end in no sound. one read of the mic's rate, and a
+    /// fresh engine if it moved. a running one reconfigures out loud and
+    /// is answered there.
+    private func rebuildIfTheMicChangedRate() {
+        guard engine?.isRunning == false,
+              let requestedDevice,
+              let builtAt = inputFormat?.sampleRate,
+              let now = Self.nominalRate(of: requestedDevice),
+              now != builtAt else {
+            return
+        }
+        recorderLogger.notice(
+            "the mic moved from \(builtAt, privacy: .public) Hz to \(now, privacy: .public) Hz; rebuilding the capture"
+        )
+        tearDown()
+    }
+
+    private static func nominalRate(of device: AudioObjectID) -> Float64? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var rate = Float64(0)
+        var size = UInt32(MemoryLayout<Float64>.size)
+        guard AudioObjectGetPropertyData(
+            device,
+            &address,
+            0,
+            nil,
+            &size,
+            &rate
+        ) == noErr, rate > 0 else {
+            return nil
+        }
+        return rate
     }
 
     private func boundDeviceID() -> AudioObjectID? {
