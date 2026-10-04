@@ -55,6 +55,10 @@ to know there's a new version, the app asks dictate.jass.gg once a day and sends
 
 **record a meeting.** press record in the menu bar. your mic is you, and whatever the mac plays is them. press stop and you have one markdown file with the speakers split out. point your agent at the folder. when a call starts, the app asks if you want it recorded. it never starts by itself. settings can run one script of yours after each meeting is saved, with the path to the file. written in english by default, from any language whisper knows.
 
+<p align="center">
+  <img src="apps/mac/art/film-meeting.gif" width="760" alt="a zoom call. the app asks to record it, and after the hang-up the call becomes a markdown file. later the agent is asked what was agreed, reads the file, and quotes the line." />
+</p>
+
 if you want something that this app does not do, fork it. the licence is MIT.
 
 ## credits
