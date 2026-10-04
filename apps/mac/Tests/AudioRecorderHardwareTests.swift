@@ -36,6 +36,39 @@ final class AudioRecorderHardwareTests: XCTestCase {
         await fulfillment(of: [heard], timeout: 1)
     }
 
+    /// a capture serves press after press, built at the rate the mic ran
+    /// at the first time. the mic changing rate between presses — a call
+    /// app, audio midi setup — must not cost the next press.
+    func testAMicThatChangedRateSinceTheLastPressStillSendsFrames() async throws {
+        guard let input = MicDescription.defaultInputDevice(),
+              let inputRate = Self.rate(of: input) else {
+            throw XCTSkip("this mac has no default input")
+        }
+        let recorder = AudioRecorder(preRollEnabled: false)
+        defer { recorder.discard() }
+        let first = expectation(description: "the first press's frames")
+        try await recorder.start { _ in
+            first.fulfill()
+        }
+        await fulfillment(of: [first], timeout: 1)
+        recorder.cancel()
+
+        let otherRate: Float64 = inputRate == 44_100 ? 48_000 : 44_100
+        guard Self.setRate(otherRate, of: input) else {
+            throw XCTSkip("the default input won't run at \(otherRate) Hz")
+        }
+        addTeardownBlock {
+            _ = Self.setRate(inputRate, of: input)
+        }
+
+        let heard = expectation(description: "the next press's frames")
+        try await recorder.start { _ in
+            heard.fulfill()
+        }
+
+        await fulfillment(of: [heard], timeout: 1)
+    }
+
     private static func defaultOutputDevice() -> AudioObjectID? {
         var address = address(kAudioHardwarePropertyDefaultOutputDevice)
         var device = AudioObjectID(kAudioObjectUnknown)
