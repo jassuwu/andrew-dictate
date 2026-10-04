@@ -17,8 +17,13 @@ const all = releases(notes);
   description="what changed in each release of andrew dictate."
   path="/changelog"
 >
-  <main class="column pb-8 pt-26">
-    <h1 class="pitch text-gold-pale">changelog.</h1>
+  <main class="column pb-8 pt-20">
+    <!-- no menu bar, so the way back is the name, where the page starts -->
+    <a href="/" class="flex w-fit items-center gap-2.5 text-[15px] text-cream/60 transition-colors hover:text-gold-pale">
+      <img src="/badge.png" alt="" width="20" height="20" class="rounded-[5px]" />
+      andrew dictate
+    </a>
+    <h1 class="pitch mt-10 text-gold-pale">changelog.</h1>
     <p class="prose-line mt-3">
       every release, newest first. this is where "{proof}" is kept.
     </p>

@@ -39,7 +39,6 @@
     -webkit-text-size-adjust: 100%;
     background: var(--color-ink);
     color-scheme: dark;
-    scroll-padding-top: 4rem;
   }
 
   body {
@@ -79,28 +78,7 @@
     font-family: var(--font-hand);
   }
 
-  /* the page is laid out like the screen the app lives on: a menu bar along
-     the top with the badge in it. */
-  .menubar {
-    position: fixed;
-    inset: 0 0 auto 0;
-    z-index: 30;
-    height: 2.25rem;
-    background: rgb(12 12 14 / 0.72);
-    backdrop-filter: blur(18px) saturate(1.4);
-    -webkit-backdrop-filter: blur(18px) saturate(1.4);
-    border-bottom: 1px solid rgb(242 237 224 / 0.06);
-  }
-
-  .badge {
-    display: grid;
-    place-items: center;
-    width: 1.5rem;
-    height: 1.5rem;
-    border-radius: 0.4rem;
-  }
-
-  /* one column for the whole page, the menu bar and the footer too. it
+  /* one column for the whole page, the footer too. it
      reads like a note, top to bottom. */
   .column {
     width: min(35rem, 100% - 3rem);
