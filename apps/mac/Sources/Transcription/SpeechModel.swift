@@ -107,6 +107,18 @@ enum SpeechModel: String, CaseIterable, Codable, Identifiable, Sendable {
         }
     }
 
+    /// How long a dictation take waits on it before the press stops
+    /// waiting (`TranscriptionDeadline`). Whisper large reads at a few
+    /// times real time on a good day and slower cold, so a take gets its
+    /// own length again; turbo, half that.
+    var dictationPace: TranscriptionDeadline.Pace {
+        switch self {
+        case .parakeetV2, .parakeetV3: .parakeet
+        case .whisperLargeV3Turbo: .init(floor: .seconds(10), perSecondOfAudio: 0.5)
+        case .whisperLargeV3: .init(floor: .seconds(20), perSecondOfAudio: 1)
+        }
+    }
+
     /// One download serves both jobs: a model on disk for dictation is on
     /// disk for meetings.
     var approximateSize: String {

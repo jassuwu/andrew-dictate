@@ -1676,8 +1676,9 @@ final class DictationCoordinator: ObservableObject {
 
         let engine = transcriptionEngine
         let generation = engineGeneration
+        let patience = activeDictationModel.dictationPace.floor
         engineHealthTask = Task { @MainActor [weak self] in
-            let answered = await EngineProbe.answers(engine)
+            let answered = await EngineProbe.answers(engine, within: patience)
             guard let self, !Task.isCancelled else {
                 return
             }
@@ -2120,6 +2121,10 @@ extension DictationCoordinator {
         machine.isPillShowing = { [weak self] in
             guard let self else { return false }
             return self.activeFeedbackGeneration != nil && !self.isQuestionUp
+        }
+        // whisper takes longer than parakeet, and is given longer.
+        machine.transcriptionPace = { [weak self] in
+            self?.activeDictationModel.dictationPace ?? .parakeet
         }
     }
 
