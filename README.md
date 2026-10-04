@@ -1,24 +1,24 @@
 <p align="center">
-  <img src="apps/mac/art/og.png" alt="andrew dictate. dictation for talking to your agents." />
+  <img src="apps/mac/art/og.png" alt="andrew dictate. escape the keyboard. dictation for talking to your agents. dictation, meetings, free, fast, local." />
 </p>
 
-**andrew dictate** · alpha · escape the keyboard.
+a mac app. it's alpha. the words and the formatting aren't always right, and [they get better over time](https://dictate.jass.gg/changelog). there's a demo at [dictate.jass.gg](https://dictate.jass.gg).
 
-dictation for talking to your agents.<br>
-meeting transcripts your agents can read.<br>
-free. fast. local.
+## dictate
 
-i made this to be fast and free. speed is the part that doesn't change.
-
-the words and the formatting aren't always right. [they get better over time](https://dictate.jass.gg/changelog), and i fix mistakes as i see them.
-
-the speech models are parakeet and whisper. this app puts them together and stays out of your way.
+hold `fn`, talk, let go. the text lands where your cursor is, in any app. double-tap `fn` to talk hands-free, and `esc` throws it away. a dictionary fixes a word it keeps mishearing. if your keyboard eats `fn`, pick another key in settings. english, or 25 languages.
 
 <p align="center">
   <img src="apps/mac/art/film-dictate.gif" width="760" alt="a prompt is typed into an agent and deleted. then fn is held, the same prompt is said, and when the key comes up it lands in the prompt box and the agent starts on it." />
 </p>
 
-that's from the launch film. you can hold the key yourself at [dictate.jass.gg](https://dictate.jass.gg).
+## meetings
+
+press record in the menu bar, or say yes when the app asks at the start of a call. it never starts by itself. your mic is you, and whatever the mac plays is them. press stop and you get one markdown file with the speakers split out, in english by default. point your agent at the folder. settings can run a script of yours after each meeting is saved.
+
+<p align="center">
+  <img src="apps/mac/art/film-meeting.gif" width="760" alt="a zoom call. the app asks to record it, and after the hang-up the call becomes a markdown file. later the agent is asked what was agreed, reads the file, and quotes the line." />
+</p>
 
 ## install
 
@@ -26,41 +26,29 @@ that's from the launch film. you can hold the key yourself at [dictate.jass.gg](
 brew install --cask jassuwu/tap/andrew-dictate
 ```
 
-apple silicon, macOS 26.
-
-i'm broke, so i didn't pay apple $99 to sign this. run this once, and never again:
+apple silicon, macOS 26. i'm broke, so i didn't pay apple $99 to sign this. run this once:
 
 ```sh
 xattr -dr com.apple.quarantine "/Applications/Andrew Dictate.app"
 open "/Applications/Andrew Dictate.app"
 ```
 
-the second line opens it. there's no dock icon. a setup window comes up, and after that it lives as the gold badge in your menu bar. setup asks which jobs you want. dictation (~460 mb) is ticked, and meeting recording (~2.9 gb) is there to tick.
+there's no dock icon. it lives in the menu bar as the gold badge. setup asks which jobs you want: dictation (~460 mb), and meetings (~2.9 gb) if you tick it.
 
-no terminal? open the app, let macOS refuse, then click `open anyway` in system settings › privacy & security. that button is only there for about an hour. there's a dmg in [releases](https://github.com/jassuwu/andrew-dictate/releases) too.
+no terminal? open the app, let macOS refuse, then click `open anyway` in system settings › privacy & security within the hour. there's a dmg in [releases](https://github.com/jassuwu/andrew-dictate/releases) too.
 
 ## update
+
+the menu says when there's a new version, and a click updates it. or:
 
 ```sh
 brew upgrade --cask jassuwu/tap/andrew-dictate
 ```
 
-you don't need the `xattr` line again. the menu says when there's a new version, and a click on that line runs the upgrade for you.
-
-to know there's a new version, the app asks dictate.jass.gg once a day and sends only the version it's running. a switch in settings › general stops it.
-
-## what it does
-
-**dictate.** hold `fn`, talk, let go. the text lands where your cursor is, in any app. the model runs on your mac, so there's no wait for a server, and it works offline. a dictionary fixes a mishearing that keeps coming back. double-tap `fn` to talk hands-free. `esc` throws it away. if your keyboard eats `fn`, pick another key in settings. english, or 25 languages.
-
-**record a meeting.** press record in the menu bar. your mic is you, and whatever the mac plays is them. press stop and you have one markdown file with the speakers split out. point your agent at the folder. when a call starts, the app asks if you want it recorded. it never starts by itself. settings can run one script of yours after each meeting is saved, with the path to the file. written in english by default, from any language whisper knows.
-
-<p align="center">
-  <img src="apps/mac/art/film-meeting.gif" width="760" alt="a zoom call. the app asks to record it, and after the hang-up the call becomes a markdown file. later the agent is asked what was agreed, reads the file, and quotes the line." />
-</p>
-
-if you want something that this app does not do, fork it. the licence is MIT.
+to know, the app sends its version to dictate.jass.gg once a day, and nothing else. settings › general turns that off.
 
 ## credits
 
-[FluidAudio](https://github.com/FluidInference/FluidAudio) (apache-2.0) · [parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) (cc-by-4.0) · [WhisperKit](https://github.com/argmaxinc/WhisperKit) (mit) · [whisper](https://github.com/openai/whisper) (mit) · [whistle](https://huggingface.co/Cactus-Compute/whistle) (apache-2.0) · [silero vad](https://github.com/snakers4/silero-vad) (mit) · [mit](LICENSE) · made by [jass](https://jass.gg)
+[FluidAudio](https://github.com/FluidInference/FluidAudio) (apache-2.0) · [parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) (cc-by-4.0) · [WhisperKit](https://github.com/argmaxinc/WhisperKit) (mit) · [whisper](https://github.com/openai/whisper) (mit) · [whistle](https://huggingface.co/Cactus-Compute/whistle) (apache-2.0) · [silero vad](https://github.com/snakers4/silero-vad) (mit)
+
+[mit](LICENSE), so fork it if you want it different. made by [jass](https://jass.gg).
