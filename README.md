@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="apps/mac/art/og.png" alt="andrew dictate. escape the keyboard. dictation for talking to your agents. dictation, meetings, free, fast, local." />
+  <img src="apps/mac/art/og.png" alt="andrew dictate. escape the keyboard. dictation for talking to your agents. meeting transcripts your agents can read. free. fast. local." />
 </p>
 
 a mac app. it's alpha. the words and the formatting aren't always right, and [they get better over time](https://dictate.jass.gg/changelog).
@@ -9,7 +9,7 @@ a mac app. it's alpha. the words and the formatting aren't always right, and [th
 hold `fn`, talk, let go. the text lands where your cursor is, in any app. double-tap `fn` to talk hands-free, and `esc` throws it away. a dictionary fixes a word it keeps mishearing. if your keyboard eats `fn`, pick another key in settings. english, or 25 languages.
 
 <p align="center">
-  <img src="apps/mac/art/film-dictate.gif" width="760" alt="a prompt is typed into an agent and deleted. then fn is held, the same prompt is said, and when the key comes up it lands in the prompt box and the agent starts on it." />
+  <img src="apps/mac/art/demo-dictate.gif" width="760" alt="a prompt is typed into an agent and deleted. then fn is held, the same prompt is said, and when the key comes up it lands in the prompt box and the agent starts on it." />
 </p>
 
 ## meetings
@@ -17,7 +17,7 @@ hold `fn`, talk, let go. the text lands where your cursor is, in any app. double
 press record in the menu bar, or say yes when the app asks at the start of a call. it never starts by itself. your mic is you, and whatever the mac plays is them. press stop and you get one markdown file with the speakers split out, in english by default. point your agent at the folder. settings can run a script of yours after each meeting is saved.
 
 <p align="center">
-  <img src="apps/mac/art/film-meeting.gif" width="760" alt="a zoom call. the app asks to record it, and after the hang-up the call becomes a markdown file. later the agent is asked what was agreed, reads the file, and quotes the line." />
+  <img src="apps/mac/art/demo-meeting.gif" width="760" alt="a zoom call. the app asks to record it, and after the hang-up the call becomes a markdown file. later the agent is asked what was agreed, reads the file, and quotes the line." />
 </p>
 
 ## install
@@ -39,7 +39,7 @@ no brew? get the dmg from [releases](https://github.com/jassuwu/andrew-dictate/r
 
 ## update
 
-the menu says when there's a new version, and a click updates it. or:
+the menu says when there's a new version. if you installed with brew, a click on it updates the app. or:
 
 ```sh
 brew upgrade --cask jassuwu/tap/andrew-dictate

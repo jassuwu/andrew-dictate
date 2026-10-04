@@ -67,7 +67,7 @@ describe("the page", () => {
     for (const line of lines) expect(page).toContain(plain(line));
   });
 
-  test("has no scripted demo left in it", () => {
+  test("has no hold-the-key scene left in it", () => {
     expect(page).not.toMatch(/hold the key|press record here|try it/i);
   });
 });
@@ -96,7 +96,7 @@ describe("the readme", () => {
     const source = readFileSync(join(repo, "README.md"), "utf8");
     const alt = source.match(/^<p[^>]*>\s*<img src="apps\/mac\/art\/og\.png" alt="([^"]+)"/)?.[1];
     expect(alt).toBeDefined();
-    for (const line of [topBlock.name, topBlock.tagline, topBlock.pitch[0]]) {
+    for (const line of [topBlock.name, topBlock.tagline, ...topBlock.pitch]) {
       expect(alt).toContain(line);
     }
   });

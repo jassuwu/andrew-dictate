@@ -47,7 +47,7 @@ export const installLines = {
 } as const;
 
 export const updateLines = {
-  menu: "the menu says when there's a new version, and a click updates it. or:",
+  menu: "the menu says when there's a new version. if you installed with brew, a click on it updates the app. or:",
   check:
     "to know, the app sends its version to dictate.jass.gg once a day, and nothing else. settings › general turns that off.",
 } as const;
