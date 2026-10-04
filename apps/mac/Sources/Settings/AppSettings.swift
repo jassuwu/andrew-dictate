@@ -322,6 +322,34 @@ final class AppSettings: ObservableObject {
     }
 
     private static let dictationWantedKey = "AndrewDictate.dictationWanted"
+
+    /// whether this mac set meetings up: the meeting model came down for
+    /// meetings, or a meeting was recorded. not the same as the meeting
+    /// model being on disk, now that dictation can download any model: a
+    /// mac that only dictates with whisper is not set up for meetings, and
+    /// is not asked about its calls.
+    @Published var meetingsSetUp: Bool {
+        didSet {
+            guard meetingsSetUp != oldValue else {
+                return
+            }
+            userDefaults.set(meetingsSetUp, forKey: Self.meetingsSetUpKey)
+        }
+    }
+
+    /// the first launch of a build that knows `meetingsSetUp` works it out
+    /// once from the disk, the way every build before it did — before
+    /// dictation could download a meeting model — and writes the answer
+    /// down either way, so it is never worked out again.
+    func settleMeetingsSetUp(_ wasSetUp: () -> Bool) {
+        guard userDefaults.object(forKey: Self.meetingsSetUpKey) == nil else {
+            return
+        }
+        meetingsSetUp = wasSetUp()
+        userDefaults.set(meetingsSetUp, forKey: Self.meetingsSetUpKey)
+    }
+
+    private static let meetingsSetUpKey = "AndrewDictate.meetingsSetUp"
     private static let meetingModelKey = "AndrewDictate.meetingModel"
     private static let meetingShortcutKey = "AndrewDictate.meetingShortcut"
     private static let meetingsFolderKey = "AndrewDictate.meetingsFolder"
@@ -430,6 +458,7 @@ final class AppSettings: ObservableObject {
         dictationWanted = userDefaults.object(forKey: Self.dictationWantedKey) == nil
             ? true
             : userDefaults.bool(forKey: Self.dictationWantedKey)
+        meetingsSetUp = userDefaults.bool(forKey: Self.meetingsSetUpKey)
         meetingModel = userDefaults
             .string(forKey: Self.meetingModelKey)
             .flatMap(SpeechModel.init(rawValue:)) ?? .meetingDefault

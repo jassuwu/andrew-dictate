@@ -2256,6 +2256,12 @@ extension DictationCoordinator {
             flashNotice("finish dictating first", aboutAMeeting: true)
             return
         }
+        // recording one is setting meetings up, whichever job downloaded
+        // the model it records with.
+        if !settings.meetingsSetUp {
+            settings.meetingsSetUp = true
+            watchForCallsIfSetUp()
+        }
         liveTranscript.clear()
         liveTranscript.elapsed = .zero
         Task { [notifier = meetings.notifier] in
@@ -2429,6 +2435,9 @@ extension DictationCoordinator {
         // hour. five seconds of head start keeps it off the dictation
         // model's prewarm, so the first fn press is not slower for it. the
         // number is a guess, like the rest of MeetingThresholds.
+        settings.settleMeetingsSetUp { [settings] in
+            ModelFiles.isInstalled(settings.meetingModel)
+        }
         meetings.launch(
             setUp: hasMeetingsSetUp,
             watchesForCalls: chosenMeetingModelIsInstalled,
@@ -2449,11 +2458,11 @@ extension DictationCoordinator {
             .store(in: &settingsCancellables)
     }
 
-    /// the meeting model settings chose, on disk. not any meeting model:
-    /// parakeet is on disk for anyone who dictates with v3, and a mac that
+    /// meetings set up, and the meeting model settings chose on disk. not
+    /// the model alone: dictation can download any model, and a mac that
     /// only dictates is not set up for meetings.
     private var chosenMeetingModelIsInstalled: Bool {
-        ModelFiles.isInstalled(settings.meetingModel)
+        settings.meetingsSetUp && ModelFiles.isInstalled(settings.meetingModel)
     }
 
     /// the chosen meeting model on disk, or a folder somebody chose. both
@@ -2496,8 +2505,15 @@ extension DictationCoordinator {
     /// the chosen one is on this mac, so `record` can start what it offers.
     /// a meeting that records keeps its watch, so the end of its call is
     /// still asked about.
+    /// a download removed in settings may be the meeting model: a call is
+    /// then no longer offered, since `record` could not start it.
+    func modelWasRemoved() {
+        watchForCallsIfSetUp()
+    }
+
     private func watchForCallsIfSetUp(_ model: SpeechModel? = nil) {
-        if ModelFiles.isInstalled(model ?? settings.meetingModel) {
+        if settings.meetingsSetUp,
+           ModelFiles.isInstalled(model ?? settings.meetingModel) {
             meetings.watchForCalls()
         } else if !meetings.isRecording {
             meetings.stopWatchingForCalls()
@@ -2749,6 +2765,7 @@ extension DictationCoordinator {
         }
         meetingModelDownloads[model] = nil
         if ok {
+            settings.meetingsSetUp = true
             watchForCallsIfSetUp()
         }
         return ok

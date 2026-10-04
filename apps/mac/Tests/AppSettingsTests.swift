@@ -38,6 +38,35 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(reloaded.totalWordsDictated, 3)
     }
 
+    /// a mac's first launch of this build works out once, from the disk,
+    /// whether meetings were set up, and never again: after it, dictation
+    /// downloading whisper large must not make it so.
+    func testMeetingsSetUpIsWorkedOutOnceAndWrittenDown() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let first = AppSettings(userDefaults: userDefaults)
+        first.settleMeetingsSetUp { false }
+        XCTAssertFalse(first.meetingsSetUp)
+
+        let later = AppSettings(userDefaults: userDefaults)
+        later.settleMeetingsSetUp { true }
+        XCTAssertFalse(later.meetingsSetUp, "asked once, the answer stands")
+
+        later.meetingsSetUp = true
+        XCTAssertTrue(AppSettings(userDefaults: userDefaults).meetingsSetUp)
+    }
+
+    func testAMacThatHadItsMeetingModelIsSetUpForMeetings() {
+        let (userDefaults, suiteName) = makeUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppSettings(userDefaults: userDefaults)
+        settings.settleMeetingsSetUp { true }
+
+        XCTAssertTrue(AppSettings(userDefaults: userDefaults).meetingsSetUp)
+    }
+
     /// before dictation could pick whisper, its two choices were stored as
     /// "v2" and "v3": an update keeps the pick it finds.
     func testADictationModelStoredByAnOlderBuildIsStillThePick() {

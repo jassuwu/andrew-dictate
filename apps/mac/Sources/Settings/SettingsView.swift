@@ -1067,6 +1067,7 @@ struct SettingsView: View {
         }
 
         refreshInstalledModels()
+        coordinator.modelWasRemoved()
 
         guard decision.requiresRepreparation else {
             return
