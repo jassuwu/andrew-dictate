@@ -55,7 +55,7 @@ final class DictationCoordinator: ObservableObject {
     /// way whether 460 mb came down or the folder was already full, and setup
     /// has to say which of the two the user just lived through.
     @Published private(set) var engineModelWasOnDisk = false
-    @Published private(set) var activeEngineVersion: EngineVersion
+    @Published private(set) var activeDictationModel: SpeechModel
     @Published private(set) var engineSwitchMessage: String?
     @Published private(set) var hotkeyDetection: HotkeyDetection?
     /// what actually reached the page, cleaned.
@@ -242,7 +242,7 @@ final class DictationCoordinator: ObservableObject {
     private var engineSwitchState: EngineSwitchState
     private var enginePreparationRequested: Bool
     private var settingsCancellables: Set<AnyCancellable> = []
-    private var isApplyingEngineVersionSetting = false
+    private var isApplyingDictationModelSetting = false
     private var onboardingWindowController: OnboardingWindowController?
     private var isOnboardingPresented: Bool
     private var hotkeyDetectionSequence = 0
@@ -327,9 +327,9 @@ final class DictationCoordinator: ObservableObject {
 
     init(settings: AppSettings = .shared) {
         self.settings = settings
-        activeEngineVersion = settings.engineVersion
+        activeDictationModel = settings.dictationModel
         engineSwitchState = EngineSwitchState(
-            activeVersion: settings.engineVersion
+            activeVersion: settings.dictationModel
         )
         isOnboardingPresented = !settings.onboardingDismissed
         enginePreparationRequested = EnginePrewarmGate.shouldPrewarmAtLaunch(
@@ -339,7 +339,7 @@ final class DictationCoordinator: ObservableObject {
         let dictionaryStore = DictionaryStore()
         self.dictionaryStore = dictionaryStore
         let transcriptionEngine = ParakeetEngine(
-            version: settings.engineVersion
+            version: settings.dictationModel
         )
         self.transcriptionEngine = transcriptionEngine
         let inserter = PasteInserter()
@@ -445,12 +445,12 @@ final class DictationCoordinator: ObservableObject {
             }
             .store(in: &settingsCancellables)
 
-        settings.$engineVersion
+        settings.$dictationModel
             .dropFirst()
             .removeDuplicates()
             .sink { [weak self] version in
                 guard let self,
-                      !self.isApplyingEngineVersionSetting else {
+                      !self.isApplyingDictationModelSetting else {
                     return
                 }
                 self.replaceEngine(with: version)
@@ -773,7 +773,7 @@ final class DictationCoordinator: ObservableObject {
     func copyTimings() {
         let report = timelineStore.formattedReport(
             conditions: .current(
-                engine: activeEngineVersion.displayName
+                engine: activeDictationModel.displayName
             )
         )
         Task { [inserter] in
@@ -791,7 +791,7 @@ final class DictationCoordinator: ObservableObject {
         let system = ProcessInfo.processInfo.operatingSystemVersion
         let appVersion = info["CFBundleShortVersionString"] as? String ?? "?"
         let build = info["CFBundleVersion"] as? String ?? "?"
-        let engine = activeEngineVersion.rawValue
+        let engine = activeDictationModel.rawValue
         let store = pressLog
         let meetingStore = meetingRecords
         pressLogQueue.async {
@@ -980,9 +980,9 @@ final class DictationCoordinator: ObservableObject {
     }
 
     func prepareForActiveModelRemoval(
-        _ version: EngineVersion
+        _ version: SpeechModel
     ) async {
-        guard version == activeEngineVersion else {
+        guard version == activeDictationModel else {
             return
         }
 
@@ -1002,7 +1002,7 @@ final class DictationCoordinator: ObservableObject {
         enginePreparationState = .notStarted
         engineSwitchMessage = nil
         _ = engineSwitchState.cancelPreparation()
-        applyEngineVersionSetting(activeEngineVersion)
+        applyDictationModelSetting(activeDictationModel)
 
         await transcriptionEngine.unloadModels()
     }
@@ -1073,7 +1073,7 @@ final class DictationCoordinator: ObservableObject {
         captureSlot.prepare()
     }
 
-    private func replaceEngine(with version: EngineVersion) {
+    private func replaceEngine(with version: SpeechModel) {
         engineHealthTask?.cancel()
         engineHealthTask = nil
         engineSwitchMessage = nil
@@ -1083,7 +1083,7 @@ final class DictationCoordinator: ObservableObject {
             enginePrewarmTask = nil
             engineSwapTask?.cancel()
             engineSwapTask = nil
-            activeEngineVersion = version
+            activeDictationModel = version
             engineSwitchState = EngineSwitchState(
                 activeVersion: version
             )
@@ -1126,7 +1126,7 @@ final class DictationCoordinator: ObservableObject {
         enginePrewarmTask?.cancel()
         engineGeneration += 1
         let generation = engineGeneration
-        let version = activeEngineVersion
+        let version = activeDictationModel
         isPrewarmed = false
         engineSwitchMessage = nil
         // asked before a byte moves, so the answer cannot be fooled by how
@@ -1196,7 +1196,7 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
-    private func startEngineSwap(to version: EngineVersion) {
+    private func startEngineSwap(to version: SpeechModel) {
         engineSwapTask?.cancel()
         enginePrewarmTask?.cancel()
         enginePrewarmTask = nil
@@ -1263,7 +1263,7 @@ final class DictationCoordinator: ObservableObject {
                     return
                 }
 
-                self.activeEngineVersion = activeVersion
+                self.activeDictationModel = activeVersion
                 self.enginePreparationState = .ready
                 self.engineSwitchMessage = nil
                 self.engineSwapTask = nil
@@ -1292,7 +1292,7 @@ final class DictationCoordinator: ObservableObject {
                 self.enginePreparationState = .ready
                 self.engineSwitchMessage = message
                 self.engineSwapTask = nil
-                self.applyEngineVersionSetting(settingVersion)
+                self.applyDictationModelSetting(settingVersion)
                 self.engineLogger.error(
                     "engine swap failed target=\(version.rawValue): \(error.localizedDescription)"
                 )
@@ -1301,14 +1301,14 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
-    private func applyEngineVersionSetting(_ version: EngineVersion) {
-        guard settings.engineVersion != version else {
+    private func applyDictationModelSetting(_ version: SpeechModel) {
+        guard settings.dictationModel != version else {
             return
         }
 
-        isApplyingEngineVersionSetting = true
-        settings.engineVersion = version
-        isApplyingEngineVersionSetting = false
+        isApplyingDictationModelSetting = true
+        settings.dictationModel = version
+        isApplyingDictationModelSetting = false
     }
 
     private func applyPreparationUpdate(
@@ -1803,7 +1803,7 @@ final class DictationCoordinator: ObservableObject {
             // read before the switch: `.notStarted` starts the download,
             // which sets `.downloading(progress: 0)` synchronously and would
             // turn the press that priced it into "0%".
-            let size = activeEngineVersion.approximateSize.dropFirst()
+            let size = activeDictationModel.approximateSize.dropFirst()
             let notice = enginePreparationState.pressedEarlyNotice(
                 downloadSize: "about \(size)"
             )
@@ -1819,7 +1819,7 @@ final class DictationCoordinator: ObservableObject {
                     flashNotice(
                         """
                         getting the speech model — \
-                        \(settings.engineVersion.approximateSize), once
+                        \(settings.dictationModel.approximateSize), once
                         """,
                         duration: 2
                     )
@@ -1891,7 +1891,7 @@ final class DictationCoordinator: ObservableObject {
                     ),
                     heard: heard,
                     inserted: inserted,
-                    engine: activeEngineVersion.rawValue,
+                    engine: activeDictationModel.rawValue,
                     keyUpToInsertedMilliseconds:
                         timeline.durations.keyUpToCompletion.inMilliseconds
                 )

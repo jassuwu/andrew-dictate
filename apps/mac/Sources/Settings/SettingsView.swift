@@ -46,7 +46,7 @@ struct SettingsView: View {
     @State private var selectedTab: SettingsTab = .dictation
     @State private var historySegment: HistorySegment = .dictations
     @State private var installedModels: [InstalledModel] = []
-    @State private var pendingModelRemoval: EngineVersion?
+    @State private var pendingModelRemoval: SpeechModel?
     @State private var pendingArchiveWipe = false
     @State private var modelStoreMessage: String?
     @State private var showsRemoval = false
@@ -86,7 +86,7 @@ struct SettingsView: View {
             wrappedValue: coordinator.dictionaryStore
         )
         modelStore = ModelStore(
-            activeVersion: { coordinator.activeEngineVersion }
+            activeVersion: { coordinator.activeDictationModel }
         )
     }
 
@@ -190,12 +190,12 @@ struct SettingsView: View {
                 .frame(minHeight: 500)
         }
         .alert(item: $pendingModelRemoval) { version in
-            let isActive = version == coordinator.activeEngineVersion
+            let isActive = version == coordinator.activeDictationModel
             return Alert(
                 title: Text(
                     isActive
                         ? "remove the active model?"
-                        : "remove parakeet \(version.rawValue) download?"
+                        : "remove the \(version.shortName) download?"
                 ),
                 message: Text(
                     isActive
@@ -389,8 +389,8 @@ struct SettingsView: View {
             // the picker is the list (ADR 0039): the tradeoff is the
             // decision, so it goes on the control.
             ModelChooserView(
-                selection: $settings.engineVersion,
-                active: coordinator.activeEngineVersion,
+                selection: $settings.dictationModel,
+                active: coordinator.activeDictationModel,
                 preparation: coordinator.enginePreparationState,
                 installed: installedModels,
                 onRetry: { coordinator.retryEnginePrewarm() }
@@ -1038,7 +1038,7 @@ struct SettingsView: View {
     /// the filesystem goes first. unloading the engine up front meant a
     /// failed delete left you with nothing loaded, the model still on
     /// disk, and no idea why — so a failure here must cost nothing.
-    private func removeDownload(_ version: EngineVersion) {
+    private func removeDownload(_ version: SpeechModel) {
         let decision: ModelRemovalDecision
         do {
             decision = try modelStore.remove(version)

@@ -8,21 +8,21 @@ import SwiftUI
 /// `ModelCardView`, shared with meetings, which picks its own model from
 /// the same cards (ADR 0040).
 struct ModelChooserView: View {
-    @Binding var selection: EngineVersion
-    let active: EngineVersion
+    @Binding var selection: SpeechModel
+    let active: SpeechModel
     let preparation: EnginePreparationState
     let installed: [InstalledModel]
     let onRetry: () -> Void
 
     var body: some View {
         ModelCardGrid {
-            ForEach(EngineVersion.allCases) { version in
+            ForEach(SpeechModel.cards(for: .dictation)) { version in
                 card(for: version)
             }
         }
     }
 
-    private func card(for version: EngineVersion) -> some View {
+    private func card(for version: SpeechModel) -> some View {
         let isChosen = version == selection
         let isActive = version == active
         let downloaded = installed.first { $0.version == version }
@@ -33,7 +33,7 @@ struct ModelChooserView: View {
 
         return ModelCardView(
             name: version.shortName,
-            trait: version.trait,
+            trait: version.trait(for: .dictation),
             size: size,
             state: stateLine(
                 isChosen: isChosen,
@@ -82,30 +82,5 @@ struct ModelChooserView: View {
             }
         }
         return downloaded ? "on this mac" : "downloads when chosen"
-    }
-}
-
-extension EngineVersion {
-    var shortName: String {
-        switch self {
-        case .v2: "parakeet v2"
-        case .v3: "parakeet v3"
-        }
-    }
-
-    /// the one-line reason you'd pick it — the tradeoff *is* the decision,
-    /// so it goes on the control, not in a popup you learn from after.
-    var trait: String {
-        switch self {
-        case .v2: "english · fastest"
-        case .v3: "25 languages · a touch slower"
-        }
-    }
-
-    var approximateSize: String {
-        switch self {
-        case .v2: "~460 mb"
-        case .v3: "~470 mb"
-        }
     }
 }

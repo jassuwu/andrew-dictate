@@ -14,14 +14,14 @@ actor ParakeetEngine: TranscriptionEngine {
     /// a fresh gate, so a call wedged in the old one holds up nothing on
     /// the new one.
     private struct ActiveManager {
-        let version: EngineVersion
+        let version: SpeechModel
         let manager: AsrManager
         let gate: SerialGate
     }
 
     private struct Preparation {
         let identifier: Int
-        let version: EngineVersion
+        let version: SpeechModel
         let task: Task<AsrManager, Error>
     }
 
@@ -32,14 +32,14 @@ actor ParakeetEngine: TranscriptionEngine {
     /// take will use.
     private static let wakeSilence = [Float](repeating: 0, count: 8_000)
     private var nextPreparationIdentifier = 0
-    private var fallbackVersion: EngineVersion
+    private var fallbackVersion: SpeechModel
 
-    init(version: EngineVersion) {
+    init(version: SpeechModel) {
         fallbackVersion = version
     }
 
     func selectVersionForBlockingPreparation(
-        _ version: EngineVersion
+        _ version: SpeechModel
     ) {
         fallbackVersion = version
     }
@@ -61,7 +61,7 @@ actor ParakeetEngine: TranscriptionEngine {
     }
 
     func prepareAndSwap(
-        to version: EngineVersion,
+        to version: SpeechModel,
         progressHandler: (
             @Sendable (TranscriptionPreparationUpdate) -> Void
         )?
@@ -143,7 +143,7 @@ actor ParakeetEngine: TranscriptionEngine {
     @discardableResult
     private func activate(
         _ manager: AsrManager,
-        version: EngineVersion
+        version: SpeechModel
     ) -> ActiveManager {
         if let activeManager, activeManager.manager === manager {
             return activeManager
@@ -170,7 +170,7 @@ actor ParakeetEngine: TranscriptionEngine {
     }
 
     private func preparedManager(
-        for version: EngineVersion,
+        for version: SpeechModel,
         progressHandler: (
             @Sendable (TranscriptionPreparationUpdate) -> Void
         )?
@@ -224,12 +224,14 @@ actor ParakeetEngine: TranscriptionEngine {
     }
 
     private static func makePrewarmedManager(
-        version: EngineVersion,
+        version: SpeechModel,
         progressHandler: (
             @Sendable (TranscriptionPreparationUpdate) -> Void
         )?
     ) async throws -> AsrManager {
-        let asrVersion = version.asrModelVersion
+        guard let asrVersion = version.asrModelVersion else {
+            throw SpeechModel.NotParakeet(model: version)
+        }
         transcriptionLogger.notice("prewarming transcription engine")
         transcriptionLogger.notice(
             "downloading \(version.displayName) models if needed"
@@ -272,13 +274,21 @@ actor ParakeetEngine: TranscriptionEngine {
     }
 }
 
-extension EngineVersion {
-    var asrModelVersion: AsrModelVersion {
+extension SpeechModel {
+    /// FluidAudio's name for a parakeet model; nil for every other.
+    var asrModelVersion: AsrModelVersion? {
         switch self {
-        case .v2:
-            .v2
-        case .v3:
-            .v3
+        case .parakeetV2: .v2
+        case .parakeetV3: .v3
+        case .whisperLargeV3, .whisperLargeV3Turbo: nil
+        }
+    }
+
+    struct NotParakeet: Error, LocalizedError {
+        let model: SpeechModel
+
+        var errorDescription: String? {
+            "\(model.shortName) is not a parakeet model"
         }
     }
 }

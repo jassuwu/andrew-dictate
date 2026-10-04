@@ -1,31 +1,62 @@
 import Foundation
 
-/// Which speech model listens to meetings — ADR 0040.
+/// Every speech model the app can listen with, for either job — ADR 0040.
 ///
-/// Separate from `EngineVersion` on purpose: dictation and meetings are two
-/// jobs with opposite needs (200 ms in English versus every language, no
-/// hurry), and each picks its own model from the same cards.
+/// Dictation and meetings each keep their own pick from these, because the
+/// two jobs want opposite things: 200 ms in English versus every language
+/// and no hurry. Any model can do either job; the card says what it costs
+/// in the job it is shown for, rather than leaving it to be discovered.
 ///
-/// The spike settled the default: large-v3 turbo was fine-tuned on
+/// The spike settled the meeting default: large-v3 turbo was fine-tuned on
 /// transcription only and silently ignores the translate task, so the one
 /// model that can turn a Hindi colleague into English is the full large-v3.
 /// Turbo stays as the "as spoken" choice for someone who reads the language.
 ///
-/// Parakeet is the third and fourth card: dictation's v3 and v2, by far the
-/// fastest and already on disk for anyone who dictates with them. v3 knows
+/// Parakeet v2 and v3 are the dictation models, by far the fastest. v3 knows
 /// English and the European languages, v2 English alone; anything else,
 /// Hindi included, comes out as confident nonsense, so neither is ever the
-/// default.
+/// meeting default.
 ///
 /// Stored by raw value in settings and in every spool's manifest: a case is
 /// never renamed.
-enum SpeechModel: String, CaseIterable, Codable, Sendable {
+enum SpeechModel: String, CaseIterable, Codable, Identifiable, Sendable {
     case whisperLargeV3
     case whisperLargeV3Turbo
     case parakeetV3
     case parakeetV2
 
-    static let `default`: SpeechModel = .whisperLargeV3
+    /// The two places a model is picked for.
+    enum Job: Sendable {
+        case dictation
+        case meetings
+    }
+
+    static let meetingDefault: SpeechModel = .whisperLargeV3
+    static let dictationDefault: SpeechModel = .parakeetV2
+
+    /// The cards a job shows, in the order it shows them: the job's own
+    /// choice first. Meetings keep the order they always had, which is
+    /// also the order `record with ▸` lists them in.
+    static func cards(for job: Job) -> [SpeechModel] {
+        switch job {
+        case .dictation: [.parakeetV2, .parakeetV3]
+        case .meetings: allCases
+        }
+    }
+
+    var id: Self {
+        self
+    }
+
+    /// Dictation's setting, as any build ever stored it. Before dictation
+    /// could pick whisper its two choices were stored as "v2" and "v3".
+    init?(storedDictationValue value: String) {
+        switch value {
+        case "v2": self = .parakeetV2
+        case "v3": self = .parakeetV3
+        default: self.init(rawValue: value)
+        }
+    }
 
     var shortName: String {
         switch self {
@@ -36,29 +67,46 @@ enum SpeechModel: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    /// The consequence, stated on the card rather than discovered later.
-    var trait: String {
+    /// The long name: what VoiceOver reads and what a timing report says
+    /// it was measured on.
+    var displayName: String {
         switch self {
-        case .whisperLargeV3: "every language, in english"
-        case .whisperLargeV3Turbo: "every language, as spoken · faster"
-        case .parakeetV3: "fast · english and european languages only · anything else comes out as nonsense"
-        case .parakeetV2: "fastest · english only · anything else comes out as nonsense"
+        case .whisperLargeV3: "whisper large-v3"
+        case .whisperLargeV3Turbo: "whisper large-v3 turbo"
+        case .parakeetV3: "parakeet v3 (multilingual)"
+        case .parakeetV2: "parakeet v2 (english)"
         }
     }
 
+    /// The one-line reason you'd pick it for this job — the tradeoff *is*
+    /// the decision, so it goes on the card, not in a popup you learn from
+    /// after.
+    func trait(for job: Job) -> String {
+        switch (job, self) {
+        case (.dictation, .parakeetV2): "english · fastest"
+        case (.dictation, .parakeetV3): "25 languages · a touch slower"
+        case (.dictation, .whisperLargeV3Turbo): "every language · slower than parakeet"
+        case (.dictation, .whisperLargeV3): "every language · slowest, you'll wait for it"
+        case (.meetings, .whisperLargeV3): "every language, in english"
+        case (.meetings, .whisperLargeV3Turbo): "every language, as spoken · faster"
+        case (.meetings, .parakeetV3): "fast · english and european languages only · anything else comes out as nonsense"
+        case (.meetings, .parakeetV2): "fastest · english only · anything else comes out as nonsense"
+        }
+    }
+
+    /// One download serves both jobs: a model on disk for dictation is on
+    /// disk for meetings.
     var approximateSize: String {
         switch self {
         case .whisperLargeV3: "~2.9 gb"
         case .whisperLargeV3Turbo: "~1.5 gb"
-        // the same file dictation's v3 reads: nothing more to fetch for
-        // anyone who already dictates with it.
-        case .parakeetV3: "~470 mb, shared with dictation's v3"
-        case .parakeetV2: "~460 mb, shared with dictation's v2"
+        case .parakeetV3: "~470 mb"
+        case .parakeetV2: "~460 mb"
         }
     }
 
     /// WhisperKit's name for it, and the folder it lands in. Parakeet is
-    /// not whisper's, and lives where dictation keeps it.
+    /// not whisper's, and lives in FluidAudio's folder.
     var whisperVariant: String? {
         switch self {
         case .whisperLargeV3: "openai_whisper-large-v3"
@@ -67,9 +115,10 @@ enum SpeechModel: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    /// Whether the far side comes out as English. Turbo cannot translate, so
-    /// it transcribes — Hindi arrives in Devanagari, Hinglish keeps its
-    /// English words in Latin script. Parakeet has no translate task at all.
+    /// Whether a meeting's far side comes out as English. Turbo cannot
+    /// translate, so it transcribes — Hindi arrives in Devanagari, Hinglish
+    /// keeps its English words in Latin script. Parakeet has no translate
+    /// task at all. Dictation never translates: you are the one talking.
     var translatesToEnglish: Bool {
         self == .whisperLargeV3
     }

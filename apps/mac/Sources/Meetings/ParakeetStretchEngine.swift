@@ -22,8 +22,8 @@ struct ParakeetStretchEngine: StretchEngine {
 
     private let engine: ParakeetEngine
 
-    init(version: EngineVersion) {
-        engine = ParakeetEngine(version: version)
+    init(model: SpeechModel) {
+        engine = ParakeetEngine(version: model)
     }
 
     func load() async throws {

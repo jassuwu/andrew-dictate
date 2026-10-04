@@ -5,24 +5,6 @@ func dictatedWordCount(in transcript: String) -> Int {
     transcript.split(whereSeparator: { $0.isWhitespace }).count
 }
 
-enum EngineVersion: String, CaseIterable, Identifiable, Sendable {
-    case v2
-    case v3
-
-    var id: Self {
-        self
-    }
-
-    var displayName: String {
-        switch self {
-        case .v2:
-            "parakeet v2 (english)"
-        case .v3:
-            "parakeet v3 (multilingual)"
-        }
-    }
-}
-
 struct ModelRemovalDecision: Equatable, Sendable {
     let isAllowed: Bool
     let requiresRepreparation: Bool
@@ -30,8 +12,8 @@ struct ModelRemovalDecision: Equatable, Sendable {
 
 enum ModelRemovalPolicy {
     static func decision(
-        of version: EngineVersion,
-        activeVersion: EngineVersion
+        of version: SpeechModel,
+        activeVersion: SpeechModel
     ) -> ModelRemovalDecision {
         ModelRemovalDecision(
             isAllowed: true,
@@ -104,14 +86,17 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    @Published var engineVersion: EngineVersion {
+    /// the model dictation listens with. picked from the same cards the
+    /// meeting model is, and stored apart from it: the two jobs want
+    /// opposite things (ADR 0040).
+    @Published var dictationModel: SpeechModel {
         didSet {
-            guard engineVersion != oldValue else {
+            guard dictationModel != oldValue else {
                 return
             }
             userDefaults.set(
-                engineVersion.rawValue,
-                forKey: Self.engineVersionKey
+                dictationModel.rawValue,
+                forKey: Self.dictationModelKey
             )
         }
     }
@@ -316,7 +301,9 @@ final class AppSettings: ObservableObject {
     private static let soundFeedbackKey =
         "AndrewDictate.soundFeedbackEnabled"
     private static let keepDictationsKey = "AndrewDictate.keepDictations"
-    private static let engineVersionKey = "AndrewDictate.engineVersion"
+    /// the key from when dictation only had parakeet to pick from, kept so
+    /// the pick survives the update.
+    private static let dictationModelKey = "AndrewDictate.engineVersion"
     private static let cleanupEnabledKey = "AndrewDictate.cleanupEnabled"
     private static let dismissedSuggestionsKey =
         "AndrewDictate.dismissedSuggestions"
@@ -421,9 +408,10 @@ final class AppSettings: ObservableObject {
             : userDefaults.bool(forKey: Self.keepDictationsKey)
         dictationHotkey = userDefaults.hotkeyBinding()
 
-        engineVersion = userDefaults
-            .string(forKey: Self.engineVersionKey)
-            .flatMap(EngineVersion.init(rawValue:)) ?? .v2
+        dictationModel = userDefaults
+            .string(forKey: Self.dictationModelKey)
+            .flatMap(SpeechModel.init(storedDictationValue:))
+            ?? .dictationDefault
         // unset means on: cleanup has always shipped enabled.
         cleanupEnabled = userDefaults.object(
             forKey: Self.cleanupEnabledKey
@@ -444,7 +432,7 @@ final class AppSettings: ObservableObject {
             : userDefaults.bool(forKey: Self.dictationWantedKey)
         meetingModel = userDefaults
             .string(forKey: Self.meetingModelKey)
-            .flatMap(SpeechModel.init(rawValue:)) ?? .default
+            .flatMap(SpeechModel.init(rawValue:)) ?? .meetingDefault
         // a value this build cannot read is no shortcut, never a crash; nor
         // is one it would refuse, kept from a build that took it (⌘W).
         let dictationKey = userDefaults.hotkeyBinding()

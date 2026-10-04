@@ -14,7 +14,7 @@ struct MeetingModelChooserView: View {
 
     var body: some View {
         ModelCardGrid {
-            ForEach(SpeechModel.allCases, id: \.self) { model in
+            ForEach(SpeechModel.cards(for: .meetings)) { model in
                 card(for: model)
             }
         }
@@ -26,7 +26,7 @@ struct MeetingModelChooserView: View {
 
         return ModelCardView(
             name: model.shortName,
-            trait: model.trait,
+            trait: model.trait(for: .meetings),
             size: model.approximateSize,
             state: stateLine(
                 isChosen: isChosen,

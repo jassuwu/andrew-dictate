@@ -639,7 +639,7 @@ struct OnboardingView: View {
                     ProgressView(value: bounded(progress))
                         .progressViewStyle(.linear)
                         .frame(width: 240)
-                    Text("about \(coordinator.settings.engineVersion.approximateSize.dropFirst()). carry on — this keeps going.")
+                    Text("about \(coordinator.settings.dictationModel.approximateSize.dropFirst()). carry on — this keeps going.")
                         .font(.caption)
                         .foregroundStyle(BrandUI.textSecondary)
                 }

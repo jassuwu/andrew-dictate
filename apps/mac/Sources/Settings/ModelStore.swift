@@ -2,25 +2,25 @@ import FluidAudio
 import Foundation
 
 struct InstalledModel: Identifiable, Equatable {
-    let version: EngineVersion
+    let version: SpeechModel
     let isDownloaded: Bool
     let onDiskSize: String
 
-    var id: EngineVersion {
+    var id: SpeechModel {
         version
     }
 }
 
 enum ModelStoreError: LocalizedError {
     case unsafeModelDirectory
-    case removalFailed(EngineVersion, underlying: Error)
+    case removalFailed(SpeechModel, underlying: Error)
 
     var errorDescription: String? {
         switch self {
         case .unsafeModelDirectory:
             "the model download location is invalid"
         case let .removalFailed(version, underlying):
-            "couldn’t remove parakeet \(version.rawValue) — "
+            "couldn’t remove \(version.shortName) — "
                 + Self.reason(underlying)
         }
     }
@@ -41,11 +41,11 @@ enum ModelStoreError: LocalizedError {
 @MainActor
 final class ModelStore {
     private let fileManager: FileManager
-    private let activeVersion: @MainActor () -> EngineVersion
+    private let activeVersion: @MainActor () -> SpeechModel
 
     init(
         fileManager: FileManager = .default,
-        activeVersion: @escaping @MainActor () -> EngineVersion
+        activeVersion: @escaping @MainActor () -> SpeechModel
     ) {
         self.fileManager = fileManager
         self.activeVersion = activeVersion
@@ -57,18 +57,20 @@ final class ModelStore {
     /// meetings ask it too, off the main actor: parakeet for meetings is
     /// installed exactly when dictation's v3 is.
     nonisolated static func isOnDisk(
-        _ version: EngineVersion,
+        _ version: SpeechModel,
         fileManager: FileManager = .default
     ) -> Bool {
-        isNonemptyDirectory(
-            modelDirectory(for: version),
-            fileManager: fileManager
-        )
+        guard let directory = modelDirectory(for: version) else {
+            return false
+        }
+        return isNonemptyDirectory(directory, fileManager: fileManager)
     }
 
     func installedModels() -> [InstalledModel] {
-        EngineVersion.allCases.map { version in
-            let directory = Self.modelDirectory(for: version)
+        SpeechModel.allCases.compactMap { version in
+            guard let directory = Self.modelDirectory(for: version) else {
+                return nil
+            }
             let isDownloaded = Self.isOnDisk(
                 version,
                 fileManager: fileManager
@@ -86,7 +88,7 @@ final class ModelStore {
     }
 
     func removalDecision(
-        for version: EngineVersion
+        for version: SpeechModel
     ) -> ModelRemovalDecision {
         ModelRemovalPolicy.decision(
             of: version,
@@ -98,17 +100,16 @@ final class ModelStore {
     /// only handed back once the bytes are actually gone — discarding
     /// it would mean tearing down for a delete that never happened.
     func remove(
-        _ version: EngineVersion
+        _ version: SpeechModel
     ) throws -> ModelRemovalDecision {
         let decision = removalDecision(for: version)
 
         let modelsRoot = MLModelConfigurationUtils
             .defaultModelsDirectory()
             .standardizedFileURL
-        let directory = Self.modelDirectory(for: version)
-            .standardizedFileURL
-
-        guard directory.deletingLastPathComponent() == modelsRoot else {
+        guard let directory = Self.modelDirectory(for: version)?
+            .standardizedFileURL,
+              directory.deletingLastPathComponent() == modelsRoot else {
             throw ModelStoreError.unsafeModelDirectory
         }
 
@@ -128,8 +129,8 @@ final class ModelStore {
         return decision
     }
 
-    private nonisolated static func modelDirectory(for version: EngineVersion) -> URL {
-        AsrModels.defaultCacheDirectory(for: version.asrModelVersion)
+    private nonisolated static func modelDirectory(for version: SpeechModel) -> URL? {
+        version.asrModelVersion.map(AsrModels.defaultCacheDirectory(for:))
     }
 
     private nonisolated static func isNonemptyDirectory(

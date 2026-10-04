@@ -26,19 +26,10 @@ enum MeetingEngines {
             .appendingPathComponent(variant, isDirectory: true)
     }
 
-    /// Dictation's name for a parakeet model; nil for whisper's.
-    static func parakeetVersion(of model: SpeechModel) -> EngineVersion? {
-        switch model {
-        case .parakeetV2: .v2
-        case .parakeetV3: .v3
-        case .whisperLargeV3, .whisperLargeV3Turbo: nil
-        }
-    }
-
     static func isInstalled(_ model: SpeechModel) -> Bool {
-        if let version = parakeetVersion(of: model) {
+        if model.asrModelVersion != nil {
             // the one answer dictation's settings and setup use.
-            return ModelStore.isOnDisk(version)
+            return ModelStore.isOnDisk(model)
         }
         guard let folder = folder(for: model) else { return false }
         let decoder = folder.appendingPathComponent("TextDecoder.mlmodelc")
@@ -65,8 +56,8 @@ enum MeetingEngines {
         if !FluidDiarizer.isOnDisk {
             Task.detached(priority: .utility) { await fetchSpeakerSplit() }
         }
-        if let version = parakeetVersion(of: model) {
-            return stretches(ParakeetStretchEngine(version: version), ceiling: ParakeetStretchEngine.ceiling)
+        if model.asrModelVersion != nil {
+            return stretches(ParakeetStretchEngine(model: model), ceiling: ParakeetStretchEngine.ceiling)
         }
         return stretches(WhisperStretchEngine(model: model), ceiling: WhisperStretchEngine.ceiling)
     }
@@ -172,10 +163,10 @@ enum MeetingEngines {
                     downloadBase: modelDirectory,
                     progressCallback: { progress($0.fractionCompleted) }
                 )
-            } else if let version = parakeetVersion(of: model) {
+            } else if let version = model.asrModelVersion {
                 // the call dictation's engine makes, to the folder it reads.
                 _ = try await AsrModels.download(
-                    version: version.asrModelVersion,
+                    version: version,
                     progressHandler: { progress($0.fractionCompleted) }
                 )
             }

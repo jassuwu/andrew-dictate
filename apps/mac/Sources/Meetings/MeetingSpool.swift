@@ -311,7 +311,7 @@ struct MeetingSpool: Sendable {
         let made = (attributes?[.creationDate] as? Date)
             ?? (attributes?[.modificationDate] as? Date)
             ?? Date()
-        let model = SpeechModel.default
+        let model = SpeechModel.meetingDefault
         return Manifest(
             app: MeetingCoordinator.unnamed, started: made, engine: model.rawValue,
             model: model)

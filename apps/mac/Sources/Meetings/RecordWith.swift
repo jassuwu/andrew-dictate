@@ -16,7 +16,7 @@ enum RecordWith {
         isRecording: Bool
     ) -> [Choice] {
         guard !isRecording else { return [] }
-        return SpeechModel.allCases
+        return SpeechModel.cards(for: .meetings)
             .filter { installed.contains($0) && $0 != defaultModel }
             .map { Choice(model: $0, title: $0.shortName) }
     }

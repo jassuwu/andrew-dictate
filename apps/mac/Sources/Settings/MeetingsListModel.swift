@@ -110,7 +110,7 @@ final class MeetingsListModel: ObservableObject {
         // a stat of each model's folder, so it is asked when the pane
         // reads the disk and not each time a row is drawn.
         let installed = installedModels()
-        meetingModels = SpeechModel.allCases.filter(installed.contains)
+        meetingModels = SpeechModel.cards(for: .meetings).filter(installed.contains)
     }
 
     // MARK: - recordings that could not be transcribed
