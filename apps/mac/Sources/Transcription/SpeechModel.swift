@@ -45,7 +45,7 @@ enum SpeechModel: String, CaseIterable, Codable, Identifiable, Sendable {
     /// also the order `record with ▸` lists them in.
     static func cards(for job: Job) -> [SpeechModel] {
         switch job {
-        case .dictation: [.parakeetV2, .parakeetV3]
+        case .dictation: [.parakeetV2, .parakeetV3, .whisperLargeV3Turbo, .whisperLargeV3]
         case .meetings: allCases
         }
     }
