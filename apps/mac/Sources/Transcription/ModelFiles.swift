@@ -59,10 +59,19 @@ enum ModelFiles {
     /// tokenizer comes down after it, so that nothing waits on the network
     /// when the model loads; the tokenizer failing is logged and is not the
     /// model failing: the load fetches it again, or says it cannot.
+    ///
+    /// Dictation asks this at every launch. Parakeet's answer comes from
+    /// the disk, but WhisperKit's asks the network even for a model it has,
+    /// so whisper on disk is not asked about at all: a mac offline still
+    /// dictates. Its load fetches a tokenizer that never came.
     static func download(
         _ model: SpeechModel,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws {
+        if model.family == .whisper, isInstalled(model) {
+            progress(1)
+            return
+        }
         if let variant = model.whisperVariant {
             _ = try await WhisperKit.download(
                 variant: variant,
