@@ -26,6 +26,7 @@ struct MeetingModelChooserView: View {
 
         return ModelCardView(
             name: model.shortName,
+            badge: model.badge,
             trait: model.trait(for: .meetings),
             size: model.approximateSize,
             state: stateLine(

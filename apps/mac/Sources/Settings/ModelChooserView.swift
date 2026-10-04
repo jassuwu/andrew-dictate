@@ -33,6 +33,7 @@ struct ModelChooserView: View {
 
         return ModelCardView(
             name: version.shortName,
+            badge: version.badge,
             trait: version.trait(for: .dictation),
             size: size,
             state: stateLine(

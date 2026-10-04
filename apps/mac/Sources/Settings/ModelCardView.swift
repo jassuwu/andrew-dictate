@@ -9,6 +9,9 @@ import SwiftUI
 /// hide the consequence: `trait` and `state` are not optional.
 struct ModelCardView<Footer: View>: View {
     let name: String
+    /// a word beside the name for a model that is new or unproven, so the
+    /// card says so before you pick it rather than after.
+    let badge: String?
     let trait: String
     /// on disk if it is there, the estimate if it isn't.
     let size: String
@@ -26,6 +29,7 @@ struct ModelCardView<Footer: View>: View {
 
     init(
         name: String,
+        badge: String? = nil,
         trait: String,
         size: String,
         state: String,
@@ -37,6 +41,7 @@ struct ModelCardView<Footer: View>: View {
         @ViewBuilder footer: @escaping () -> Footer
     ) {
         self.name = name
+        self.badge = badge
         self.trait = trait
         self.size = size
         self.state = state
@@ -65,9 +70,24 @@ struct ModelCardView<Footer: View>: View {
                     .padding(.top, 2)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(name)
-                        .font(BrandUI.bodyFont.weight(.medium))
-                        .foregroundStyle(BrandUI.textPrimary)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(name)
+                            .font(BrandUI.bodyFont.weight(.medium))
+                            .foregroundStyle(BrandUI.textPrimary)
+
+                        // an outline, not a fill: the filled pill is
+                        // `active`, and this must never read as it.
+                        if let badge {
+                            Text(badge)
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(BrandUI.textSecondary)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .overlay {
+                                    Capsule().stroke(BrandUI.textSecondary.opacity(0.5), lineWidth: 1)
+                                }
+                        }
+                    }
 
                     Text(trait)
                         .font(.caption)
@@ -122,7 +142,7 @@ struct ModelCardView<Footer: View>: View {
             .contentShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(accessibilityName)
+        .accessibilityLabel(badge.map { "\(accessibilityName), \($0)" } ?? accessibilityName)
         .accessibilityAddTraits(isChosen ? .isSelected : [])
     }
 }
@@ -130,6 +150,7 @@ struct ModelCardView<Footer: View>: View {
 extension ModelCardView where Footer == EmptyView {
     init(
         name: String,
+        badge: String? = nil,
         trait: String,
         size: String,
         state: String,
@@ -141,6 +162,7 @@ extension ModelCardView where Footer == EmptyView {
     ) {
         self.init(
             name: name,
+            badge: badge,
             trait: trait,
             size: size,
             state: state,
