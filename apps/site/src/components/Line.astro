@@ -1,0 +1,26 @@
+---
+// one line of the shared copy (src/copy.ts), set for the page: a key in
+// backticks is a keycap, other backticks are code, links are links.
+import { pieces } from "../markup";
+
+interface Props {
+  line: string;
+  class?: string;
+}
+
+const { line, class: className = "prose-line" } = Astro.props;
+---
+
+<p class={className}>{
+  pieces(line).map((piece) =>
+    piece.kind === "key" ? (
+      <kbd>{piece.text}</kbd>
+    ) : piece.kind === "code" ? (
+      <span class="note-code">{piece.text}</span>
+    ) : piece.kind === "link" ? (
+      <a class="link" href={piece.href}>{piece.text}</a>
+    ) : (
+      piece.text
+    ),
+  )
+}</p>
