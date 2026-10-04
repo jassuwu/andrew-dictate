@@ -25,82 +25,78 @@ const [dictation, meetingsPitch, freeFastLocal] = topBlock.pitch;
   <main>
     <!-- the page says what the readme says, in the same order: what it is,
          the two jobs, each with its demo loop from the launch video, then install. -->
-    <section class="column pb-12 pt-20">
+    <section class="column pb-10 pt-16 sm:pb-14 sm:pt-24">
       <div class="flex items-center gap-3">
-        <img src="/badge.png" alt="" width="32" height="32" class="rounded-[7px]" />
+        <img src="/badge.png" alt="" width="36" height="36" class="rounded-[8px]" />
         <div class="relative">
           <div class="name-row flex flex-wrap items-center gap-x-3 gap-y-1">
-            <h1 class="text-[15px] font-medium leading-[1.35] text-gold-pale">
+            <h1 class="text-[17px] font-medium leading-[1.35] text-gold-pale">
               <span class="wordmark">{topBlock.name}</span>
             </h1>
             <span
-              class="-rotate-[4deg] rounded-[3px] bg-gold px-1 py-[2px] font-mono text-[9px] leading-none tracking-[0.14em] text-ink"
+              class="-rotate-[4deg] rounded-[3px] bg-gold px-1 py-[2px] font-mono text-[10px] leading-none tracking-[0.14em] text-ink"
             >
               ALPHA
             </span>
           </div>
-          <p class="text-[15px] text-cream/50">{topBlock.tagline}</p>
+          <p class="text-[17px] text-cream/50">{topBlock.tagline}</p>
           <!-- out of the flow, so the hidden joke doesn't push the name off
                the badge's centre -->
-          <p class="aside absolute left-0 top-full whitespace-nowrap text-[12px] leading-[1.5]" aria-hidden="true">get it?</p>
+          <p class="aside absolute left-0 top-full whitespace-nowrap text-[13px] leading-[1.5]" aria-hidden="true">get it?</p>
         </div>
       </div>
 
-      <p class="pitch mt-12">{dictation}</p>
+      <p class="pitch mt-14">{dictation}</p>
       <p class="pitch-second mt-1">{meetingsPitch}</p>
-      <p class="mt-5 font-mono text-[0.8125rem] tracking-[0.02em] text-gold">{freeFastLocal}</p>
+      <p class="mt-6 font-mono text-[0.9rem] tracking-[0.02em] text-gold">{freeFastLocal}</p>
 
-      <Line line={intro} class="prose-line mt-8" />
+      <Line line={intro} class="prose-line mt-10" />
     </section>
 
-    <section class="py-10">
-      <h2 class="heading column">dictate.</h2>
+    <section class="column py-10 sm:py-14">
+      <h2 class="heading">dictate.</h2>
       <Demo
         name="dictate"
         label="a prompt is typed into an agent and deleted. then fn is held, the same prompt is said, and when the key comes up it lands in the prompt box and the agent starts on it."
       />
-      <div class="column">
-        <Line line={dictate} />
-      </div>
+      <Line line={dictate} />
     </section>
 
     <!-- meetings are the smaller half, lower on the page -->
-    <section class="py-10">
-      <h2 class="heading column">meetings.</h2>
+    <section class="column py-10 sm:py-14">
+      <h2 class="heading">meetings.</h2>
       <Demo
         name="meetings"
         label="a zoom call. the app asks to record it, and after the hang-up the call becomes a markdown file. later the agent is asked what was agreed, reads the file, and quotes the line."
       />
-      <div class="column">
-        <Line line={meetings} />
-      </div>
+      <Line line={meetings} />
     </section>
 
-    <section id="install" class="column py-10">
+    <section id="install" class="column py-10 sm:py-14">
       <h2 class="heading">install.</h2>
-      <div class="mt-4">
+      <div class="mt-5">
         <Command command={install} label="the install command" />
       </div>
-      <Line line={installLines.unsigned} class="prose-line mt-6" />
-      <div class="mt-4">
+      <Line line={installLines.unsigned} class="prose-line mt-8" />
+      <div class="mt-5">
         <Command command={unblock} label="the unblock command" quiet />
       </div>
-      <Line line={installLines.after} class="prose-line mt-4" />
-      <Line line={installLines.noBrew} class="fact mt-3" />
+      <Line line={installLines.after} class="prose-line mt-5" />
+      <Line line={installLines.noBrew} class="fact mt-4" />
     </section>
 
-    <section class="column py-10">
+    <section class="column py-10 sm:py-14">
       <h2 class="heading">update.</h2>
-      <Line line={updateLines.menu} class="prose-line mt-4" />
-      <div class="mt-4">
+      <Line line={updateLines.menu} class="prose-line mt-5" />
+      <div class="mt-5">
         <Command command={upgrade} label="the update command" quiet />
       </div>
-      <Line line={updateLines.check} class="fact mt-3" />
+      <Line line={updateLines.check} class="fact mt-4" />
     </section>
 
-    <section class="column py-10">
+    <section class="column py-10 sm:py-14">
       <h2 class="heading">credits.</h2>
-      <ul class="credits mt-4">
+      <ul class="credits mt-5">
         {
           credits.map(([name, href, kind]) => (
             <li>
@@ -109,7 +105,7 @@ const [dictation, meetingsPitch, freeFastLocal] = topBlock.pitch;
           ))
         }
       </ul>
-      <Line line={licence} class="prose-line mt-4" />
+      <Line line={licence} class="prose-line mt-5" />
     </section>
   </main>
 
