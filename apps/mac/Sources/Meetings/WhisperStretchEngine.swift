@@ -11,8 +11,8 @@ import WhisperKit
 actor WhisperStretchEngine: StretchEngine {
     enum Failure: Error, LocalizedError {
         case notLoaded
-        case notWhisper(MeetingModel)
-        case noTokenizer(MeetingModel)
+        case notWhisper(SpeechModel)
+        case noTokenizer(SpeechModel)
 
         var errorDescription: String? {
             switch self {
@@ -34,10 +34,10 @@ actor WhisperStretchEngine: StretchEngine {
     /// its spool. Provisional.
     static let tokenizerPatience = Duration.seconds(30)
 
-    private let model: MeetingModel
+    private let model: SpeechModel
     private var whisper: WhisperKit?
 
-    init(model: MeetingModel) {
+    init(model: SpeechModel) {
         self.model = model
     }
 

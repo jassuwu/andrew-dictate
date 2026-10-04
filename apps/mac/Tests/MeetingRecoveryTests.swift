@@ -551,7 +551,7 @@ final class MeetingRecoveryTests: XCTestCase {
     /// A spool a crash left behind, with a second of audio on it.
     @discardableResult
     private func orphan(
-        _ app: String, started: Date, model: MeetingModel = .whisperLargeV3Turbo
+        _ app: String, started: Date, model: SpeechModel = .whisperLargeV3Turbo
     ) async throws -> MeetingSpool.Handle {
         let handle = try spool.begin(.init(
             app: app, started: started, engine: model.rawValue, model: model))
@@ -662,26 +662,26 @@ private final class Reads: @unchecked Sendable {
 /// this mac: asking for one that is not throws what the app's own does.
 private final class FakeTranscribers: @unchecked Sendable {
     private let lock = NSLock()
-    private var _installed = Set(MeetingModel.allCases)
-    private var _made: [MeetingModel] = []
+    private var _installed = Set(SpeechModel.allCases)
+    private var _made: [SpeechModel] = []
     /// the one every transcriber made is.
     let transcriber = FakeTranscriber()
 
     /// The models that are on this mac, from now on.
-    var installed: Set<MeetingModel> {
+    var installed: Set<SpeechModel> {
         get { lock.withLock { _installed } }
         set { lock.withLock { _installed = newValue } }
     }
 
     /// The model each transcriber that was made was made for, in order.
-    var made: [MeetingModel] {
+    var made: [SpeechModel] {
         lock.withLock { _made }
     }
 
-    func next(for model: MeetingModel) throws -> FakeTranscriber {
+    func next(for model: SpeechModel) throws -> FakeTranscriber {
         try lock.withLock {
             guard _installed.contains(model) else {
-                throw MeetingModel.NotInstalled(model: model)
+                throw SpeechModel.NotInstalled(model: model)
             }
             _made.append(model)
             return transcriber

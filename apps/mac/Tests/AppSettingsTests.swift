@@ -373,7 +373,7 @@ final class AppSettingsTests: XCTestCase {
 
         let manifest = Data(#"["whisperLargeV3","whisperLargeV3Turbo"]"#.utf8)
         XCTAssertEqual(
-            try JSONDecoder().decode([MeetingModel].self, from: manifest),
+            try JSONDecoder().decode([SpeechModel].self, from: manifest),
             [.whisperLargeV3, .whisperLargeV3Turbo])
     }
 
@@ -388,9 +388,9 @@ final class AppSettingsTests: XCTestCase {
         settings.meetingModel = .parakeetV3
 
         XCTAssertEqual(AppSettings(userDefaults: userDefaults).meetingModel, .parakeetV3)
-        let manifest = try JSONEncoder().encode(MeetingModel.parakeetV3)
-        XCTAssertEqual(try JSONDecoder().decode(MeetingModel.self, from: manifest), .parakeetV3)
-        XCTAssertEqual(MeetingModel.default, .whisperLargeV3)
+        let manifest = try JSONEncoder().encode(SpeechModel.parakeetV3)
+        XCTAssertEqual(try JSONDecoder().decode(SpeechModel.self, from: manifest), .parakeetV3)
+        XCTAssertEqual(SpeechModel.default, .whisperLargeV3)
     }
 
     func testUnknownMeetingModelFallsBackToWhisperLarge() {

@@ -8,19 +8,19 @@ import SwiftUI
 /// `installed` and `downloading` default to empty: the view draws whatever
 /// it is told, and the coordinator is the only thing that knows the truth.
 struct MeetingModelChooserView: View {
-    @Binding var selection: MeetingModel
-    var installed: Set<MeetingModel> = []
-    var downloading: [MeetingModel: Double] = [:]
+    @Binding var selection: SpeechModel
+    var installed: Set<SpeechModel> = []
+    var downloading: [SpeechModel: Double] = [:]
 
     var body: some View {
         ModelCardGrid {
-            ForEach(MeetingModel.allCases, id: \.self) { model in
+            ForEach(SpeechModel.allCases, id: \.self) { model in
                 card(for: model)
             }
         }
     }
 
-    private func card(for model: MeetingModel) -> some View {
+    private func card(for model: SpeechModel) -> some View {
         let isChosen = model == selection
         let isDownloaded = installed.contains(model)
 
@@ -62,7 +62,7 @@ struct MeetingModelChooserView: View {
 }
 
 #Preview("meeting model") {
-    @Previewable @State var selection: MeetingModel = .whisperLargeV3
+    @Previewable @State var selection: SpeechModel = .whisperLargeV3
 
     return MeetingModelChooserView(
         selection: $selection,

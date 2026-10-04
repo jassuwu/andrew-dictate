@@ -145,7 +145,7 @@ final class AppSettings: ObservableObject {
 
     /// which model listens to meetings — its own pick, not dictation's
     /// (ADR 0040). the two jobs want opposite things and the cards say so.
-    @Published var meetingModel: MeetingModel {
+    @Published var meetingModel: SpeechModel {
         didSet {
             guard meetingModel != oldValue else {
                 return
@@ -444,7 +444,7 @@ final class AppSettings: ObservableObject {
             : userDefaults.bool(forKey: Self.dictationWantedKey)
         meetingModel = userDefaults
             .string(forKey: Self.meetingModelKey)
-            .flatMap(MeetingModel.init(rawValue:)) ?? .default
+            .flatMap(SpeechModel.init(rawValue:)) ?? .default
         // a value this build cannot read is no shortcut, never a crash; nor
         // is one it would refuse, kept from a build that took it (⌘W).
         let dictationKey = userDefaults.hotkeyBinding()

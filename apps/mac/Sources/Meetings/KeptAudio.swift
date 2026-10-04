@@ -60,7 +60,7 @@ struct KeptAudio: Sendable {
     struct Label: Equatable, Sendable {
         let transcript: URL
         let started: Date
-        let model: MeetingModel
+        let model: SpeechModel
         /// When the sweep deletes it. nil keeps it until you do.
         let until: Date?
         /// The meeting's gaps on both clocks, as the spool noted them: the
@@ -255,7 +255,7 @@ struct KeptAudio: Sendable {
     /// read. A label written for audio that is gone would be a file nobody
     /// reads and nothing sweeps.
     @discardableResult
-    func relabel(_ entry: Entry, model: MeetingModel, until: Date?) -> Bool {
+    func relabel(_ entry: Entry, model: SpeechModel, until: Date?) -> Bool {
         guard audioURL(entry.id) != nil, label(entry.id) != nil else { return false }
         do {
             try write(
@@ -451,7 +451,7 @@ extension KeptAudio.Label: Codable {
         self.init(
             transcript: URL(fileURLWithPath: try container.decode(String.self, forKey: .transcript)),
             started: try container.decode(Date.self, forKey: .started),
-            model: try container.decode(MeetingModel.self, forKey: .model),
+            model: try container.decode(SpeechModel.self, forKey: .model),
             until: try container.decodeIfPresent(Date.self, forKey: .until),
             // gaps this build cannot make out are gaps it does not know, not
             // a label lost: the file's are used, as for an older label.

@@ -17,7 +17,7 @@ enum MeetingEngines {
 
     /// WhisperKit lays models out as `models/<repo>/<variant>` under its base.
     /// Nil for parakeet, which is not whisper's to lay out.
-    static func folder(for model: MeetingModel) -> URL? {
+    static func folder(for model: SpeechModel) -> URL? {
         guard let variant = model.whisperVariant else { return nil }
         return modelDirectory
             .appendingPathComponent("models", isDirectory: true)
@@ -26,7 +26,7 @@ enum MeetingEngines {
             .appendingPathComponent(variant, isDirectory: true)
     }
 
-    static func isInstalled(_ model: MeetingModel) -> Bool {
+    static func isInstalled(_ model: SpeechModel) -> Bool {
         guard let folder = folder(for: model) else {
             // parakeet: the one answer dictation's settings and setup use.
             return ModelStore.isOnDisk(.v3)
@@ -35,17 +35,17 @@ enum MeetingEngines {
         return FileManager.default.fileExists(atPath: decoder.path)
     }
 
-    static func installed() -> Set<MeetingModel> {
-        Set(MeetingModel.allCases.filter(isInstalled))
+    static func installed() -> Set<SpeechModel> {
+        Set(SpeechModel.allCases.filter(isInstalled))
     }
 
     /// What listens to a meeting, for the model it was started with.
     ///
     /// Every model reads the meeting a stretch at a time: each side cut where
     /// Silero hears speech begin and end, and each stretch decoded once.
-    static func makeTranscriber(for model: MeetingModel) async throws -> any MeetingTranscriber {
+    static func makeTranscriber(for model: SpeechModel) async throws -> any MeetingTranscriber {
         guard isInstalled(model) else {
-            throw MeetingModel.NotInstalled(model: model)
+            throw SpeechModel.NotInstalled(model: model)
         }
         // the speaker split is read at the end of the meeting; a mac that
         // was set up before its models came down with the meeting model
@@ -84,7 +84,7 @@ enum MeetingEngines {
     /// repo's own folder under the base it is given. Nil for parakeet,
     /// which has no use for one. Moving WhisperKit's pin in `project.yml`
     /// means checking that this is still the repo it asks for.
-    static func tokenizerFolder(for model: MeetingModel) -> URL? {
+    static func tokenizerFolder(for model: SpeechModel) -> URL? {
         guard model.whisperVariant != nil else { return nil }
         return HubApiWrapper(downloadBase: modelDirectory)
             .localRepoLocation(HubApiWrapper.Repo(id: tokenizerRepo))
@@ -133,7 +133,7 @@ enum MeetingEngines {
     /// What `prepare` fetches after the model: the tokenizer for a whisper
     /// model, and the speaker-split models for every model. Failing is
     /// logged and nothing more.
-    static func fetchWhatSetupOwes(_ model: MeetingModel) async {
+    static func fetchWhatSetupOwes(_ model: SpeechModel) async {
         if model.whisperVariant != nil {
             do {
                 try await tokenizer.run()
@@ -154,7 +154,7 @@ enum MeetingEngines {
     /// meeting without the split has plain `them`, and one without a
     /// tokenizer says so rather than fetching it.
     static func prepare(
-        _ model: MeetingModel,
+        _ model: SpeechModel,
         progress: @escaping @Sendable (Double) -> Void
     ) async -> Bool {
         do {

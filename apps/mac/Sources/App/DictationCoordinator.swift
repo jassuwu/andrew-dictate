@@ -299,7 +299,7 @@ final class DictationCoordinator: ObservableObject {
     let meetings: LazyMeetings
     /// made by the first meeting, like the panel that shows it.
     private lazy var liveTranscript = LiveTranscriptModel(elapsed: .zero)
-    @Published private(set) var meetingModelDownloads: [MeetingModel: Double] = [:]
+    @Published private(set) var meetingModelDownloads: [SpeechModel: Double] = [:]
     @Published private(set) var isLiveTranscriptShown = false
     /// `record a meeting` was pressed before its model was on disk, and is
     /// held while setup runs. the click already happened; setup is the
@@ -2215,7 +2215,7 @@ extension DictationCoordinator {
 // MARK: - meetings
 
 extension DictationCoordinator {
-    var installedMeetingModels: Set<MeetingModel> {
+    var installedMeetingModels: Set<SpeechModel> {
         MeetingEngines.installed()
     }
 
@@ -2227,7 +2227,7 @@ extension DictationCoordinator {
     /// asked about. `model` is `record with`: this one meeting is heard by
     /// it instead of the default, and only the menu passes one — the pill's
     /// button and the hotkey always use the default.
-    func startMeeting(name: String? = nil, model: MeetingModel? = nil) {
+    func startMeeting(name: String? = nil, model: SpeechModel? = nil) {
         guard !meetings.isRecording else { return }
         guard installedMeetingModels.contains(model ?? settings.meetingModel) else {
             if let model {
@@ -2487,7 +2487,7 @@ extension DictationCoordinator {
     /// the chosen one is on this mac, so `record` can start what it offers.
     /// a meeting that records keeps its watch, so the end of its call is
     /// still asked about.
-    private func watchForCallsIfSetUp(_ model: MeetingModel? = nil) {
+    private func watchForCallsIfSetUp(_ model: SpeechModel? = nil) {
         if MeetingEngines.isInstalled(model ?? settings.meetingModel) {
             meetings.watchForCalls()
         } else if !meetings.isRecording {

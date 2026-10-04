@@ -63,7 +63,7 @@ struct MeetingThresholds: Sendable {
 struct MeetingPreferences: Sendable {
     let folder: URL
     let hook: URL?
-    var model: MeetingModel
+    var model: SpeechModel
     /// How long its audio waits once its file is written.
     var keepAudio: KeepMeetingAudio = .default
 }
@@ -127,9 +127,9 @@ enum MeetingEvent: Equatable, Sendable {
     /// the model you picked. It loads that model and reads the whole
     /// meeting, minutes for an hour of one, so the lamp says what it is
     /// doing.
-    case transcribingAgain(MeetingModel)
+    case transcribingAgain(SpeechModel)
     /// The new reading is the file, in the same place.
-    case transcribedAgain(MeetingSummary, MeetingModel)
+    case transcribedAgain(MeetingSummary, SpeechModel)
     /// It did not happen — the model failed, or what it read was thin over
     /// a whole transcript, or the audio was gone — and the file is as it
     /// was. The audio is still there for another try.
@@ -173,7 +173,7 @@ enum MeetingEvent: Equatable, Sendable {
 
     /// `saved`, said for a file that was replaced: the model that wrote it
     /// now, and the same two ways it can fall short of whole.
-    private static func againText(_ summary: MeetingSummary, _ model: MeetingModel) -> String {
+    private static func againText(_ summary: MeetingSummary, _ model: SpeechModel) -> String {
         let said = "transcribed again · \(model.shortName)"
         if summary.gapCount > 0 {
             return "\(said) · \(summary.gapCount) \(summary.gapCount == 1 ? "gap" : "gaps")"
@@ -287,7 +287,7 @@ final class MeetingCoordinator: ObservableObject {
     private let source: any MeetingAudioSource
     /// One transcriber per meeting, built for the model chosen at the time —
     /// the setting can change between meetings, not during one.
-    private let makeTranscriber: @Sendable (MeetingModel) async throws -> any MeetingTranscriber
+    private let makeTranscriber: @Sendable (SpeechModel) async throws -> any MeetingTranscriber
     private let diarizer: any MeetingDiarizer
     private let spool: MeetingSpool
     /// Where a meeting's audio goes once its file is written, for as long
@@ -403,7 +403,7 @@ final class MeetingCoordinator: ObservableObject {
 
     init(
         source: any MeetingAudioSource,
-        makeTranscriber: @escaping @Sendable (MeetingModel) async throws -> any MeetingTranscriber,
+        makeTranscriber: @escaping @Sendable (SpeechModel) async throws -> any MeetingTranscriber,
         diarizer: any MeetingDiarizer,
         spool: MeetingSpool = MeetingSpool(),
         hookRunner: HookRunner = HookRunner(logURL: HookRunner.defaultLogURL),
@@ -475,7 +475,7 @@ final class MeetingCoordinator: ObservableObject {
     /// `name` is the call app's, once something can tell which one held the
     /// mic at the start (ADR 0047); without one the meeting is `unnamed`.
     /// It is a name and nothing more: the tap hears the whole mac either way.
-    func start(name: String? = nil, model: MeetingModel? = nil) {
+    func start(name: String? = nil, model: SpeechModel? = nil) {
         guard session.state == .idle else { return }
         // `model` is `record with`: this one meeting's model, in its own
         // snapshot, so the spool, the file and a recovery all say the model
@@ -1574,7 +1574,7 @@ final class MeetingCoordinator: ObservableObject {
     private func cover(
         _ live: Reading,
         handle: MeetingSpool.Handle,
-        model: MeetingModel,
+        model: SpeechModel,
         clock: SpoolClock
     ) async -> Covered {
         let farSideLoud = await farSideLoud(in: handle)
@@ -1628,7 +1628,7 @@ final class MeetingCoordinator: ObservableObject {
     /// could not be done: the model would not come, or it threw.
     private func readAgain(
         _ handle: MeetingSpool.Handle,
-        model: MeetingModel,
+        model: SpeechModel,
         clock: SpoolClock
     ) async -> Reading? {
         do {
@@ -1664,7 +1664,7 @@ final class MeetingCoordinator: ObservableObject {
         handle: MeetingSpool.Handle,
         app: String,
         started: Date,
-        model: MeetingModel,
+        model: SpeechModel,
         folder: URL,
         keepAudio: KeepMeetingAudio,
         recovered: Bool,
@@ -1912,7 +1912,7 @@ final class MeetingCoordinator: ObservableObject {
     /// The order a spool is read in when the model that recorded it is gone:
     /// the one that translates, then the faster whisper, then parakeet,
     /// which only knows english and the european languages.
-    private static let modelsToRecoverWith: [MeetingModel] = [
+    private static let modelsToRecoverWith: [SpeechModel] = [
         .whisperLargeV3, .whisperLargeV3Turbo, .parakeetV3,
     ]
 
@@ -1920,12 +1920,12 @@ final class MeetingCoordinator: ObservableObject {
     /// meeting model that is on this mac when that one is not; nil when none
     /// is. Anything but a model missing is the model's failure and is thrown.
     private func transcriberForRecovery(
-        preferring model: MeetingModel
-    ) async throws -> (transcriber: any MeetingTranscriber, model: MeetingModel)? {
+        preferring model: SpeechModel
+    ) async throws -> (transcriber: any MeetingTranscriber, model: SpeechModel)? {
         for candidate in [model] + Self.modelsToRecoverWith.filter({ $0 != model }) {
             do {
                 return (try await makeTranscriber(candidate), candidate)
-            } catch is MeetingModel.NotInstalled {
+            } catch is SpeechModel.NotInstalled {
                 continue
             }
         }
@@ -2250,9 +2250,9 @@ extension MeetingCoordinator {
         case deleted
         /// The new reading did not cover what was said, over a transcript
         /// that did.
-        case thin(MeetingModel, String)
+        case thin(SpeechModel, String)
         /// It found no speech on either side, over a transcript with words.
-        case nobodySpoke(MeetingModel)
+        case nobodySpoke(SpeechModel)
 
         var errorDescription: String? {
             switch self {
@@ -2287,7 +2287,7 @@ extension MeetingCoordinator {
     /// `transcribe(you:them:)` takes the two sides as arrays, as a
     /// recovery's does, so an hour of the meeting is in memory while it
     /// runs.
-    func transcribeAgain(_ transcript: URL, with model: MeetingModel) async {
+    func transcribeAgain(_ transcript: URL, with model: SpeechModel) async {
         if isRecording {
             onEvent?(.couldNotTranscribeAgain(AgainFailure.recording.localizedDescription))
             return
@@ -2337,7 +2337,7 @@ extension MeetingCoordinator {
     /// Everything but the hook. Returns what the hook is to be told.
     private func remake(
         _ transcript: URL,
-        with model: MeetingModel,
+        with model: SpeechModel,
         prefs: MeetingPreferences,
         asked: ContinuousClock.Instant,
         attempt: inout Attempt

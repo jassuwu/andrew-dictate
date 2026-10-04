@@ -9,7 +9,7 @@ final class MeetingStartModelTests: XCTestCase {
     private var source: FakeSource!
     private var asked: ModelsAsked!
     /// What settings say right now: the default, unless a test moves it.
-    private var defaultModel: MeetingModel = .whisperLargeV3
+    private var defaultModel: SpeechModel = .whisperLargeV3
 
     override func setUp() async throws {
         dir = FileManager.default.temporaryDirectory
@@ -133,13 +133,13 @@ final class MeetingStartModelTests: XCTestCase {
 /// The models the engine was asked for, in order: one per meeting.
 private final class ModelsAsked: @unchecked Sendable {
     private let lock = NSLock()
-    private var asked: [MeetingModel] = []
+    private var asked: [SpeechModel] = []
 
-    var models: [MeetingModel] {
+    var models: [SpeechModel] {
         lock.withLock { asked }
     }
 
-    func record(_ model: MeetingModel) {
+    func record(_ model: SpeechModel) {
         lock.withLock { asked.append(model) }
     }
 }

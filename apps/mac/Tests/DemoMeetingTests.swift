@@ -61,7 +61,7 @@ final class DemoMeetingTests: XCTestCase {
         let call = try call()
         XCTAssertGreaterThanOrEqual(call.lines.count, 6)
         XCTAssertEqual(call.stops.count, call.lines.count)
-        XCTAssertNotNil(MeetingModel(rawValue: call.engine), "not a meeting model: \(call.engine)")
+        XCTAssertNotNil(SpeechModel(rawValue: call.engine), "not a meeting model: \(call.engine)")
     }
 
     func testEveryFileTheSceneShowsIsWhatTheWriterWrites() throws {

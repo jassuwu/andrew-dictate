@@ -10,7 +10,7 @@ final class MeetingRecordTests: XCTestCase {
     private var transcriber: FakeTranscriber!
     private var transcribers: FakeTranscribers!
     private var records: [MeetingRecord] = []
-    private var meetingModel: MeetingModel = .whisperLargeV3Turbo
+    private var meetingModel: SpeechModel = .whisperLargeV3Turbo
 
     /// 2026-08-23 06:13:20 UTC.
     private let started = Date(timeIntervalSince1970: 1_787_000_000)

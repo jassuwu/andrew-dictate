@@ -18,12 +18,12 @@ import Foundation
 ///
 /// Stored by raw value in settings and in every spool's manifest: a case is
 /// never renamed.
-enum MeetingModel: String, CaseIterable, Codable, Sendable {
+enum SpeechModel: String, CaseIterable, Codable, Sendable {
     case whisperLargeV3
     case whisperLargeV3Turbo
     case parakeetV3
 
-    static let `default`: MeetingModel = .whisperLargeV3
+    static let `default`: SpeechModel = .whisperLargeV3
 
     var shortName: String {
         switch self {
@@ -70,13 +70,13 @@ enum MeetingModel: String, CaseIterable, Codable, Sendable {
     }
 }
 
-extension MeetingModel {
+extension SpeechModel {
     /// What making a transcriber for a model that is not on this mac throws.
     /// Its own type, in a file the coordinator can see, because recovery
     /// answers it differently from every other failure: it reads the spool
     /// with a model that is there, or waits, and counts nothing against it.
     struct NotInstalled: Error, LocalizedError {
-        let model: MeetingModel
+        let model: SpeechModel
 
         var errorDescription: String? {
             "\(model.shortName) is not on this mac"
