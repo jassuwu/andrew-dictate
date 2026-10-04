@@ -158,7 +158,7 @@ final class DictationCoordinator: ObservableObject {
     let settings: AppSettings
 
     private let hotkeyMonitor: HotkeyMonitor
-    private let transcriptionEngine: ParakeetEngine
+    private let transcriptionEngine: SpeechEngine
     /// the machine's, and the menu's copies go through it too, so they
     /// take their turn with a paste.
     private let inserter: PasteInserter
@@ -338,7 +338,7 @@ final class DictationCoordinator: ObservableObject {
         )
         let dictionaryStore = DictionaryStore()
         self.dictionaryStore = dictionaryStore
-        let transcriptionEngine = ParakeetEngine(
+        let transcriptionEngine = SpeechEngine(
             version: settings.dictationModel
         )
         self.transcriptionEngine = transcriptionEngine
@@ -2216,7 +2216,7 @@ extension DictationCoordinator {
 
 extension DictationCoordinator {
     var installedMeetingModels: Set<SpeechModel> {
-        MeetingEngines.installed()
+        ModelFiles.installed()
     }
 
     /// `record a meeting`, and the pill's `record`. the model is a download
@@ -2444,7 +2444,7 @@ extension DictationCoordinator {
     /// parakeet is on disk for anyone who dictates with v3, and a mac that
     /// only dictates is not set up for meetings.
     private var chosenMeetingModelIsInstalled: Bool {
-        MeetingEngines.isInstalled(settings.meetingModel)
+        ModelFiles.isInstalled(settings.meetingModel)
     }
 
     /// the chosen meeting model on disk, or a folder somebody chose. both
@@ -2488,7 +2488,7 @@ extension DictationCoordinator {
     /// a meeting that records keeps its watch, so the end of its call is
     /// still asked about.
     private func watchForCallsIfSetUp(_ model: SpeechModel? = nil) {
-        if MeetingEngines.isInstalled(model ?? settings.meetingModel) {
+        if ModelFiles.isInstalled(model ?? settings.meetingModel) {
             meetings.watchForCalls()
         } else if !meetings.isRecording {
             meetings.stopWatchingForCalls()
