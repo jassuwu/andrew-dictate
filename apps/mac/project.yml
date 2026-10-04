@@ -125,6 +125,10 @@ targets:
         excludes:
           - PipelinePlaygroundView.swift
           - WordFixerView.swift
+      # the real recorder, for the one test that runs it against the
+      # audio server (AudioRecorderHardwareTests).
+      - Sources/Audio/AudioRecorder.swift
+      - Sources/Audio/MicDescription+CoreAudio.swift
       - Sources/Audio/AudioSoundFlag.swift
       - Sources/Audio/CaptureCapWarning.swift
       - Sources/Audio/CaptureSlot.swift
