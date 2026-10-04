@@ -7,7 +7,7 @@ export type Piece =
   | { kind: "link"; text: string; href: string };
 
 /** the keys the copy names. one of these in backticks is a keycap. */
-const keys = new Set(["fn", "esc"]);
+const keycaps = new Set(["fn", "esc"]);
 
 const site = "https://dictate.jass.gg";
 
@@ -18,9 +18,10 @@ export function pieces(line: string): Piece[] {
   for (const m of line.matchAll(mark)) {
     if (m.index > at) out.push({ kind: "text", text: line.slice(at, m.index) });
     if (m[1] !== undefined) {
-      out.push({ kind: keys.has(m[1]) ? "key" : "code", text: m[1] });
+      out.push({ kind: keycaps.has(m[1]) ? "key" : "code", text: m[1] });
     } else {
-      const href = m[3].startsWith(site) ? m[3].slice(site.length) || "/" : m[3];
+      const own = m[3] === site || m[3].startsWith(`${site}/`);
+      const href = own ? m[3].slice(site.length) || "/" : m[3];
       out.push({ kind: "link", text: m[2], href });
     }
     at = m.index + m[0].length;

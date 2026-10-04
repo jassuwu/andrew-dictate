@@ -23,6 +23,12 @@ describe("pieces", () => {
     ]);
   });
 
+  test("an address that only starts like the site's stays whole", () => {
+    expect(pieces("[x](https://dictate.jass.gg.example.com/a)")).toEqual([
+      { kind: "link", text: "x", href: "https://dictate.jass.gg.example.com/a" },
+    ]);
+  });
+
   test("plain text is one piece", () => {
     expect(pieces("english, or 25 languages.")).toEqual([
       { kind: "text", text: "english, or 25 languages." },
