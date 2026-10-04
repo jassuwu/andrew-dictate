@@ -43,7 +43,7 @@ export const installLines = {
   unsigned:
     "apple silicon, macOS 26. i'm broke, so i didn't pay apple $99 to sign this. run this once:",
   after: `there's no dock icon. it lives in the menu bar as the gold badge. setup asks which jobs you want: dictation (${sizes.dictation}), and meetings (${sizes.meetings}) if you tick it.`,
-  noTerminal: `no terminal? open the app, let macOS refuse, then click \`open anyway\` in system settings › privacy & security within the hour. there's a dmg in [releases](${repo}/releases) too.`,
+  noBrew: `no brew? get the dmg from [releases](${repo}/releases). when macOS refuses to open it, click \`open anyway\` in system settings › privacy & security.`,
 } as const;
 
 export const updateLines = {
@@ -71,7 +71,7 @@ export const lines = [
   meetings,
   installLines.unsigned,
   installLines.after,
-  installLines.noTerminal,
+  installLines.noBrew,
   updateLines.menu,
   updateLines.check,
   licence,

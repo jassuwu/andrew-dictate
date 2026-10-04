@@ -35,7 +35,7 @@ open "/Applications/Andrew Dictate.app"
 
 there's no dock icon. it lives in the menu bar as the gold badge. setup asks which jobs you want: dictation (~460 mb), and meetings (~2.9 gb) if you tick it.
 
-no terminal? open the app, let macOS refuse, then click `open anyway` in system settings › privacy & security within the hour. there's a dmg in [releases](https://github.com/jassuwu/andrew-dictate/releases) too.
+no brew? get the dmg from [releases](https://github.com/jassuwu/andrew-dictate/releases). when macOS refuses to open it, click `open anyway` in system settings › privacy & security.
 
 ## update
 
