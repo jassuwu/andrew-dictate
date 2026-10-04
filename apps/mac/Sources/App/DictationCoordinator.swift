@@ -2122,6 +2122,10 @@ extension DictationCoordinator {
             guard let self else { return false }
             return self.activeFeedbackGeneration != nil && !self.isQuestionUp
         }
+        // the press log says which model answered: diagnostics read it.
+        machine.engineVersion = { [weak self] in
+            self?.activeDictationModel.rawValue ?? ""
+        }
         // whisper takes longer than parakeet, and is given longer.
         machine.transcriptionPace = { [weak self] in
             self?.activeDictationModel.dictationPace ?? .parakeet
