@@ -2,7 +2,7 @@
   <img src="apps/mac/art/og.png" alt="andrew dictate. escape the keyboard. dictation for talking to your agents. dictation, meetings, free, fast, local." />
 </p>
 
-a mac app. it's alpha. the words and the formatting aren't always right, and [they get better over time](https://dictate.jass.gg/changelog). there's a demo at [dictate.jass.gg](https://dictate.jass.gg).
+a mac app. it's alpha. the words and the formatting aren't always right, and [they get better over time](https://dictate.jass.gg/changelog).
 
 ## dictate
 
@@ -49,6 +49,6 @@ to know, the app sends its version to dictate.jass.gg once a day, and nothing el
 
 ## credits
 
-[FluidAudio](https://github.com/FluidInference/FluidAudio) (apache-2.0) · [parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) (cc-by-4.0) · [WhisperKit](https://github.com/argmaxinc/WhisperKit) (mit) · [whisper](https://github.com/openai/whisper) (mit) · [whistle](https://huggingface.co/Cactus-Compute/whistle) (apache-2.0) · [silero vad](https://github.com/snakers4/silero-vad) (mit)
+[FluidAudio](https://github.com/FluidInference/FluidAudio) apache-2.0 · [parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) cc-by-4.0 · [WhisperKit](https://github.com/argmaxinc/WhisperKit) mit · [whisper](https://github.com/openai/whisper) mit · [whistle](https://huggingface.co/Cactus-Compute/whistle) apache-2.0 · [silero vad](https://github.com/snakers4/silero-vad) mit
 
-[mit](LICENSE), so fork it if you want it different. made by [jass](https://jass.gg).
+[mit](https://github.com/jassuwu/andrew-dictate/blob/main/LICENSE), so fork it if you want it different. made by [jass](https://jass.gg).
