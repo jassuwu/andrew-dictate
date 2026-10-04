@@ -15,10 +15,10 @@ the words and the formatting aren't always right. [they get better over time](ht
 the speech models are parakeet and whisper. this app puts them together and stays out of your way.
 
 <p align="center">
-  <img src="apps/site/demo.gif" width="760" alt="a key is held, words are said, and when the key comes up the text lands in an agent's prompt box." />
+  <img src="apps/mac/art/film-dictate.gif" width="760" alt="a prompt is typed into an agent and deleted. then fn is held, the same prompt is said, and when the key comes up it lands in the prompt box and the agent starts on it." />
 </p>
 
-that's the demo from [dictate.jass.gg](https://dictate.jass.gg), filmed. you can hold the key yourself there.
+that's from the launch film. you can hold the key yourself at [dictate.jass.gg](https://dictate.jass.gg).
 
 ## install
 
