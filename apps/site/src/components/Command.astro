@@ -9,7 +9,7 @@ interface Props {
 const { command, label, quiet = false } = Astro.props;
 ---
 
-<div class:list={["cmd", quiet ? "text-[12px]" : "text-[12.5px]"]}>
+<div class:list={["cmd", quiet ? "text-[13.5px]" : "text-[14px]"]}>
   <code>{command}</code>
   <button type="button" hidden aria-label={`copy ${label}`} aria-live="polite">copy</button>
 </div>

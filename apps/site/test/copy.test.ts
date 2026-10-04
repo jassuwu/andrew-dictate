@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { sizes, topBlock } from "../src/copy";
+import { lines, sizes, topBlock } from "../src/copy";
+import { plain } from "../src/markup";
 
 // the copy guard. it reads the page as it was built, because that is what a
 // visitor gets, and fails when the old pitch comes back: the app sold by what
@@ -57,15 +58,17 @@ describe("the page", () => {
   }
 
   test("opens with the top block, word for word", () => {
-    for (const line of [
-      topBlock.name,
-      topBlock.tagline,
-      ...topBlock.pitch,
-      ...topBlock.why,
-      topBlock.models,
-    ]) {
+    for (const line of [topBlock.name, topBlock.tagline, ...topBlock.pitch]) {
       expect(page).toContain(line);
     }
+  });
+
+  test("says every line of the copy", () => {
+    for (const line of lines) expect(page).toContain(plain(line));
+  });
+
+  test("has no hold-the-key scene left in it", () => {
+    expect(page).not.toMatch(/hold the key|press record here|try it/i);
   });
 });
 
@@ -89,16 +92,17 @@ describe("the readme", () => {
     });
   }
 
-  test("opens with the same top block as the page", () => {
-    for (const line of [
-      topBlock.name,
-      topBlock.tagline,
-      ...topBlock.pitch,
-      ...topBlock.why,
-      topBlock.models,
-    ]) {
-      expect(readme).toContain(line);
+  test("opens with the banner, and its words are in the alt text", () => {
+    const source = readFileSync(join(repo, "README.md"), "utf8");
+    const alt = source.match(/^<p[^>]*>\s*<img src="apps\/mac\/art\/og\.png" alt="([^"]+)"/)?.[1];
+    expect(alt).toBeDefined();
+    for (const line of [topBlock.name, topBlock.tagline, ...topBlock.pitch]) {
+      expect(alt).toContain(line);
     }
+  });
+
+  test("says what the page says, line for line", () => {
+    for (const line of lines) expect(readme).toContain(plain(line));
   });
 
   test("quotes the download sizes onboarding shows", () => {

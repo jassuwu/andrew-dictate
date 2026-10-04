@@ -48,6 +48,4 @@ cp badge_1024.png "$SITE/badge.png"
 cp favicon_256.png "$SITE/favicon.png"
 # a png under the old name, for whatever asks for /favicon.ico unprompted
 cp favicon_32.png  "$SITE/favicon.ico"
-# the badge as the menu bar wears it, for the menu bar the site draws
-cp menubar_36.png "$SITE/menubar.png"
 echo "built"

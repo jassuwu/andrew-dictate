@@ -11,7 +11,6 @@
     "preview": "astro preview",
     "test": "astro build && bun test",
     "check": "astro check",
-    "loop": "astro build && bun run scripts/loop.ts",
     "checkins": "bun run scripts/checkins.ts",
     "astro": "astro"
   },
@@ -23,7 +22,6 @@
   "devDependencies": {
     "@astrojs/check": "^0.9.10",
     "@types/bun": "^1.4.2",
-    "playwright-core": "^1.63.0",
     "typescript": "^6"
   }
 }

@@ -17,20 +17,25 @@ const all = releases(notes);
   description="what changed in each release of andrew dictate."
   path="/changelog"
 >
-  <main class="column pb-8 pt-26">
-    <h1 class="pitch text-gold-pale">changelog.</h1>
+  <main class="column pb-8 pt-24">
+    <!-- no menu bar, so the way back is the name, where the page starts -->
+    <a href="/" class="flex w-fit items-center gap-2.5 text-[17px] text-cream/60 transition-colors hover:text-gold-pale">
+      <img src="/badge.png" alt="" width="22" height="22" class="rounded-[5px]" />
+      andrew dictate
+    </a>
+    <h1 class="pitch mt-12 text-gold-pale">changelog.</h1>
     <p class="prose-line mt-3">
       every release, newest first. this is where "{proof}" is kept.
     </p>
 
-    <div class="mt-12 space-y-12">
+    <div class="mt-14 space-y-14">
       {
         all.map((release) => (
           <section
             id={release.version}
             class="grid gap-y-4"
           >
-            <h2 class="font-mono text-[0.8125rem] leading-[1.5] text-gold">
+            <h2 class="font-mono text-[0.9rem] leading-[1.5] text-gold">
               <a href={`#${release.version}`}>{release.version}</a>
             </h2>
             <div class="space-y-3.5">
