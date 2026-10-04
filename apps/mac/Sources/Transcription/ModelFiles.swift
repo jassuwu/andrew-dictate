@@ -43,8 +43,14 @@ enum ModelFiles {
         case .parakeet:
             return isNonemptyDirectory(folder, fileManager: fileManager)
         case .whisper:
-            let decoder = folder.appendingPathComponent("TextDecoder.mlmodelc")
-            return fileManager.fileExists(atPath: decoder.path)
+            // each of whisper's three parts, weights and all: a download
+            // cut short leaves a part's folder without its weights, and
+            // only a whole model counts, so the next download repairs it.
+            return ["MelSpectrogram", "AudioEncoder", "TextDecoder"].allSatisfy { part in
+                let compiled = folder.appendingPathComponent("\(part).mlmodelc")
+                return fileManager.fileExists(atPath: compiled.appendingPathComponent("coremldata.bin").path)
+                    && fileManager.fileExists(atPath: compiled.appendingPathComponent("weights/weight.bin").path)
+            }
         case .whistle:
             // only a file that was checked whole is ever moved here.
             return fileManager.fileExists(atPath: whistleFile.path)
@@ -136,10 +142,11 @@ enum ModelFiles {
 
         let fileManager = FileManager.default
         try fileManager.createDirectory(at: whistleDirectory, withIntermediateDirectories: true)
-        if fileManager.fileExists(atPath: whistleFile.path) {
-            _ = try fileManager.replaceItemAt(whistleFile, withItemAt: downloaded)
-        } else {
+        do {
             try fileManager.moveItem(at: downloaded, to: whistleFile)
+        } catch where fileManager.fileExists(atPath: whistleFile.path) {
+            // dictation and a meeting can download it at once, and the
+            // other got there first. its file was checked as this one was.
         }
     }
 

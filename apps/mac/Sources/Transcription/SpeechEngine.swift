@@ -314,6 +314,7 @@ private final class ParakeetModel: LoadedSpeechModel {
 /// each decoded in turn and joined.
 extension WhisperModel: LoadedSpeechModel {
     func transcribe(_ samples: [Float]) async throws -> String {
+        guard !samples.isEmpty else { return "" }
         var words: [String] = []
         for piece in QuietSplit.pieces(of: samples, longest: Self.ceiling) {
             let text = try await text(of: piece)

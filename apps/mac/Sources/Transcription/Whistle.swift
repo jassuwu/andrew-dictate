@@ -54,13 +54,15 @@ actor WhistleRuntime {
     /// At most `longest` of 16 kHz mono, as text: empty for silence.
     func text(of samples: [Float]) throws -> String {
         guard model != nil else { throw Failure.notLoaded }
+        guard !samples.isEmpty else { return "" }
         var answer = [CChar](repeating: 0, count: Self.answerCapacity)
         let tokens = samples.withUnsafeBufferPointer { pcm in
             answer.withUnsafeMutableBufferPointer { out in
                 // no language: it tells which of its seven it hears.
                 needle_transcribe(
                     pcm.baseAddress, Int32(pcm.count), nil, nil, 0,
-                    out.baseAddress, Int32(out.count))
+                    // one byte short, so the answer always ends in a zero.
+                    out.baseAddress, Int32(out.count - 1))
             }
         }
         guard tokens >= 0 else { throw Failure.transcribe(Self.lastError) }
@@ -93,6 +95,7 @@ final class WhistleModel: StretchEngine, LoadedSpeechModel {
     }
 
     func transcribe(_ samples: [Float]) async throws -> String {
+        guard !samples.isEmpty else { return "" }
         var words: [String] = []
         for piece in QuietSplit.pieces(of: samples, longest: Self.ceiling) {
             let text = try await text(of: piece)
