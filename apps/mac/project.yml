@@ -44,6 +44,9 @@ targets:
       - path: Sources/Resources/Voice
         type: folder
         buildPhase: resources
+      # the whistle engine is apache-2.0, and its licence travels with it.
+      - path: Sources/Resources/Licenses/needle-LICENSE.txt
+        buildPhase: resources
     dependencies:
       - package: FluidAudio
       - package: WhisperKit
@@ -59,6 +62,10 @@ targets:
         CODE_SIGN_STYLE: Manual
         ENABLE_HARDENED_RUNTIME: false
         SWIFT_STRICT_CONCURRENCY: complete
+        # whistle's engine, a static library with a C header (Vendor/Needle).
+        # the module map links it and libc++; Swift sees it as `Needle`.
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/Vendor/Needle/include
+        LIBRARY_SEARCH_PATHS: $(SRCROOT)/Vendor/Needle
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # the brand gold as the app accent: native controls, pane icons,
         # toggles and pickers take it system-wide instead of per-view tints.
